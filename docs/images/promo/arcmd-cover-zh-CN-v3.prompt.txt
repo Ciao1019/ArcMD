@@ -1,0 +1,61 @@
+ArcMD promotional cover, revision 3
+Generation mode: built-in image_gen
+Base cover: docs/images/promo/arcmd-cover-zh-CN-v2.png
+Palette reference: user-supplied screenshot of the locally running ArcMD app.
+Article: the user's complete Chinese dedication and origin text.
+
+Composition prompt:
+
+Use case: precise-object-edit / compositing.
+Revise the supplied ArcMD promotional cover according to the user's actual local app appearance and their exact supplied document text.
+
+INPUTS:
+Image 1: the current cover, the EDIT TARGET. Preserve its left-hand branding and overall wide composition.
+Image 2: the user's actual locally running ArcMD screenshot, the AUTHORITATIVE REFERENCE for the app's palette, texture, native chrome and visual language only. None of its document text is to be used. The document text in that screenshot is unrelated; replace it completely with the article below.
+
+DELIVERABLE:
+One final polished promotional cover, wide 16:9, high resolution ideally 2560x1440 or higher so all the Chinese article text is readable. Keep the entire right-hand app window visible inside the canvas. Flat front-facing product presentation, crisp typography, no perspective distortion.
+
+PRESERVE FROM IMAGE 1:
+The beaver icon, ArcMD wordmark, main headline “让每个想法， / 都有自己的空间。”, supporting line “原生富文本 · 多彩空间 · 本地优先”, lower-left “macOS · Windows · Linux”. Keep their layout, wording, hierarchy and charcoal color. Keep the subtle cream/pink backdrop and delicate floating shadow, but reduce distracting decoration if necessary. Do not change the brand icon.
+
+REPLACE THE RIGHT WINDOW:
+Rebuild it in the real visual language of IMAGE 2. Closely match the VERY PALE desaturated blush-pink shell at the top, warm ivory/apricot through the center, pale lilac-pink at the lower left, with extremely fine satin grain. The colors must look like image 2 rather than the saturated rosy pink from image 1. Bright WHITE document paper, dark neutral gray text, muted taupe/gray toolbar icons, restrained magenta folder outlines, barely tinted soft translucent selected row. The sidebar has no separate opaque colored panel; it is the same continuous pale outer shell. Rounded native app window and simple rounded paper card.
+Use the actual native toolbar language from image 2: traffic lights, sidebar toggle, back/forward, reload, a long slim milky translucent path field “Personal / Journal / 致敬与起源.arcmd”, and tiny quiet trailing typography/more icons. Skip a word count. Keep controls small and native, not chunky.
+Slim sidebar about 18% of the app window: one wide muted favorite tile with a small W document icon; “Personal” section name and tiny star; delicate divider; “Journal” folder; selected file “致敬与起源” beneath it, followed by “Ideas” and “阅读笔记”; “+ 新建文档” in muted gray. At the bottom use the small library glyph, star Space symbol, book Space symbol, and plus, as in image 2.
+No duplicated rows, invented feature panels, or extra controls.
+
+DOCUMENT TYPOGRAPHY IS THE PRIORITY:
+Remove the sunrise cover image entirely. Remove the old heading, all checklists, the two-column layout and the peach quote card. Replace with a clean, beautifully typeset editorial essay on white paper. No document illustration. No outline column. No backlinks footer.
+The document is a centered, comfortably wide single text column. Strong left alignment, generous horizontal margins. A clear H1 at the top “致敬与起源”, approximately twice body size, medium-bold not excessively heavy. Then the following EXACT THREE paragraphs, reproduced in full, accurately, with no omitted or rewritten words. Preserve English capitalization and Chinese punctuation.
+Use comfortable body size, about 26–32 Chinese glyphs per line, line-height around 1.7; paragraph spacing around one body line. Intelligently wrap English phrases as words rather than arbitrarily breaking them. Make text crisp and readable in the finished image. Fit all text within the paper with comfortable bottom margin; use the available height formerly occupied by the banner and checklist. Do not shrink into tiny dense text.
+The long middle paragraph may wrap naturally but remains one paragraph. Tasteful emphasis only: bold “竖向侧栏、多色彩 Space、全局收藏” within paragraph 2; bold “纯 Go 与原生 UI”; set the final paragraph slightly heavier, optionally separated by a little extra whitespace. No colored text boxes, no added subtitle, no decorative quotation marks, no new prose.
+
+VERBATIM ARTICLE:
+Title:
+致敬与起源
+
+Paragraph 1:
+The Browser Company 宣布 Arc 步入维护模式的那天，X 上无数人都在惋惜一款如此充满审美、手感与灵魂的软件走向终局。
+
+Paragraph 2:
+作为一个 Arc 的长期忠实拥趸，我不舍得那些彻底改变了我工作流的竖向侧栏、多色彩 Space、全局收藏以及安静克制的呼吸感。既然 Arc 停下了脚步，那我们就用纯 Go 与原生 UI，在文档编辑的世界里把它延续下去——没有 Electron、没有 Webview，只有纯粹的原生性能与纯粹的 Arc 交互体验。
+
+Paragraph 3:
+ArcMD，献给每一个依然相信「软件应该有审美与触感」的创作者。
+
+Quality constraints: follow image 2's subtle pink/ivory/lilac grain palette faithfully. Natural quiet native app appearance, not glossy plastic. Balanced margins, considered Chinese editorial typesetting. Complete verbatim text takes priority over decoration. Preserve all left-side cover content. No watermark, no links, no badges, no laptop, no instructions or prose from the reference screenshot.
+
+Final typography refinement prompt:
+
+Edit only the promotional typography on the LEFT side of this finished ArcMD cover to fix the cramped spacing next to the app window.
+
+Keep the right-hand app window ABSOLUTELY UNCHANGED, including its position, size, pale pink/ivory/lilac granular colors, toolbar, sidebar, white paper, every Chinese character of the complete “致敬与起源” essay, line breaks, bold emphasis, shadows, and all its contents. Keep the whole background, app icon, ArcMD wordmark and lower-left platforms footer unchanged.
+
+Targeted adjustment:
+The main promotional headline on the left currently comes too close to the window's left edge. Reduce the size of BOTH headline lines by approximately 14%, maintaining the same bold font and left alignment at the same x coordinate. Keep the same exact two lines:
+“让每个想法，”
+“都有自己的空间。”
+All of the second line, including the final Chinese full stop, must be fully visible and end at least 45 pixels before the left edge of the app window in the supplied 1672-pixel-wide canvas. No letter or punctuation may overlap the window or its shadow. Maintain the headline's overall vertical center, with elegant line spacing.
+Also reduce the supporting line “原生富文本 · 多彩空间 · 本地优先” by approximately 10%, keeping left alignment, so it also ends at least 45 pixels before the window.
+Do not reflow the headline to three lines. Do not change, move, shrink or crop the right-hand window. Do not change the wording of any text. No other design changes. Preserve the same wide 16:9 canvas.

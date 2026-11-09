@@ -1,0 +1,29 @@
+{
+  "name": "ArcMD",
+  "slug": "arcmd",
+  "identifier": "com.cizai.arcmd",
+  "version": "0.0.1",
+  "icon": "resources/icon.png",
+  "main": "./cmd/arcmd",
+  "out": "dist",
+  "resources": ["LICENSE", "third_party"],
+  "fileAssociations": [
+    {
+      "ext": ["arcmd"],
+      "name": "ArcMD Document",
+      "mimeType": "application/x-arcmd",
+      "role": "Editor"
+    },
+    {
+      "ext": ["md", "markdown", "mdx"],
+      "name": "Markdown Document",
+      "mimeType": "text/markdown",
+      "role": "Editor"
+    }
+  ],
+  "linux": { "webview": false },
+  "updates": {
+    "publicKey": "5WSm8Z4W2nF//KbuHmHZjP1uR8RC7vvS/xApNVO5nWc=",
+    "github": "Ciao1019/ArcMD"
+  }
+}

@@ -1,0 +1,29 @@
+ArcMD promotional cover
+Generation mode: built-in image_gen
+
+References:
+1. Native screenshot generated with:
+   CGO_ENABLED=0 ARCMD_SNAPSHOT=/tmp/arcmd-promo-reference go test -run '^TestSnapshot$/^writing$' ./internal/app
+   File: /tmp/arcmd-promo-reference/writing.png
+2. Existing app icon: resources/icon.png
+
+Final generation prompt:
+
+Use case: compositing / ads-marketing.
+Asset type: final polished Chinese promotional cover for the existing open-source native document editor ArcMD. Wide 16:9 landscape canvas, ideally 2560 x 1440.
+Primary request: compose the two supplied existing product assets into a beautiful launch/editorial cover with new background and precise Chinese typography.
+Input images: Image 1 is an actual ArcMD app screenshot, the main product insert; Image 2 is the existing official ArcMD beaver app icon, a small brand insert. Preserve their identity. This is a compositing task, not an app redesign.
+Art direction: exceptionally clean, warm, quiet, confident Mac-native indie software launch artwork, evocative of Arc / Zen. A softly luminous ivory background with very subtle warm pink, apricot and pale lavender color fields and barely perceptible grain. Strong typographic hierarchy, ample generous negative space. Gentle, realistic broad ambient shadows, crisp fine details.
+Composition: generous outer margins. The left roughly 36% contains a small rounded-square app icon beside the wordmark at the top, then the main headline as the visual anchor at mid-height, then one short supporting line. The right roughly 60% contains ONE large legible actual screenshot as a subtly floating rounded-corner app window. Keep the screenshot nearly front-facing and undistorted; it may be rotated by at most 2 degrees for visual rhythm. Fit the complete app window comfortably inside the canvas and let it dominate the right side. Two very subtly offset pink and peach translucent rounded panels behind the window suggest multiple Spaces, without additional UI or text. No objects overlap the headline.
+Screenshot invariants: retain the supplied native app layout, blue-teal outer shell, vertical sidebar, white document card, outline, Chinese article headed “留一点空白”, task list and table, and native toolbar. Use the actual image as a faithful embedded product screenshot; do not hallucinate web chrome, AI panels or extra UI. It is acceptable for its smallest text to simply appear as screenshot detail. Preserve the blue background and the distinctive brown-and-cream bucktoothed beaver of the supplied app icon in the small rounded-square icon insert.
+Exact promotional text outside screenshot:
+“ArcMD”
+Main headline on two lines:
+“让每个想法，”
+“都有自己的空间。”
+Supporting line:
+“原生富文本 · 多彩空间 · 本地优先”
+Small footer along the lower-left:
+“macOS · Windows · Linux”
+Typography: ArcMD in a large sophisticated clean sans-serif, main headline in beautifully typeset bold modern Simplified Chinese sans-serif, dark warm charcoal. The headline is large and immediately readable in a feed thumbnail. Supporting text much smaller in muted warm gray. Optical alignment, natural Chinese punctuation, accurate verbatim spelling. Do not add any other promotional copy.
+Avoid: generic dashboard widgets, neon colors, dark futuristic tech imagery, excessive gradients, shiny plastic 3D icons, cartoon mascots outside the existing app icon, laptop/phone mockups, decorative arrows, feature pills, badges, watermarks, URLs, unsupported feature claims, clutter. Deliver one complete finished cover, not a grid of proposals.

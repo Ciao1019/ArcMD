@@ -1,0 +1,687 @@
+package document
+
+import (
+	"reflect"
+	"sort"
+	"strings"
+)
+
+type Snapshot struct {
+	Doc           *Document
+	Anchor, Caret int
+	Typing        Style
+	Explicit      bool
+}
+
+// Engine applies structural changes atomically and owns one history for every
+// paragraph, table cell and column. Snapshots never alias mutable documents.
+type Engine struct {
+	depth             int
+	Doc               *Document
+	Anchor, Caret     int
+	Typing            Style
+	Explicit          bool
+	version, revision uint64
+	undo, redo        []historyEntry
+	indexDoc          *Document
+	indexRevision     uint64
+	leaves            []Leaf
+	textChange        TextChange
+}
+
+func NewEngine(doc *Document) *Engine   { return &Engine{Doc: doc.Clone()} }
+func (e *Engine) Version() uint64       { return e.version }
+func (e *Engine) Revision() uint64      { return e.revision }
+func (e *Engine) CanUndo() bool         { return len(e.undo) > 0 }
+func (e *Engine) CanRedo() bool         { return len(e.redo) > 0 }
+func (e *Engine) Positions() (int, int) { return e.Anchor, e.Caret }
+func (e *Engine) Capture() Snapshot {
+	return Snapshot{e.Doc.Clone(), e.Anchor, e.Caret, e.Typing, e.Explicit}
+}
+
+func (e *Engine) Restore(s Snapshot) {
+	e.Doc, e.Anchor, e.Caret = s.Doc.Clone(), s.Anchor, s.Caret
+	e.Typing, e.Explicit = s.Typing, s.Explicit
+	e.revision++
+}
+
+func (e *Engine) SetSelection(a, z int) {
+	clamp := func(at int) int {
+		leaf := e.LeafAt(max(0, at))
+		text := leaf.Block.Text()
+		return leaf.Start + Len(text[:ByteOffset(text, max(0, at-leaf.Start))])
+	}
+	e.Anchor, e.Caret = clamp(a), clamp(z)
+	e.Explicit = false
+}
+
+func (e *Engine) Edit(change func()) {
+	if e.depth > 0 {
+		change()
+		return
+	}
+	e.depth++
+	defer func() { e.depth--; e.indexDoc = nil }()
+	before := e.Capture()
+	change()
+	dropStrayColors(e.Doc.Blocks)
+	if reflect.DeepEqual(before.Doc, e.Doc) {
+		return
+	}
+	e.recordUndo(historyEntry{state: before})
+	e.version++
+	e.revision++
+}
+
+// dropStrayColors clears the color of blocks no longer callouts, as a
+// callout turned into another kind, so every edit leaves a valid document.
+func dropStrayColors(blocks []*Block) {
+	for _, b := range blocks {
+		if b.Kind != "callout" {
+			b.Color, b.Emoji = "", ""
+		}
+		if b.Kind != "heading" && !isListKind(b.Kind) {
+			b.Folded = false
+		}
+		if b.Kind == "table" {
+			normalizeSpans(b)
+		}
+		dropStrayColors(b.Children)
+	}
+}
+
+// SetColor colors the callout id, or the callout holding the caret when id
+// is empty; it does nothing to other blocks or with an unknown color.
+func (e *Engine) SetColor(id, color string) {
+	if !validCalloutColor(color) {
+		return
+	}
+	if id == "" {
+		id = e.LeafAt(e.Caret).Block.ID
+	}
+	e.Edit(func() {
+		if parent, index := e.find(id); parent != nil && (*parent)[index].Kind == "callout" {
+			(*parent)[index].Color = color
+		}
+	})
+}
+
+// SetEmoji gives callout id an emoji icon; "" goes back to its color's.
+func (e *Engine) SetEmoji(id, emoji string) {
+	e.Edit(func() {
+		if parent, index := e.find(id); parent != nil && (*parent)[index].Kind == "callout" && len(emoji) <= 32 {
+			(*parent)[index].Emoji = emoji
+		}
+	})
+}
+
+// SetLanguage sets the fence language of code block id, as one undo step.
+func (e *Engine) SetLanguage(id, language string) {
+	e.Edit(func() {
+		if parent, index := e.find(id); parent != nil && (*parent)[index].Kind == "code" {
+			(*parent)[index].Language = language
+		}
+	})
+}
+
+func (e *Engine) Undo() {
+	if !e.CanUndo() {
+		return
+	}
+	entry := e.undo[len(e.undo)-1]
+	e.redo = append(e.redo, e.captureHistory(entry.blockID))
+	e.restoreHistory(entry)
+	e.undo = e.undo[:len(e.undo)-1]
+	e.version++
+}
+
+func (e *Engine) Redo() {
+	if !e.CanRedo() {
+		return
+	}
+	entry := e.redo[len(e.redo)-1]
+	e.undo = append(e.undo, e.captureHistory(entry.blockID))
+	e.restoreHistory(entry)
+	e.redo = e.redo[:len(e.redo)-1]
+	e.version++
+}
+
+func (e *Engine) LeafAt(at int) Leaf {
+	// A transaction may query intermediate mutations before its revision is
+	// published. Only the committed state can retain an index across queries.
+	leaves := e.leaves
+	if e.depth > 0 {
+		leaves = e.Doc.Leaves()
+	} else if e.indexDoc != e.Doc || e.indexRevision != e.revision {
+		e.leaves = e.Doc.Leaves()
+		e.indexDoc, e.indexRevision = e.Doc, e.revision
+		leaves = e.leaves
+	}
+	i := sort.Search(len(leaves), func(i int) bool { return at <= leaves[i].End })
+	return leaves[min(i, len(leaves)-1)]
+}
+
+func (e *Engine) CurrentStyle() Style {
+	if e.Explicit {
+		return e.Typing
+	}
+	leaf := e.LeafAt(min(e.Anchor, e.Caret))
+	position := leaf.Start
+	for _, run := range leaf.Block.Runs {
+		position += Len(run.Text)
+		if position > min(e.Anchor, e.Caret) || e.Anchor == e.Caret && position == e.Caret {
+			return run.Style
+		}
+	}
+	return Style{}
+}
+
+func (e *Engine) Replace(a, z int, text string) {
+	if e.replaceText(a, z, text) {
+		return
+	}
+	e.Edit(func() { e.replace(a, z, text); e.autoformat(text) })
+}
+
+// PreviewReplace updates the display document during IME composition. The
+// input adapter retains the committed snapshot and creates history on commit.
+func (e *Engine) PreviewReplace(a, z int, text string) {
+	e.replace(a, z, text)
+	e.revision++
+}
+
+func (e *Engine) replace(a, z int, text string) {
+	plain := e.Doc.PlainText()
+	a, z = Len(plain[:ByteOffset(plain, max(0, min(a, z)))]), Len(plain[:ByteOffset(plain, max(a, z))])
+	first, last := e.LeafAt(a), e.LeafAt(z)
+	style := e.CurrentStyle()
+	before := SliceRuns(first.Block.Runs, 0, a-first.Start)
+	after := SliceRuns(last.Block.Runs, z-last.Start, last.End-last.Start)
+	runs := Compact(append(append(before, Run{Text: strings.ReplaceAll(text, "\r\n", "\n"), Style: style}), after...))
+	if first.Parent != last.Parent || first.Block != last.Block && first.Block.Kind == "cell" {
+		if a == 0 && z == Len(plain) {
+			e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
+			first = e.Doc.Leaves()[0]
+			first.Block.Runs = runs
+		} else {
+			e.replaceAcross(a, z, strings.ReplaceAll(text, "\r\n", "\n"), style)
+			return
+		}
+	} else {
+		if first.Block != last.Block && a == first.Start && (isRule(first.Block) || isMedia(first.Block)) {
+			// A rule or attachment selected whole goes with the selection
+			// rather than taking the text after it.
+			first.Block.Kind, first.Block.URL = "paragraph", ""
+		}
+		first.Block.Runs = runs
+		*first.Parent = append((*first.Parent)[:first.Index+1], (*first.Parent)[last.Index+1:]...)
+	}
+	// Code, preserved source and cells retain internal newlines. Paragraph
+	// separators split blocks and carry the marks on each side of the caret.
+	if first.Block.Kind != "code" && first.Block.Kind != "cell" && first.Block.Kind != "raw" && first.Block.Kind != "math" {
+		parts := strings.Split(first.Block.Text(), "\n")
+		if len(parts) > 1 {
+			var blocks []*Block
+			offset := 0
+			for i, part := range parts {
+				block := first.Block.Clone()
+				if i > 0 {
+					block.ID = NewID()
+					block.Checked = false
+					if block.Kind != "bullet" && block.Kind != "numbered" && block.Kind != "task" && block.Kind != "quote" {
+						block.Kind, block.Level = "paragraph", 0
+					}
+				}
+				block.Runs = SliceRuns(runs, offset, offset+Len(part))
+				blocks = append(blocks, block)
+				offset += Len(part) + 1
+			}
+			parent, index := e.find(first.Block.ID)
+			if parent != nil {
+				*parent = append(append(append([]*Block(nil), (*parent)[:index]...), blocks...), (*parent)[index+1:]...)
+			}
+		}
+	}
+	e.Anchor, e.Caret = a+Len(strings.ReplaceAll(text, "\r\n", "\n")), a+Len(strings.ReplaceAll(text, "\r\n", "\n"))
+	e.Typing, e.Explicit = style, true
+}
+
+func (e *Engine) autoformat(inserted string) {
+	if inserted != " " {
+		return
+	}
+	leaf := e.LeafAt(e.Caret)
+	b := leaf.Block
+	if b.Kind != "paragraph" {
+		return
+	}
+	prefix := b.Text()
+	kind, level := "", 0
+	switch prefix {
+	case "# ", "## ", "### ", "#### ", "##### ", "###### ":
+		kind, level = "heading", len(prefix)-1
+	case "- ", "* ", "+ ":
+		kind = "bullet"
+	case "1. ":
+		kind = "numbered"
+	case "> ":
+		kind = "quote"
+	case "[] ", "[ ] ":
+		kind = "task"
+	case "``` ":
+		kind = "code"
+	}
+	if kind != "" {
+		b.Kind, b.Level, b.Runs = kind, level, nil
+		e.Anchor, e.Caret = leaf.Start, leaf.Start
+	}
+}
+
+func (e *Engine) Enter(soft bool) {
+	if soft {
+		e.Replace(min(e.Anchor, e.Caret), max(e.Anchor, e.Caret), "\u2028")
+		return
+	}
+	leaf := e.LeafAt(e.Caret)
+	if !soft && e.Anchor == e.Caret && leaf.Block.Text() == "" && (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task" || leaf.Block.Kind == "quote") {
+		e.SetKind("paragraph", 0)
+		return
+	}
+	e.Replace(min(e.Anchor, e.Caret), max(e.Anchor, e.Caret), "\n")
+}
+
+// Fragment captures selected structure for ArcMD's clipboard representation.
+func (e *Engine) Fragment() *Document {
+	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+	if a == 0 && z == Len(e.Doc.PlainText()) {
+		return e.Doc.Clone()
+	}
+	out := New()
+	out.Blocks = nil
+	for _, leaf := range e.Doc.Leaves() {
+		if leaf.End <= a || leaf.Start >= z {
+			continue
+		}
+		b := leaf.Block.Clone()
+		b.Runs = SliceRuns(b.Runs, max(0, a-leaf.Start), min(z, leaf.End)-leaf.Start)
+		if b.Kind == "cell" {
+			b.Kind = "paragraph"
+		}
+		out.Blocks = append(out.Blocks, b)
+	}
+	if len(out.Blocks) == 0 {
+		out.Blocks = []*Block{NewBlock("paragraph", "")}
+	}
+	return out
+}
+
+// Paste inserts a rich fragment in a single transaction, generating fresh IDs.
+func (e *Engine) Paste(fragment *Document) {
+	e.Edit(func() {
+		a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+		leaf := e.LeafAt(a)
+		if len(fragment.Blocks) == 1 && len(fragment.Blocks[0].Children) == 0 {
+			insert := fragment.Blocks[0]
+			e.replace(a, z, insert.Text())
+			for _, target := range e.Doc.Leaves() {
+				start, end := max(a, target.Start), min(a+Len(insert.Text()), target.End)
+				if end <= start {
+					continue
+				}
+				runs := target.Block.Runs
+				middle := SliceRuns(insert.Runs, start-a, end-a)
+				target.Block.Runs = Compact(append(append(SliceRuns(runs, 0, start-target.Start), middle...), SliceRuns(runs, end-target.Start, target.End-target.Start)...))
+			}
+			return
+		}
+		if leaf.Block.Kind == "cell" {
+			e.replace(a, z, fragment.PlainText())
+			return
+		}
+		e.replace(a, z, "")
+		leaf = e.LeafAt(e.Caret)
+		prefix := SliceRuns(leaf.Block.Runs, 0, e.Caret-leaf.Start)
+		suffix := SliceRuns(leaf.Block.Runs, e.Caret-leaf.Start, leaf.End-leaf.Start)
+		var blocks []*Block
+		if len(prefix) > 0 {
+			b := leaf.Block.Clone()
+			b.Runs = prefix
+			blocks = append(blocks, b)
+		}
+		var fresh func(*Block)
+		fresh = func(b *Block) {
+			b.ID = NewID()
+			for _, child := range b.Children {
+				fresh(child)
+			}
+		}
+		var last string
+		for _, block := range fragment.Blocks {
+			b := block.Clone()
+			fresh(b)
+			blocks = append(blocks, b)
+			last = b.ID
+		}
+		if len(suffix) > 0 {
+			b := NewBlock("paragraph", "")
+			b.Runs = suffix
+			blocks = append(blocks, b)
+		}
+		parent, index := e.find(leaf.Block.ID)
+		*parent = append(append(append([]*Block(nil), (*parent)[:index]...), blocks...), (*parent)[index+1:]...)
+		e.FocusBlock(last)
+	})
+}
+
+func (e *Engine) SetKind(kind string, level int) {
+	e.Edit(func() {
+		a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+		for _, leaf := range e.Doc.Leaves() {
+			if leaf.End < a || leaf.Start > z || leaf.Block.Kind == "cell" {
+				continue
+			}
+			leaf.Block.Kind, leaf.Block.Level = kind, level
+			leaf.Block.URL = ""
+		}
+	})
+}
+
+func (e *Engine) Toggle(mark string) {
+	style := e.CurrentStyle()
+	get := func(s *Style) *bool {
+		switch mark {
+		case "bold":
+			return &s.Bold
+		case "italic":
+			return &s.Italic
+		case "underline":
+			return &s.Underline
+		case "strike":
+			return &s.Strike
+		default:
+			return &s.Code
+		}
+	}
+	on := !*get(&style)
+	if e.Anchor == e.Caret {
+		*get(&style) = on
+		e.Typing, e.Explicit = style, true
+		return
+	}
+	e.Edit(func() { e.format(func(s *Style) { *get(s) = on }) })
+}
+
+// SetTextColor colors the selection's text, or what is typed next at a
+// collapsed caret: color and highlight replace the current ones unless
+// nil; "" clears one.
+func (e *Engine) SetTextColor(color, highlight *string) {
+	change := func(s *Style) {
+		if color != nil {
+			s.Color = *color
+		}
+		if highlight != nil {
+			s.Highlight = *highlight
+		}
+	}
+	if e.Anchor == e.Caret {
+		style := e.CurrentStyle()
+		change(&style)
+		e.Typing, e.Explicit = style, true
+		return
+	}
+	e.Edit(func() { e.format(change) })
+}
+
+func (e *Engine) SetLink(url string) {
+	e.Edit(func() { e.format(func(s *Style) { s.Link = url }) })
+}
+
+func (e *Engine) format(change func(*Style)) {
+	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+	for _, leaf := range e.Doc.Leaves() {
+		start, end := max(a, leaf.Start)-leaf.Start, min(z, leaf.End)-leaf.Start
+		if end <= start {
+			continue
+		}
+		runs := leaf.Block.Runs
+		middle := SliceRuns(runs, start, end)
+		for i := range middle {
+			change(&middle[i].Style)
+		}
+		leaf.Block.Runs = Compact(append(append(SliceRuns(runs, 0, start), middle...), SliceRuns(runs, end, leaf.End-leaf.Start)...))
+	}
+}
+
+func (e *Engine) find(id string) (*[]*Block, int) {
+	var walk func(*[]*Block) (*[]*Block, int)
+	walk = func(blocks *[]*Block) (*[]*Block, int) {
+		for i, b := range *blocks {
+			if b.ID == id {
+				return blocks, i
+			}
+			if p, j := walk(&b.Children); p != nil {
+				return p, j
+			}
+		}
+		return nil, 0
+	}
+	return walk(&e.Doc.Blocks)
+}
+
+func (e *Engine) FocusBlock(id string) {
+	for _, leaf := range e.Doc.Leaves() {
+		if leaf.Block.ID == id || leaf.Owner == id {
+			e.SetSelection(leaf.Start, leaf.Start)
+			return
+		}
+	}
+}
+
+func (e *Engine) Insert(block *Block) {
+	e.Edit(func() {
+		leaf := e.LeafAt(e.Caret)
+		parent, index := e.find(leaf.Owner)
+		if leaf.Block.Kind == "paragraph" && leaf.Block.Text() == "" && leaf.Block.ID == leaf.Owner {
+			(*parent)[index] = block
+		} else {
+			index++
+			*parent = append(append(append([]*Block(nil), (*parent)[:index]...), block), (*parent)[index:]...)
+		}
+		e.FocusBlock(block.ID)
+	})
+}
+
+// InsertAt puts blocks among the top-level blocks before the one at index
+// (clamped; len for the end), as one step of the history, and puts the
+// caret on the last. An empty document's only paragraph gives way to
+// them.
+func (e *Engine) InsertAt(index int, blocks ...*Block) {
+	if len(blocks) == 0 {
+		return
+	}
+	e.Edit(func() {
+		top := &e.Doc.Blocks
+		if len(*top) == 1 && (*top)[0].Kind == "paragraph" && (*top)[0].Text() == "" && len((*top)[0].Children) == 0 {
+			*top = nil
+		}
+		index = max(0, min(index, len(*top)))
+		*top = append(append(append([]*Block(nil), (*top)[:index]...), blocks...), (*top)[index:]...)
+		e.FocusBlock(blocks[len(blocks)-1].ID)
+	})
+}
+
+func (e *Engine) DeleteBlock(id string) {
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent == nil || parent != &e.Doc.Blocks {
+			return
+		}
+		*parent = append((*parent)[:index], (*parent)[index+1:]...)
+		if len(*parent) == 0 {
+			*parent = []*Block{NewBlock("paragraph", "")}
+		}
+		e.FocusBlock((*parent)[min(index, len(*parent)-1)].ID)
+	})
+}
+
+func (e *Engine) MoveBlock(id string, to int) {
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent != &e.Doc.Blocks {
+			return
+		}
+		to = max(0, min(to, len(*parent)-1))
+		b := (*parent)[index]
+		*parent = append((*parent)[:index], (*parent)[index+1:]...)
+		*parent = append(append(append([]*Block(nil), (*parent)[:to]...), b), (*parent)[to:]...)
+		e.FocusBlock(id)
+	})
+}
+
+func (e *Engine) Duplicate(id string) {
+	parent, index := e.find(id)
+	if parent == nil {
+		return
+	}
+	block := (*parent)[index].Clone()
+	var fresh func(*Block)
+	fresh = func(b *Block) {
+		b.ID = NewID()
+		for _, child := range b.Children {
+			fresh(child)
+		}
+	}
+	fresh(block)
+	e.FocusBlock(id)
+	e.Insert(block)
+}
+
+func (e *Engine) ToggleTask(id string) {
+	e.Edit(func() {
+		if parent, index := e.find(id); parent != nil {
+			b := (*parent)[index]
+			b.Checked = !b.Checked
+		}
+	})
+}
+
+func (e *Engine) Align(align string) {
+	e.Edit(func() { e.LeafAt(e.Caret).Block.Align = align })
+}
+
+func (e *Engine) Indent(delta int) {
+	e.Edit(func() { b := e.LeafAt(e.Caret).Block; b.Indent = max(0, min(12, b.Indent+delta)) })
+}
+
+func (e *Engine) ResizeTable(rows bool, delta int) {
+	e.Edit(func() {
+		leaf := e.LeafAt(e.Caret)
+		parent, index := e.find(leaf.Owner)
+		if parent == nil {
+			return
+		}
+		table := (*parent)[index]
+		if table.Kind != "table" {
+			return
+		}
+		if rows {
+			if delta > 0 {
+				table.Children = append(table.Children, Table(1, len(table.Children[0].Children)).Children[0])
+			} else if len(table.Children) > 1 {
+				table.Children = table.Children[:len(table.Children)-1]
+			}
+		} else {
+			for _, row := range table.Children {
+				if delta > 0 {
+					row.Children = append(row.Children, NewBlock("cell", ""))
+				} else if len(row.Children) > 1 {
+					row.Children = row.Children[:len(row.Children)-1]
+				}
+			}
+			table.Widths = nil
+		}
+		e.FocusBlock(table.ID)
+	})
+}
+
+// TableInsert adds an empty row (rows) or column to table id before line
+// at, which may be the count to append; the caret moves into the new line.
+func (e *Engine) TableInsert(id string, rows bool, at int) {
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent == nil || (*parent)[index].Kind != "table" {
+			return
+		}
+		table := (*parent)[index]
+		focus := ""
+		shiftSpans(table, rows, at, 1)
+		if rows {
+			at = max(0, min(at, len(table.Children)))
+			line := Table(1, len(table.Children[0].Children)).Children[0]
+			table.Children = append(table.Children[:at:at], append([]*Block{line}, table.Children[at:]...)...)
+			focus = line.Children[0].ID
+		} else {
+			at = max(0, min(at, len(table.Children[0].Children)))
+			for i, row := range table.Children {
+				cell := NewBlock("cell", "")
+				row.Children = append(row.Children[:at:at], append([]*Block{cell}, row.Children[at:]...)...)
+				if i == 0 {
+					focus = cell.ID
+				}
+			}
+			if len(table.Widths) > 0 {
+				// The new column takes an average share.
+				sum := float32(0)
+				for _, w := range table.Widths {
+					sum += w
+				}
+				avg := sum / float32(len(table.Widths))
+				table.Widths = append(table.Widths[:at:at], append([]float32{avg}, table.Widths[at:]...)...)
+			}
+		}
+		e.FocusBlock(focus)
+	})
+}
+
+// TableDelete removes row (rows) or column at from table id; removing its
+// last row or column removes the table.
+func (e *Engine) TableDelete(id string, rows bool, at int) {
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent == nil || (*parent)[index].Kind != "table" {
+			return
+		}
+		table := (*parent)[index]
+		count := len(table.Children)
+		if !rows {
+			count = len(table.Children[0].Children)
+		}
+		if at < 0 || at >= count {
+			return
+		}
+		if count == 1 {
+			e.removeTop(index, true)
+			return
+		}
+		shiftSpans(table, rows, at, -1)
+		if rows {
+			table.Children = append(table.Children[:at:at], table.Children[at+1:]...)
+		} else {
+			for _, row := range table.Children {
+				row.Children = append(row.Children[:at:at], row.Children[at+1:]...)
+			}
+			if len(table.Widths) > at {
+				table.Widths = append(table.Widths[:at:at], table.Widths[at+1:]...)
+			}
+		}
+		e.FocusBlock(table.ID)
+	})
+}
+
+func (e *Engine) SetWidths(id string, widths []float32) {
+	e.Edit(func() {
+		if parent, index := e.find(id); parent != nil {
+			(*parent)[index].Widths = append([]float32(nil), widths...)
+		}
+	})
+}

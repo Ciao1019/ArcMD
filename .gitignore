@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/build/
+/dist/
+/arcmd
+*.exe
+
+# MyGo dev bundles
+.mygo/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Update signing keys belong outside the repository.
+mygo-update.key
+*.private-key

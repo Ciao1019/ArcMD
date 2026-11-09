@@ -1,0 +1,183 @@
+name: CI and packages
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CGO_ENABLED: '0'
+  GOFLAGS: -mod=readonly
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Check and test
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Verify dependencies
+        run: |
+          go mod download
+          go mod verify
+      - name: Check package version
+        run: go run ./tools/ci version
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Validate workflow
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color
+      - name: Document Windows 32-bit limitation
+        run: |
+          {
+            echo '### Platform support'
+            echo 'Windows 32-bit is not packaged: MyGo v0.7.4 selects its unsupported backend for windows/386. A successful cross-compile does not produce a working GUI.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    name: Package ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-amd64
+            platform: darwin/amd64
+            runner: macos-15
+          - target: darwin-arm64
+            platform: darwin/arm64
+            runner: macos-15
+          - target: windows-amd64
+            platform: windows/amd64
+            runner: windows-2022
+          # MyGo has no windows/386 GUI backend. Do not ship its stub binary.
+          - target: linux-amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Download dependencies
+        run: go mod download
+      - name: Build and collect packages
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          # Signs the update archives and manifests that installed apps
+          # download (mygo.json "updates"). Without it the packages build
+          # unsigned and installed apps are not offered this release.
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag && -z "$MYGO_UPDATER_PRIVATE_KEY" ]]; then
+            echo 'Release builds require MYGO_UPDATER_PRIVATE_KEY.' >&2
+            exit 1
+          fi
+          go run ./tools/ci build "$TARGET_PLATFORM"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: packages-${{ matrix.target }}
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    needs: [check, package]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: packages-*
+          path: release
+          merge-multiple: true
+      - name: Verify and combine checksums
+        working-directory: release
+        run: |
+          shopt -s nullglob
+          manifests=(SHA256SUMS-*.txt)
+          if [[ ${#manifests[@]} -ne 5 ]]; then
+            echo 'Expected checksums from all five package jobs.' >&2
+            exit 1
+          fi
+          for manifest in "${manifests[@]}"; do
+            sha256sum --check "$manifest"
+          done
+          cat "${manifests[@]}" | sort -k2 > SHA256SUMS.txt
+          rm -- "${manifests[@]}"
+      - name: Publish packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          awk -v version="${RELEASE_TAG#v}" '
+            $0 == "## " version { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! test -s release-notes.md; then
+            echo 'Missing release notes in CHANGELOG.md.' >&2
+            exit 1
+          fi
+          prerelease=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          # Upload everything to a draft before making it public. A retry may
+          # complete its draft, but must never overwrite an existing release.
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            if [[ "$is_draft" != true ]]; then
+              echo 'Refusing to overwrite a published release' >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "ArcMD $RELEASE_TAG" \
+              --notes-file release-notes.md "${prerelease[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false "${prerelease[@]}"

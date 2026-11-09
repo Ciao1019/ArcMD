@@ -1,0 +1,28 @@
+ArcMD promotional cover, revision 2
+Generation mode: built-in image_gen
+Edit target: docs/images/promo/arcmd-cover-zh-CN.png
+Right-hand editor is an idealized promotional mockup, created at the user's request.
+
+Final generation prompt:
+
+Use case: compositing / precise-object-edit.
+Edit the supplied ArcMD promotional cover. The user dislikes the real editor screenshot on the RIGHT and explicitly requests a fabricated, more attractive editor interface. Replace that right-hand screenshot with a beautifully art-directed, idealized ArcMD native editor mockup, made for a premium promotional image.
+
+INVARIANTS: Preserve the whole left side exactly: the beaver app icon, “ArcMD” wordmark, headline “让每个想法， / 都有自己的空间。”, supporting line “原生富文本 · 多彩空间 · 本地优先”, and footer “macOS · Windows · Linux”. Preserve their placement, wording, proportions and dark charcoal colors. Preserve the wide 16:9 composition, soft ivory/pink/apricot background, generous whitespace, and the translucent pink/apricot layers behind the right window.
+
+CHANGE ONLY THE RIGHT-HAND APP WINDOW:
+Replace the teal screenshot entirely. Create a polished fictitious but credible native document editor inspired by Arc and Zen, using warm rose, blush, peach and a trace of lavender. One large nearly front-facing rounded native window, aesthetically refined rather than visually dense. No blue-teal shell. Fine translucent pink shell and slim left sidebar, generous soft white document paper, delicate inner borders and soft realistic shadow. Harmonize it with the cover background while keeping its silhouette defined.
+
+Window composition:
+- Rounded outer corners, tiny tasteful macOS traffic lights in the top-left.
+- A narrow translucent warm rose sidebar occupying about 21% of the window. Three small favorites tiles in a row at the top with understated line icons. A section label “写作空间”. A sparse, neatly aligned file list: “灵感收集”, selected “留一点空白”, “阅读笔记”, “生活计划”. The selected row is milky white and softly rounded. One understated folder icon and modest indentation. A quiet “+ 新建文档” row below. Three small colored Space indicators at the bottom, no large labels.
+- A quiet very slim toolbar across the top of the white paper, with a back arrow and “写作空间 / 留一点空白”; restrained tiny native controls.
+- No table of contents column. Let the document breathe.
+- Within the white document card, show a wide short beautiful header artwork: an abstract minimalist warm apricot sunrise above softly layered rose and lavender rolling forms, with delicate paper-like smooth shapes. This is an in-document cover image, not extra floating decorative objects.
+- Below it, a large crisp editorial page title “留一点空白” in dark charcoal Chinese sans-serif; one small supporting sentence “把灵感写下来，让想法慢慢生长。”
+- Then a modest subheading “从一个念头开始” and two short lines of muted gray body copy, with one small rose highlighted phrase. Use precise restrained typography and generous line height.
+- In the lower part, two balanced columns: left a small checklist headed “今天的计划” with three neat rows and one checked item; right one pale peach callout card with a small sun line icon and the short quote “好的想法，值得慢慢写。” No code block, no line numbers, no dense tables.
+- Use exactly enough content to look useful and lived-in, with excellent spacing and clear hierarchy. Small UI text can be subtle, but major Chinese text must be accurate and clean. Never make enormous fake dashboard controls.
+- High craft: native-feeling small line icons, crisp typography, elegant alignment, gentle pastel translucency, subtle depth. The UI should look inviting, editorial, calm, and aspirational, with almost the polish of an actual carefully designed product screenshot.
+
+Keep the window in the same right-hand area, fully inside the canvas and away from the promotional headline. Avoid changing any other area. No new badges, slogans, URLs, watermarks, AI/chat panels, laptops or phones. Deliver one finished revised cover.

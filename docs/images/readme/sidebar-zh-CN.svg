@@ -1,0 +1,238 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 820" width="1280" height="820" role="img" aria-label="ArcMD 侧边栏：⌘\ 收起侧边栏，页面铺满窗口；指针移到窗口左缘时侧边栏以浮层滑出，移开后自动收回">
+<style>
+  .t { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Helvetica, Arial, sans-serif; }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .ink { fill: #1f2329; } .soft { fill: #646a73; } .faint { fill: #8f959e; }
+  .side { fill: #3a2a30; } .sideT { fill: #3d2b1e; }
+  .a { animation-duration: 12s; animation-iteration-count: infinite; animation-fill-mode: both; }
+  .fb { transform-box: fill-box; }
+  .io { animation-timing-function: cubic-bezier(.65,0,.35,1); }
+  .en { animation-timing-function: cubic-bezier(.16,1,.3,1); }
+
+
+  /* 8% ⌘\ · 10–16% collapse · 26–36% point at the left edge · 36–41% peek · 41–55% browse · 55–62% leave, it tucks back · 74% ⌘\ · 76–82% expand */
+  @keyframes ov    { 0%,10% { transform: translateX(0) } 16%,76% { transform: translateX(-236px) } 82%,100% { transform: translateX(0) } }
+  @keyframes docC  { 0%,10% { transform: translateX(0) } 16%,76% { transform: translateX(-190px) } 82%,100% { transform: translateX(0) } }
+  @keyframes tools { 0%,10% { transform: translateX(0) } 16%,76% { transform: translateX(-97px) } 82%,100% { transform: translateX(0) } }
+  @keyframes addr  { 0%,10% { transform: scaleX(1) } 16%,76% { transform: scaleX(1.1432) } 82%,100% { transform: scaleX(1) } }
+  @keyframes addrT { 0%,10% { transform: translateX(0) } 16%,76% { transform: translateX(-106px) } 82%,100% { transform: translateX(0) } }
+  @keyframes peek  { 0%,36% { transform: translateX(-250px) } 40.5%,56% { transform: translateX(0) } 61%,100% { transform: translateX(-250px) } }
+  @keyframes hud   { 0%,6% { opacity: 0; transform: scale(.92) } 7.5%,12% { opacity: 1; transform: none } 15%,72% { opacity: 0; transform: scale(.96) }
+                     73.5%,78% { opacity: 1; transform: none } 81%,100% { opacity: 0; transform: scale(.96) } }
+  @keyframes ptr   { 0%,24% { opacity: 0; transform: translate(660px,430px) } 26% { opacity: 1; transform: translate(660px,430px) } 35%,37% { opacity: 1; transform: translate(3px,380px) }
+                     42% { opacity: 1; transform: translate(112px,250px) } 47% { opacity: 1; transform: translate(118px,332px) } 51% { opacity: 1; transform: translate(124px,372px) }
+                     58% { opacity: 1; transform: translate(560px,420px) } 66% { opacity: 1; transform: translate(600px,440px) } 69%,100% { opacity: 0; transform: translate(600px,440px) } }
+  @keyframes hov   { 0%,41% { opacity: 0; transform: translateY(0) } 42% { opacity: 1; transform: translateY(0) } 45% { transform: translateY(0) } 47% { transform: translateY(76px) }
+                     49% { transform: translateY(76px) } 51%,55% { opacity: 1; transform: translateY(123px) } 56.5%,100% { opacity: 0; transform: translateY(123px) } }
+  @keyframes cap1  { 0%,24% { opacity: 1 } 26%,71% { opacity: .38 } 73%,100% { opacity: 1 } }
+  @keyframes cap2  { 0%,24% { opacity: .38 } 26%,53% { opacity: 1 } 55%,100% { opacity: .38 } }
+  @keyframes cap3  { 0%,53% { opacity: .38 } 55%,71% { opacity: 1 } 73%,100% { opacity: .38 } }
+  .ov { animation-name: ov; }
+  .docC { animation-name: docC; }
+  .tools { animation-name: tools; }
+  .addr { animation-name: addr; }
+  .addrT { animation-name: addrT; }
+  .peek { animation-name: peek; }
+  .hud { animation-name: hud; }
+  .ptr { animation-name: ptr; }
+  .hov { animation-name: hov; }
+  .cap1 { animation-name: cap1; }
+  .cap2 { animation-name: cap2; }
+  .cap3 { animation-name: cap3; }
+  .addr { transform-box: fill-box; transform-origin: 100% 50%; }
+  .hud { transform-box: fill-box; transform-origin: 50% 50%; }
+
+  .float { animation: float 7s ease-in-out infinite; }
+  @keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
+  @keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+  @media (prefers-reduced-motion: reduce) { .a, .float { animation: none !important; } }
+</style>
+<defs>
+  <radialGradient id="glowF21158"><stop offset="0" stop-color="#F21158"/><stop offset=".55" stop-color="#F21158" stop-opacity=".45"/><stop offset="1" stop-color="#F21158" stop-opacity="0"/></radialGradient><radialGradient id="glowF211EF"><stop offset="0" stop-color="#F211EF"/><stop offset=".55" stop-color="#F211EF" stop-opacity=".45"/><stop offset="1" stop-color="#F211EF" stop-opacity="0"/></radialGradient><radialGradient id="glowF2410F"><stop offset="0" stop-color="#F2410F"/><stop offset=".55" stop-color="#F2410F" stop-opacity=".45"/><stop offset="1" stop-color="#F2410F" stop-opacity="0"/></radialGradient><radialGradient id="glowF25F11"><stop offset="0" stop-color="#F25F11"/><stop offset=".55" stop-color="#F25F11" stop-opacity=".45"/><stop offset="1" stop-color="#F25F11" stop-opacity="0"/></radialGradient><radialGradient id="glowF2D80F"><stop offset="0" stop-color="#F2D80F"/><stop offset=".55" stop-color="#F2D80F" stop-opacity=".45"/><stop offset="1" stop-color="#F2D80F" stop-opacity="0"/></radialGradient>
+  <clipPath id="stage"><rect width="1280" height="820" rx="28"/></clipPath>
+  <linearGradient id="stageBg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff5f7"/><stop offset="1" stop-color="#fff7ee"/></linearGradient>
+  <linearGradient id="shP" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8cddc"/><stop offset=".5" stop-color="#f7d6cf"/><stop offset="1" stop-color="#f1caee"/></linearGradient>
+  <linearGradient id="shT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8c6b4"/><stop offset=".5" stop-color="#f9d9b9"/><stop offset="1" stop-color="#f7ecb6"/></linearGradient>
+  <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9a6b"/><stop offset=".55" stop-color="#ffc56b"/><stop offset="1" stop-color="#ffe9a3"/></linearGradient>
+  <linearGradient id="shPu" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="760"><stop offset="0" stop-color="#f8cddc"/><stop offset=".5" stop-color="#f7d6cf"/><stop offset="1" stop-color="#f1caee"/></linearGradient>
+  <linearGradient id="shTu" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="760"><stop offset="0" stop-color="#f8c6b4"/><stop offset=".5" stop-color="#f9d9b9"/><stop offset="1" stop-color="#f7ecb6"/></linearGradient>
+  <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".22"/></linearGradient>
+  <linearGradient id="cardP" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fce6ee"/><stop offset=".5" stop-color="#fbe9e6"/><stop offset="1" stop-color="#f7e2f5"/></linearGradient>
+  <linearGradient id="cardT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f9d9c9"/><stop offset=".5" stop-color="#f9e3c9"/><stop offset="1" stop-color="#f6eec6"/></linearGradient>
+  <clipPath id="win"><rect width="1240" height="760" rx="12"/></clipPath>
+  <clipPath id="card"><rect x="230" y="46" width="1002" height="706" rx="10"/></clipPath>
+  <clipPath id="pages"><rect x="0" y="112" width="230" height="600"/></clipPath>
+  <g id="folderP"><path d="M1 3.5a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.6h6.2A1.5 1.5 0 0 1 15 5.1V12.5A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5z" fill="#f4a9c0" stroke="#c9356b" stroke-width="1.25"/><path d="M1.6 7.2h13.6l-1.1 5.6a1.4 1.4 0 0 1-1.4 1.2H2.9a1.4 1.4 0 0 1-1.4-1.2z" fill="#fbd3df" stroke="#c9356b" stroke-width="1.25"/></g>
+  <g id="folderT"><path d="M1 3.5a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.6h6.2A1.5 1.5 0 0 1 15 5.1V12.5A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5z" fill="#f7b98f" stroke="#c4561f" stroke-width="1.25"/><path d="M1.6 7.2h13.6l-1.1 5.6a1.4 1.4 0 0 1-1.4 1.2H2.9a1.4 1.4 0 0 1-1.4-1.2z" fill="#fcdcc3" stroke="#c4561f" stroke-width="1.25"/></g>
+</defs>
+
+<g clip-path="url(#stage)">
+  <rect width="1280" height="820" fill="url(#stageBg)"/>
+  <g>
+    <circle cx="170" cy="120" r="356.5" fill="url(#glowF21158)" opacity=".16"/>
+    <circle cx="1130" cy="140" r="387.5" fill="url(#glowF211EF)" opacity=".14"/>
+    <circle cx="160" cy="760" r="403" fill="url(#glowF25F11)" opacity=".14"/>
+    <circle cx="1140" cy="780" r="403" fill="url(#glowF2D80F)" opacity=".2"/>
+    <g class="a io shellT">
+      <circle cx="170" cy="120" r="387.5" fill="url(#glowF2410F)" opacity=".16"/>
+      <circle cx="1130" cy="160" r="403" fill="url(#glowF2D80F)" opacity=".2"/>
+    </g>
+  </g>
+
+  <g>
+  <g transform="translate(70 34) scale(.919)">
+    <g fill="#5a1830"><rect x="-26" y="30" width="1292" height="800" rx="40" opacity=".022"/><rect x="-16" y="20" width="1272" height="784" rx="30" opacity=".03"/><rect x="-8" y="10" width="1256" height="772" rx="20" opacity=".04"/><rect x="-2" y="3" width="1244" height="762" rx="14" opacity=".05"/></g>
+    <rect width="1240" height="760" rx="12" fill="#fff"/>
+    <g clip-path="url(#win)">
+      <rect width="1240" height="760" fill="url(#shT)"/>
+
+      <!-- Document card, as wide as the window allows -->
+      <rect x="8" y="46" width="1224" height="706" rx="10" fill="#fff" stroke="#000" stroke-opacity=".06"/>
+      <clipPath id="cardW"><rect x="8" y="46" width="1224" height="706" rx="10"/></clipPath>
+      <g clip-path="url(#cardW)">
+                  <rect x="8" y="46" width="1224" height="168" fill="url(#cover)"/>
+          <g opacity=".35" fill="#fff"><circle cx="1080" cy="96" r="70"/><circle cx="1150" cy="190" r="46"/></g>
+        <g class="a io docC">          <text x="516" y="250" class="t" font-size="60">📚</text>
+          <text x="256" y="292" class="t" font-size="13" font-weight="500" fill="#336df4">读书笔记</text>
+          <text x="268" y="320" class="t soft" font-size="13">树语</text>
+          <text x="268" y="348" class="t soft" font-size="13">摘抄</text>
+
+          <text x="520" y="310" class="t ink" font-size="34" font-weight="600">读书笔记</text>
+          <text x="520" y="346" class="t soft" font-size="16">改变我看世界方式的书，每本一页。</text>
+          <text x="520" y="402" class="t ink" font-size="24" font-weight="600">树语</text>
+          <text x="520" y="438" class="t ink" font-size="16">一部关于树的小说，也关于它们要我们付出的</text>
+          <text x="520" y="464" class="t ink" font-size="16">那种缓慢而安静的注意力。</text>
+
+          <g>
+          <rect x="520.5" y="490.5" width="640" height="56" rx="8" fill="#fef7e1" stroke="#f6d77c"/>
+          <circle cx="545" cy="518" r="8.5" fill="none" stroke="#d99a0b" stroke-width="1.6"/><path d="M545 514v4.6m0 3v.2" stroke="#d99a0b" stroke-width="1.8" stroke-linecap="round"/>
+          <text x="566" y="524" class="t ink" font-size="16">慢慢读，留下一句想记住的话。</text>
+
+          <text x="520" y="600" class="t ink" font-size="24" font-weight="600">摘抄</text>
+          <rect x="520" y="618" width="2" height="24" fill="#bbbfc4"/>
+          <text x="536" y="635" class="t soft" font-size="16">“种一棵树最好的时间是十年前，其次是现在。”</text>
+          <circle cx="528" cy="676" r="3" fill="#336df4"/><text x="546" y="682" class="t ink" font-size="16">划出让你意外的句子</text>
+          <circle cx="528" cy="710" r="3" fill="#336df4"/><text x="546" y="716" class="t ink" font-size="16">周五前读完一本</text>
+          </g>
+
+        </g>
+      </g>
+
+      <!-- Docked sidebar: it slides away without reflowing -->
+      <g class="a io ov">
+        <rect width="232" height="760" fill="url(#shTu)"/>
+        <path d="M230 46h10a10 10 0 0 0-10 10zM230 752h10a10 10 0 0 1-10-10z" fill="url(#shTu)"/>
+      <!-- Favorites: global, they stay while spaces swipe -->
+      <g>
+        <rect x="10" y="52" width="65" height="47" rx="13" fill="#000" fill-opacity=".045"/>
+        <rect x="82.5" y="52" width="65" height="47" rx="13" fill="#fff" fill-opacity=".42" stroke="#000" stroke-opacity=".09" stroke-width="2"/>
+        <rect x="155" y="52" width="65" height="47" rx="13" fill="#000" fill-opacity=".045"/>
+        <rect x="32.5" y="65.5" width="20" height="20" rx="5.6" fill="#7048e8" fill-opacity=".16"/><text x="42.5" y="80" text-anchor="middle" class="t" font-size="12" font-weight="700" fill="#7048e8">周</text>
+        <rect x="105" y="65.5" width="20" height="20" rx="5.6" fill="#0c8599" fill-opacity=".16"/><text x="115" y="80" text-anchor="middle" class="t" font-size="12" font-weight="700" fill="#0c8599">项</text>
+        <text x="187.5" y="81" text-anchor="middle" class="t" font-size="15">🌿</text>
+      </g>
+
+        <g>
+          <text x="18" y="141" class="t" font-size="15">📚</text>
+          <text x="44" y="141" class="t sideT" font-size="13" font-weight="600" fill-opacity=".62">阅读</text>
+          <use href="#folderT" x="18" y="186"/>
+          <text x="44" y="199" class="t sideT" font-size="14" font-weight="500">书架</text>
+          <rect x="35" y="233" width="15" height="15" rx="4" fill="#e8590c" fill-opacity=".16"/><text x="42.5" y="244.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#e8590c">树</text>
+          <text x="60" y="246" class="t sideT" font-size="14">树语</text>
+          <rect x="35" y="274" width="15" height="15" rx="4" fill="#1c7ed6" fill-opacity=".16"/><text x="42.5" y="285.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#1c7ed6">编</text>
+          <text x="60" y="287" class="t sideT" font-size="14">编织茅香</text>
+          <rect x="8" y="304" width="214" height="36" rx="10" fill="#fff" fill-opacity=".74" stroke="#000" stroke-opacity=".05"/>
+          <text x="19" y="327" class="t" font-size="13">📚</text>
+          <text x="44" y="328" class="t sideT" font-size="14">读书笔记</text>
+          <rect x="19" y="356" width="15" height="15" rx="4" fill="#ae3ec9" fill-opacity=".16"/><text x="26.5" y="367.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#ae3ec9">摘</text>
+          <text x="44" y="369" class="t sideT" font-size="14">摘抄</text>
+          <text x="20" y="410" class="t sideT" font-size="17" fill-opacity=".35">+</text>
+          <text x="44" y="410" class="t sideT" font-size="13" fill-opacity=".38">新建文档</text>
+        </g>
+      <g class="fb" style="opacity:.42;transform:scale(.8)"><text x="104" y="737" text-anchor="middle" class="t" font-size="17">✦</text></g>
+      <g class="fb"><text x="132" y="737" text-anchor="middle" class="t" font-size="17">📚</text></g>
+      <text x="205" y="737" text-anchor="middle" class="t side" font-size="20" fill-opacity=".55">+</text>
+      <g fill="none" stroke="#5b4048" stroke-width="1.4" opacity=".6"><rect x="17" y="724" width="16" height="13" rx="2.5"/><path d="M21 724v-4h8v4"/></g>
+      </g>
+
+      <!-- Toolbar -->
+      <circle cx="21" cy="22" r="6" fill="#ff5f57"/><circle cx="41" cy="22" r="6" fill="#febc2e"/><circle cx="61" cy="22" r="6" fill="#28c840"/>
+      <g class="a io tools">
+      <g fill="none" stroke="#5b4048" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".75">
+        <rect x="197" y="15" width="16" height="14" rx="3"/><path d="M202 15v14"/>
+        <path d="M252 22h-12m5-5-5 5 5 5"/>
+        <path d="M272 22h12m-5-5 5 5-5 5" opacity=".35"/>
+        <path d="M315 18a6 6 0 1 0 1.5 5m-.2-8v4h-4"/>
+      </g>
+      </g>
+      <rect class="a io addr" x="336" y="7" width="740" height="31" rx="9" fill="#fff" fill-opacity=".5"/>
+      <g class="a io addrT">
+        <text x="349" y="27.5" class="t" font-size="13">📚</text>
+        <text x="372" y="27.5" class="t" font-size="13"><tspan fill="#6f5a49">阅读 /</tspan><tspan fill="#2b1d12" font-weight="500"> 读书笔记.arcmd</tspan></text>
+        <text x="1110" y="27.5" class="t" font-size="12" fill="#6f5a49" text-anchor="end">142 字</text>
+      </g>
+      <g fill="none" stroke="#5b4636" stroke-width="1.5" stroke-linecap="round" opacity=".75">
+        <path d="M1147 16h10m-5 0v12"/><rect x="1176" y="15" width="16" height="14" rx="3"/><path d="M1186 15v14"/>
+      </g>
+      <g fill="#5b4636" opacity=".75"><circle cx="1210" cy="22" r="1.6"/><circle cx="1216" cy="22" r="1.6"/><circle cx="1222" cy="22" r="1.6"/></g>
+
+
+
+      <!-- Peek: the sidebar floats out from the left edge -->
+      <g class="a en peek">
+        <g fill="#4a2a10"><rect x="0" y="6" width="246" height="760" rx="18" opacity=".05"/><rect x="3" y="8" width="240" height="754" rx="15" opacity=".07"/><rect x="5" y="7" width="233" height="750" rx="13" opacity=".08"/></g>
+        <rect x="6" y="6" width="230" height="748" rx="12" fill="url(#shTu)"/>
+        <rect x="6" y="6" width="230" height="748" rx="12" fill="#fff" fill-opacity=".12" stroke="#fff" stroke-opacity=".6"/>
+        <g fill="none" stroke="#5b4636" stroke-width="1.5" opacity=".75"><rect x="203" y="23" width="16" height="14" rx="3"/><path d="M208 23v14"/></g>
+        <g transform="translate(7 7)">
+        <rect class="a io hov" x="8" y="228" width="214" height="36" rx="10" fill="#000" fill-opacity=".05"/>
+      <!-- Favorites: global, they stay while spaces swipe -->
+      <g>
+        <rect x="10" y="52" width="65" height="47" rx="13" fill="#000" fill-opacity=".045"/>
+        <rect x="82.5" y="52" width="65" height="47" rx="13" fill="#fff" fill-opacity=".42" stroke="#000" stroke-opacity=".09" stroke-width="2"/>
+        <rect x="155" y="52" width="65" height="47" rx="13" fill="#000" fill-opacity=".045"/>
+        <rect x="32.5" y="65.5" width="20" height="20" rx="5.6" fill="#7048e8" fill-opacity=".16"/><text x="42.5" y="80" text-anchor="middle" class="t" font-size="12" font-weight="700" fill="#7048e8">周</text>
+        <rect x="105" y="65.5" width="20" height="20" rx="5.6" fill="#0c8599" fill-opacity=".16"/><text x="115" y="80" text-anchor="middle" class="t" font-size="12" font-weight="700" fill="#0c8599">项</text>
+        <text x="187.5" y="81" text-anchor="middle" class="t" font-size="15">🌿</text>
+      </g>
+
+        <g>
+          <text x="18" y="141" class="t" font-size="15">📚</text>
+          <text x="44" y="141" class="t sideT" font-size="13" font-weight="600" fill-opacity=".62">阅读</text>
+          <use href="#folderT" x="18" y="186"/>
+          <text x="44" y="199" class="t sideT" font-size="14" font-weight="500">书架</text>
+          <rect x="35" y="233" width="15" height="15" rx="4" fill="#e8590c" fill-opacity=".16"/><text x="42.5" y="244.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#e8590c">树</text>
+          <text x="60" y="246" class="t sideT" font-size="14">树语</text>
+          <rect x="35" y="274" width="15" height="15" rx="4" fill="#1c7ed6" fill-opacity=".16"/><text x="42.5" y="285.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#1c7ed6">编</text>
+          <text x="60" y="287" class="t sideT" font-size="14">编织茅香</text>
+          <rect x="8" y="304" width="214" height="36" rx="10" fill="#fff" fill-opacity=".74" stroke="#000" stroke-opacity=".05"/>
+          <text x="19" y="327" class="t" font-size="13">📚</text>
+          <text x="44" y="328" class="t sideT" font-size="14">读书笔记</text>
+          <rect x="19" y="356" width="15" height="15" rx="4" fill="#ae3ec9" fill-opacity=".16"/><text x="26.5" y="367.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#ae3ec9">摘</text>
+          <text x="44" y="369" class="t sideT" font-size="14">摘抄</text>
+          <text x="20" y="410" class="t sideT" font-size="17" fill-opacity=".35">+</text>
+          <text x="44" y="410" class="t sideT" font-size="13" fill-opacity=".38">新建文档</text>
+        </g>
+      <g class="fb" style="opacity:.42;transform:scale(.8)"><text x="104" y="723" text-anchor="middle" class="t" font-size="17">✦</text></g>
+      <g class="fb"><text x="132" y="723" text-anchor="middle" class="t" font-size="17">📚</text></g>
+      <text x="205" y="723" text-anchor="middle" class="t side" font-size="20" fill-opacity=".55">+</text>
+        </g>
+        <g fill="none" stroke="#5b4636" stroke-width="1.4" opacity=".6" transform="translate(7 -7)"><rect x="17" y="724" width="16" height="13" rx="2.5"/><path d="M21 724v-4h8v4"/></g>
+      </g>
+
+      <!-- Keyboard shortcut -->
+      <g class="a en hud">
+        <rect x="560" y="330" width="120" height="64" rx="16" fill="#1f1a17" fill-opacity=".78"/>
+        <text x="620" y="373" text-anchor="middle" class="t" font-size="26" font-weight="500" fill="#fff">⌘ \</text>
+      </g>
+      <g class="a io ptr"><path d="M0 0v17l4.2-4 2.8 6.4 2.6-1.1-2.7-6.3 5.8-.2z" fill="#111" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/></g>
+    </g>
+  </g>
+  </g>
+  <g class="t" font-size="15" font-weight="500" fill="#3b2a30">
+    <g class="a cap1"><rect x="230" y="760" width="22" height="22" rx="6" fill="#F2410F" fill-opacity=".14"/><text x="241" y="776" text-anchor="middle" font-size="12">⌘</text><text x="262" y="776">⌘\ 收起侧边栏</text></g>
+    <g class="a cap2"><rect x="520" y="760" width="22" height="22" rx="6" fill="#F25F11" fill-opacity=".16"/><text x="531" y="776" text-anchor="middle" font-size="12">←</text><text x="552" y="776">指针移到左缘，自动滑出</text></g>
+    <g class="a cap3"><rect x="800" y="760" width="22" height="22" rx="6" fill="#F2D80F" fill-opacity=".3"/><text x="811" y="776" text-anchor="middle" font-size="12">↩</text><text x="832" y="776">移开即收回</text></g>
+  </g>
+</g>
+</svg>

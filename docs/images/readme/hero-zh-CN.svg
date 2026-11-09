@@ -1,0 +1,242 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 820" width="1280" height="820" role="img" aria-label="ArcMD：在粉色的 Personal 空间与橙色的阅读空间之间轻扫切换；每个空间都有自己的颜色、文件和正在看的页面">
+<style>
+  .t { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Helvetica, Arial, sans-serif; }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .ink { fill: #1f2329; } .soft { fill: #646a73; } .faint { fill: #8f959e; }
+  .side { fill: #3a2a30; } .sideT { fill: #3d2b1e; }
+  .a { animation-duration: 14s; animation-iteration-count: infinite; animation-fill-mode: both; }
+  .fb { transform-box: fill-box; }
+  .io { animation-timing-function: cubic-bezier(.65,0,.35,1); }
+  .en { animation-timing-function: cubic-bezier(.16,1,.3,1); }
+
+  /* ---- 0% Personal · 7–24% typing · 34–40% swipe to Reading · 50–70% select + format · 87–93% swipe back ---- */
+  @keyframes shellT  { 0%,34% { opacity: 0 } 40%,87% { opacity: 1 } 93%,100% { opacity: 0 } }
+  @keyframes pageP   { 0%,34% { transform: translateX(0) } 40%,87% { transform: translateX(-236px) } 93%,100% { transform: translateX(0) } }
+  @keyframes pageT   { 0%,34% { transform: translateX(236px) } 40%,87% { transform: translateX(0) } 93%,100% { transform: translateX(236px) } }
+  @keyframes docP    { 0%,34% { opacity: 1; transform: none } 37%,90% { opacity: 0; transform: translateY(10px) } 95%,100% { opacity: 1; transform: none } }
+  @keyframes docT    { 0%,36% { opacity: 0; transform: translateY(10px) } 41%,87% { opacity: 1; transform: none } 90%,100% { opacity: 0; transform: translateY(10px) } }
+  @keyframes typing  { 0%,7% { transform: translateX(0) } 24%,60% { transform: translateX(210px) } 60.1%,100% { transform: translateX(0) } }
+  @keyframes caret   { 0%,6% { opacity: 0 } 6.5%,30% { opacity: 1 } 31%,100% { opacity: 0 } }
+  @keyframes blink   { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+  @keyframes swP     { 0%,34% { opacity: 1; transform: scale(1) } 40%,87% { opacity: .42; transform: scale(.8) } 93%,100% { opacity: 1; transform: scale(1) } }
+  @keyframes swT     { 0%,34% { opacity: .42; transform: scale(.8) } 40%,87% { opacity: 1; transform: scale(1) } 93%,100% { opacity: .42; transform: scale(.8) } }
+  @keyframes fingers { 0%,31% { opacity: 0; transform: translateX(0) } 32.5% { opacity: 1; transform: translateX(0) } 39% { opacity: 1; transform: translateX(-120px) } 41%,83% { opacity: 0; transform: translateX(-120px) }
+                       83.1% { opacity: 0; transform: translateX(-120px) } 84.5% { opacity: 1; transform: translateX(-120px) } 91% { opacity: 1; transform: translateX(0) } 93%,100% { opacity: 0; transform: translateX(0) } }
+  @keyframes cap1    { 0%,33% { opacity: 1 } 35%,92% { opacity: .38 } 94%,100% { opacity: 1 } }
+  @keyframes cap2    { 0%,32% { opacity: .38 } 34%,46% { opacity: 1 } 48%,85% { opacity: .38 } 87%,93% { opacity: 1 } 95%,100% { opacity: .38 } }
+  @keyframes cap3    { 0%,46% { opacity: .38 } 48%,85% { opacity: 1 } 87%,100% { opacity: .38 } }
+  @keyframes float   { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
+
+  .shellT  { animation-name: shellT; }
+  .pageP   { animation-name: pageP; }  .pageT { animation-name: pageT; }
+  .docP    { animation-name: docP; }   .docT  { animation-name: docT; }
+  .typing  { animation-name: typing; animation-timing-function: steps(13, end); }
+  .caret   { animation-name: caret; }
+  .blink   { animation: blink 1s steps(1) infinite; }
+  .swP     { animation-name: swP; transform-origin: 50% 50%; } .swT { animation-name: swT; transform-origin: 50% 50%; }
+  .fingers { animation-name: fingers; }
+  .cap1 { animation-name: cap1; } .cap2 { animation-name: cap2; } .cap3 { animation-name: cap3; }
+  .float { animation: float 7s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .a, .blink, .float { animation: none !important; } }
+</style>
+<defs>
+  <radialGradient id="glowF21158"><stop offset="0" stop-color="#F21158"/><stop offset=".55" stop-color="#F21158" stop-opacity=".45"/><stop offset="1" stop-color="#F21158" stop-opacity="0"/></radialGradient><radialGradient id="glowF211EF"><stop offset="0" stop-color="#F211EF"/><stop offset=".55" stop-color="#F211EF" stop-opacity=".45"/><stop offset="1" stop-color="#F211EF" stop-opacity="0"/></radialGradient><radialGradient id="glowF2410F"><stop offset="0" stop-color="#F2410F"/><stop offset=".55" stop-color="#F2410F" stop-opacity=".45"/><stop offset="1" stop-color="#F2410F" stop-opacity="0"/></radialGradient><radialGradient id="glowF25F11"><stop offset="0" stop-color="#F25F11"/><stop offset=".55" stop-color="#F25F11" stop-opacity=".45"/><stop offset="1" stop-color="#F25F11" stop-opacity="0"/></radialGradient><radialGradient id="glowF2D80F"><stop offset="0" stop-color="#F2D80F"/><stop offset=".55" stop-color="#F2D80F" stop-opacity=".45"/><stop offset="1" stop-color="#F2D80F" stop-opacity="0"/></radialGradient>
+  <clipPath id="stage"><rect width="1280" height="820" rx="28"/></clipPath>
+  <linearGradient id="stageBg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff5f7"/><stop offset="1" stop-color="#fff7ee"/></linearGradient>
+  <linearGradient id="shP" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8cddc"/><stop offset=".5" stop-color="#f7d6cf"/><stop offset="1" stop-color="#f1caee"/></linearGradient>
+  <linearGradient id="shT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8c6b4"/><stop offset=".5" stop-color="#f9d9b9"/><stop offset="1" stop-color="#f7ecb6"/></linearGradient>
+  <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9a6b"/><stop offset=".55" stop-color="#ffc56b"/><stop offset="1" stop-color="#ffe9a3"/></linearGradient>
+  <clipPath id="win"><rect width="1240" height="760" rx="12"/></clipPath>
+  <clipPath id="card"><rect x="230" y="46" width="1002" height="706" rx="10"/></clipPath>
+  <clipPath id="pages"><rect x="0" y="112" width="230" height="600"/></clipPath>
+  <g id="folderP"><path d="M1 3.5a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.6h6.2A1.5 1.5 0 0 1 15 5.1V12.5A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5z" fill="#f4a9c0" stroke="#c9356b" stroke-width="1.25"/><path d="M1.6 7.2h13.6l-1.1 5.6a1.4 1.4 0 0 1-1.4 1.2H2.9a1.4 1.4 0 0 1-1.4-1.2z" fill="#fbd3df" stroke="#c9356b" stroke-width="1.25"/></g>
+  <g id="folderT"><path d="M1 3.5a1.5 1.5 0 0 1 1.5-1.5h3.2l1.6 1.6h6.2A1.5 1.5 0 0 1 15 5.1V12.5A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5z" fill="#f7b98f" stroke="#c4561f" stroke-width="1.25"/><path d="M1.6 7.2h13.6l-1.1 5.6a1.4 1.4 0 0 1-1.4 1.2H2.9a1.4 1.4 0 0 1-1.4-1.2z" fill="#fcdcc3" stroke="#c4561f" stroke-width="1.25"/></g>
+</defs>
+
+<g clip-path="url(#stage)">
+  <!-- Stage: soft color fields from both themes -->
+  <rect width="1280" height="820" fill="url(#stageBg)"/>
+  <g>
+    <circle cx="170" cy="120" r="356.5" fill="url(#glowF21158)" opacity=".16"/>
+    <circle cx="1130" cy="140" r="387.5" fill="url(#glowF211EF)" opacity=".14"/>
+    <circle cx="160" cy="760" r="403" fill="url(#glowF25F11)" opacity=".14"/>
+    <circle cx="1140" cy="780" r="403" fill="url(#glowF2D80F)" opacity=".2"/>
+    <g class="a io shellT">
+      <circle cx="170" cy="120" r="387.5" fill="url(#glowF2410F)" opacity=".16"/>
+      <circle cx="1130" cy="160" r="403" fill="url(#glowF2D80F)" opacity=".2"/>
+    </g>
+  </g>
+
+  <g>
+  <g transform="translate(70 34) scale(.919)">
+    <g fill="#5a1830"><rect x="-26" y="30" width="1292" height="800" rx="40" opacity=".022"/><rect x="-16" y="20" width="1272" height="784" rx="30" opacity=".03"/><rect x="-8" y="10" width="1256" height="772" rx="20" opacity=".04"/><rect x="-2" y="3" width="1244" height="762" rx="14" opacity=".05"/></g>
+    <rect width="1240" height="760" rx="12" fill="#fff"/>
+    <g clip-path="url(#win)">
+      <!-- Window shell, painted by the space theme -->
+      <rect width="1240" height="760" fill="url(#shP)"/>
+      <rect class="a io shellT" width="1240" height="760" fill="url(#shT)"/>
+
+      <!-- Title row -->
+      <circle cx="21" cy="22" r="6" fill="#ff5f57"/><circle cx="41" cy="22" r="6" fill="#febc2e"/><circle cx="61" cy="22" r="6" fill="#28c840"/>
+      <g fill="none" stroke="#5b4048" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".75">
+        <rect x="197" y="15" width="16" height="14" rx="3"/><path d="M202 15v14"/>
+        <path d="M252 22h-12m5-5-5 5 5 5"/>
+        <path d="M272 22h12m-5-5 5 5-5 5" opacity=".35"/>
+        <path d="M315 18a6 6 0 1 0 1.5 5m-.2-8v4h-4"/>
+      </g>
+      <rect x="336" y="7" width="740" height="31" rx="9" fill="#fff" fill-opacity=".5"/>
+      <g class="a docP" style="animation-timing-function:ease">
+        <rect x="348" y="15" width="15" height="15" rx="4" fill="#d6336c" fill-opacity=".16"/><text x="355.5" y="26.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#d6336c">写</text>
+        <text x="372" y="27.5" class="t" font-size="13"><tspan fill="#6e5a60">Personal /</tspan><tspan fill="#2a1d21" font-weight="500"> 写作.arcmd</tspan></text>
+        <text x="1110" y="27.5" class="t" font-size="12" fill="#6e5a60" text-anchor="end">186 字</text>
+      </g>
+      <g class="a docT" style="animation-timing-function:ease">
+        <text x="349" y="27.5" class="t" font-size="13">📚</text>
+        <text x="372" y="27.5" class="t" font-size="13"><tspan fill="#6f5a49">阅读 /</tspan><tspan fill="#2b1d12" font-weight="500"> 读书笔记.arcmd</tspan></text>
+        <text x="1110" y="27.5" class="t" font-size="12" fill="#6f5a49" text-anchor="end">142 字</text>
+      </g>
+      <g fill="none" stroke="#5b4048" stroke-width="1.5" stroke-linecap="round" opacity=".75">
+        <path d="M1147 16h10m-5 0v12"/><rect x="1176" y="15" width="16" height="14" rx="3"/><path d="M1186 15v14"/>
+      </g>
+      <g fill="#5b4048" opacity=".75"><circle cx="1210" cy="22" r="1.6"/><circle cx="1216" cy="22" r="1.6"/><circle cx="1222" cy="22" r="1.6"/></g>
+
+      <!-- Favorites: global, they stay while spaces swipe -->
+      <g>
+        <rect x="10" y="52" width="65" height="47" rx="13" fill="#000" fill-opacity=".045"/>
+        <rect x="82.5" y="52" width="65" height="47" rx="13" fill="#fff" fill-opacity=".42" stroke="#000" stroke-opacity=".09" stroke-width="2"/>
+        <rect x="155" y="52" width="65" height="47" rx="13" fill="#000" fill-opacity=".045"/>
+        <rect x="32.5" y="65.5" width="20" height="20" rx="5.6" fill="#7048e8" fill-opacity=".16"/><text x="42.5" y="80" text-anchor="middle" class="t" font-size="12" font-weight="700" fill="#7048e8">周</text>
+        <rect x="105" y="65.5" width="20" height="20" rx="5.6" fill="#0c8599" fill-opacity=".16"/><text x="115" y="80" text-anchor="middle" class="t" font-size="12" font-weight="700" fill="#0c8599">项</text>
+        <text x="187.5" y="81" text-anchor="middle" class="t" font-size="15">🌿</text>
+      </g>
+
+      <!-- Space pages -->
+      <g clip-path="url(#pages)">
+        <g class="a io pageP">
+          <text x="18" y="141" class="t" font-size="15">✦</text>
+          <text x="44" y="141" class="t side" font-size="13" font-weight="600" fill-opacity=".62">Personal</text>
+          <use href="#folderP" x="18" y="186"/>
+          <text x="44" y="199" class="t side" font-size="14" font-weight="500">日记</text>
+          <rect x="35" y="233" width="15" height="15" rx="4" fill="#d6336c" fill-opacity=".16"/><text x="42.5" y="244.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#d6336c">灵</text>
+          <text x="60" y="246" class="t side" font-size="14">灵感</text>
+          <rect x="35" y="274" width="15" height="15" rx="4" fill="#0c8599" fill-opacity=".16"/><text x="42.5" y="285.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#0c8599">晨</text>
+          <text x="60" y="287" class="t side" font-size="14">晨间随笔</text>
+          <rect x="19" y="315" width="15" height="15" rx="4" fill="#7048e8" fill-opacity=".16"/><text x="26.5" y="326.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#7048e8">书</text>
+          <text x="44" y="328" class="t side" font-size="14">书单</text>
+          <rect x="8" y="345" width="214" height="36" rx="10" fill="#fff" fill-opacity=".74" stroke="#000" stroke-opacity=".05"/>
+          <rect x="19" y="356" width="15" height="15" rx="4" fill="#d6336c" fill-opacity=".16"/><text x="26.5" y="367.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#d6336c">写</text>
+          <text x="44" y="369" class="t side" font-size="14">写作</text>
+          <text x="20" y="410" class="t side" font-size="17" fill-opacity=".35">+</text>
+          <text x="44" y="410" class="t side" font-size="13" fill-opacity=".38">新建文档</text>
+        </g>
+        <g class="a io pageT">
+          <text x="18" y="141" class="t" font-size="15">📚</text>
+          <text x="44" y="141" class="t sideT" font-size="13" font-weight="600" fill-opacity=".62">阅读</text>
+          <use href="#folderT" x="18" y="186"/>
+          <text x="44" y="199" class="t sideT" font-size="14" font-weight="500">书架</text>
+          <rect x="35" y="233" width="15" height="15" rx="4" fill="#e8590c" fill-opacity=".16"/><text x="42.5" y="244.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#e8590c">树</text>
+          <text x="60" y="246" class="t sideT" font-size="14">树语</text>
+          <rect x="35" y="274" width="15" height="15" rx="4" fill="#1c7ed6" fill-opacity=".16"/><text x="42.5" y="285.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#1c7ed6">编</text>
+          <text x="60" y="287" class="t sideT" font-size="14">编织茅香</text>
+          <rect x="8" y="304" width="214" height="36" rx="10" fill="#fff" fill-opacity=".74" stroke="#000" stroke-opacity=".05"/>
+          <text x="19" y="327" class="t" font-size="13">📚</text>
+          <text x="44" y="328" class="t sideT" font-size="14">读书笔记</text>
+          <rect x="19" y="356" width="15" height="15" rx="4" fill="#ae3ec9" fill-opacity=".16"/><text x="26.5" y="367.5" text-anchor="middle" class="t" font-size="9.5" font-weight="600" fill="#ae3ec9">摘</text>
+          <text x="44" y="369" class="t sideT" font-size="14">摘抄</text>
+          <text x="20" y="410" class="t sideT" font-size="17" fill-opacity=".35">+</text>
+          <text x="44" y="410" class="t sideT" font-size="13" fill-opacity=".38">新建文档</text>
+        </g>
+      </g>
+      <!-- Two-finger swipe -->
+      <g class="a io fingers">
+        <circle cx="176" cy="520" r="11" fill="#fff" fill-opacity=".75" stroke="#000" stroke-opacity=".12"/>
+        <circle cx="200" cy="532" r="11" fill="#fff" fill-opacity=".75" stroke="#000" stroke-opacity=".12"/>
+      </g>
+
+      <!-- Space switcher -->
+      <g fill="none" stroke="#5b4048" stroke-width="1.4" opacity=".6"><rect x="17" y="724" width="16" height="13" rx="2.5"/><path d="M21 724v-4h8v4"/></g>
+      <g class="a io fb swP"><text x="104" y="737" text-anchor="middle" class="t" font-size="17">✦</text></g>
+      <g class="a io fb swT"><text x="132" y="737" text-anchor="middle" class="t" font-size="17">📚</text></g>
+      <text x="205" y="737" text-anchor="middle" class="t side" font-size="20" fill-opacity=".55">+</text>
+
+      <!-- Document card -->
+      <rect x="230" y="46" width="1002" height="706" rx="10" fill="#fff" stroke="#000" stroke-opacity=".06"/>
+      <g clip-path="url(#card)">
+        <!-- Personal · Writing -->
+        <g class="a docP" style="animation-timing-function:ease">
+          <text x="256" y="78" class="t faint" font-size="16">«</text>
+          <text x="256" y="114" class="t" font-size="13" font-weight="500" fill="#336df4">留一点空白</text>
+          <text x="268" y="142" class="t soft" font-size="13">从一个念头开始</text>
+          <text x="280" y="170" class="t soft" font-size="13">今天的计划</text>
+          <text x="268" y="198" class="t soft" font-size="13">记录，也是一种思考</text>
+
+          <text x="520" y="138" class="t ink" font-size="34" font-weight="600">留一点空白</text>
+          <text x="520" y="194" class="t ink" font-size="16">写作可以很简单。打开一页，记下此刻的想法。</text>
+          <text x="520" y="220" class="t ink" font-size="16">让文字慢慢成为自己的形状。</text>
+          <g class="a typing">
+            <rect x="519" y="202" width="380" height="26" fill="#fff"/>
+            <g class="a caret"><rect class="blink" x="519" y="204" width="2" height="21" rx="1" fill="#336df4"/></g>
+          </g>
+
+          <text x="520" y="280" class="t ink" font-size="24" font-weight="600">从一个念头开始</text>
+          <text x="520" y="316" class="t ink" font-size="16">好的工具让人专注于内容。用 <tspan font-weight="700">清晰的文字</tspan> 表达，用 <tspan font-style="italic">适当的留白</tspan> 留住节奏。</text>
+          <rect x="520" y="334" width="2" height="24" fill="#bbbfc4"/>
+          <text x="536" y="351" class="t soft" font-size="16">不必急着写完，先把想说的话写下来。</text>
+
+          <text x="520" y="406" class="t ink" font-size="20" font-weight="600">今天的计划</text>
+          <circle cx="528" cy="432" r="3" fill="#336df4"/><text x="546" y="438" class="t ink" font-size="16">读完一本书的最后一章</text>
+          <circle cx="528" cy="466" r="3" fill="#336df4"/><text x="546" y="472" class="t ink" font-size="16">整理散落在笔记里的灵感</text>
+          <rect x="520.5" y="492.5" width="15" height="15" rx="3.5" fill="#fff" stroke="#336df4"/><path d="M524 500l2.6 2.6 5-5" fill="none" stroke="#336df4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="546" y="506" class="t faint" font-size="16">留半小时，安静地写点东西</text><rect x="546" y="500" width="192" height="1.2" fill="#8f959e"/>
+
+          <text x="520" y="566" class="t ink" font-size="24" font-weight="600">记录，也是一种思考</text>
+          <text x="520" y="602" class="t ink" font-size="16">把复杂的事情拆成几步，往往就能找到开始的地方。</text>
+          <rect x="520.5" y="626.5" width="640" height="122" rx="8" fill="#fff" stroke="#dee0e3"/>
+          <path d="M521 627h639v40H521z" fill="#f2f3f5"/>
+          <path d="M840 627v122M521 667h639M521 707h639" stroke="#dee0e3"/>
+          <text x="536" y="652" class="t ink" font-size="14" font-weight="500">阶段</text><text x="856" y="652" class="t ink" font-size="14" font-weight="500">关注什么</text>
+          <text x="536" y="692" class="t ink" font-size="14">观察</text><text x="856" y="692" class="t ink" font-size="14">真实发生的细节</text>
+          <text x="536" y="732" class="t ink" font-size="14">整理</text><text x="856" y="732" class="t ink" font-size="14">想法之间的联系</text>
+        </g>
+
+        <!-- Reading · 读书笔记 (cover + page icon) -->
+        <g class="a docT" style="animation-timing-function:ease">
+          <rect x="230" y="46" width="1002" height="168" fill="url(#cover)"/>
+          <g opacity=".35" fill="#fff"><circle cx="1080" cy="96" r="70"/><circle cx="1150" cy="190" r="46"/></g>
+          <text x="516" y="250" class="t" font-size="60">📚</text>
+          <text x="256" y="292" class="t" font-size="13" font-weight="500" fill="#336df4">读书笔记</text>
+          <text x="268" y="320" class="t soft" font-size="13">树语</text>
+          <text x="268" y="348" class="t soft" font-size="13">摘抄</text>
+
+          <text x="520" y="310" class="t ink" font-size="34" font-weight="600">读书笔记</text>
+          <text x="520" y="346" class="t soft" font-size="16">改变我看世界方式的书，每本一页。</text>
+          <text x="520" y="402" class="t ink" font-size="24" font-weight="600">树语</text>
+          <text x="520" y="438" class="t ink" font-size="16">一部关于树的小说，也关于它们要我们付出的</text>
+          <text x="520" y="464" class="t ink" font-size="16">那种缓慢而安静的注意力。</text>
+
+          <g>
+          <rect x="520.5" y="490.5" width="640" height="56" rx="8" fill="#fef7e1" stroke="#f6d77c"/>
+          <circle cx="545" cy="518" r="8.5" fill="none" stroke="#d99a0b" stroke-width="1.6"/><path d="M545 514v4.6m0 3v.2" stroke="#d99a0b" stroke-width="1.8" stroke-linecap="round"/>
+          <text x="566" y="524" class="t ink" font-size="16">慢慢读，留下一句想记住的话。</text>
+
+          <text x="520" y="600" class="t ink" font-size="24" font-weight="600">摘抄</text>
+          <rect x="520" y="618" width="2" height="24" fill="#bbbfc4"/>
+          <text x="536" y="635" class="t soft" font-size="16">“种一棵树最好的时间是十年前，其次是现在。”</text>
+          <circle cx="528" cy="676" r="3" fill="#336df4"/><text x="546" y="682" class="t ink" font-size="16">划出让你意外的句子</text>
+          <circle cx="528" cy="710" r="3" fill="#336df4"/><text x="546" y="716" class="t ink" font-size="16">周五前读完一本</text>
+          </g>
+
+        </g>
+      </g>
+    </g>
+  </g>
+  </g>
+
+  <!-- Captions, in step with the animation -->
+  <g class="t" font-size="15" font-weight="500" fill="#3b2a30">
+    <g class="a cap1"><rect x="260" y="760" width="22" height="22" rx="6" fill="#F21158" fill-opacity=".14"/><text x="271" y="776" text-anchor="middle" font-size="12">✍</text><text x="292" y="776">每个空间都有自己的颜色</text></g>
+    <g class="a cap2"><rect x="520" y="760" width="22" height="22" rx="6" fill="#F25F11" fill-opacity=".16"/><text x="531" y="776" text-anchor="middle" font-size="12">⇆</text><text x="552" y="776">双指轻扫，切换空间</text></g>
+    <g class="a cap3"><rect x="782" y="760" width="22" height="22" rx="6" fill="#F2D80F" fill-opacity=".3"/><text x="793" y="776" text-anchor="middle" font-size="12">◐</text><text x="814" y="776">每个空间记住自己的页面</text></g>
+  </g>
+</g>
+</svg>

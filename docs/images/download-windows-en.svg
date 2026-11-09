@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="56" viewBox="0 0 200 56" role="img" aria-label="Download for Windows: x64 · Installer · ZIP">
+  <rect x=".5" y=".5" width="199" height="55" rx="12" fill="#fff" stroke="#d1d9e0"/>
+  <g fill="#1f2328" transform="translate(21 19) scale(.56)"><path d="M0 5.6 16.5 3.3v16H0zM18.5 3 40 0v19.3H18.5zM0 21.3h16.5v16L0 35zM18.5 21.3H40V41l-21.5-3z"/></g>
+  <text x="58" y="25" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#1f2328">Windows</text>
+  <text x="58" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="11" fill="#59636e">x64 · Installer · ZIP</text>
+  <path d="M176 21v13m-5-5 5 5 5-5" fill="none" stroke="#59636e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
