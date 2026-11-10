@@ -203,6 +203,14 @@ CGO_ENABLED=0 GOOS=windows go build ./...
 ARCMD_SNAPSHOT=/tmp/arcmd-shots CGO_ENABLED=0 go test -run Snapshot ./internal/app
 ```
 
+<div align="center">
+
+如果 ArcMD 对你有帮助，欢迎在右上角给个 **⭐ Star**！
+
+<a href="https://github.com/Ciao1019/ArcMD/stargazers"><img src="docs/images/readme/star.gif" width="600" alt="点击 GitHub 上的 Star 按钮为 ArcMD 点亮星标"></a>
+
+</div>
+
 ## 致谢
 
 感谢 [LinuxDo](https://linux.do/) 社区的支持。

@@ -241,6 +241,14 @@ For UI changes, render and inspect the native snapshots:
 ARCMD_SNAPSHOT=/tmp/arcmd-shots CGO_ENABLED=0 go test -run Snapshot ./internal/app
 ```
 
+<div align="center">
+
+If ArcMD is useful to you, a **⭐ Star** in the top-right corner means a lot!
+
+<a href="https://github.com/Ciao1019/ArcMD/stargazers"><img src="docs/images/readme/star.gif" width="600" alt="Clicking the Star button on GitHub to star ArcMD"></a>
+
+</div>
+
 ## Acknowledgements
 
 Thanks to the [LinuxDo](https://linux.do/) community for its support.
