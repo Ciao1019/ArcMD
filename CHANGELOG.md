@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.4
+
+A macOS application-icon correction for the hand-drawn beaver identity.
+
+- Normalize the icon tile to the macOS grid and make its interior opaque, so macOS Tahoe no longer shrinks it inside an extra gray background.
+- Preserve the approved beaver illustration and ivory paper background. The horizontal README artwork is unchanged.
+- Application features remain the same as 0.0.2; unreleased plugin work is not included.
+
 ## 0.0.3
 
 A logo-only release introducing ArcMD’s hand-drawn beaver identity.

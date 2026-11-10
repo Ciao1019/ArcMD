@@ -6,7 +6,7 @@
 
 简体中文 · [English](README.en.md)
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.3-F21158" alt="版本 0.0.3"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.4-F21158" alt="版本 0.0.4"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="支持 macOS、Windows 与 Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="使用 Go 与 MyGo 原生开发"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI 工作流配置"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-zh-CN.svg" height="56" alt="下载 ArcMD Windows 版：x64 安装程序与 ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-zh-CN.svg" height="56" alt="下载 ArcMD Linux 版：x64 与 ARM64，DEB 与 TAR.GZ"></a>
 
-<sub>当前预览版本为 0.0.3，按钮会打开发布页；也可以<a href="#从源码运行">从源码运行</a>。</sub>
+<sub>当前预览版本为 0.0.4，按钮会打开发布页；也可以<a href="#从源码运行">从源码运行</a>。</sub>
 
 <br><br>
 
