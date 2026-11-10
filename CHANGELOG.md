@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.3
+
+A logo-only release introducing ArcMD’s hand-drawn beaver identity.
+
+- Replace the application icon with the new beaver artwork, including dedicated small-size macOS icons.
+- Use the horizontal ArcMD logo in the Chinese and English READMEs.
+- Application features remain the same as 0.0.2. The plugin marketplace/runtime work is not included.
+
+Downloads are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`.
+
 ## 0.0.2
 
 This release improves images, document moves, system file opening, and PDF export.

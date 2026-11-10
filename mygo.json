@@ -2,7 +2,7 @@
   "name": "ArcMD",
   "slug": "arcmd",
   "identifier": "com.cizai.arcmd",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "icon": "resources/icon.png",
   "main": "./cmd/arcmd",
   "out": "dist",
@@ -21,6 +21,9 @@
       "role": "Editor"
     }
   ],
+  "macos": {
+    "icon": "resources/icon.icns"
+  },
   "linux": { "webview": false },
   "updates": {
     "publicKey": "5WSm8Z4W2nF//KbuHmHZjP1uR8RC7vvS/xApNVO5nWc=",
