@@ -54,11 +54,7 @@ func (e *Editor) layoutHeader(o Options) float32 {
 	if cover := e.Doc.Cover; cover != "" {
 		h.coverRect = ui.Rect{X: 0, Y: 0, W: o.Width, H: coverHeight}
 		if !strings.HasPrefix(cover, "gradient:") {
-			bitmap, found := e.images[cover]
-			if !found && o.LoadImage != nil {
-				bitmap = o.LoadImage(cover)
-				e.images[cover] = bitmap
-			}
+			bitmap := e.imageResource(cover, o).Bitmap
 			h.coverImage = bitmap
 			if bitmap != nil {
 				// As much of the picture as its proportions ask for, within

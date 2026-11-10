@@ -43,6 +43,12 @@ func (e *Editor) relayoutText(o Options) bool {
 		r.leaf.End += units
 		r.rect.Y += dy
 		r.y += dy
+		if f := r.picture; f != nil {
+			f.bounds.Y += dy
+			for i := range f.actions {
+				f.actions[i].bounds.Y += dy
+			}
+		}
 	}
 	bottom := old.rect.Y + old.rect.H
 	for j := range e.decorations {

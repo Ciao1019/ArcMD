@@ -88,7 +88,7 @@ func (a *App) focusView(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c.Key("focus")).Grow(1).MinWidth(0).Padding(0, 8, 8, 8).Children(func() {
 		bar := c.TitleBar()
-		top := ui.Row(c.Key("focus-bar")).Height(max(bar.Height, 36)).AlignItems(ui.Center).DragWindow()
+		top := ui.Row(c.Key("focus-bar")).Height(max(bar.Height, 36)).Padding(0, bar.Right, 0, bar.Left).AlignItems(ui.Center).DragWindow()
 		_, py, inside := c.Root().PointerPosition()
 		show := inside && py < 60
 		top.Children(func() {
@@ -145,24 +145,26 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		}
 	}
 	return editor.Options{
-		Resizing:    a.splitResizing,
-		Width:       width,
-		Theme:       c.Theme(),
-		Page:        pageStyle(a.paperDark),
-		Attach:      func() { run(a.pickImages) },
-		DropFiles:   func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
-		PasteImage:  func(data []byte) { run(func() { a.pasteImage(data) }) },
-		LoadImage:   d.loadImage,
-		OpenLink:    func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
-		OpenWiki:    func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
-		OpenTag:     func(tag string) { run(func() { a.openTag(tag) }) },
-		WikiSuggest: func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
-		Footer:      func(c *ui.Context) { a.pageFooterFor(c, d) },
-		Typewriter:  a.prefs.Typewriter,
-		Dim:         focus && !a.prefs.NoDim,
-		PickCover:   func(done func(string)) { run(func() { a.pickCover(done) }) },
-		Bindings:    a.editorBindings(),
-		Outline:     !a.prefs.OutlineClosed,
-		SetOutline:  a.setOutline,
+		Resizing:     a.splitResizing,
+		Width:        width,
+		Theme:        c.Theme(),
+		Page:         pageStyle(a.paperDark),
+		Attach:       func() { run(a.pickImages) },
+		DropFiles:    func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
+		PasteImage:   func(data []byte) { run(func() { a.pasteImage(data) }) },
+		LoadImage:    d.imageResource,
+		ReplaceImage: func(id, url string) { a.pickReplacementImage(d, id, url) },
+		RevealImage:  func(url string) { a.revealImage(d, url) },
+		OpenLink:     func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
+		OpenWiki:     func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
+		OpenTag:      func(tag string) { run(func() { a.openTag(tag) }) },
+		WikiSuggest:  func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
+		Footer:       func(c *ui.Context) { a.pageFooterFor(c, d) },
+		Typewriter:   a.prefs.Typewriter,
+		Dim:          focus && !a.prefs.NoDim,
+		PickCover:    func(done func(string)) { run(func() { a.pickCover(done) }) },
+		Bindings:     a.editorBindings(),
+		Outline:      !a.prefs.OutlineClosed,
+		SetOutline:   a.setOutline,
 	}
 }

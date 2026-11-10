@@ -50,6 +50,7 @@ type Page struct {
 	// Scrim is the fill behind words over a picture, as the cover's hint
 	// while it is repositioned, and OnScrim their color.
 	Scrim, OnScrim ui.Color
+	ImageShadow    ui.Color
 	// Covers are the two colors, top-left to bottom-right, of each of
 	// document.CoverGradients.
 	Covers   map[string][2]ui.Color
@@ -91,6 +92,7 @@ func pageOf(p Page, t *ui.Theme) Page {
 	set(&p.TableLine, t.Border)
 	set(&p.TableHeader, t.Surface)
 	set(&p.Hover, t.Text.Alpha(.06))
+	set(&p.ImageShadow, t.Text.Alpha(.08))
 	set(&p.TurnActive, t.Accent.Alpha(.14))
 	set(&p.Popover, t.Background)
 	set(&p.BarFill, t.Text.Alpha(.06))

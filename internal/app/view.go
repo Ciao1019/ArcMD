@@ -134,6 +134,7 @@ func (a *App) View(c *ui.Context) {
 	a.settingsView(c)
 	a.versionsView(c)
 	a.updateWindowView(c)
+	a.pdfExportView(c)
 	if a.captureSplits() {
 		a.saveState()
 	}
@@ -323,7 +324,9 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 // and the more menu. It drags the window.
 func (a *App) toolbar(c *ui.Context) {
 	bar := c.TitleBar()
-	ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
+	// The sidebar reserves the left controls; Windows and Linux can keep
+	// their window buttons on the right, over this toolbar instead.
+	ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, bar.Right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		if a.folded() {
 			ui.Box(c).Width(bar.Left + 4)
 			if iconButton(c, "show-sidebar", iconSidebar, "展开侧边栏", a.withKey("展开侧边栏", "sidebar"), false).Clicked() {
@@ -380,7 +383,7 @@ func (a *App) address(c *ui.Context) {
 			parts = append(parts, strings.Split(dir, "/")...)
 		}
 		ui.Text(c, strings.Join(parts, " / ")+" /").TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
-		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(0)
+		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).Tooltip(a.doc.rel)
 		ui.Spacer(c)
 		status, color := "", t.TextMuted
 		switch {

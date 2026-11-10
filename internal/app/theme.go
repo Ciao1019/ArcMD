@@ -399,9 +399,12 @@ func darkPaperTheme() *ui.Theme {
 // and callouts tinted with a matching border. Dark paper has its own.
 func pageStyle(dark bool) editor.Page {
 	if dark {
-		return darkPageStyle()
+		p := darkPageStyle()
+		p.ImageShadow = ui.Hex("#00000026")
+		return p
 	}
 	return editor.Page{
+		ImageShadow: ui.Hex("#00000014"),
 		Marker:      ui.Hex("#1456F0"),
 		Caption:     ui.Hex("#646A73"),
 		Placeholder: ui.Hex("#BBBFC4"),

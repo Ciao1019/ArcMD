@@ -67,7 +67,7 @@ func TestFeaturesSnapshot(t *testing.T) {
 			case "pdf-page":
 				ed := editor.FromDocument(a.doc.ed.Committed())
 				theme := documentTheme(false)
-				o := editor.Options{Width: paperWidth, Theme: theme, Page: pageStyle(false), LoadImage: a.doc.loadImage}
+				o := editor.Options{Width: paperWidth, Theme: theme, Page: pageStyle(false), LoadImage: a.doc.imageResource}
 				body := float32(paperHeight - 2*paperMargin)
 				var tops []float32
 				ui.Render(func(c *ui.Context) { tops = ed.Paginate(o, body) }, paperWidth, paperHeight, 1)

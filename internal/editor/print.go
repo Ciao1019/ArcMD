@@ -27,7 +27,7 @@ func (e *Editor) Paginate(o Options, height float32) []float32 {
 		cuts = append(cuts, h.top-4)
 	}
 	for _, r := range e.rows {
-		if r.layout == nil || r.leaf.Block.ID != r.leaf.Owner || r.image != nil || r.math != nil {
+		if r.layout == nil || r.leaf.Block.ID != r.leaf.Owner || r.picture != nil || r.math != nil {
 			continue
 		}
 		for _, l := range r.layout.Lines()[1:] {
@@ -65,4 +65,43 @@ func (e *Editor) PaintPage(p *ui.Painter, r ui.Rect, top, bottom float32, t *ui.
 	p.Clip(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: bottom - top}, 0, func() {
 		e.paint(p, ui.Rect{X: r.X, Y: r.Y - top, W: r.W, H: r.H + top}, t, false)
 	})
+}
+
+// PrintText is a selectable text cluster positioned in document coordinates.
+type PrintText struct {
+	Text   string
+	Bounds ui.Rect
+}
+
+// PageText uses the same glyph geometry as PaintPage, including wrapped text
+// and table cells. Hidden TeX source and image alt text are not printed twice.
+func (e *Editor) PageText(top, bottom float32) []PrintText {
+	var out []PrintText
+	for _, row := range e.rows {
+		if row.layout == nil || row.picture != nil || row.mathHidden || row.rect.Y+row.rect.H <= top || row.rect.Y >= bottom {
+			continue
+		}
+		text := row.leaf.Block.Text()
+		for _, line := range row.layout.Lines() {
+			y := row.y + line.Rect.Y
+			if y < top || y >= bottom {
+				continue
+			}
+			for at := line.Start; at < line.End; {
+				next := min(line.End, row.layout.NextBoundary(at))
+				if next <= at {
+					break
+				}
+				rects := row.layout.SelectionRects(ui.TextInputRange{Start: at, End: next})
+				if len(rects) > 0 {
+					r := rects[0]
+					r.X += row.x
+					r.Y += row.y
+					out = append(out, PrintText{Text: text[ui.UTF16ByteOffset(text, at):ui.UTF16ByteOffset(text, next)], Bounds: r})
+				}
+				at = next
+			}
+		}
+	}
+	return out
 }

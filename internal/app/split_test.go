@@ -283,7 +283,7 @@ func TestSplitSearchAndRelink(t *testing.T) {
 	if hits := a.textHits("Needle"); len(hits) != 1 || hits[0].Path != left.rel {
 		t.Fatalf("inactive edits not searchable: %v", hits)
 	}
-	a.relink("Before", "After")
+	a.relink("Before", "After", map[string]bool{left.space.ID: true})
 	if !strings.Contains(left.ed.Text(), "[[After]]") || a.doc != right {
 		t.Fatal("link rewrite did not preserve inactive editor")
 	}

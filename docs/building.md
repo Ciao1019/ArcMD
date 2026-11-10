@@ -12,7 +12,7 @@ CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.7.4 build
 ```
 
 On Apple Silicon Macs, this writes `ArcMD.app` and
-`arcmd-0.0.1-arm64.dmg` into `dist/darwin-arm64/`. The default macOS
+`arcmd-0.0.2-arm64.dmg` into `dist/darwin-arm64/`. The default macOS
 signature is ad hoc, for local testing; distribution requires a Developer ID
 and notarization. Add `-platform darwin/universal` for a package supporting
 both Apple Silicon and Intel Macs. Package metadata lives in `mygo.json`;
@@ -75,8 +75,8 @@ on GitHub and in the application's updater. Commit the prepared source,
 then push the matching tag:
 
 ```sh
-git tag v0.0.1
-git push origin v0.0.1
+git tag v0.0.2
+git push origin v0.0.2
 ```
 
 The workflow rejects mismatched tag/package/app versions. After every

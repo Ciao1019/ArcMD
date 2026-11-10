@@ -26,10 +26,14 @@ serve a future CLI or plugin host.
 | --- | --- |
 | `app.go` | State, first run, window options, actions (open, new, switch space, pin, trash) |
 | `view.go` | Window layout, shortcuts, sidebar folding and peeking, toolbar and address, the card, writing surface |
-| `sidebar.go` | Pinned tiles, space header, folder tree (open, rename, drag to move, menus), space bar |
+| `sidebar.go` | Space header, pinned rows, folder tree, drag/drop, space bar |
 | `icons.go` | Lucide icons |
 | `palette.go` | Command bar: actions, fuzzy ranking, keyboard navigation |
-| `dialogs.go` | New/edit space, plugins |
+| `dialogs.go`, `spacedraft.go`, `spaceeditor.go`, `spaceicons.go` | Space drafts and anchored property editors |
+| `favorites.go`, `library.go` | Global favorite tiles and the library |
+| `openfile.go` | System file-open routing and external-folder spaces |
+| `relocate.go` | Document moves with attachments, undo states and snapshots |
+| `pdfexport.go` | Cancellable, page-by-page PDF export and printing |
 | `document.go` | The open rich document and read-only export preview: dirty tracking, autosave, images, links |
 | `split.go`, `splitview.go`, `splitstore.go` | Document pane lifecycle, native split cards and dividers, saved layout |
 | `theme.go` | Design tokens: the space-tinted theme and chrome colors |
@@ -101,8 +105,10 @@ leaves the original path and unsaved model available for retry.
 Native decode rejects unknown versions, fields, block types and invalid IDs or
 table shapes. The app displays a read error and disables editing for that file.
 Exports create a separate `.md` with a unique name. Unsupported imported HTML
-and extensions are opaque text blocks. Formulas currently expose TeX source.
-Merged table cells and external HTML clipboard conversion are future work.
+and extensions are opaque text blocks. The editor supports merged table cells,
+cell backgrounds, and structured HTML clipboard imports. Block formulas use
+`internal/tex` for layout and show editable TeX with a live preview when focused;
+inline math is still planned.
 
 Autosave waits 700 ms using the frame clock. Writes use atomic replacement.
 New files use atomic exclusive publication to avoid import/export collisions.
@@ -114,6 +120,61 @@ A space is a folder plus a name, glyph and color, kept in
 `<config>/ArcMD/spaces.json` with the order, the active space, pins and the
 last open document of each. Switching a space swaps the document list, the
 theme's accent and the chrome tint, and reopens the space's last document.
+
+### Moving documents and links
+
+`relocate.go` moves files and folders with their local image and cover resources.
+Shared source attachments remain available. Conflicting destination pictures
+receive distinct names, and URLs are rebased in current content, composition,
+undo/redo states and saved versions. A resource failure rolls back the file move.
+Markdown import sources retain their original bytes; rebasing image references
+requires converting to the native format first. Existing broken image references
+are not repaired by moving a document.
+
+Local images resolve relative to the document's directory, including URL-encoded
+names and `../images` resources outside its Space. This is a read-only exception:
+resource writes remain inside the destination Space, using `assets/` and rebasing
+native document URLs when a parent reference would escape. GIFs show their first
+frame.
+
+`editor/images.go` owns image layout, recovery cards, focus targets and the
+image preview. Figures follow Textus: natural size, centered in the column,
+rounded corners and a soft shadow. Alt text remains in the model and is shown
+in a failed-image card or while explicitly editing the description. Recovery
+cards distinguish missing files, unreadable files, decode failures and unsupported
+references, wrapping their actions on narrow panes. `imageactions.go` binds the
+file picker to the original document and stable block ID; a replacement retains
+the description and is one undo transaction. File-manager actions locate the
+nearest existing parent when a picture is missing. Printing omits recovery
+actions and limits a tall picture to the page height.
+
+History transfer merges timestamp collisions without overwriting snapshots.
+Source history is removed only after the destination has been populated. Links
+resolve relative to their source document's space, then the saved space order.
+Rename captures that resolution first, so another space's same-named document
+keeps its links. Unopened native documents receive conflict-checked saves.
+
+### System file opening
+
+MyGo's `OnOpenFile` handles installed file associations and Dock drops. A single
+instance forwards later opens to the existing window. Development command-line
+runs also accept document paths. The deepest matching Space owns an opened file;
+an external file's parent folder is registered as a new Space. Opening alone
+never converts Markdown or copies the file, and save conflicts block navigation.
+
+### PDF export and printing
+
+An isolated editor snapshots the document and paginates it on A4 paper. The UI
+renders one page at a time; native runs encode and write it on a worker before
+scheduling the next page. The progress dialog allows cancellation, which removes
+its temporary output. A completed export is published under an exclusive,
+numbered filename, never over an existing PDF. Printing opens a unique temporary
+PDF in the system viewer.
+
+`internal/pdf.Writer` streams JPEG pages and retains only object offsets and a
+Unicode alphabet. An invisible Unicode text layer uses the editor's cluster
+positions for selection, copying and search; formula artwork and image pixels
+remain raster content. This is not a tagged PDF or a fully vector export.
 
 ## Plugins
 

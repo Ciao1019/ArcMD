@@ -17,8 +17,9 @@ var iconSplit = iconSidebar
 func (a *App) splitView(c *ui.Context) {
 	a.syncSplit()
 	s := a.split
+	bar := c.TitleBar()
 	if a.folded() {
-		ui.Row(c.Key("split-window-bar")).Height(max(36, c.TitleBar().Height)).PaddingStart(c.TitleBar().Left + 4).AlignItems(ui.Center).DragWindow().Children(func() {
+		ui.Row(c.Key("split-window-bar")).Height(max(36, bar.Height)).Padding(0, bar.Right, 0, bar.Left+4).AlignItems(ui.Center).DragWindow().Children(func() {
 			if iconButton(c, "sidebar", iconSidebar, "展开侧边栏", a.withKey("展开侧边栏", "sidebar"), false).Clicked() {
 				a.toggleSidebar()
 			}
@@ -26,7 +27,13 @@ func (a *App) splitView(c *ui.Context) {
 			a.moreMenu(c)
 		})
 	} else {
-		ui.Box(c).Height(8).DragWindow()
+		// Left controls sit above the sidebar. Right controls need a full
+		// title-bar band so they cannot cover the top pane's toolbar.
+		height := float32(8)
+		if bar.Right > 0 {
+			height = max(height, bar.Height)
+		}
+		ui.Box(c).Height(height).DragWindow()
 	}
 	area := ui.Box(c.Key("split-area")).Grow(1).MinWidth(0).MinHeight(0)
 	b := area.LayoutBounds()

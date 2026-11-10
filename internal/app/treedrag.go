@@ -488,7 +488,7 @@ func (a *App) placeEntry(rel, dir string, index int) {
 		a.refreshTree()
 		return
 	}
-	to, err := vault.Move(sp.Root, rel, dir)
+	to, _, err := a.moveWithResources(sp, rel, sp, dir)
 	if err != nil {
 		a.notify("移动 %s 失败。%v", path.Base(rel), err)
 		return

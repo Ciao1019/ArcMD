@@ -28,6 +28,13 @@ The full MIT notice is in `cra/LICENSE`.
 
 [Cra source](https://github.com/VictorKildahl/cra)
 
+The image figures and missing-image recovery cards (`internal/editor/images.go`)
+follow Textus's image view and missing-image card design, under the MIT License,
+Copyright (c) 2026 CatVinci Studio. They are implemented with native Go drawing
+and controls. The MIT notice is in `textus/LICENSE`.
+
+[Textus source](https://github.com/CatVinci-Studio/Textus)
+
 Icons are Lucide, under the ISC License. Attribution appears in
 `internal/app/icons.go`; `internal/app/spacesymbols.go` is generated from
 Lucide 1.70.0.

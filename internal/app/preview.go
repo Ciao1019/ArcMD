@@ -490,7 +490,7 @@ func (a *App) docPreview(c *ui.Context) {
 				Width:     previewThumbW,
 				Theme:     dt,
 				Page:      pageStyle(a.paperDark),
-				LoadImage: d.loadImage,
+				LoadImage: d.imageResource,
 			})
 		})
 	})

@@ -24,7 +24,9 @@ type Editor struct {
 	handles                          []blockHandle
 	resizers                         []columnHandle
 	cache                            map[string]cachedShape
-	images                           map[string]*ui.Bitmap
+	images                           map[string]ImageResource
+	imageCaptionID                   string
+	imageViewer                      imageViewer
 	width, height, viewport, padding float32
 	cacheRevision                    uint64
 	resizePending                    bool
@@ -107,11 +109,11 @@ type Editor struct {
 }
 
 type row struct {
-	leaf   document.Leaf
-	layout *ui.TextLayout
-	rect   ui.Rect
-	x, y   float32
-	image  *ui.Bitmap
+	leaf    document.Leaf
+	layout  *ui.TextLayout
+	rect    ui.Rect
+	x, y    float32
+	picture *imageFigure
 	// number is the position of a numbered item in its list, from 1.
 	number int
 	// math is a math block's formula, drawn from mathTop: in place of its
@@ -299,7 +301,11 @@ type Options struct {
 	Resizing  bool
 	Width     float32
 	Theme     *ui.Theme
-	LoadImage func(string) *ui.Bitmap
+	LoadImage func(string) ImageResource
+	// ReplaceImage selects a new file for a stable block ID. RevealImage
+	// opens its local file (or nearest existing folder) in the file manager.
+	ReplaceImage func(id, url string)
+	RevealImage  func(url string)
 	// Attach, when set, lets the slash menu insert images: the host picks
 	// them and inserts them at the caret.
 	Attach func()
@@ -342,15 +348,17 @@ type Options struct {
 func New(markdown string) *Editor { return FromDocument(ImportMarkdown(markdown)) }
 func FromDocument(doc *document.Document) *Editor {
 	// The color button starts out as a yellow highlighter.
-	return &Editor{Buffer: newBuffer(doc), cache: make(map[string]cachedShape), images: make(map[string]*ui.Bitmap), dropIndex: -1, lastHighlight: "light-yellow",
+	return &Editor{Buffer: newBuffer(doc), cache: make(map[string]cachedShape), images: make(map[string]ImageResource), dropIndex: -1, lastHighlight: "light-yellow",
 		wiki: wikiState{dismissed: -1}}
 }
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
+	e.editImageCaption()
 	e.Buffer.ReplaceText(r, text)
 	e.reveal, e.vertical = true, false
 	e.slashDismissed = false
 }
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
+	e.editImageCaption()
 	e.Buffer.SetMarkedText(r, text, selected)
 	e.reveal = true
 }
@@ -364,6 +372,9 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.openWiki, e.openTag = o.OpenWiki, o.OpenTag
 	e.header.pickCover = o.PickCover
 	e.sync()
+	if e.imageCaptionID != "" && e.Engine.LeafAt(e.Caret).Block.ID != e.imageCaptionID {
+		e.imageCaptionID, e.ready = "", false
+	}
 	e.findShortcuts(c)
 	e.revealCaret()
 	e.watchMath()
@@ -482,6 +493,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				// pointer's presses before anything inside it.
 				e.starter(c)
 				e.headerControls(c)
+				e.imageControls(c, o)
 				if o.Footer != nil {
 					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(max(80, e.width-2*e.padding))
 					footer.Children(func() { o.Footer(c) })
@@ -498,6 +510,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.popups(c, surface)
 	e.wikiMenu(c, surface)
 	e.headerPopups(c, surface)
+	e.imagePreview(c)
 	return pane
 }
 
@@ -884,19 +897,7 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 		total := top + h + bottom
 		row := row{leaf: leaves[b.ID], layout: cached.layout, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number}
 		if b.Kind == "image" {
-			bitmap, found := e.images[b.URL]
-			if !found && o.LoadImage != nil {
-				bitmap = o.LoadImage(b.URL)
-				e.images[b.URL] = bitmap
-			}
-			row.image = bitmap
-			if bitmap != nil {
-				bw, bh := bitmap.Size()
-				h = min(360, w*float32(bh)/float32(max(1, bw)))
-				total = h + 38
-				row.rect.H = total
-				row.y = y + h + 6
-			}
+			total = e.layoutImage(&row, o)
 		}
 		if b.Kind == "rule" {
 			total = 25 + gap
@@ -935,6 +936,11 @@ func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange
 		return ui.Rect{}, r, false
 	}
 	local := max(0, min(r.Start-row.leaf.Start, row.leaf.End-row.leaf.Start))
+	if row.picture != nil && e.imageCaptionID != row.leaf.Block.ID {
+		rect := row.picture.bounds
+		rect.H = min(26, rect.H)
+		return rect, ui.TextInputRange{Start: row.leaf.Start, End: row.leaf.Start}, true
+	}
 	rect := row.layout.Caret(local)
 	rect.X += row.x
 	rect.Y += row.y
@@ -955,6 +961,9 @@ func (e *Editor) IndexForPoint(point ui.Point) (int, bool) {
 		if d < distance {
 			best, distance = r, d
 		}
+	}
+	if best.picture != nil && e.imageCaptionID != best.leaf.Block.ID {
+		return best.leaf.Start, true
 	}
 	return best.leaf.Start + best.layout.IndexAt(ui.Point{X: point.X - best.x, Y: point.Y - best.y}), true
 }
@@ -1037,13 +1046,13 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		if r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
 			continue
 		}
-		if r.image != nil {
-			p.Image(r.image, offset(ui.Rect{X: r.rect.X, Y: r.rect.Y, W: r.rect.W, H: r.rect.H - 38}), ui.Contain)
+		if r.picture != nil {
+			e.paintImage(p, bounds, r, t)
+			if e.imageCaptionID != r.leaf.Block.ID || e.printing {
+				continue
+			}
 		}
 		e.paintMarker(p, bounds, r, t)
-		if r.leaf.Block.Kind == "image" && r.image == nil {
-			p.Text(bounds.X+r.x, bounds.Y+r.y+30, "图片未加载 · "+r.leaf.Block.URL, 12, t.TextMuted)
-		}
 		if e.focused && selection.End > r.leaf.Start && selection.Start < r.leaf.End {
 			local := ui.TextInputRange{Start: max(0, selection.Start-r.leaf.Start), End: min(r.leaf.End, selection.End) - r.leaf.Start}
 			for _, rect := range r.layout.SelectionRects(local) {
@@ -1112,7 +1121,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		// The starter below says the rest.
 		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, "开始写作", 16, t.TextMuted.Alpha(.8))
 	}
-	if caret && selection.Start == selection.End {
+	if caret && selection.Start == selection.End && (e.Engine.LeafAt(e.Caret).Block.Kind != "image" || e.imageCaptionID == e.Engine.LeafAt(e.Caret).Block.ID) {
 		if r, _, ok := e.BoundsForRange(selection); ok {
 			r = offset(r)
 			r.W = 1.5

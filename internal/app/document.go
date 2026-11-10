@@ -6,6 +6,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -224,23 +225,49 @@ func (d *document) autosave(c *ui.Context) {
 }
 
 func (d *document) loadImage(url string) *ui.Bitmap {
-	if strings.Contains(url, ":") {
-		return nil
-	}
-	decoded, err := neturl.PathUnescape(url)
+	return d.imageResource(url).Bitmap
+}
+
+func (d *document) imageResource(url string) editor.ImageResource {
+	full, err := localImageFile(d.space.Root, d.rel, url)
 	if err != nil {
-		return nil
-	}
-	full, err := vault.Resolve(d.space.Root, path.Join(path.Dir(d.rel), decoded))
-	if err != nil {
-		return nil
+		problem := editor.ImageInvalid
+		if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+			problem = editor.ImageRemote
+		}
+		return editor.ImageResource{Problem: problem}
 	}
 	data, err := os.ReadFile(full)
 	if err != nil {
-		return nil
+		problem := editor.ImageUnreadable
+		if errors.Is(err, os.ErrNotExist) {
+			problem = editor.ImageMissing
+		}
+		return editor.ImageResource{Problem: problem, Local: true}
 	}
-	image, _ := ui.DecodeBitmap(data)
-	return image
+	image, err := ui.DecodeBitmap(data)
+	if err != nil {
+		return editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}
+	}
+	return editor.ImageResource{Bitmap: image, Local: true}
+}
+
+// localImageFile resolves read-only resources against the document, not the
+// Space boundary. Imported Markdown often uses ../images beside its folder.
+// Writes still use vault.Resolve and may never escape the destination Space.
+func localImageFile(root, rel, url string) (string, error) {
+	decoded, err := neturl.PathUnescape(url)
+	if err != nil {
+		return "", err
+	}
+	if decoded == "" || strings.ContainsAny(decoded, ":\\\x00") || path.IsAbs(decoded) || filepath.IsAbs(decoded) {
+		return "", errors.New("image reference must be a relative local path")
+	}
+	file, err := vault.Resolve(root, rel)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(file), filepath.FromSlash(decoded)), nil
 }
 
 // resolveLink returns the space path a link of the document points to,

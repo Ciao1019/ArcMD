@@ -6,7 +6,6 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -109,7 +108,7 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	if !a.flush() {
 		return ""
 	}
-	to, copied, err := vault.MoveTo(src.Root, rel, dst.Root, dir)
+	to, copied, err := a.moveWithResources(src, rel, dst, dir)
 	if err != nil {
 		a.notify("移动 %s 到「%s」失败。%v", path.Base(rel), dst.Name, err)
 		return ""
@@ -117,7 +116,7 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	if copied {
 		// Another disk: the copy is there; the original goes to the trash.
 		if p, err := vault.Resolve(src.Root, rel); err == nil {
-			if err := mygo.Shell.TrashItem(p); err != nil {
+			if err := a.trashItem(p); err != nil {
 				a.notify("已复制 %s 到「%s」，但未能将原件移到废纸篓。%v", path.Base(rel), dst.Name, err)
 			}
 		}

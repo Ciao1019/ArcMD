@@ -32,7 +32,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.0.1"
+const Version = "0.0.2"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -173,6 +173,8 @@ type App struct {
 	// pickFiles, when set, asks for pictures in place of the system's
 	// dialog: tests answer it.
 	pickFiles func(done func(paths []string))
+	// revealFile substitutes for the platform file manager in image tests.
+	revealFile func(path string)
 	// notices are messages for the user, shown as toasts by the next frame.
 	notices []string
 	// watchFiles follows a space's folder (watch.go), and watches are the
@@ -199,6 +201,7 @@ type App struct {
 	bin      trashbin.Bin
 	// printFile, when set, takes the PDF to print in place of the system's
 	// viewer: tests answer it.
+	pdfExport *pdfExport
 	printFile func(path string)
 	// trashFile, when set, moves a file to the trash in place of the
 	// system: tests answer it.
@@ -278,6 +281,45 @@ func (a *App) firstRun() error {
 
 // Run opens the window and runs the app until it quits.
 func (a *App) Run() error {
+	mygo.App.SetPath(mygo.PathUserData, a.cfg.ConfigDir)
+	if !mygo.App.RequestSingleInstanceLock() {
+		return nil
+	}
+	var pending []string
+	if !mygo.App.IsPackaged() {
+		wd, _ := os.Getwd()
+		pending = documentArguments(os.Args[1:], wd)
+	}
+	open := func(file string) {
+		if a.openSystemFile(file) {
+			a.win.Show()
+			a.win.Focus()
+			_ = mygo.App.AddRecentDocument(file)
+		}
+	}
+	mygo.App.OnOpenFile(func(file string) {
+		if a.win == nil {
+			pending = append(pending, file)
+			return
+		}
+		a.win.Update(func() { open(file) })
+	})
+	mygo.App.OnSecondInstance(func(args []string, workingDir string) {
+		if !mygo.App.IsPackaged() {
+			// MyGo forwards os.Args[1:], so the first argument is a file.
+			for _, file := range documentArguments(args, workingDir) {
+				if a.win == nil {
+					pending = append(pending, file)
+				} else {
+					a.win.Update(func() { open(file) })
+				}
+			}
+		}
+		if a.win != nil {
+			a.win.Show()
+			a.win.Focus()
+		}
+	})
 	mygo.App.SetLanguages("zh-Hans")
 	mygo.App.WhenReady(func() {
 		mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
@@ -313,6 +355,15 @@ func (a *App) Run() error {
 			Vibrancy:             mygo.VibrancySidebar,
 			Content:              a.Content(),
 		})
+		if len(pending) > 0 {
+			files := pending
+			pending = nil
+			a.win.Update(func() {
+				for _, file := range files {
+					open(file)
+				}
+			})
+		}
 		// Index the documents now, on a goroutine, so that the first search
 		// finds text at once.
 		a.search.async = true
@@ -322,6 +373,7 @@ func (a *App) Run() error {
 			if !a.flush() {
 				event.PreventDefault()
 			} else {
+				a.cancelPDF()
 				a.finishSpaceEdit()
 				if a.captureSplits() {
 					a.saveState()
@@ -762,6 +814,7 @@ func (a *App) followTitle() {
 		if i > 1 {
 			want = fmt.Sprintf("%s %d", title, i)
 		}
+		sources := a.renameSources(sp, d.rel)
 		to, err := vault.Rename(sp.Root, d.rel, want)
 		if errors.Is(err, vault.ErrExists) {
 			continue
@@ -778,7 +831,7 @@ func (a *App) followTitle() {
 		if to != from {
 			a.moved(sp, from, to)
 			if !isUntitled(name) {
-				a.relink(name, vault.Title(to))
+				a.relink(name, vault.Title(to), sources)
 			}
 		}
 		d.ed.RequestFocus = focus
@@ -844,6 +897,7 @@ func (a *App) commitRename() {
 	if sp == nil || !a.flush() {
 		return
 	}
+	sources := a.renameSources(sp, rel)
 	to, err := vault.Rename(sp.Root, rel, name)
 	if err != nil {
 		a.notify("重命名 %s 失败。%v", path.Base(rel), err)
@@ -852,7 +906,7 @@ func (a *App) commitRename() {
 	if to != rel {
 		a.moved(sp, rel, to)
 		if vault.IsDocument(rel) {
-			a.relink(vault.Title(rel), vault.Title(to))
+			a.relink(vault.Title(rel), vault.Title(to), sources)
 		}
 	}
 }
@@ -866,7 +920,7 @@ func (a *App) moveInto(rel, dir string) {
 	if !a.flush() {
 		return
 	}
-	to, err := vault.Move(sp.Root, rel, dir)
+	to, _, err := a.moveWithResources(sp, rel, sp, dir)
 	if err != nil {
 		a.notify("移动 %s 失败。%v", path.Base(rel), err)
 		return

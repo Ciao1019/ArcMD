@@ -64,19 +64,51 @@ func b2i(b bool) int {
 	return 0
 }
 
-// findNamed is the document named name, the active space's first, then
-// the open document's space's.
+// findNamed resolves relative to the document's own space, even when a
+// favorite is displayed in another space. Other spaces keep their saved order.
 func (a *App) findNamed(name string) (*space.Space, string, bool) {
-	var found *space.Space
-	var rel string
+	id := a.state.ActiveSpace().ID
+	if a.doc != nil {
+		id = a.doc.space.ID
+	}
+	return a.findNamedFrom(id, name)
+}
+
+func (a *App) findNamedFrom(id, name string) (*space.Space, string, bool) {
+	var candidates []place
 	a.eachDoc(func(sp *space.Space, n *vault.Node) bool {
 		if wiki.Same(n.Title(), name) {
-			found, rel = sp, n.Path
-			return false
+			candidates = append(candidates, place{sp.ID, n.Path})
 		}
 		return true
 	})
-	return found, rel, found != nil
+	priority := func(spaceID string) int {
+		if spaceID == id {
+			return -1
+		}
+		return slices.IndexFunc(a.state.Spaces, func(sp *space.Space) bool { return sp.ID == spaceID })
+	}
+	slices.SortFunc(candidates, func(x, y place) int {
+		if d := priority(x.space) - priority(y.space); d != 0 {
+			return d
+		}
+		return strings.Compare(x.rel, y.rel)
+	})
+	if len(candidates) == 0 {
+		return nil, "", false
+	}
+	return a.state.Get(candidates[0].space), candidates[0].rel, true
+}
+
+// renameSources captures resolution before the file name changes. Identical
+// labels in another space must keep referring to that space's own document.
+func (a *App) renameSources(sp *space.Space, rel string) map[string]bool {
+	allowed := map[string]bool{}
+	for _, source := range a.state.Spaces {
+		target, file, ok := a.findNamedFrom(source.ID, vault.Title(rel))
+		allowed[source.ID] = ok && target == sp && file == rel
+	}
+	return allowed
 }
 
 // openWiki opens the document a [[link]] names, or makes it beside the
@@ -327,7 +359,7 @@ func (a *App) iconTitle(spaceID, rel string) string {
 // relink renames the links to the document titled from in every document
 // linking to it to to, the open one through its editor, and says how many
 // changed.
-func (a *App) relink(from, to string) {
+func (a *App) relink(from, to string, allowed map[string]bool) {
 	if wiki.Same(from, to) || from == "" || to == "" {
 		return
 	}
@@ -339,46 +371,37 @@ func (a *App) relink(from, to string) {
 	resident := map[place]bool{}
 	for _, d := range a.residentDocuments() {
 		resident[place{d.space.ID, d.rel}] = true
-		if d.loadErr == nil && wiki.LinksTo(d.plainText(), from) && d.ed.Engine.MapText(rename) {
+		if allowed[d.space.ID] && d.loadErr == nil && wiki.LinksTo(d.plainText(), from) && d.ed.Engine.MapText(rename) {
 			changed++
 		}
 	}
-	for _, h := range a.search.index.Backlinks(from, search.Live{}, nil) {
-		if resident[place{h.Space, h.Path}] {
+	var files []place
+	a.eachDoc(func(sp *space.Space, n *vault.Node) bool {
+		if allowed[sp.ID] {
+			files = append(files, place{sp.ID, n.Path})
+		}
+		return true
+	})
+	for _, file := range files {
+		if resident[file] || !strings.EqualFold(path.Ext(file.rel), ".arcmd") {
 			continue
 		}
-		sp := a.state.Get(h.Space)
-		if sp == nil || !strings.EqualFold(path.Ext(h.Path), ".arcmd") {
+		sp := a.state.Get(file.space)
+		text, err := vault.Read(sp.Root, file.rel)
+		if err != nil || !wiki.LinksTo(text, from) {
 			continue
 		}
-		text, err := vault.Read(sp.Root, h.Path)
-		if err != nil {
+		d := openDocument(sp, file.rel, text, false)
+		if d.loadErr != nil || !d.ed.Engine.MapText(rename) {
 			continue
 		}
-		doc, err := model.Decode(text)
-		if err != nil {
+		if err := d.save(); err != nil {
+			a.notify("更新 %s 的双链失败。%v", file.rel, err)
 			continue
 		}
-		any := false
-		var walk func([]*model.Block)
-		walk = func(blocks []*model.Block) {
-			for _, b := range blocks {
-				for i, r := range b.Runs {
-					if out, ok := wiki.Rename(r.Text, from, to); ok {
-						b.Runs[i].Text, any = out, true
-					}
-				}
-				walk(b.Children)
-			}
-		}
-		walk(doc.Blocks)
-		if !any {
-			continue
-		}
-		if encoded, err := doc.Encode(); err == nil && vault.Write(sp.Root, h.Path, encoded) == nil {
-			changed++
-		}
+		changed++
 	}
+
 	if changed > 0 {
 		a.refreshSearch()
 		a.notify("已更新 %d 篇文档中指向「%s」的链接。", changed, to)

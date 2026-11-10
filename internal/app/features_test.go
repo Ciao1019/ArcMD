@@ -261,6 +261,7 @@ func TestExportPDFAndPrint(t *testing.T) {
 	a, tt := newTestApp(t)
 	tt.Frame()
 	tt.Key(ui.Cmd|ui.Shift, ui.KeyE)
+	finishTestPDF(t, a, tt)
 	tt.Frame()
 	data, err := os.ReadFile(filepath.Join(root(a), "Welcome.pdf"))
 	if err != nil || !bytes.HasPrefix(data, []byte("%PDF-1.4")) || !bytes.Contains(data, []byte("/Count 1")) {
@@ -270,12 +271,14 @@ func TestExportPDFAndPrint(t *testing.T) {
 		t.Errorf("notice: %q", tt.Texts())
 	}
 	a.exportPDF()
+	finishTestPDF(t, a, tt)
 	if _, err := os.Stat(filepath.Join(root(a), "Welcome 2.pdf")); err != nil {
 		t.Error("second export replaced the first")
 	}
 	var printed string
 	a.printFile = func(p string) { printed = p }
 	a.printDoc()
+	finishTestPDF(t, a, tt)
 	if data, _ := os.ReadFile(printed); !bytes.HasPrefix(data, []byte("%PDF")) {
 		t.Errorf("printed %q", printed)
 	}
