@@ -108,6 +108,7 @@ func (a *App) themeCard(c *ui.Context, f *spaceForm, anchor ui.Element) {
 				Width(editorCardW).Radius(22).Clip().Padding(9, 0, 14, 0).Gap(14).AlignItems(ui.Center).
 				Shadow(0, 8, 24, 0, black.Alpha(0.20)).Border(0.5, rim).
 				Role(ui.RoleDialog).Label("空间主题")
+			a.tourMark("theme-card", card)
 			card.Draw(func(p *ui.Painter, r ui.Rect) {
 				p.FillGradient(r, fill, 22)
 			})
@@ -124,7 +125,9 @@ func (a *App) themeCard(c *ui.Context, f *spaceForm, anchor ui.Element) {
 			// The press went to the icon picker, which is part of the form.
 			f.cardOpen = true
 		}
-		if f.id != "" && !f.cardOpen {
+		if a.tour.themeHeld {
+			f.cardOpen = true // the tour's, which keeps nothing of it
+		} else if f.id != "" && !f.cardOpen {
 			a.submitSpace()
 		}
 	})

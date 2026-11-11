@@ -6,7 +6,7 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.6-F21158" alt="Version 0.0.6"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.7-F21158" alt="Version 0.0.7"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.0.6. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.0.7. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 

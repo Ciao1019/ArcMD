@@ -19,6 +19,10 @@ func newTestApp(t testing.TB) (*App, *ui.Tester) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The first run's tour would cover the window: tests of it start it
+	// again (tour_test.go).
+	a.tour = tour{}
+	a.tourSeen()
 	tt := ui.NewTester(a.View, 1200, 760)
 	tt.SetLocale("zh-Hans")
 	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 78})

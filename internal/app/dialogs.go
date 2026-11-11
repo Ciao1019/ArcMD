@@ -71,7 +71,8 @@ func (a *App) editSpaceProperty(s *space.Space, property string) {
 // leaving its editor. An unchosen icon and a new draft are discarded.
 func (a *App) finishSpaceEdit() {
 	f := &a.spaceForm
-	if f.open && f.id != "" && (f.edit == "theme" || f.edit == "name") {
+	// The theme card the tour shows is its own: nothing of it is kept.
+	if f.open && f.id != "" && (f.edit == "theme" || f.edit == "name") && !a.tour.themeHeld {
 		a.submitSpace()
 	}
 	a.cancelSpaceForm()

@@ -233,6 +233,9 @@ func TestUpdatedCardAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This launch makes the first space too, whose tour is not the point.
+	a.tour = tour{}
+	a.tourSeen()
 	_, opened := withUpdates(a, &fakeUpdates{})
 	tt := ui.NewTester(a.View, 1200, 760)
 	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 78})

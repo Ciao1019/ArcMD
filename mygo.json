@@ -2,7 +2,7 @@
   "name": "ArcMD",
   "slug": "arcmd",
   "identifier": "com.cizai.arcmd",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "icon": "resources/icon.png",
   "main": "./cmd/arcmd",
   "out": "dist",

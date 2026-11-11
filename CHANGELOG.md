@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.7
+
+This release adds a guided tour that introduces ArcMD the first time it opens.
+
+### Guided tour
+
+- A short tour walks through creating spaces, theme colors, swiping between spaces, bookmarks, pinned documents, and favorites. A spotlight glides to the part of the window each step is about, and every step has a small animated illustration in the space's own colors.
+- The step on theme colors opens the real theme editor and gently moves its colors, so the whole window shows the live preview. Nothing is saved: the space keeps its theme when the step ends.
+- The tour appears once: on the first launch of a new installation, and on the first launch after updating from an earlier version. Finishing or skipping it keeps it from appearing again; quitting halfway shows it on the next launch.
+- Use ← and → to move between steps, Enter to continue, and Esc to skip. Replay it at any time from the command bar ("新手教程") or Settings › About.
+- The tour only points: it does not change any space or document, and it honors the system's reduced-motion preference.
+
+### Data compatibility
+
+Document and Space configuration formats are unchanged from 0.0.6. Preferences gain a `tourSeen` flag; older ArcMD releases ignore it.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates from earlier releases.
+
+ArcMD remains an early preview. macOS packages use ad-hoc signing and are not notarized; Windows packages are unsigned. The plugin marketplace and plugin execution runtimes remain unavailable.
+
 ## 0.0.6
 
 This release brings the full set of new writing and reading features, together with all security and data-safety fixes from 0.0.5.

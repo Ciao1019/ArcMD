@@ -34,10 +34,12 @@ func (a *App) View(c *ui.Context) {
 	a.carried, a.carrying = a.carrying, nil
 	a.syncOpen()
 	a.overClosed, a.overClose = a.overClose, place{}
+	clear(a.tour.marks)
 	a.shortcuts(c)
 	// Finish swipe and spring state before deriving the chrome and paper,
 	// so even the landing frame uses one consistent space and position.
 	a.pagerTick(c)
+	a.tourTheme()
 	sp := a.state.ActiveSpace()
 	base := c.Theme()
 	a.docTheme = base
@@ -135,6 +137,7 @@ func (a *App) View(c *ui.Context) {
 	a.versionsView(c)
 	a.updateWindowView(c)
 	a.pdfExportView(c)
+	a.tourView(c)
 	if a.captureSplits() {
 		a.saveState()
 	}
@@ -142,8 +145,8 @@ func (a *App) View(c *ui.Context) {
 
 // shortcuts handles the window's keys.
 func (a *App) shortcuts(c *ui.Context) {
-	if a.recording != "" {
-		return // the settings take the next key
+	if a.recording != "" || a.tour.open {
+		return // the settings take the next key, the tour its own
 	}
 	switch {
 	case a.pressed(c, "palette"):
@@ -281,6 +284,7 @@ func (a *App) main(c *ui.Context, docked float32) {
 			Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
 		w, _ := c.Size()
 		a.splitDropTarget(c, card)
+		a.tourMark("bookmarks", card)
 		card.Children(func() { a.documentContent(c, a.doc, w-docked-8-left-2) })
 	})
 }

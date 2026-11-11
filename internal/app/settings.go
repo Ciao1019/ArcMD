@@ -124,7 +124,7 @@ func (a *App) settingsView(c *ui.Context) {
 				case tabShortcuts:
 					a.settingsShortcuts(c)
 				case tabAbout:
-					settingsAbout(c)
+					a.settingsAbout(c)
 				default:
 					a.settingsGeneral(c)
 				}
@@ -303,7 +303,7 @@ func (a *App) settingsUpdates(c *ui.Context) {
 	})
 }
 
-func settingsAbout(c *ui.Context) {
+func (a *App) settingsAbout(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Gap(6).AlignItems(ui.Center).Padding(28, 0, 8, 0).Children(func() {
 		ui.Text(c, "ArcMD").FontSize(28).FontWeight(600)
@@ -325,6 +325,15 @@ func settingsAbout(c *ui.Context) {
 			ui.Link(c.Key("repository"), "GitHub 开源仓库", "https://github.com/Ciao1019/ArcMD").
 				FontSize(13).AlignSelf(ui.Start).Tooltip("在浏览器中打开 GitHub 开源仓库")
 			ui.Text(c, "github.com/Ciao1019/ArcMD").FontSize(12).TextColor(t.TextMuted)
+		})
+		ui.Row(c.Key("about-tour")).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
+				ui.Text(c, "新手教程").FontSize(14).FontWeight(600)
+				ui.Text(c, "再看一遍空间、主题配色、左右滑动、书签、置顶和收藏的介绍。").FontSize(13).LineHeight(1.6).TextColor(t.TextMuted)
+			})
+			if ui.Button(c.Key("replay-tour"), "重新观看").Clicked() {
+				a.startTour()
+			}
 		})
 	})
 }

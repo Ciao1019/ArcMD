@@ -39,6 +39,10 @@ type Prefs struct {
 	// PendingUpdate is the version ArcMD restarted to install; the launch
 	// that runs it says ArcMD was updated, then clears it.
 	PendingUpdate string `json:"pendingUpdate,omitempty"`
+	// TourSeen is set once the tour of the window was finished or skipped.
+	// Until then every launch shows it: the first of a new installation,
+	// and the first after an update from a version that had no tour.
+	TourSeen bool `json:"tourSeen,omitempty"`
 }
 
 // Store reads and writes prefs.json.

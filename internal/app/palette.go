@@ -162,6 +162,7 @@ func (a *App) actions() []action {
 	cmd("设置…", a.keyLabel("settings"), func() { a.openSettings(tabGeneral) })
 	cmd("键盘快捷键", "", func() { a.openSettings(tabShortcuts) })
 	cmd("关于 ArcMD", "", func() { a.openSettings(tabAbout) })
+	cmd("新手教程", "", a.startTour)
 	cmd("检查更新…", "", a.checkForUpdates)
 	if n := a.updateNotice(); n != nil && n.Kind == update.Ready {
 		cmd("重新启动以安装更新", "", a.installUpdate)

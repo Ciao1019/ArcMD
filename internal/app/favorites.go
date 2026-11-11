@@ -122,7 +122,9 @@ func (a *App) favorites(c *ui.Context) {
 		slots++
 	}
 	g := gridOf(slots)
-	ui.Column(c.Key("favorites")).PaddingX(10).Children(func() {
+	col := ui.Column(c.Key("favorites")).PaddingX(10)
+	a.tourMark("favorites", col)
+	col.Children(func() {
 		// The height the layout takes is the animated one, so the list
 		// under the tiles slides with them rather than jumping when a slot
 		// adds a row.
@@ -307,7 +309,9 @@ func (a *App) favoritesStrip(c *ui.Context, has bool) {
 // half faded, and its × closes it for good.
 func (a *App) favoritesCard(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c.Key("favorites")).PaddingX(10).Children(func() {
+	col := ui.Column(c.Key("favorites")).PaddingX(10)
+	a.tourMark("favorites", col)
+	col.Children(func() {
 		card := ui.Column(c.Key("favorites-card")).Height(favoriteCardH).Radius(12).AlignItems(ui.Center).Label("收藏")
 		if d, ok := ui.Drop[dragged](card); ok && a.isDocOf(d) {
 			a.pinAt(d, 0)

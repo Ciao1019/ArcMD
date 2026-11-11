@@ -32,7 +32,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.0.6"
+const Version = "0.0.7"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -212,6 +212,8 @@ type App struct {
 	trashFile func(path string) error
 	// updates are the software updates (update.go).
 	updates updateState
+	// tour introduces the sidebar on the first run (tour.go).
+	tour tour
 }
 
 // trashItem moves the file or folder at p to the system's trash.
@@ -259,6 +261,11 @@ func New(cfg Config) (*App, error) {
 		a.open(sp.LastOpen)
 	}
 	a.restoreSplits()
+	// The tour shows until it was seen once. Preferences that cannot be
+	// saved could not remember that, and would show it at every launch.
+	if !a.prefs.TourSeen && !a.prefsBroken {
+		a.startTour()
+	}
 	return a, nil
 }
 

@@ -73,6 +73,7 @@ func (a *App) sidebar(c *ui.Context, floating bool) {
 // the place the pager shows; only the pages in view are built.
 func (a *App) pagerView(c *ui.Context) {
 	box := ui.Column(c.Key("pager")).Grow(1).MinHeight(0).Clip()
+	a.tourMark("swipe", box)
 	b := box.LayoutBounds()
 	if b.W > 0 {
 		a.pager.width = b.W
@@ -139,6 +140,9 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				pinned := ui.Column(c.Key("pinned")).Gap(rowGap).Radius(10).Transition(sectionMove)
 				if highlight == sectionPinned && len(pins) > 0 {
 					pinned.Background(hoverFill(t))
+				}
+				if live {
+					a.tourMark("pinned", pinned)
 				}
 				pinned.Children(func() {
 					for i, n := range pins {
@@ -259,6 +263,9 @@ func (a *App) spaceHeader(c *ui.Context, sp *space.Space, live bool) {
 	t := c.Theme()
 	h := ui.Row(c.Key("space-header")).Height(36).PaddingEnd(5).Radius(12).AlignItems(ui.Center).
 		Label("空间标题")
+	if live {
+		a.tourMark("theme", h)
+	}
 	over := live && a.dropZone(h, "")
 	lit := live && h.Hovered()
 	switch {
@@ -730,7 +737,9 @@ func (a *App) spaceBar(c *ui.Context) {
 		a.spaceBarFor = active.ID
 	}
 	draft := a.spaceForm.open && a.spaceForm.id == ""
-	ui.Row(c.Key("spaces")).Height(36).Gap(2).AlignItems(ui.Center).Children(func() {
+	foot := ui.Row(c.Key("spaces")).Height(36).Gap(2).AlignItems(ui.Center)
+	a.tourMark("spaces", foot)
+	foot.Children(func() {
 		if a.libraryFootButton(c).Clicked() {
 			a.toggleLibrary()
 		}

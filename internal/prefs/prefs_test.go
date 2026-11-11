@@ -14,11 +14,12 @@ func TestRoundTrip(t *testing.T) {
 	}
 	p.Typewriter = true
 	p.Keys = map[string]string{"palette": "Cmd+J"}
+	p.TourSeen = true
 	if err := s.Save(p); err != nil {
 		t.Fatal(err)
 	}
 	q, err := s.Load()
-	if err != nil || !q.Typewriter || q.Keys["palette"] != "Cmd+J" {
+	if err != nil || !q.Typewriter || q.Keys["palette"] != "Cmd+J" || !q.TourSeen {
 		t.Fatalf("loaded %+v %v", q, err)
 	}
 	os.WriteFile(s.Path, []byte(`{"version": 9}`), 0o644)

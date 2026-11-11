@@ -667,3 +667,45 @@ func toastColors(l spaceLook) toastLook {
 // updaterButton is the update window's wide button, Arc's
 // UpdaterButtonBackgroundColor: white, black in the dark.
 func updaterButton(t *ui.Theme) ui.Color { return pick(t, white, black) }
+
+// tourLook are the colors of the first-run tour (tour.go): the scrim over
+// the window and the ring round what a step points at, and, for the
+// pictures on its card, the space's own tint with a small mock of the
+// window drawn in its ink and accent. alt and alt2 are the accent's hue
+// turned, standing for other spaces' colors.
+type tourLook struct {
+	scrim      ui.Color
+	scrimAlpha float32
+	ring       ui.Color
+	// ink draws the mock's bars and glyphs, panel its glass surfaces, and
+	// paper and paperInk its sheet of writing.
+	ink, panel        ui.Color
+	paper, paperInk   ui.Color
+	accent, alt, alt2 ui.Color
+	shadow            ui.Color
+}
+
+func tourColors(l spaceLook) tourLook {
+	acc := l.accent
+	h, s, v := space.HSB(float64(acc.R)/255, float64(acc.G)/255, float64(acc.B)/255)
+	// The other spaces' colors keep some color and light of their own
+	// where the accent is nearly grey or nearly black.
+	turned := func(by float64) ui.Color {
+		r, g, b := space.FromHSB(h+by, min(max(s, 0.5), 0.75), min(max(v, 0.62), 0.9))
+		return ui.RGB(uint8(math.Round(r*255)), uint8(math.Round(g*255)), uint8(math.Round(b*255)))
+	}
+	tl := tourLook{
+		scrim: black, scrimAlpha: 0.42, ring: white,
+		ink: l.text, panel: white.Alpha(0.78),
+		paper: ui.Hex("#FFFFFF"), paperInk: ui.Hex("#1F2329"),
+		accent: acc, alt: turned(140), alt2: turned(-95),
+		shadow: black.Alpha(0.16),
+	}
+	if l.Dark {
+		tl.scrimAlpha = 0.56
+		tl.panel = white.Alpha(0.13)
+		tl.paper, tl.paperInk = ui.Hex("#1F2023"), ui.Hex("#E3E4E7")
+		tl.shadow = black.Alpha(0.4)
+	}
+	return tl
+}
