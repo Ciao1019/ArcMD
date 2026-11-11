@@ -96,6 +96,9 @@ jobs:
           cache-dependency-path: go.sum
       - name: Download dependencies
         run: go mod download
+      - name: Test case-sensitive file operations
+        if: matrix.target == 'linux-amd64'
+        run: go test ./internal/vault
       - name: Build and collect packages
         env:
           TARGET_PLATFORM: ${{ matrix.platform }}

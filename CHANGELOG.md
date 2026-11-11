@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.5
+
+A security and data-safety patch release. Existing editing features, UI, and the document format remain unchanged from 0.0.4.
+
+- Stop saving when the on-disk document cannot be read for conflict checking. Unsaved edits remain available, and external changes are not overwritten after a read failure.
+- Reject document paths whose symbolic links resolve outside their Space, including paths for new files. Preserve valid links within a Space and stop recursive folder-link cycles. Relative Markdown images such as `../images/` remain supported.
+- Reject malformed table cells with a document-load error instead of panicking. Damaged documents remain untouched on disk.
+- Refuse case-only renames when the destination is a different existing file on a case-sensitive filesystem. Normal case-only renames remain supported.
+- Require HTTPS for plugin index and package requests, including every redirect. The plugin marketplace and runtime remain unavailable in this release.
+- Add regression coverage, document-decoder fuzz testing, and Linux CI coverage for case-sensitive file operations.
+
+Downloads are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`.
+
 ## 0.0.4
 
 A macOS application-icon correction for the hand-drawn beaver identity.

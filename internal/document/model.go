@@ -345,9 +345,6 @@ func (d *Document) Validate() error {
 					return errors.New("document: ragged table")
 				}
 			}
-			if err := validSpans(b); err != nil {
-				return err
-			}
 			if len(b.Widths) != 0 && len(b.Widths) != cols {
 				return errors.New("document: invalid column widths")
 			}
@@ -393,6 +390,10 @@ func (d *Document) Validate() error {
 			if err := visit(child, b.Kind, depth+1); err != nil {
 				return err
 			}
+		}
+		// Span checks dereference cells, so validate their structure first.
+		if b.Kind == "table" {
+			return validSpans(b)
 		}
 		return nil
 	}

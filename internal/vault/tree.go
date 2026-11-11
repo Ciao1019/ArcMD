@@ -36,10 +36,28 @@ func Tree(root string) ([]*Node, error) {
 }
 
 func readDir(root, rel string) ([]*Node, error) {
+	return readBranch(root, rel, nil)
+}
+
+func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
 	dir := root
 	if rel != "" {
-		dir = filepath.Join(root, filepath.FromSlash(rel))
+		var err error
+		dir, err = Resolve(root, rel)
+		if err != nil {
+			return nil, err
+		}
 	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, parent := range ancestors {
+		if os.SameFile(info, parent) {
+			return nil, errors.New("vault: symbolic link cycle")
+		}
+	}
+	ancestors = append(ancestors, info)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -50,6 +68,9 @@ func readDir(root, rel string) ([]*Node, error) {
 		p := path.Join(rel, name)
 		isDir := e.IsDir()
 		if e.Type()&fs.ModeSymlink != 0 {
+			if _, err := Resolve(root, p); err != nil {
+				continue
+			}
 			if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
 				isDir = fi.IsDir()
 			}
@@ -59,7 +80,7 @@ func readDir(root, rel string) ([]*Node, error) {
 			if skipDir(name) {
 				continue
 			}
-			kids, err := readDir(root, p)
+			kids, err := readBranch(root, p, ancestors)
 			if err != nil {
 				continue // unreadable folders are left out
 			}
@@ -164,9 +185,18 @@ func move(root, from, to string) error {
 	if err != nil {
 		return err
 	}
-	// Renaming only the case of a name is allowed on case-insensitive disks.
-	if _, err := os.Stat(dst); err == nil && !strings.EqualFold(from, to) {
-		return ErrExists
+	// A case-only rename may refer to the same file on a case-insensitive
+	// disk. Equal names alone do not establish that on other file systems.
+	if target, err := os.Lstat(dst); err == nil {
+		source, err := os.Lstat(src)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(from, to) || !os.SameFile(source, target) {
+			return ErrExists
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return os.Rename(src, dst)
 }

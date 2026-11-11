@@ -170,7 +170,10 @@ func (d *document) write(force bool) error {
 		case errors.Is(err, os.ErrNotExist):
 			d.missing = true
 			return errMissing
-		case err == nil && disk != d.diskText:
+		case err != nil:
+			d.saveErr = err
+			return err
+		case disk != d.diskText:
 			d.conflict, d.diskNow = true, disk
 			return errConflict
 		}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -166,28 +167,54 @@ func unpack(f *zip.File, dst string) error {
 	return err
 }
 
-func get(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
-	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://127.0.0.1") {
-		return nil, fmt.Errorf("plugin: %q is not an https URL", url)
+func secureURL(u *url.URL) error {
+	if u.Scheme != "https" || u.Hostname() == "" {
+		return fmt.Errorf("plugin: %q is not an https URL", u.Redacted())
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	return nil
+}
+
+func get(ctx context.Context, client *http.Client, address string, limit int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	if err := secureURL(req.URL); err != nil {
+		return nil, err
+	}
+	// Keep the caller's transport, timeouts and redirect policy without
+	// mutating a shared client. Every hop must retain authenticated TLS.
+	if client == nil {
+		client = http.DefaultClient
+	}
+	guarded := *client
+	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := secureURL(req.URL); err != nil {
+			return err
+		}
+		if client.CheckRedirect != nil {
+			if err := client.CheckRedirect(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 {
+			return errors.New("plugin: stopped after 10 redirects")
+		}
+		return secureURL(req.URL)
+	}
+	resp, err := guarded.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("plugin: GET %s: %s", url, resp.Status)
+		return nil, fmt.Errorf("plugin: GET %s: %s", address, resp.Status)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(b)) > limit {
-		return nil, errors.New("plugin: " + url + " is too large")
+		return nil, errors.New("plugin: " + address + " is too large")
 	}
 	return b, nil
 }

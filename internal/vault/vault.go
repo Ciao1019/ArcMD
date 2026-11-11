@@ -59,7 +59,8 @@ func Title(rel string) string {
 // ErrOutside reports a path that leaves the root.
 var ErrOutside = errors.New("vault: path is outside the space folder")
 
-// Resolve returns the absolute path of rel under root.
+// Resolve returns the path of rel under root. Existing symbolic links must
+// resolve within the root, including when the final file does not exist yet.
 func Resolve(root, rel string) (string, error) {
 	rel = filepath.ToSlash(rel)
 	if rel == "" || path.IsAbs(rel) || filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" {
@@ -74,7 +75,70 @@ func Resolve(root, rel string) (string, error) {
 	if clean == "." {
 		return "", ErrOutside
 	}
-	return filepath.Join(root, filepath.FromSlash(clean)), nil
+	full := filepath.Join(root, filepath.FromSlash(clean))
+	base, err := existingPath(root)
+	if err != nil {
+		return "", err
+	}
+	target, err := existingPath(full)
+	if err != nil {
+		return "", err
+	}
+	inside, err := filepath.Rel(base, target)
+	if (err != nil || !filepath.IsLocal(inside)) && !sameRootAncestor(base, target) {
+		return "", ErrOutside
+	}
+	return full, nil
+}
+
+// EvalSymlinks preserves filename casing. On a case-insensitive filesystem,
+// an absolute link may spell the root differently while staying inside it.
+func sameRootAncestor(root, target string) bool {
+	base, err := os.Stat(root)
+	if err != nil || !base.IsDir() {
+		return false
+	}
+	for {
+		if info, err := os.Stat(target); err == nil && os.SameFile(base, info) {
+			return true
+		}
+		parent := filepath.Dir(target)
+		if parent == target {
+			return false
+		}
+		target = parent
+	}
+}
+
+// existingPath resolves the existing prefix of a path without requiring the
+// file or its new folders to exist. A dangling link is not a missing suffix:
+// failing closed there prevents creating files through an unchecked target.
+func existingPath(name string) (string, error) {
+	name, err := filepath.Abs(name)
+	if err != nil {
+		return "", err
+	}
+	var suffix []string
+	for {
+		if _, err := os.Lstat(name); err == nil {
+			base, err := filepath.EvalSymlinks(name)
+			if err != nil {
+				return "", err
+			}
+			for i := len(suffix) - 1; i >= 0; i-- {
+				base = filepath.Join(base, suffix[i])
+			}
+			return base, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(name)
+		if parent == name {
+			return "", fs.ErrNotExist
+		}
+		suffix = append(suffix, filepath.Base(name))
+		name = parent
+	}
 }
 
 // skipDir reports whether the walk leaves out a directory: hidden ones (as
@@ -106,6 +170,14 @@ func List(root string) ([]Doc, error) {
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			if _, err := Resolve(root, rel); err != nil {
+				return nil
+			}
+			if info, err := os.Stat(p); err != nil || !info.Mode().IsRegular() {
+				return nil
+			}
 		}
 		docs = append(docs, Doc{Path: filepath.ToSlash(rel)})
 		return nil

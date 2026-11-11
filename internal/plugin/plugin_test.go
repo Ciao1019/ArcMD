@@ -65,7 +65,7 @@ func zipOf(t *testing.T, files map[string]string) []byte {
 
 func serve(t *testing.T, b []byte) (Listing, *http.Client) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(b) }))
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(b) }))
 	t.Cleanup(srv.Close)
 	sum := sha256.Sum256(b)
 	return Listing{ID: "dev.arcmd.ai-writer", Version: "0.1.0", Download: srv.URL + "/p.zip", SHA256: hex.EncodeToString(sum[:])}, srv.Client()
