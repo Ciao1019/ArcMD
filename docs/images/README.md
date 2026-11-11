@@ -9,6 +9,13 @@
   They use no SVG filters (no blur, drop shadow, or turbulence grain): an
   animated image is repainted every frame, and filters made the animations
   stutter. Glows are radial gradients and shadows are stacked translucent shapes.
+- `readme/themes-*.svg` and `readme/bookmarks-*.svg` are frames of ArcMD's
+  window as the app draws it, rendered without a window by
+  `internal/app/readme_art_test.go` and laid on a desktop picture that is
+  blurred behind the window, as the window's material blurs what is behind it.
+  The frames are JPEGs inside the SVG, cross-faded by CSS `@keyframes`; the
+  captions under the window are SVG text. Regenerate them with
+  `ARCMD_README=docs/images/readme go test -run ReadmeArt ./internal/app`.
 - `download-{macos,windows,linux}-{en,zh-CN}.svg` are the platform download
   buttons: plain white, a thin border and a monochrome glyph, 200×56. The Apple glyph path is adapted from
   [Quiet.md](https://github.com/s1dashu/quiet-md/tree/main/docs/images) (MIT,

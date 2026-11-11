@@ -67,6 +67,25 @@ press <kbd>⌃1</kbd>…<kbd>⌃9</kbd>, and the whole window glides into the ne
 space. Every space remembers the page you left open there; favorites stay with
 you wherever you go.
 
+### Colors, gradients, translucency and grain, previewed live
+
+<p align="center"><img src="docs/images/readme/themes-en.svg" width="100%" alt="ArcMD space themes: pick a color on the theme card, blend up to three colors, lower the intensity so the window shows the blurred desktop behind it, add grain, then switch to dark; the whole window previews live"></p>
+
+Choose “编辑主题颜色…” (Edit Theme Colors) from the space name's ••• menu. Drag
+the dot on the color pad to change the color, and use − / + to blend one, two or
+three colors. Lower the intensity of a single-color theme and the window turns
+translucent, softly blurring the desktop behind it; turn the grain dial, or pick
+Auto, Light or Dark.
+
+### Bookmarks: pick up where you left off
+
+<p align="center"><img src="docs/images/readme/bookmarks-en.svg" width="100%" alt="ArcMD bookmarks: hover a paragraph and a bookmark appears in the margin; click to add it, and the outline lists the document's bookmarks; Shift Command D lists the bookmarks of every document"></p>
+
+Hover any paragraph and a bookmark appears in the margin; click it (or press
+<kbd>⌘D</kbd>) to mark the spot. The outline lists the document's bookmarks,
+<kbd>⌃⌘↑</kbd> / <kbd>⌃⌘↓</kbd> jump between them, and <kbd>⇧⌘D</kbd> lists
+the bookmarks of every document. Bookmarks never change the document itself.
+
 ### The Library: all your spaces at a glance
 
 <p align="center"><img src="docs/images/readme/library-en.svg" width="100%" alt="Clicking the Library button widens the sidebar into a row of space cards, each drawn in its own theme; clicking a page in the Reading space opens it there"></p>
