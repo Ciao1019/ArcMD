@@ -74,6 +74,9 @@ func (b *Buffer) slice(a, z int) string {
 	return b.text[ui.UTF16ByteOffset(b.text, a):ui.UTF16ByteOffset(b.text, z)]
 }
 func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
+	if b.ReadOnly {
+		return
+	}
 	b.sync()
 	target := b.Selection().Range
 	if b.mark != nil {
@@ -96,6 +99,9 @@ func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 	b.sync()
 }
 func (b *Buffer) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
+	if b.ReadOnly {
+		return
+	}
 	b.sync()
 	target := b.Selection().Range
 	if b.mark != nil {

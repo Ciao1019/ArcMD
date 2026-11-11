@@ -55,7 +55,16 @@ func (e *Editor) Corner(c *ui.Context) {
 	leaf := e.Engine.LeafAt(e.Caret)
 	ui.Row(c.Key("page-corner")).Gap(2).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, fmt.Sprintf("%d 字", e.wordCount())).FontSize(12).TextColor(t.TextMuted).NoWrap().Padding(0, 6).Tooltip("字数（中文按字、英文按词）")
-		e.moreMenu(c, leaf)
+		label := "编辑中"
+		if e.ReadOnly {
+			label = "只读"
+		}
+		if ui.Button(c.Key("reading-lock"), label).FontSize(12).Tooltip("切换文档只读模式").Clicked() {
+			e.SetReadOnly(!e.ReadOnly)
+		}
+		if !e.ReadOnly {
+			e.moreMenu(c, leaf)
+		}
 	})
 }
 
@@ -65,6 +74,11 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 		menuAction(m, "下划线", func() { e.Wrap("_") })
 		menuAction(m, "删除线", func() { e.Wrap("~~") })
 		menuAction(m, "行内代码", func() { e.Wrap("`") })
+		menuAction(m, "上标", func() { e.SetScript("sup") })
+		menuAction(m, "下标", func() { e.SetScript("sub") })
+		menuAction(m, "插入行内公式", e.InsertInlineMath)
+		menuAction(m, "插入脚注", func() { e.InsertFootnote(); e.RequestFocus, e.reveal = true, true })
+		menuAction(m, "跳转脚注 / 返回正文", func() { e.FollowFootnote() })
 		m.Separator()
 		menuAction(m, "撤销", func() { e.Undo(); e.RequestFocus = true })
 		menuAction(m, "重做", func() { e.Redo(); e.RequestFocus = true })
@@ -287,7 +301,7 @@ func toolSeparator(c *ui.Context) {
 func (e *Editor) watchSlash() {
 	leaf := e.Engine.LeafAt(e.Caret)
 	text := leaf.Block.Text()
-	show := !e.slashDismissed && e.Anchor == e.Caret && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
+	show := !e.ReadOnly && !e.slashDismissed && e.Anchor == e.Caret && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
 	if !show {
 		e.slashOpen = false
 		return
@@ -350,26 +364,7 @@ func (e *Editor) popups(c *ui.Context, surface ui.Element) {
 	}
 	e.blockMenu(c, surface)
 	e.tableToolbar(c, surface)
-	if e.linkOpen {
-		ui.Modal(c.Key("edit-link"), &e.linkOpen, func() {
-			ui.Column(c).Width(360).Gap(10).Children(func() {
-				ui.Text(c, "链接地址").FontWeight(500)
-				ui.TextInput(c, &e.linkURL).AutoFocus().Label("链接地址").Placeholder("https://")
-				if ui.PrimaryButton(c, "应用链接").Clicked() {
-					e.Engine.Edit(func() {
-						if e.Anchor == e.Caret {
-							start := e.Caret
-							e.Engine.Replace(start, start, e.linkURL)
-							e.Engine.SetSelection(start, start+document.Len(e.linkURL))
-						}
-						e.Engine.SetLink(e.linkURL)
-					})
-					e.linkOpen = false
-					e.RequestFocus = true
-				}
-			})
-		})
-	}
+	e.linkPopover(c, surface)
 }
 
 func (e *Editor) cellTab(back bool) bool {
@@ -408,5 +403,3 @@ func menuAction(m *ui.Menu, label string, run func()) {
 		run()
 	}
 }
-
-func (e *Editor) EditLink() { e.linkURL = e.Engine.CurrentStyle().Link; e.linkOpen = true }

@@ -39,6 +39,14 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 				return true
 			}
 		}
+		if e.inlineClick(ev.X, ev.Y) {
+			return true
+		}
+		if !e.ReadOnly && ev.Mods == 0 && ev.Clicks < 2 && e.linkAt(at) != "" {
+			e.SetSelection(at, at)
+			e.EditLink()
+			return true
+		}
 		if e.toggleTask(at, ev.X) {
 			return true
 		}
@@ -99,7 +107,7 @@ func (e *Editor) command(command string, read func() string, write func(string))
 	case "paste":
 		e.pasteSelection(read)
 	case "pasteAndMatchStyle":
-		e.ReplaceText(nil, read())
+		e.Buffer.ReplaceText(nil, read())
 	case "undo":
 		e.Undo()
 	case "redo":
@@ -122,6 +130,11 @@ func (e *Editor) command(command string, read func() string, write func(string))
 
 func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) bool {
 	mods, key := ev.Mods, ev.Key
+	for _, r := range e.reserved {
+		if r.Mods == mods && r.Key == key {
+			return false
+		}
+	}
 	if e.slashKeys(ev) || e.wikiKeys(ev) {
 		return true
 	}
@@ -295,6 +308,9 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		if mods&ui.Ctrl != 0 || mods&ui.Alt != 0 {
 			return false
 		}
+		if mods & ^ui.Shift == 0 && e.columnTab(shift) {
+			return true
+		}
 		if shift || e.Anchor != e.Caret {
 			e.indent(shift)
 		} else {
@@ -315,6 +331,12 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 }
 
 func (e *Editor) delete(direction int, word, line bool) {
+	if e.ReadOnly {
+		return
+	}
+	if direction < 0 && !word && !line && e.deletePair() {
+		return
+	}
 	r := e.Selection().Range
 	if r.Start == r.End {
 		// At a block edge the engine decides: tables, columns and attachments

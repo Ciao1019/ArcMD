@@ -93,7 +93,10 @@ invoke the same engine operations as the command palette.
 
 IME preedit edits a temporary model. The save path reads the committed snapshot
 until the composition commits as one transaction. Clipboard data includes a
-validated native fragment plus plain text and Markdown alternatives.
+validated native fragment plus Markdown, semantic HTML and a Markdown text
+alternative (verbatim selections keep their source). Whole selected tables and
+columns retain their structure. Markdown pastes recognize headings, lists,
+tables and code while literal editing contexts preserve source.
 
 Markdown parsing is an interchange adapter in `internal/editor/markdown.go`.
 Existing Markdown opens in memory. The first save after an edit publishes a
@@ -107,8 +110,17 @@ table shapes. The app displays a read error and disables editing for that file.
 Exports create a separate `.md` with a unique name. Unsupported imported HTML
 and extensions are opaque text blocks. The editor supports merged table cells,
 cell backgrounds, and structured HTML clipboard imports. Block formulas use
-`internal/tex` for layout and show editable TeX with a live preview when focused;
-inline math is still planned.
+`internal/tex` for layout with embedded KaTeX fonts. Following Textus, formulas
+are centered without a background at rest; focusing one reveals a bordered
+source panel and a separate live preview with reserved space below. Complete
+`$$` or `\[...\]` clipboard formulas import as math, and a copied math block
+retains its type. Typing `$$` then Enter opens a math block; Enter on a closing
+`$$` line returns to a paragraph. Inline `$...$` formulas use the same fonts in
+text style. A retained layout wrapper maps model UTF-16 ranges to native object
+positions for selection, caret placement, search and print output. Clicking a
+formula reveals source until the caret leaves. Escaped dollars retain a literal
+mark. This is native
+Go rendering of the supported TeX subset, not the KaTeX JavaScript engine.
 
 Autosave waits 700 ms using the frame clock. Writes use atomic replacement.
 New files use atomic exclusive publication to avoid import/export collisions.
@@ -118,7 +130,10 @@ Switching documents, switching Spaces and closing the window flush first.
 
 A space is a folder plus a name, glyph and color, kept in
 `<config>/ArcMD/spaces.json` with the order, the active space, pins and the
-last open document of each. Switching a space swaps the document list, the
+last open document of each. The same file keeps bookmarks: places marked in
+documents by top-level block ID, with an excerpt that finds the block again
+in a Markdown file read afresh. They live outside the document so marking a
+place never edits or converts it. Switching a space swaps the document list, the
 theme's accent and the chrome tint, and reopens the space's last document.
 
 ### Moving documents and links
@@ -179,3 +194,28 @@ remain raster content. This is not a tagged PDF or a fully vector export.
 ## Plugins
 
 See [plugins.md](plugins.md).
+
+### Reading and inline editing
+
+Document version 6 adds `Style.Script` (`sup`/`sub`), `Style.NoMath` for literal
+Markdown dollars, `Block.ImageWidth`, and footnote blocks with `NoteLabel`.
+Versions 1–5 migrate in memory; older versions claiming newer attributes are
+rejected. Footnote definitions keep styled text, references stay lossless in
+runs, and numbering follows first reference order. Jump/return remembers the
+originating reference. Scripts use native inline objects per grapheme because
+MyGo 0.7.4 measures baseline shifts but its glyph painter omits the displacement.
+The layout mapping preserves selection boundaries and the PDF text layer.
+
+`linkpopover.go` edits a captured range beside the link. A revision check
+cancels stale edits. Local wiki previews wait 450ms, prefer retained live
+editors, and disappear on scrolling or Escape. They never create documents.
+`autopair.go` tracks only generated closers, wraps existing styled selections,
+and pairs IME text only on commit. Paste bypasses pairing.
+
+Image resizing previews a width outside the document and commits once on
+release; arrow keys resize and Home restores natural size. The preview supports
+5%–800% continuous zoom at the pointer, pan, fit and original-size controls.
+Reading font size and line height are global preferences, separate from fixed
+PDF paper metrics. Each retained editor has a session reading lock. The engine
+rejects text and structural transactions, composition, undo and redo while
+locked; selection, copy, search and navigation remain available.

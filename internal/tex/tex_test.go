@@ -133,3 +133,22 @@ func TestErrors(t *testing.T) {
 		t.Errorf("unknown command %+v", b.Ops[0])
 	}
 }
+
+func TestIntegralLimitsClearUpperHook(t *testing.T) {
+	b := layout(t, `\int_0^\infty x^2 e^{-x} dx = 2`)
+	var upper, lower Op
+	for _, op := range b.Ops {
+		if op.Error {
+			t.Fatalf("unrecognized token %q", op.Text)
+		}
+		if op.Text == "∞" {
+			upper = op
+		}
+		if op.Text == "0" {
+			lower = op
+		}
+	}
+	if upper.X <= lower.X || upper.Y >= lower.Y {
+		t.Fatal("integral limits do not follow its slant")
+	}
+}

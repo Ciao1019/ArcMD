@@ -12,6 +12,40 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestSidebarDoubleClickDoesNotRename(t *testing.T) {
+	for _, name := range []string{"Journal", "Ideas"} {
+		t.Run(name, func(t *testing.T) {
+			a, tt := newTestApp(t)
+			sp := a.state.ActiveSpace()
+			for click := 1; click <= 2; click++ {
+				if err := tt.Click(name); err != nil {
+					t.Fatal(err)
+				}
+				if a.renaming != "" || tt.Focused("名称") {
+					t.Fatalf("click %d started renaming %q", click, a.renaming)
+				}
+				if name == "Journal" {
+					if sp.IsExpanded("Journal") != (click == 2) {
+						t.Fatalf("click %d did not toggle the folder", click)
+					}
+				} else if a.doc == nil || a.doc.rel != "Journal/Ideas.arcmd" {
+					t.Fatalf("click %d did not open the document", click)
+				}
+			}
+			// Renaming remains an explicit action in the row's menu.
+			if err := tt.RightClick(name); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.ChooseMenuItem("重命名…"); err != nil {
+				t.Fatal(err)
+			}
+			if a.renaming == "" || !tt.Focused("名称") {
+				t.Fatal("the context menu did not focus the rename field")
+			}
+		})
+	}
+}
+
 func TestSidebarWidthAndPinning(t *testing.T) {
 	a, tt := newTestApp(t)
 	back, ok := tt.Find("后退")

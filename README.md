@@ -6,7 +6,7 @@
 
 简体中文 · [English](README.en.md)
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.5-F21158" alt="版本 0.0.5"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.6-F21158" alt="版本 0.0.6"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="支持 macOS、Windows 与 Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="使用 Go 与 MyGo 原生开发"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI 工作流配置"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-zh-CN.svg" height="56" alt="下载 ArcMD Windows 版：x64 安装程序与 ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-zh-CN.svg" height="56" alt="下载 ArcMD Linux 版：x64 与 ARM64，DEB 与 TAR.GZ"></a>
 
-<sub>当前预览版本为 0.0.5，按钮会打开发布页；也可以<a href="#从源码运行">从源码运行</a>。</sub>
+<sub>当前预览版本为 0.0.6，按钮会打开发布页；也可以<a href="#从源码运行">从源码运行</a>。</sub>
 
 <br><br>
 
@@ -83,7 +83,8 @@ MyGo 提供原生窗口、GPU 绘制、字形排版和系统输入接口，ArcMD
 
 - **富文本格式**：标题、粗体、斜体、下划线、删除线、链接、行内代码、文字颜色与高亮。
   选中文字即可使用浮动工具栏，输入 `/` 插入内容块。
-- **多种内容块**：嵌套列表、任务、引用、彩色高亮块、代码块、图片、TeX 公式块、支持合并单元格的可编辑表格，以及双栏布局。
+- **多种内容块**：嵌套列表、任务、引用、彩色高亮块、代码块、图片、行内与块级 TeX 公式、脚注、上下标、支持合并单元格的可编辑表格，以及双栏布局。
+- **顺手的编辑与阅读**：Markdown / HTML 剪贴板交换、链接就地编辑与双链悬停预览、图片拖拽调尺寸与连续缩放、中文括号引号配对；可调整正文字号和行距，或一键切换只读。
 - **清晰的文档结构**：可导航的目录、可折叠的标题与列表、可拖动的内容块和章节，以及页面图标、图片封面与渐变封面。
 - **带上已有内容**：导入和导出 Markdown，从网页及文档应用粘贴富文本，也可以将页面导出为 PDF。
 
@@ -97,6 +98,7 @@ MyGo 提供原生窗口、GPU 绘制、字形排版和系统输入接口，ArcMD
 ### 连接想法，保持专注
 
 - **双链与标签**：用 `[[双链]]` 连接文档，查看反向链接，通过 `#标签` 浏览内容；重命名文档时自动更新指向它的链接。
+- **书签**：指针移到段落上，点右侧出现的书签图标（或按 ⌘D）标记想回来看的段落，⌃⌘↑ / ⌃⌘↓ 在书签间跳转，目录与命令栏列出全部书签，可命名；书签不改动文档本身。
 - **专注写作**：专注模式、可选的段落淡化、打字机滚动，以及可自定义的键盘快捷键。
 - **本地存储**：文档与附件都保存在自己的文件夹里，配合自动保存、版本历史、外部修改检测，以及保留 30 天的「最近删除」，帮助找回工作内容。
 

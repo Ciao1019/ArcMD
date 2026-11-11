@@ -8,6 +8,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fuzzy"
+	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/update"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -23,6 +24,13 @@ type palette struct {
 	lastQuery string
 	index     int
 	pane      *splitPane // document picker for one split pane
+	// bookmarks lists the bookmarks instead (bookmarks.go); renaming is
+	// the one being named while renameOn, newLabel what is typed.
+	bookmarks     bool
+	renaming      space.Bookmark
+	renameOn      bool
+	renameFocused bool
+	newLabel      string
 }
 
 // action is a result of the command bar.
@@ -36,6 +44,10 @@ type action struct {
 	doc     place
 	snippet string
 	match   [2]int
+	// bookmark is the bookmark a bookmark's action goes to; faded marks one
+	// whose block is gone.
+	bookmark *space.Bookmark
+	faded    bool
 }
 
 func (a *App) openPalette() {
@@ -139,6 +151,7 @@ func (a *App) actions() []action {
 		dim = "专注模式下淡化其他段落"
 	}
 	cmd(dim, "", a.toggleDim)
+	cmd("书签…", a.keyLabel("bookmarks"), a.openBookmarks)
 	cmd("按标签浏览", "#", func() { a.openPalette(); a.palette.query = "#" })
 	cmd("最近删除…", "", a.openTrash)
 	if len(a.state.Spaces) > 1 {
@@ -178,6 +191,15 @@ func (a *App) actions() []action {
 			pin = "取消置顶文档"
 		}
 		cmd(pin, "", func() { a.togglePin(sp, rel) })
+		if d := a.bookmarkable(); d != nil {
+			mark := "添加书签"
+			if a.caretMarked(d) {
+				mark = "移除书签"
+			}
+			cmd(mark, a.keyLabel("bookmark"), a.toggleBookmarkAtCaret)
+			cmd("上一个书签", a.keyLabel("prev-bookmark"), func() { a.stepBookmark(-1) })
+			cmd("下一个书签", a.keyLabel("next-bookmark"), func() { a.stepBookmark(1) })
+		}
 		if inPins(sp, rel) {
 			cmd("关闭并保持置顶", "", func() { a.closeOpen(sp, rel) })
 		}
@@ -224,6 +246,9 @@ func (a *App) actions() []action {
 // documents whose text holds the query.
 func (a *App) results() []action {
 	q := a.palette.query
+	if a.palette.bookmarks {
+		return a.bookmarkResults(q)
+	}
 	if strings.TrimSpace(q) == "" {
 		return a.idleResults()
 	}
@@ -332,6 +357,9 @@ func (a *App) paletteView(c *ui.Context) {
 		if p.pane != nil {
 			placeholder = "选择分屏文档"
 		}
+		if p.bookmarks {
+			placeholder = "搜索书签"
+		}
 		ui.Column(c).Width(width).Gap(6).Children(func() {
 			input := ui.TextInput(c.Key("query"), &p.query).Placeholder(placeholder).
 				AutoFocus().Label("命令栏").FontSize(16).Padding(10, 12)
@@ -340,7 +368,14 @@ func (a *App) paletteView(c *ui.Context) {
 				return
 			}
 			if len(res) == 0 {
-				ui.Text(c, "没有匹配的结果").TextColor(t.TextMuted).Padding(10, 12)
+				empty := "没有匹配的结果"
+				switch {
+				case p.bookmarks && len(a.state.Bookmarks) == 0:
+					empty = "还没有书签 · 按 " + a.firstKey("bookmark") + " 标记当前段落"
+				case p.bookmarks:
+					empty = "没有匹配的书签"
+				}
+				ui.Text(c, empty).TextColor(t.TextMuted).Padding(10, 12)
 				return
 			}
 			ui.Scroll(c.Key("palette-results")).MaxHeight(max(80, winH-190)).MinHeight(0).Children(func() {
@@ -350,6 +385,12 @@ func (a *App) paletteView(c *ui.Context) {
 						row.Background(t.Accent.Alpha(0.16))
 					} else if row.Hovered() {
 						row.Background(t.Text.Alpha(0.06))
+					}
+					if act.faded {
+						row.Opacity(.55)
+					}
+					if act.bookmark != nil && a.bookmarkRow(c, row, act) {
+						continue
 					}
 					row.Children(func() {
 						ui.Text(c, act.kind).FontSize(11).TextColor(t.TextMuted).Width(64).NoWrap()
@@ -396,10 +437,24 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	after := func(run func()) func() {
 		return func() { run(); ed.RequestFocus = true }
 	}
+	lock := "锁定文档（只读）"
+	if ed.ReadOnly {
+		lock = "解锁文档"
+	}
+	cmd(lock, "", func() { ed.SetReadOnly(!ed.ReadOnly) })
+	cmd("阅读设置…", "", func() { a.openSettings(tabGeneral) })
+	cmd("跳转脚注 / 返回正文", "", func() { ed.FollowFootnote() })
 	cmd("查找", a.keyLabel("find"), func() { ed.OpenFind(false) })
+	if ed.ReadOnly {
+		return
+	}
 	cmd("查找和替换", a.keyLabel("replace"), func() { ed.OpenFind(true) })
 	cmd("插入双链…", "[[", after(ed.StartWikiLink))
 	cmd("插入公式", "", after(ed.InsertMath))
+	cmd("插入行内公式", "", after(ed.InsertInlineMath))
+	cmd("插入脚注", "", after(ed.InsertFootnote))
+	cmd("上标", "", after(func() { ed.SetScript("sup") }))
+	cmd("下标", "", after(func() { ed.SetScript("sub") }))
 	if ed.Doc.Icon == "" {
 		cmd("添加页面图标", "", ed.EditPageIcon)
 	} else {

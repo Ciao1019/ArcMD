@@ -432,9 +432,9 @@ func docCount(n *vault.Node) int {
 }
 
 // nodeRow is a folder's or a document's row, as Cra draws Arc's: a click
-// opens it, a double click renames it, and it drags to another place in
-// the list, into a folder, across the line to pin or unpin it, or onto the
-// favorites.
+// opens it, its context menu offers renaming, and it drags to another
+// place in the list, into a folder, across the line to pin or unpin it,
+// or onto the favorites.
 func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, parent string, index int, live bool) {
 	t := c.Theme()
 	chosen := !n.Dir && a.doc != nil && a.doc.space == sp && a.doc.rel == n.Path
@@ -586,8 +586,6 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 	row.ContextMenu(func(m *ui.Menu) { a.nodeMenu(m, sp, n) })
 	switch {
 	case renaming, closed:
-	case row.DoubleClicked():
-		a.renameIn(sp, n.Path)
 	case row.Clicked():
 		if n.Dir {
 			a.toggleFolder(n.Path)

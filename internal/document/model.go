@@ -16,10 +16,11 @@ import (
 // CurrentVersion is the format this ArcMD writes. Version 2 added the color
 // of callouts, version 3 the color and highlight of text, version 4 folded
 // headings and list items, cell backgrounds, merged cells and callout
-// emoji, version 5 the page's icon and cover. Older documents are read and
+// emoji, version 5 the page's icon and cover, version 6 scripts, image widths
+// and footnotes. Older documents are read and
 // migrated in memory, and written back as the current version only when
 // edited.
-const CurrentVersion = 5
+const CurrentVersion = 6
 
 // CoverGradients are the covers drawn rather than pictured, as
 // "gradient:name" in Document.Cover.
@@ -56,6 +57,8 @@ func validCalloutColor(color string) bool {
 }
 
 type Style struct {
+	NoMath    bool   `json:"noMath,omitempty"` // Literal dollar signs from Markdown escapes.
+	Script    string `json:"script,omitempty"` // "sup" or "sub" (version 6).
 	Bold      bool   `json:"bold,omitempty"`
 	Italic    bool   `json:"italic,omitempty"`
 	Underline bool   `json:"underline,omitempty"`
@@ -74,16 +77,18 @@ type Run struct {
 }
 
 type Block struct {
-	ID       string    `json:"id"`
-	Kind     string    `json:"kind"`
-	Runs     []Run     `json:"runs,omitempty"`
-	Level    int       `json:"level,omitempty"`
-	Indent   int       `json:"indent,omitempty"`
-	Checked  bool      `json:"checked,omitempty"`
-	Language string    `json:"language,omitempty"`
-	URL      string    `json:"url,omitempty"`
-	Align    string    `json:"align,omitempty"`
-	Widths   []float32 `json:"widths,omitempty"`
+	ImageWidth float32   `json:"imageWidth,omitempty"` // Preferred DIP width; zero is natural.
+	NoteLabel  string    `json:"noteLabel,omitempty"`  // Footnote definition label (version 6).
+	ID         string    `json:"id"`
+	Kind       string    `json:"kind"`
+	Runs       []Run     `json:"runs,omitempty"`
+	Level      int       `json:"level,omitempty"`
+	Indent     int       `json:"indent,omitempty"`
+	Checked    bool      `json:"checked,omitempty"`
+	Language   string    `json:"language,omitempty"`
+	URL        string    `json:"url,omitempty"`
+	Align      string    `json:"align,omitempty"`
+	Widths     []float32 `json:"widths,omitempty"`
 	// Color is a callout's color, one of CalloutColors (version 2).
 	Color string `json:"color,omitempty"`
 	// Folded hides what a heading or list item holds (version 4).
@@ -263,8 +268,27 @@ func (d *Document) migrate() error {
 	if d.Version < 4 && newer(d.Blocks) {
 		return fmt.Errorf("document: version %d has no folds, cell styles or emoji", d.Version)
 	}
-	if d.Icon != "" || d.Cover != "" {
+	if d.Version < 5 && (d.Icon != "" || d.Cover != "" || d.CoverY != 0) {
 		return fmt.Errorf("document: version %d has no page icon or cover", d.Version)
+	}
+	var v6 func([]*Block) bool
+	v6 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b != nil {
+				if b.ImageWidth != 0 || b.NoteLabel != "" || b.Kind == "footnote" || v6(b.Children) {
+					return true
+				}
+				for _, r := range b.Runs {
+					if r.Style.Script != "" || r.Style.NoMath {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	if v6(d.Blocks) {
+		return errors.New("document: scripts, image widths and footnotes require version 6")
 	}
 	d.Version = CurrentVersion
 	return nil
@@ -329,7 +353,16 @@ func (d *Document) Validate() error {
 		if b.Emoji != "" && (b.Kind != "callout" || len(b.Emoji) > 32) {
 			return errors.New("document: invalid callout emoji")
 		}
+		if !(b.ImageWidth >= 0 && b.ImageWidth <= 10000) || b.ImageWidth != 0 && b.Kind != "image" {
+			return errors.New("document: invalid image width")
+		}
+		if b.Kind == "footnote" && (b.NoteLabel == "" || len(b.NoteLabel) > 1000 || strings.ContainsAny(b.NoteLabel, "[]\n\r\t ")) || b.Kind != "footnote" && b.NoteLabel != "" {
+			return errors.New("document: invalid footnote label")
+		}
 		for _, r := range b.Runs {
+			if r.Style.Script != "" && r.Style.Script != "sup" && r.Style.Script != "sub" {
+				return errors.New("document: invalid script")
+			}
 			if r.Style.Color != "" && !oneOf(r.Style.Color, TextColors) || r.Style.Highlight != "" && !oneOf(r.Style.Highlight, TextHighlights) {
 				return errors.New("document: invalid text color")
 			}
@@ -379,7 +412,7 @@ func (d *Document) Validate() error {
 			if parent != "row" {
 				return errors.New("document: cell outside row")
 			}
-		case "paragraph", "heading", "quote", "bullet", "numbered", "task", "code", "callout", "image", "rule", "raw", "math":
+		case "paragraph", "heading", "quote", "bullet", "numbered", "task", "code", "callout", "image", "rule", "raw", "math", "footnote":
 		default:
 			return fmt.Errorf("document: unsupported block %q", b.Kind)
 		}

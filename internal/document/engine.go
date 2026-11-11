@@ -16,6 +16,7 @@ type Snapshot struct {
 // Engine applies structural changes atomically and owns one history for every
 // paragraph, table cell and column. Snapshots never alias mutable documents.
 type Engine struct {
+	ReadOnly          bool // Session reading lock; does not change the stored document.
 	depth             int
 	Doc               *Document
 	Anchor, Caret     int
@@ -56,6 +57,9 @@ func (e *Engine) SetSelection(a, z int) {
 }
 
 func (e *Engine) Edit(change func()) {
+	if e.ReadOnly {
+		return
+	}
 	if e.depth > 0 {
 		change()
 		return
@@ -77,6 +81,12 @@ func (e *Engine) Edit(change func()) {
 // callout turned into another kind, so every edit leaves a valid document.
 func dropStrayColors(blocks []*Block) {
 	for _, b := range blocks {
+		if b.Kind != "image" {
+			b.ImageWidth = 0
+		}
+		if b.Kind != "footnote" {
+			b.NoteLabel = ""
+		}
 		if b.Kind != "callout" {
 			b.Color, b.Emoji = "", ""
 		}
@@ -125,6 +135,9 @@ func (e *Engine) SetLanguage(id, language string) {
 }
 
 func (e *Engine) Undo() {
+	if e.ReadOnly {
+		return
+	}
 	if !e.CanUndo() {
 		return
 	}
@@ -136,6 +149,9 @@ func (e *Engine) Undo() {
 }
 
 func (e *Engine) Redo() {
+	if e.ReadOnly {
+		return
+	}
 	if !e.CanRedo() {
 		return
 	}
@@ -177,6 +193,9 @@ func (e *Engine) CurrentStyle() Style {
 }
 
 func (e *Engine) Replace(a, z int, text string) {
+	if e.ReadOnly {
+		return
+	}
 	if e.replaceText(a, z, text) {
 		return
 	}
@@ -186,6 +205,9 @@ func (e *Engine) Replace(a, z int, text string) {
 // PreviewReplace updates the display document during IME composition. The
 // input adapter retains the committed snapshot and creates history on commit.
 func (e *Engine) PreviewReplace(a, z int, text string) {
+	if e.ReadOnly {
+		return
+	}
 	e.replace(a, z, text)
 	e.revision++
 }
@@ -195,6 +217,7 @@ func (e *Engine) replace(a, z int, text string) {
 	a, z = Len(plain[:ByteOffset(plain, max(0, min(a, z)))]), Len(plain[:ByteOffset(plain, max(a, z))])
 	first, last := e.LeafAt(a), e.LeafAt(z)
 	style := e.CurrentStyle()
+	style.NoMath = false
 	before := SliceRuns(first.Block.Runs, 0, a-first.Start)
 	after := SliceRuns(last.Block.Runs, z-last.Start, last.End-last.Start)
 	runs := Compact(append(append(before, Run{Text: strings.ReplaceAll(text, "\r\n", "\n"), Style: style}), after...))
@@ -283,6 +306,9 @@ func (e *Engine) Enter(soft bool) {
 		return
 	}
 	leaf := e.LeafAt(e.Caret)
+	if e.enterMath(leaf) {
+		return
+	}
 	if !soft && e.Anchor == e.Caret && leaf.Block.Text() == "" && (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task" || leaf.Block.Kind == "quote") {
 		e.SetKind("paragraph", 0)
 		return
@@ -298,17 +324,47 @@ func (e *Engine) Fragment() *Document {
 	}
 	out := New()
 	out.Blocks = nil
-	for _, leaf := range e.Doc.Leaves() {
+	leaves := e.Doc.Leaves()
+	whole := map[string]*Block{}
+	for _, block := range e.Doc.Blocks {
+		if len(block.Children) == 0 {
+			continue
+		}
+		start, end := -1, -1
+		for _, leaf := range leaves {
+			if leaf.Owner == block.ID {
+				if start < 0 {
+					start = leaf.Start
+				}
+				end = leaf.End
+			}
+		}
+		if start >= a && end <= z {
+			whole[block.ID] = block
+		}
+	}
+	copied := map[string]bool{}
+	for _, leaf := range leaves {
 		if leaf.End <= a || leaf.Start >= z {
+			continue
+		}
+		if block := whole[leaf.Owner]; block != nil {
+			if !copied[leaf.Owner] {
+				out.Blocks = append(out.Blocks, block.Clone())
+				copied[leaf.Owner] = true
+			}
 			continue
 		}
 		b := leaf.Block.Clone()
 		b.Runs = SliceRuns(b.Runs, max(0, a-leaf.Start), min(z, leaf.End)-leaf.Start)
-		if b.Kind == "cell" {
+		if b.Kind == "cell" || a > leaf.Start || z < leaf.End {
 			b.Kind = "paragraph"
+			b.Level, b.NoteLabel, b.ImageWidth, b.URL = 0, "", 0, ""
+			b.Background, b.ColSpan, b.RowSpan = "", 0, 0
 		}
 		out.Blocks = append(out.Blocks, b)
 	}
+	dropStrayColors(out.Blocks)
 	if len(out.Blocks) == 0 {
 		out.Blocks = []*Block{NewBlock("paragraph", "")}
 	}
@@ -318,9 +374,11 @@ func (e *Engine) Fragment() *Document {
 // Paste inserts a rich fragment in a single transaction, generating fresh IDs.
 func (e *Engine) Paste(fragment *Document) {
 	e.Edit(func() {
+		fragment = e.pastedNotes(fragment)
 		a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
 		leaf := e.LeafAt(a)
-		if len(fragment.Blocks) == 1 && len(fragment.Blocks[0].Children) == 0 {
+		// A formula remains a block even when it is the only copied item.
+		if len(fragment.Blocks) == 1 && len(fragment.Blocks[0].Children) == 0 && (fragment.Blocks[0].Kind == "paragraph" || isVerbatim(leaf.Block) || leaf.Block.Kind == "cell") {
 			insert := fragment.Blocks[0]
 			e.replace(a, z, insert.Text())
 			for _, target := range e.Doc.Leaves() {
@@ -387,6 +445,9 @@ func (e *Engine) SetKind(kind string, level int) {
 }
 
 func (e *Engine) Toggle(mark string) {
+	if e.ReadOnly {
+		return
+	}
 	style := e.CurrentStyle()
 	get := func(s *Style) *bool {
 		switch mark {
@@ -415,6 +476,9 @@ func (e *Engine) Toggle(mark string) {
 // collapsed caret: color and highlight replace the current ones unless
 // nil; "" clears one.
 func (e *Engine) SetTextColor(color, highlight *string) {
+	if e.ReadOnly {
+		return
+	}
 	change := func(s *Style) {
 		if color != nil {
 			s.Color = *color

@@ -61,6 +61,9 @@ type document struct {
 	plainRev   uint64
 	plainKnown bool
 	footer     pageFooterCache
+	// marks are the document's bookmarks resolved to its blocks
+	// (bookmarks.go).
+	marks docMarks
 }
 
 func openDocument(sp *space.Space, rel, text string, preferSource bool) *document {

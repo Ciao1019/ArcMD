@@ -256,7 +256,7 @@ func (st *State) MoveFavorite(i, to int) {
 }
 
 // Renamed follows a file or folder of the space with the ID moved from one
-// path to another, in the space and the favorites.
+// path to another, in the space, the favorites and the bookmarks.
 func (st *State) Renamed(spaceID, from, to string) {
 	if s := st.Get(spaceID); s != nil {
 		s.Renamed(from, to)
@@ -267,20 +267,26 @@ func (st *State) Renamed(spaceID, from, to string) {
 			st.Favorites[i].Path = re(f.Path)
 		}
 	}
+	for i, b := range st.Bookmarks {
+		if b.Space == spaceID {
+			st.Bookmarks[i].Path = re(b.Path)
+		}
+	}
 }
 
 // Forget drops rel of the space with the ID, and what is under it, from the
-// space and the favorites, as after it is gone.
+// space, the favorites and the bookmarks, as after it is gone.
 func (st *State) Forget(spaceID, rel string) {
 	if s := st.Get(spaceID); s != nil {
 		s.Forget(rel)
 	}
 	st.Favorites = slices.DeleteFunc(st.Favorites, func(f Favorite) bool { return f.Space == spaceID && under(f.Path, rel) })
+	st.Bookmarks = slices.DeleteFunc(st.Bookmarks, func(b Bookmark) bool { return b.Space == spaceID && under(b.Path, rel) })
 }
 
 // MovedAcross follows a file or folder that moved from the path from of
 // the space with the ID fromID to the path to of the space toID: its
-// favorites go with it, as do the open folders and the order inside a
+// favorites and bookmarks go with it, as do the open folders and the order inside a
 // folder, and the space it left forgets it.
 func (st *State) MovedAcross(fromID, from, toID, to string) {
 	re := renamer(from, to)
@@ -306,6 +312,11 @@ func (st *State) MovedAcross(fromID, from, toID, to string) {
 	for i, f := range st.Favorites {
 		if f.Space == fromID && under(f.Path, from) {
 			st.Favorites[i] = Favorite{toID, re(f.Path)}
+		}
+	}
+	for i, b := range st.Bookmarks {
+		if b.Space == fromID && under(b.Path, from) {
+			st.Bookmarks[i].Space, st.Bookmarks[i].Path = toID, re(b.Path)
 		}
 	}
 }
@@ -338,6 +349,8 @@ type State struct {
 	// FavoritesHintDismissed hides the card that stands for no favorites,
 	// as its × leaves it.
 	FavoritesHintDismissed bool `json:"favoritesHintDismissed,omitempty"`
+	// Bookmarks are the places marked in documents, oldest first.
+	Bookmarks []Bookmark `json:"bookmarks,omitempty"`
 }
 
 // CurrentVersion is the version of the state's JSON format. Version 2
@@ -347,8 +360,9 @@ type State struct {
 // space shows. Version 5 added Space.Order, the order dragging leaves the
 // sidebar in, and State.FavoritesHintDismissed; older states have neither.
 // Version 6 added Space.Pins, what is pinned at the top of a space's list,
-// and Space.PinsCollapsed.
-const CurrentVersion = 6
+// and Space.PinsCollapsed. Version 7 added State.Bookmarks, the places
+// marked in documents; older states have none.
+const CurrentVersion = 7
 
 // ErrNotFound reports a space ID the state does not have.
 var ErrNotFound = errors.New("space: not found")
@@ -412,6 +426,7 @@ func (st *State) Remove(id string) error {
 	}
 	st.Spaces = slices.Delete(st.Spaces, i, i+1)
 	st.Favorites = slices.DeleteFunc(st.Favorites, func(f Favorite) bool { return f.Space == id })
+	st.Bookmarks = slices.DeleteFunc(st.Bookmarks, func(b Bookmark) bool { return b.Space == id })
 	if st.Active == id {
 		st.Active = ""
 		if len(st.Spaces) > 0 {

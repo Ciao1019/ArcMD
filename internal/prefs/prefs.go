@@ -18,7 +18,10 @@ const CurrentVersion = 1
 
 // Prefs are the preferences.
 type Prefs struct {
-	Version int `json:"version"`
+	Version    int     `json:"version"`
+	FontSize   float32 `json:"fontSize,omitempty"`
+	LineHeight float32 `json:"lineHeight,omitempty"`
+	NoAutoPair bool    `json:"noAutoPair,omitempty"`
 	// Typewriter keeps the line being written in the middle of the page.
 	Typewriter bool `json:"typewriter,omitempty"`
 	// NoDim keeps the other paragraphs bright in focus mode, which fades
@@ -58,11 +61,13 @@ func (s Store) Load() (*Prefs, error) {
 	if p.Version > CurrentVersion || p.Version < 1 {
 		return nil, fmt.Errorf("prefs: unsupported version %d", p.Version)
 	}
+	p.normalizeReading()
 	return &p, nil
 }
 
 // Save writes the preferences.
 func (s Store) Save(p *Prefs) error {
+	p.normalizeReading()
 	p.Version = CurrentVersion
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -72,4 +77,25 @@ func (s Store) Save(p *Prefs) error {
 		return err
 	}
 	return fsutil.WriteFileAtomic(s.Path, append(data, '\n'), 0o644)
+}
+
+func (p *Prefs) ReadingSize() float32 {
+	if p.FontSize >= 12 && p.FontSize <= 28 {
+		return p.FontSize
+	}
+	return 16
+}
+func (p *Prefs) ReadingLine() float32 {
+	if p.LineHeight >= 1.2 && p.LineHeight <= 2.2 {
+		return p.LineHeight
+	}
+	return 26.0 / 16
+}
+func (p *Prefs) normalizeReading() {
+	if !(p.FontSize >= 12 && p.FontSize <= 28) {
+		p.FontSize = 0
+	}
+	if !(p.LineHeight >= 1.2 && p.LineHeight <= 2.2) {
+		p.LineHeight = 0
+	}
 }

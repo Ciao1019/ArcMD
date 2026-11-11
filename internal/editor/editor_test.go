@@ -34,7 +34,7 @@ func TestRealRichTypingAndNativeClipboard(t *testing.T) {
 		t.Fatal("underline is not structural")
 	}
 	tt.Key(ui.Cmd, ui.KeyC)
-	if tt.Clipboard() != "world" {
+	if tt.Clipboard() != "<u>**world**</u>" {
 		t.Fatal("native copy", tt.Clipboard())
 	}
 	tt.Type("世界😀")
@@ -909,5 +909,50 @@ func TestCalloutEmoji(t *testing.T) {
 	tt.Click("使用颜色图标")
 	if e.Doc.Blocks[0].Emoji != "" || e.Doc.Blocks[0].Color != "green" {
 		t.Fatal("back to color icon")
+	}
+}
+
+func TestClickingAGapAddsAParagraph(t *testing.T) {
+	e, tt := newTester("# T\n\n```go\nx\n```\n\n```go\ny\n```")
+	focus(e, tt)
+	bounds, _ := tt.Find("文档")
+	gaps := e.gaps()
+	if len(gaps) != 2 || gaps[0].end || !gaps[1].end {
+		t.Fatalf("gaps between and after closing code: %+v", gaps)
+	}
+	// Under the pointer the gap shows; elsewhere the page is as it was.
+	end := gaps[1].rect
+	tt.Move(bounds.X+end.X+40, bounds.Y+end.Y+end.H/2)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := e.hoveredGap(); !ok || tt.Cursor() != ui.CursorPointer {
+		t.Fatal("the gap under the pointer does not show a hand", tt.Cursor())
+	}
+	tt.ClickAt(bounds.X+end.X+40, bounds.Y+end.Y+end.H/2)
+	tt.Type("after")
+	if len(e.Doc.Blocks) != 4 || e.Doc.Blocks[3].Kind != "paragraph" || e.Doc.Blocks[3].Text() != "after" {
+		t.Fatalf("click after the last block: %q", e.Text())
+	}
+	if gaps = e.gaps(); len(gaps) != 1 {
+		t.Fatalf("a paragraph at the end needs no gap: %+v", gaps)
+	}
+	between := gaps[0].rect
+	tt.ClickAt(bounds.X+between.X+40, bounds.Y+between.Y+between.H/2)
+	tt.Type("between")
+	if len(e.Doc.Blocks) != 5 || e.Doc.Blocks[2].Text() != "between" || e.Doc.Blocks[1].Text() != "x" || e.Doc.Blocks[3].Text() != "y" {
+		t.Fatalf("click between two code blocks: %q", e.Text())
+	}
+	if len(e.gaps()) != 0 {
+		t.Fatal("gaps remain")
+	}
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Key(ui.Cmd, ui.KeyZ)
+	if len(e.Doc.Blocks) != 4 {
+		t.Fatal("adding the paragraph is not its own undo step")
+	}
+	e.ReadOnly = true
+	e.Doc.Blocks = e.Doc.Blocks[:3]
+	if len(e.gaps()) != 0 {
+		t.Fatal("a read-only page offers gaps")
 	}
 }

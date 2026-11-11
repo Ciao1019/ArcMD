@@ -16,7 +16,7 @@ import (
 func (e *Editor) Paginate(o Options, height float32) []float32 {
 	e.printing = true
 	e.ready = false
-	e.mathEditing = ""
+	e.mathEditing, e.inlineEditing = "", ""
 	e.page = pageOf(o.Page, o.Theme)
 	e.layout(o)
 	end := e.contentEnd + 24
@@ -92,9 +92,26 @@ func (e *Editor) PageText(top, bottom float32) []PrintText {
 				if next <= at {
 					break
 				}
+				object := false
+				for _, o := range row.layout.objects {
+					if !o.script && at >= o.start && at < o.end {
+						object = true
+						break
+					}
+				}
+				if object {
+					at = next
+					continue
+				}
 				rects := row.layout.SelectionRects(ui.TextInputRange{Start: at, End: next})
 				if len(rects) > 0 {
 					r := rects[0]
+					for _, o := range row.layout.objects {
+						if o.script && at == o.start {
+							r = o.rect
+							break
+						}
+					}
 					r.X += row.x
 					r.Y += row.y
 					out = append(out, PrintText{Text: text[ui.UTF16ByteOffset(text, at):ui.UTF16ByteOffset(text, next)], Bounds: r})

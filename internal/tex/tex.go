@@ -51,6 +51,15 @@ type Box struct {
 // cannot read, as unbalanced braces; commands it does not know show as
 // written, marked as errors.
 func Layout(src string, size float32, m Measure) (Box, error) {
+	return layoutMode(src, size, m, true)
+}
+
+// LayoutInline uses text-style operators and side limits within a sentence.
+func LayoutInline(src string, size float32, m Measure) (Box, error) {
+	return layoutMode(src, size, m, false)
+}
+
+func layoutMode(src string, size float32, m Measure, display bool) (Box, error) {
 	p := &parser{src: src}
 	lines, err := p.lines(nil)
 	if err != nil {
@@ -62,7 +71,7 @@ func Layout(src string, size float32, m Measure) (Box, error) {
 	l := &layouter{m: m}
 	var boxes []Box
 	for _, line := range lines {
-		boxes = append(boxes, l.list(line, size, true))
+		boxes = append(boxes, l.list(line, size, display))
 	}
 	return l.stack(boxes, size, alignCenter), nil
 }

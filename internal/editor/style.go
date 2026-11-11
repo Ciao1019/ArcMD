@@ -51,6 +51,8 @@ type Page struct {
 	// while it is repositioned, and OnScrim their color.
 	Scrim, OnScrim ui.Color
 	ImageShadow    ui.Color
+	// MathBorder and MathShadow belong to the source panel and live preview.
+	MathBorder, MathShadow ui.Color
 	// Covers are the two colors, top-left to bottom-right, of each of
 	// document.CoverGradients.
 	Covers   map[string][2]ui.Color
@@ -93,6 +95,8 @@ func pageOf(p Page, t *ui.Theme) Page {
 	set(&p.TableHeader, t.Surface)
 	set(&p.Hover, t.Text.Alpha(.06))
 	set(&p.ImageShadow, t.Text.Alpha(.08))
+	set(&p.MathBorder, t.Border)
+	set(&p.MathShadow, t.Text.Alpha(.12))
 	set(&p.TurnActive, t.Accent.Alpha(.14))
 	set(&p.Popover, t.Background)
 	set(&p.BarFill, t.Text.Alpha(.06))

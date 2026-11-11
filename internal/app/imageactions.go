@@ -14,7 +14,7 @@ import (
 // native dialog. Switching panes or deleting the block cannot redirect it.
 func (a *App) pickReplacementImage(d *document, id, expected string) {
 	current := func() bool {
-		if d == nil || d.loadErr != nil || d.source || a.residentDocument(d.space.ID, d.rel) != d {
+		if d == nil || d.ed.ReadOnly || d.loadErr != nil || d.source || a.residentDocument(d.space.ID, d.rel) != d {
 			return false
 		}
 		for _, leaf := range d.ed.Doc.Leaves() {

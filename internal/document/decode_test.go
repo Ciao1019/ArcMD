@@ -25,8 +25,8 @@ func TestDecodeRejectsMalformedTableCells(t *testing.T) {
 }
 
 func FuzzDecode(f *testing.F) {
-	f.Add(`{"format":"arcmd","version":5,"blocks":[{"id":"p","kind":"paragraph"}]}`)
-	f.Add(`{"format":"arcmd","version":5,"blocks":[{"id":"t","kind":"table","children":[{"id":"r","kind":"row","children":[null]}]}]}`)
+	f.Add(`{"format":"arcmd","version":6,"blocks":[{"id":"p","kind":"paragraph"}]}`)
+	f.Add(`{"format":"arcmd","version":6,"blocks":[{"id":"t","kind":"table","children":[{"id":"r","kind":"row","children":[null]}]}]}`)
 	f.Fuzz(func(t *testing.T, text string) {
 		if len(text) > 1<<20 {
 			t.Skip("input exceeds the fuzz corpus size limit")

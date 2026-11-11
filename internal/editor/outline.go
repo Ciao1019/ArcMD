@@ -76,13 +76,27 @@ func (e *Editor) hasHeadings() bool {
 	return false
 }
 
+// hasBookmarks reports whether the outline has bookmarks to list.
+func (e *Editor) hasBookmarks() bool {
+	if len(e.bookmarks.marks) == 0 || e.bookmarks.toggle == nil {
+		return false
+	}
+	for _, b := range e.Doc.Blocks {
+		if _, ok := e.bookmarks.marks[b.ID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // outlineReserve settles the outline's mode for the pane width and returns
 // the room it takes beside the page now, moving to it.
 func (e *Editor) outlineReserve(c *ui.Context, o Options) float32 {
 	s := &e.outlineState
 	s.open, s.set = o.Outline, o.SetOutline
+	was := s.mode
 	s.mode = outlineOff
-	if s.set != nil && e.hasHeadings() {
+	if s.set != nil && (e.hasHeadings() || e.hasBookmarks()) {
 		s.mode = outlineFloating
 		if o.Width-outlineWidth >= outlineMinPage {
 			s.mode = outlineBeside
@@ -90,6 +104,11 @@ func (e *Editor) outlineReserve(c *ui.Context, o Options) float32 {
 	}
 	if s.mode != outlineFloating {
 		s.floating = false
+	}
+	if e.ready && was == outlineOff && s.mode == outlineBeside && s.open {
+		// The first bookmark of a page without headings brings the outline
+		// in under the reader's pointer: it slides, as when opened by hand.
+		s.toggled = true
 	}
 	// Beside the title, unless the page's margin without the outline is
 	// too narrow for the button and the title's handle: then above it.
@@ -323,5 +342,6 @@ func (e *Editor) outlineList(c *ui.Context) {
 				p.Fill(ui.Rect{X: r.X, Y: r.Y + 1, W: r.W, H: 2}, t.Accent, 1)
 			})
 		}
+		e.bookmarkSection(c)
 	})
 }

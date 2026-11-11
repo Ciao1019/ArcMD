@@ -407,3 +407,32 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 		a.notify("已更新 %d 篇文档中指向「%s」的链接。", changed, to)
 	}
 }
+
+// previewWikiFor resolves in the source note's space and prefers live editors,
+// so previews include unsaved changes without changing navigation or selection.
+func (a *App) previewWikiFor(source *document, name string) editor.WikiPreview {
+	p := editor.WikiPreview{Title: name, Missing: true}
+	if source == nil {
+		return p
+	}
+	sp, rel, ok := a.findNamedFrom(source.space.ID, name)
+	if !ok {
+		return p
+	}
+	p.Location = sp.Name + " / " + rel
+	d := a.residentDocument(sp.ID, rel)
+	if d == nil {
+		d = a.thumbOf(sp, rel)
+	}
+	if d == nil || d.loadErr != nil {
+		p.Text = "无法读取这篇笔记"
+		p.Missing = false
+		return p
+	}
+	text := []rune(d.ed.Committed().PlainText())
+	if len(text) > 500 {
+		text = append(text[:500], '…')
+	}
+	p.Text, p.Missing = string(text), false
+	return p
+}

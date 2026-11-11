@@ -8,14 +8,20 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Math blocks show their formula, typeset by package tex, and their TeX
-// only while the caret is in them, with the formula previewed below.
-
-// mathSize is the size formulas are set at.
-const mathSize = 18
+// Math follows Textus: an unboxed formula at rest, a centered source panel
+// while editing, and a separate live preview with room below that panel.
+const (
+	mathSize     = 16 * 1.21 // KaTeX's size relative to the document body.
+	mathMargin   = 18
+	mathPaddingX = 12
+	mathPaddingY = 6
+	mathFenceH   = 20
+	mathPreviewY = 16
+	mathPreviewW = 420
+)
 
 // mathFont is the family formulas are set in: a book face, as TeX's.
-const mathFont = "Times New Roman, STIX Two Text, Noto Serif, serif"
+const mathFont = "KaTeX_Main, Times New Roman, STIX Two Text, Noto Serif, serif"
 
 // mathShape is a math block's formula, laid out for its TeX.
 type mathShape struct {
@@ -27,16 +33,18 @@ type mathShape struct {
 // watchMath notes the math block the caret is in, which shows its TeX.
 func (e *Editor) watchMath() {
 	e.mathEditing = ""
-	if !e.focused || e.printing {
+	if !e.focused || e.printing || e.ReadOnly {
 		return
 	}
-	if leaf := e.Engine.LeafAt(e.Caret); leaf.Block.Kind == "math" {
+	if leaf := e.Engine.LeafAt(e.Caret); leaf.Block.Kind == "math" && e.Anchor >= leaf.Start && e.Anchor <= leaf.End {
 		e.mathEditing = leaf.Block.ID
 	}
 }
 
 // glyphs shapes a piece of a formula's text, kept for drawing.
 func (e *Editor) glyphs(text string, size float32, italic bool) *ui.TextLayout {
+	// A registration failure still leaves the system serif fallbacks usable.
+	_ = loadMathFonts()
 	key := fmt.Sprintf("%s|%g|%v", text, size, italic)
 	if l, ok := e.mathGlyphs[key]; ok {
 		return l
@@ -44,7 +52,11 @@ func (e *Editor) glyphs(text string, size float32, italic bool) *ui.TextLayout {
 	if e.mathGlyphs == nil || len(e.mathGlyphs) > 4096 {
 		e.mathGlyphs = map[string]*ui.TextLayout{}
 	}
-	l := ui.ShapeRichText([]ui.Span{{Text: text, Size: size, Italic: italic}}, ui.Font{Family: mathFont, Size: size, Italic: italic}, 0)
+	family := mathFont
+	if italic {
+		family = "KaTeX_Math, " + family
+	}
+	l := ui.ShapeRichText([]ui.Span{{Text: text, Size: size, Italic: italic}}, ui.Font{Family: family, Size: size, Italic: italic}, 0)
 	e.mathGlyphs[key] = l
 	return l
 }
@@ -73,49 +85,96 @@ func (e *Editor) formula(id, src string) mathShape {
 	return s
 }
 
-// mathRow lays a math block out beyond its TeX: the formula in place of
-// it, or below it while the caret is in it. It returns the block's height.
-func (e *Editor) mathRow(r *row, total, textH, top, bottom float32) float32 {
+// mathRow reserves a preview's room so it never covers the following block.
+// All formula geometry stays relative to the row, including narrow columns.
+func (e *Editor) mathRow(r *row, textH float32) float32 {
 	b := r.leaf.Block
 	src := strings.TrimSpace(b.Text())
+	r.mathScale = 1
+	r.mathHidden = e.mathEditing != b.ID
+	r.mathTop = mathMargin
+	r.y = r.rect.Y + mathMargin
+	if !r.mathHidden {
+		r.mathPanel = textH + 2*mathPaddingY + 2*mathFenceH
+		r.y += mathPaddingY + mathFenceH
+		r.mathTop += r.mathPanel + 10 + mathPreviewY
+	}
 	if src == "" {
-		return total
+		return 2*mathMargin + max(26, r.mathPanel)
 	}
 	shape := e.formula(b.ID, src)
 	if shape.err != nil {
-		r.mathErr = shape.err.Error()
-		return total + 22
+		r.mathErr = "公式有误：" + strings.TrimPrefix(shape.err.Error(), "tex: ")
+		r.mathError = ui.ShapeText(r.mathErr, ui.Font{Family: "system-ui", Size: 12}, max(24, r.rect.W-2*mathPaddingX))
+		_, errorH := r.mathError.Size()
+		if r.mathHidden {
+			r.mathHidden = false // Malformed TeX always remains editable and visible.
+			r.mathTop = mathMargin + textH + 8
+		}
+		return r.mathTop + errorH + mathMargin
 	}
 	box := shape.box
 	r.math = &box
-	h := box.Ascent + box.Descent
-	if e.mathEditing == b.ID {
-		r.mathTop = r.y + textH + 14
-		return total + h + 14
+	width := r.rect.W
+	if !r.mathHidden {
+		width = min(width, mathPreviewW) - 2*mathPaddingX
 	}
-	r.mathHidden = true
-	r.mathTop = r.rect.Y + top
-	return top + h + bottom
+	if box.W > width {
+		r.mathScale = max(1, width) / box.W
+	}
+	h := (box.Ascent + box.Descent) * r.mathScale
+	if !r.mathHidden {
+		return r.mathTop + h + mathPreviewY + mathMargin
+	}
+	return 2*mathMargin + max(26, h)
 }
 
 // paintMath draws a math block's formula, and reports whether it stands
 // for the block's TeX, which then is not drawn.
 func (e *Editor) paintMath(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bool {
-	if r.mathErr != "" {
-		_, h := r.layout.Size()
-		p.Text(bounds.X+r.x, bounds.Y+r.y+h+4, "公式有误："+strings.TrimPrefix(r.mathErr, "tex: "), 12, t.Danger)
+	if r.leaf.Block.Kind != "math" {
+		return false
+	}
+	x, y := bounds.X+r.rect.X, bounds.Y+r.rect.Y
+	if r.mathPanel > 0 {
+		panel := ui.Rect{X: x, Y: y + mathMargin, W: r.rect.W, H: r.mathPanel}
+		p.Stroke(panel, e.page.MathBorder, 8, 1)
+		fence := ui.ShapeText("$$", ui.Font{Family: "monospace", Size: 14.4}, 0)
+		fw, fh := fence.Size()
+		p.TextLayout(fence, x+(r.rect.W-fw)/2, panel.Y+mathPaddingY+(mathFenceH-fh)/2, e.page.Caption)
+		p.TextLayout(fence, x+(r.rect.W-fw)/2, panel.Y+panel.H-mathPaddingY-mathFenceH+(mathFenceH-fh)/2, e.page.Caption)
+	}
+	if r.mathError != nil {
+		ew, _ := r.mathError.Size()
+		p.TextLayout(r.mathError, x+(r.rect.W-ew)/2, y+r.mathTop, t.Danger)
 		return false
 	}
 	if r.math == nil {
-		return false
+		if !e.printing {
+			hint := ui.ShapeText("输入 LaTeX 公式", ui.Font{Family: "system-ui", Size: 14}, 0)
+			hw, hh := hint.Size()
+			p.TextLayout(hint, x+(r.rect.W-hw)/2, bounds.Y+r.y+(22-hh)/2, e.page.Placeholder)
+		}
+		return r.mathHidden
 	}
-	box := r.math
-	x := bounds.X + r.rect.X + (r.rect.W-box.W)/2
-	y := bounds.Y + r.mathTop + box.Ascent
+	box, scale := r.math, r.mathScale
+	w, h := box.W*scale, (box.Ascent+box.Descent)*scale
 	if !r.mathHidden {
-		// The preview below the TeX, after a hairline.
-		p.Line(bounds.X+r.x, bounds.Y+r.mathTop-7, bounds.X+r.rect.X+r.rect.W-20, bounds.Y+r.mathTop-7, 1, e.page.TableLine)
+		previewW := min(r.rect.W, w+2*mathPaddingX)
+		preview := ui.Rect{X: x + (r.rect.W-previewW)/2, Y: y + r.mathTop - mathPreviewY, W: previewW, H: h + 2*mathPreviewY}
+		p.Shadow(preview, 12, 0, 4, 16, 0, e.page.MathShadow)
+		p.Fill(preview, e.page.Popover, 12)
+		p.Stroke(preview, e.page.MathBorder, 12, 1)
 	}
+	x += (r.rect.W - w) / 2
+	y += r.mathTop
+	p.Transform(ui.Scaling(scale, scale), x, y, func() {
+		e.paintFormula(p, *box, x, y+box.Ascent, t)
+	})
+	return r.mathHidden
+}
+
+func (e *Editor) paintFormula(p *ui.Painter, box tex.Box, x, y float32, t *ui.Theme) {
 	for _, op := range box.Ops {
 		switch op.Kind {
 		case "text":
@@ -139,5 +198,4 @@ func (e *Editor) paintMath(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bo
 			p.StrokePolyline(pts, op.Width, t.Text)
 		}
 	}
-	return r.mathHidden
 }

@@ -84,6 +84,7 @@ func (e *Engine) replaceText(a, z int, text string) bool {
 	a = first.Start + Len(before[:ByteOffset(before, a-first.Start)])
 	z = first.Start + Len(before[:ByteOffset(before, z-first.Start)])
 	style := e.CurrentStyle()
+	style.NoMath = false
 	runs := Compact(append(append(SliceRuns(b.Runs, 0, a-first.Start), Run{Text: text, Style: style}), SliceRuns(b.Runs, z-first.Start, first.End-first.Start)...))
 	// Short Markdown prefixes still take the structural transaction path.
 	if text == " " && b.Kind == "paragraph" && first.End-first.Start-(z-a)+1 <= 7 {

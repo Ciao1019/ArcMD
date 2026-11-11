@@ -5,6 +5,9 @@ import "slices"
 // ReplaceImage changes one picture without losing its description or ID.
 // expected prevents a delayed file picker from overwriting a newer choice.
 func (e *Engine) ReplaceImage(id, expected, next string) bool {
+	if e.ReadOnly {
+		return false
+	}
 	parent, index := e.find(id)
 	if parent == nil || (*parent)[index].Kind != "image" || (*parent)[index].URL != expected || next == "" {
 		return false

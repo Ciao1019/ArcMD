@@ -63,7 +63,7 @@ func (a *App) View(c *ui.Context) {
 	a.syncTree()
 	a.syncWatches()
 	for _, d := range a.residentDocuments() {
-		a.withDocument(d, func() { d.autosave(c); a.followMigration(); a.followTitle() })
+		a.withDocument(d, func() { d.autosave(c); a.followMigration(); a.followTitle(); a.syncExcerpts(a.doc) })
 	}
 	for _, n := range a.notices {
 		c.Toast(n)
@@ -186,6 +186,14 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.toggleLibrary()
 	case a.pressed(c, "outline"):
 		a.toggleOutline()
+	case a.pressed(c, "bookmark"):
+		a.toggleBookmarkAtCaret()
+	case a.pressed(c, "bookmarks"):
+		a.openBookmarks()
+	case a.pressed(c, "prev-bookmark"):
+		a.stepBookmark(-1)
+	case a.pressed(c, "next-bookmark"):
+		a.stepBookmark(1)
 	case a.pressed(c, "history"):
 		a.openVersions()
 	case a.pressed(c, "export-pdf"):

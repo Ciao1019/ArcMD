@@ -402,7 +402,7 @@ func TestPageIconAndCover(t *testing.T) {
 	saveSettle(tt)
 	text, _ := vault.Read(root(a), "Welcome.arcmd")
 	doc, err := model.Decode(text)
-	if err != nil || doc.Icon != "🚀" || doc.Cover != "assets/cover.png" || doc.Version != 5 {
+	if err != nil || doc.Icon != "🚀" || doc.Cover != "assets/cover.png" || doc.Version != model.CurrentVersion {
 		t.Fatalf("saved %+v %v", doc, err)
 	}
 	a.refreshSearch()

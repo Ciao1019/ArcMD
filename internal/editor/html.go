@@ -150,6 +150,12 @@ func styled(n *html.Node, style document.Style) document.Style {
 	if strings.Contains(css, "line-through") {
 		style.Strike = true
 	}
+	if strings.Contains(css, "vertical-align:super") {
+		style.Script = "sup"
+	}
+	if strings.Contains(css, "vertical-align:sub") {
+		style.Script = "sub"
+	}
 	return style
 }
 
@@ -179,6 +185,10 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		style.Bold = true
 	case atom.I, atom.Em, atom.Cite:
 		style.Italic = true
+	case atom.Sup:
+		style.Script = "sup"
+	case atom.Sub:
+		style.Script = "sub"
 	case atom.U, atom.Ins:
 		style.Underline = true
 	case atom.S, atom.Del, atom.Strike:

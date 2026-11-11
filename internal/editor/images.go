@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"net/url"
 	"path"
 	"strings"
@@ -46,6 +47,8 @@ type imageAction struct {
 
 type imageViewer struct {
 	open, actual bool
+	zoom         float32
+	pan          ui.Point
 	name         string
 	bitmap       *ui.Bitmap
 	scroll       ui.ScrollState
@@ -116,6 +119,13 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 	if bitmap := f.resource.Bitmap; bitmap != nil {
 		iw, ih := bitmap.Size()
 		scale := min(float32(1), w/float32(max(1, iw)))
+		preferred := b.ImageWidth
+		if e.imageResize.id == b.ID {
+			preferred = e.imageResize.width
+		}
+		if preferred > 0 {
+			scale = min(w, preferred) / float32(max(1, iw))
+		}
 		if e.printing {
 			// A whole picture fits an A4 page; the interactive view has no
 			// fixed height limit, so tall screenshots remain readable.
@@ -290,10 +300,12 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		}
 		picture.ContextMenu(func(m *ui.Menu) {
 			menuAction(m, "放大查看", open)
-			menuAction(m, "编辑图片说明…", func() {
-				e.FocusBlock(id)
-				e.imageCaptionID, e.ready, e.RequestFocus = id, false, true
-			})
+			if !e.ReadOnly {
+				menuAction(m, "编辑图片说明…", func() {
+					e.FocusBlock(id)
+					e.imageCaptionID, e.ready, e.RequestFocus = id, false, true
+				})
+			}
 			if o.ReplaceImage != nil {
 				menuAction(m, "重新选择图片…", func() { o.ReplaceImage(id, src) })
 			}
@@ -301,6 +313,7 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 				menuAction(m, "在文件夹中显示", func() { o.RevealImage(src) })
 			}
 		})
+		e.imageHandles(c, row)
 		if (picture.Hovered() || picture.Focused() || e.hovered(r, 0)) && r.W >= 100 && r.H >= 56 {
 			button := e.imageButton(key.Key("zoom"), "放大查看", ui.Rect{X: r.X + r.W - 82, Y: r.Y + 8, W: 74, H: 28})
 			button.Background(e.page.Popover)
@@ -351,22 +364,20 @@ func (e *Editor) imagePreview(c *ui.Context) {
 			if ui.Button(c, label).Clicked() {
 				v.actual = !v.actual
 				v.scroll = ui.ScrollState{}
+				v.zoom, v.pan = 0, ui.Point{}
+			}
+			vw, vh := w-24, h-66
+			if ui.Button(c, "−").Label("缩小图片").Clicked() {
+				v.zoomAt(v.scaleFor(vw, vh)/1.15, vw/2, vh/2, vw, vh)
+			}
+			ui.Text(c, fmt.Sprintf("%.0f%%", v.scaleFor(vw, vh)*100)).FontSize(12).Width(42)
+			if ui.Button(c, "+").Label("放大图片").Clicked() {
+				v.zoomAt(v.scaleFor(vw, vh)*1.15, vw/2, vh/2, vw, vh)
 			}
 			if ui.Button(c, "关闭").Tooltip("关闭 (Esc)").Clicked() {
 				v.open = false
 			}
 		})
-		iw, ih := v.bitmap.Size()
-		vw, vh := w-24, h-66
-		scale := min(float32(1), vw/float32(max(1, iw)), vh/float32(max(1, ih)))
-		if v.actual {
-			scale = 1
-		}
-		pw, ph := float32(iw)*scale, float32(ih)*scale
-		ui.ScrollBoth(c.Key("preview-scroll")).Grow(1).MinHeight(0).TrackScroll(&v.scroll).Children(func() {
-			ui.Box(c).Size(max(vw, pw), max(vh, ph)).Children(func() {
-				ui.Image(c, v.bitmap).Absolute().Left(max(0, (vw-pw)/2)).Top(max(0, (vh-ph)/2)).Size(pw, ph)
-			})
-		})
+		e.imageCanvas(c, w-24, h-66)
 	})
 }

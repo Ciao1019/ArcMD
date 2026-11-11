@@ -186,11 +186,20 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 	if n.limits && (display || n.kind == "func") && (n.kind == "big" || n.kind == "func") {
 		return l.limits(base, sup, sub, size)
 	}
-	return l.scripts(base, sup, sub, size, n.italic)
+	correction := float32(0)
+	if n.italic {
+		correction = size * .03
+	}
+	if n.kind == "big" && strings.ContainsAny(n.text, "∫∬∭∮") {
+		// An integral leans beyond its advance at the upper hook. Its
+		// upper limit needs clearance while the lower one stays close.
+		correction = size * .22
+	}
+	return l.scripts(base, sup, sub, size, correction)
 }
 
 // scripts sets a superscript and a subscript beside a base.
-func (l *layouter) scripts(base Box, sup, sub *Box, size float32, italic bool) Box {
+func (l *layouter) scripts(base Box, sup, sub *Box, size, correction float32) Box {
 	out := Box{}
 	out.place(base, 0, 0)
 	x := base.W
@@ -205,12 +214,8 @@ func (l *layouter) scripts(base Box, sup, sub *Box, size float32, italic bool) B
 	}
 	w := float32(0)
 	if sup != nil {
-		dx := float32(0)
-		if italic {
-			dx = size * 0.03
-		}
-		out.place(*sup, x+dx, -up)
-		w = max(w, sup.W+dx)
+		out.place(*sup, x+correction, -up)
+		w = max(w, sup.W+correction)
 	}
 	if sub != nil {
 		out.place(*sub, x, down)

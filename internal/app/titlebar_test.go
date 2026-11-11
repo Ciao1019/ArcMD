@@ -82,7 +82,7 @@ func TestWindowsTitleBarFullscreen(t *testing.T) {
 	if !ok || before.X+before.W > 1240-windowsTitleBar.Right {
 		t.Fatalf("toolbar overlaps caption buttons at 150%% scale: %+v", before)
 	}
-	if err := tt.Click("更多"); err != nil || !tt.HasText("新建文档") {
+	if err := tt.Click("更多"); err != nil || !tt.HasText("设置…") {
 		t.Fatalf("toolbar menu did not open: %v", err)
 	}
 	tt.CloseMenu()

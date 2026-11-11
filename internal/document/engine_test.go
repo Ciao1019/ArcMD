@@ -102,7 +102,7 @@ func TestNestedTransactionsAndContainers(t *testing.T) {
 }
 
 func TestRejectUnsupportedOrCorruptFormat(t *testing.T) {
-	for _, text := range []string{`{"format":"arcmd","version":6,"blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":4,"icon":"🚀","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"../x.png","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"gradient:nope","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":1,"blocks":[]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"future"}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph","future":true}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph"},{"id":"a","kind":"paragraph"}]}`} {
+	for _, text := range []string{`{"format":"arcmd","version":7,"blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":4,"icon":"🚀","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"../x.png","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"gradient:nope","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":1,"blocks":[]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"future"}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph","future":true}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph"},{"id":"a","kind":"paragraph"}]}`} {
 		if _, err := Decode(text); err == nil {
 			t.Fatal("accepted unsupported document", text)
 		}

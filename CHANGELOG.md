@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.0.6
+
+This release brings the full set of new writing and reading features, together with all security and data-safety fixes from 0.0.5.
+
+### Writing and navigation
+
+- Bookmark passages, rename bookmarks, find them in the outline and global command bar, and jump between documents. Formula bookmarks include rendered previews.
+- Write inline and block TeX with live source previews, `$$` input, and formula clipboard exchange. Native formula rendering includes embedded KaTeX fonts and their licenses; it supports ArcMD's TeX subset.
+- Add footnotes with automatic numbering, jump to their definitions, and return to the reference.
+- Use superscript and subscript, including Markdown and HTML interchange.
+- Copy and paste rich Markdown and HTML content, including tables and columns.
+- Edit links in an anchored popover and preview local wiki-link targets on hover.
+- Resize images with the pointer or keyboard and save their widths with the document. The image viewer supports continuous zoom and panning.
+- Automatically pair Chinese and English brackets and quotes, wrap selected text, and delete empty pairs together. Pairing can be disabled in settings.
+- Adjust reading font size and line height in preferences.
+- Lock individual editors or split panes for read-only viewing.
+- Edit columns with clickable empty areas, Tab navigation, and responsive stacking in narrow layouts.
+- Click gaps between or after closed blocks to insert a paragraph.
+- Use reorganized More and settings menus. Rename sidebar documents and folders from their context menu; double-click no longer starts renaming.
+
+### Security and data safety
+
+All five fixes from 0.0.5 remain included: save-conflict read failures preserve unsaved edits; Space paths reject escaping symbolic links and stop folder-link cycles; malformed table cells produce load errors instead of panics; case-only renames cannot overwrite a different existing file; and plugin requests require HTTPS at every redirect. Regression tests, document-decoder fuzz coverage, and Linux case-sensitive filesystem checks are included.
+
+### Data compatibility
+
+ArcMD 0.0.6 writes document format **6** and Space configuration format **7**. It reads and migrates older formats. Documents are written in the new format when saved, and Space configuration is upgraded when persisted. Older ArcMD releases cannot read these upgraded files. Back up documents and configuration before upgrading if you need to return to an older release.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives, delta patches, and five `update-*.json` manifests support in-app updates.
+
+ArcMD remains an early preview. macOS packages use ad-hoc signing and are not notarized; Windows packages are unsigned. Windows 32-bit, the plugin marketplace, and plugin execution runtimes remain unavailable. Keep `.arcmd` originals to preserve all rich-text features.
+
 ## 0.0.5
 
 A security and data-safety patch release. Existing editing features, UI, and the document format remain unchanged from 0.0.4.

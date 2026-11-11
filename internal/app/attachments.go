@@ -24,7 +24,7 @@ var imageExtensions = []string{"png", "jpg", "jpeg", "gif", "webp", "bmp"}
 // inserts them at the caret as one step of the undo history.
 func (a *App) pickImages() {
 	d := a.doc
-	if d == nil {
+	if d == nil || d.ed.ReadOnly {
 		return
 	}
 	done := func(paths []string) {
@@ -51,11 +51,11 @@ func (a *App) pickImages() {
 // beside the document and gives its URL to done.
 func (a *App) pickCover(done func(url string)) {
 	d := a.doc
-	if d == nil {
+	if d == nil || d.ed.ReadOnly {
 		return
 	}
 	got := func(paths []string) {
-		if a.residentDocument(d.space.ID, d.rel) != d || len(paths) == 0 {
+		if a.residentDocument(d.space.ID, d.rel) != d || d.ed.ReadOnly || len(paths) == 0 {
 			return
 		}
 		if !isImage(paths[0]) {
@@ -98,6 +98,9 @@ func isImage(name string) bool {
 // pictures, folders included, are left out with a notice, as Markdown
 // has no attachments.
 func (a *App) insertImages(paths []string, at int) {
+	if a.doc == nil || a.doc.ed.ReadOnly {
+		return
+	}
 	d := a.doc
 	if d == nil || d.loadErr != nil || d.source {
 		return
@@ -125,6 +128,9 @@ func (a *App) insertImages(paths []string, at int) {
 // pasteImage saves a picture pasted from the clipboard beside the document
 // as a PNG and inserts it at the caret.
 func (a *App) pasteImage(png []byte) {
+	if a.doc == nil || a.doc.ed.ReadOnly {
+		return
+	}
 	d := a.doc
 	if d == nil || d.loadErr != nil || d.source {
 		return
@@ -146,6 +152,9 @@ func imageBlock(alt, rel string) *model.Block {
 // placeImages inserts image blocks as one step of the history: before the
 // top-level block at index, or at the caret for -1.
 func (a *App) placeImages(blocks []*model.Block, at int) {
+	if a.doc == nil || a.doc.ed.ReadOnly {
+		return
+	}
 	if len(blocks) == 0 {
 		return
 	}

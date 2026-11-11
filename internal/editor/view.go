@@ -14,8 +14,17 @@ import (
 )
 
 type Editor struct {
-	services ui.Services
-	hoverID  string
+	notesDoc      *document.Document
+	notesRevision uint64
+	notesKey      string
+	imageResize   imageResize
+	linkRevision  uint64
+	wikiHover     wikiHoverState
+	services      ui.Services
+	pairs         []autoPair
+	pairRevision  uint64
+	noAutoPair    bool
+	hoverID       string
 	*Buffer
 	Scroll                           ui.ScrollState
 	RequestFocus                     bool
@@ -60,33 +69,44 @@ type Editor struct {
 	pasteImage func([]byte)
 	// contentEnd is the bottom of the last block; laidBlank whether the
 	// layout left room for the starter.
-	contentEnd     float32
-	laidBlank      bool
-	dropFiles      func([]string, int)
-	fileOver       float32
-	slashOpen      bool
-	slashQuery     string
-	slashIndex     int
-	slashDismissed bool
-	linkOpen       bool
-	linkURL        string
-	outline        []outlineItem
-	outlineState   outlineState
-	pointer        ui.Point
-	pointerInside  bool
-	copiedID       string
-	copiedAt       time.Time
-	page           Page
-	pageKey        string
-	colorOpen      bool
-	colorID        string
-	langOpen       bool
-	langID         string
-	langAt         ui.Rect
-	colorAt        ui.Rect
-	words          int
-	wordsRevision  uint64
-	wordsReady     bool
+	contentEnd                float32
+	laidBlank                 bool
+	dropFiles                 func([]string, int)
+	fileOver                  float32
+	slashOpen                 bool
+	slashQuery                string
+	slashIndex                int
+	slashDismissed            bool
+	linkOpen                  bool
+	linkURL                   string
+	linkText                  string
+	linkRange                 ui.TextInputRange
+	linkOpened                bool
+	inlineEditing, laidInline string
+	notes                     map[string]noteTarget
+	noteReturn                int
+	noteHasReturn             bool
+	noteOriginID              string
+	noteOriginOffset          int
+	readingSize, readingLine  float32
+	openLink                  func(string)
+	outline                   []outlineItem
+	outlineState              outlineState
+	pointer                   ui.Point
+	pointerInside             bool
+	copiedID                  string
+	copiedAt                  time.Time
+	page                      Page
+	pageKey                   string
+	colorOpen                 bool
+	colorID                   string
+	langOpen                  bool
+	langID                    string
+	langAt                    ui.Rect
+	colorAt                   ui.Rect
+	words                     int
+	wordsRevision             uint64
+	wordsReady                bool
 	// wiki completes the [[link]] being typed (wikilinks.go).
 	wiki wikiState
 	// footerH is the height the host's footer took the last frame.
@@ -106,22 +126,31 @@ type Editor struct {
 	openWiki, openTag     func(string)
 	maths                 map[string]mathShape
 	mathGlyphs            map[string]*ui.TextLayout
+	// bookmarks are the host's marks on the page (bookmarks.go).
+	bookmarks bookmarkState
+	// reserved are keys the host takes, which the page leaves alone.
+	reserved []Combo
 }
 
 type row struct {
 	leaf    document.Leaf
-	layout  *ui.TextLayout
+	layout  *textLayout
 	rect    ui.Rect
 	x, y    float32
 	picture *imageFigure
 	// number is the position of a numbered item in its list, from 1.
 	number int
-	// math is a math block's formula, drawn from mathTop: in place of its
-	// TeX when mathHidden; mathErr says why its TeX did not lay out.
+	// emptyColumn uses its outline as the hint, keeping the writing area clear.
+	emptyColumn bool
+	// Math geometry is relative to rect, so moving preceding paragraphs
+	// also moves the formula and its preview without reshaping them.
 	math       *tex.Box
 	mathTop    float32
+	mathScale  float32
+	mathPanel  float32
 	mathHidden bool
 	mathErr    string
+	mathError  *ui.TextLayout
 }
 
 // decoration is what the page draws behind its text: the fill of a code
@@ -143,6 +172,10 @@ type decoration struct {
 	id string
 	// cols and rows are a table's column and row edges.
 	cols, rows []float32
+	// column identifies a column container; empty keeps its writing area
+	// visible without focus.
+	column *document.Block
+	empty  bool
 }
 
 // hovered reports whether the pointer is over r, with slack around it for
@@ -292,16 +325,18 @@ const (
 type cachedShape struct {
 	key    string
 	width  float32
-	layout *ui.TextLayout
+	layout *textLayout
 }
 
 type Options struct {
 	// Resizing keeps offscreen shaping cached during an interactive resize.
 	// Hosts must clear it on release; the final layout is always exact.
-	Resizing  bool
-	Width     float32
-	Theme     *ui.Theme
-	LoadImage func(string) ImageResource
+	Resizing             bool
+	NoAutoPair           bool
+	FontSize, LineHeight float32
+	Width                float32
+	Theme                *ui.Theme
+	LoadImage            func(string) ImageResource
 	// ReplaceImage selects a new file for a stable block ID. RevealImage
 	// opens its local file (or nearest existing folder) in the file manager.
 	ReplaceImage func(id, url string)
@@ -326,6 +361,7 @@ type Options struct {
 	OpenWiki    func(name string)
 	OpenTag     func(tag string)
 	WikiSuggest func(typed string) []WikiItem
+	PreviewWiki func(name string) WikiPreview
 	// Footer, when set, draws below the document, in the page's text
 	// column: the host's backlinks.
 	Footer func(c *ui.Context)
@@ -343,6 +379,18 @@ type Options struct {
 	// it the page has no outline, as in thumbnails.
 	Outline    bool
 	SetOutline func(open bool)
+	// Bookmarks are the top-level blocks bookmarked, by ID, with the label
+	// the reader gave each ("" for none). ToggleBookmark, when set, shows
+	// them: a mark beside each, which takes it away, and a section of the
+	// outline; LabelBookmark names one. BookmarkKey is the key that toggles
+	// one, for tooltips.
+	Bookmarks      map[string]string
+	ToggleBookmark func(id string)
+	LabelBookmark  func(id, label string)
+	BookmarkKey    string
+	// Reserved are keys the host handles, which the page does not take
+	// even where it would, as ⌃⌘↑ would move the caret.
+	Reserved []Combo
 }
 
 func New(markdown string) *Editor { return FromDocument(ImportMarkdown(markdown)) }
@@ -352,12 +400,20 @@ func FromDocument(doc *document.Document) *Editor {
 		wiki: wikiState{dismissed: -1}}
 }
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
+	if e.ReadOnly {
+		return
+	}
 	e.editImageCaption()
-	e.Buffer.ReplaceText(r, text)
+	if !e.pairInput(r, text) {
+		e.Buffer.ReplaceText(r, text)
+	}
 	e.reveal, e.vertical = true, false
 	e.slashDismissed = false
 }
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
+	if e.ReadOnly {
+		return
+	}
 	e.editImageCaption()
 	e.Buffer.SetMarkedText(r, text, selected)
 	e.reveal = true
@@ -365,12 +421,22 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 
 func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.services = c.Services()
+	e.noAutoPair = o.NoAutoPair
+	if e.ReadOnly {
+		o.Attach = nil
+		o.DropFiles = nil
+		o.PasteImage = nil
+		o.ReplaceImage = nil
+		o.PickCover = nil
+	}
 	e.page = pageOf(o.Page, o.Theme)
 	e.attach = o.Attach
 	e.dropFiles, e.pasteImage = o.DropFiles, o.PasteImage
 	e.typewriter, e.dim, e.bindings = o.Typewriter, o.Dim, o.Bindings
-	e.openWiki, e.openTag = o.OpenWiki, o.OpenTag
+	e.openWiki, e.openTag, e.openLink = o.OpenWiki, o.OpenTag, o.OpenLink
 	e.header.pickCover = o.PickCover
+	e.bookmarks.marks, e.bookmarks.toggle, e.bookmarks.label, e.bookmarks.key = o.Bookmarks, o.ToggleBookmark, o.LabelBookmark, o.BookmarkKey
+	e.reserved = o.Reserved
 	e.sync()
 	if e.imageCaptionID != "" && e.Engine.LeafAt(e.Caret).Block.ID != e.imageCaptionID {
 		e.imageCaptionID, e.ready = "", false
@@ -378,6 +444,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.findShortcuts(c)
 	e.revealCaret()
 	e.watchMath()
+	e.watchInline()
 	pane := ui.Column(c).Grow(1).MinHeight(0).MinWidth(0)
 	// The outline, open, takes room left of the page: the page slides over
 	// as it opens, keeping offscreen shaping while it moves.
@@ -440,16 +507,21 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				// Room for the last line to come to the middle.
 				height += e.viewport / 2
 			}
+			// The trailing space has no ink. Whole-DIP bounds keep full and
+			// incremental layouts from clamping scroll at different float tails.
+			height = float32(math.Round(float64(height)))
 			// The surface and what is placed over it scroll together in one
 			// box: placed elements stay where the scroll's content was laid
 			// out, not where it scrolled to.
 			e.outlineState.scrollMax = max(0, max(height, e.viewport)-e.viewport)
+			e.revealPending(c)
 			content := ui.Box(c.Key("page-content")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).MarginStart(reserve)
 			content.Children(func() {
 				surface = ui.Box(c.Key("writing-surface")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).
 					HandleTextInput(e).Role(ui.RoleTextField).Label("文档").Value(e.text).FocusRing(false)
 				if e.RequestFocus {
 					surface.Focus()
+					e.lastInput = c.Now()
 					e.RequestFocus = false
 				}
 				e.focused = surface.Focused()
@@ -466,6 +538,10 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					if files := surface.DroppedFiles(); len(files) > 0 {
 						o.DropFiles(files, at)
 					}
+				}
+				if _, ok := e.hoveredGap(); ok {
+					// A click here adds a paragraph rather than placing the caret.
+					surface.Cursor(ui.CursorPointer)
 				}
 				e.hoverID = ""
 				if inside {
@@ -484,16 +560,19 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					menuAction(menu, "斜体", func() { e.Wrap("*") })
 					menuAction(menu, "插入表格", func() { e.Engine.Insert(document.Table(3, 3)); e.RequestFocus = true })
 				})
-				caret := e.focused && (c.Now().Sub(e.lastInput) < time.Second || c.Now().UnixMilli()/530%2 == 0)
+				caret := !e.ReadOnly && e.focused && (c.Now().Sub(e.lastInput) < time.Second || c.Now().UnixMilli()/530%2 == 0)
 				if e.focused {
 					c.After(530 * time.Millisecond)
 				}
 				surface.Draw(func(p *ui.Painter, r ui.Rect) { e.paint(p, r, o.Theme, caret) })
 				// Beside the surface, not in it: the surface takes the
 				// pointer's presses before anything inside it.
-				e.starter(c)
-				e.headerControls(c)
+				if !e.ReadOnly {
+					e.starter(c)
+					e.headerControls(c)
+				}
 				e.imageControls(c, o)
+				e.bookmarkMarks(c)
 				if o.Footer != nil {
 					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(max(80, e.width-2*e.padding))
 					footer.Children(func() { o.Footer(c) })
@@ -507,10 +586,13 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.outlineView(c, pane, reserve)
 		e.findBox(c)
 	})
-	e.popups(c, surface)
-	e.wikiMenu(c, surface)
-	e.headerPopups(c, surface)
+	if !e.ReadOnly {
+		e.popups(c, surface)
+		e.wikiMenu(c, surface)
+		e.headerPopups(c, surface)
+	}
 	e.imagePreview(c)
+	e.wikiPreview(c, surface, o.PreviewWiki)
 	return pane
 }
 
@@ -525,14 +607,17 @@ func (e *Editor) footerTop() float32 {
 }
 
 func (e *Editor) layout(o Options) {
-	pageKey := fmt.Sprint(e.page)
+	e.collectNotes()
+	e.readingSize, e.readingLine = o.FontSize, o.LineHeight
+	defer func() { e.laidInline = e.inlineEditing }()
+	pageKey := fmt.Sprint(e.page, o.FontSize, o.LineHeight, e.noteKey())
 	finishResize := e.resizePending && !o.Resizing
 	refreshResize := e.resizePending && e.resizeScroll != e.Scroll.Y
 	anchor := resizeAnchor{}
 	if finishResize {
 		anchor = e.resizeAnchor()
 	}
-	same := !finishResize && !refreshResize && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && e.pageKey == pageKey && e.laidMath == e.mathEditing
+	same := !finishResize && !refreshResize && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && e.pageKey == pageKey && e.laidMath == e.mathEditing && e.laidInline == e.inlineEditing
 	if same && e.cacheRevision == e.Revision() {
 		return
 	}
@@ -633,32 +718,7 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 	var blockLayout func(*document.Block, float32, float32, float32) float32
 	blockLayout = func(b *document.Block, x, y, w float32) float32 {
 		if b.Kind == "columns" {
-			top := y
-			count := len(b.Children)
-			if w < 480 {
-				for _, column := range b.Children {
-					for _, child := range column.Children {
-						if hidden[child.ID] != "" {
-							continue
-						}
-						y += blockLayout(child, x, y, w)
-					}
-				}
-				return y - top + 12
-			}
-			cw := (w - float32(count-1)*24) / float32(count)
-			bottom := y
-			for i, column := range b.Children {
-				cy := y
-				for _, child := range column.Children {
-					if hidden[child.ID] != "" {
-						continue
-					}
-					cy += blockLayout(child, x+float32(i)*(cw+24), cy, cw)
-				}
-				bottom = max(bottom, cy)
-			}
-			return bottom - top + 12
+			return e.layoutColumns(b, x, y, w, hidden, blockLayout)
 		}
 		if b.Kind == "table" {
 			// Room above for the column bar.
@@ -766,6 +826,12 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 		// Body text is 16 on 26 with 8 between blocks; table
 		// cells are 14 on 22.
 		font := ui.Font{Family: "system-ui", Size: 16, LineHeight: 26.0 / 16}
+		if o.FontSize >= 12 && o.FontSize <= 28 {
+			font.Size = o.FontSize
+		}
+		if o.LineHeight >= 1.2 && o.LineHeight <= 2.2 {
+			font.LineHeight = o.LineHeight
+		}
 		if b.Kind == "cell" {
 			font.Size, font.LineHeight = 14, 22.0/14
 		}
@@ -811,6 +877,10 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			if b.Kind == "code" {
 				left, top, bottom = 60, 40, 26+gap
 			}
+			if b.Kind == "math" {
+				font.Size, font.LineHeight = 14.4, 22.0/14.4
+				left, right = mathPaddingX, mathPaddingX
+			}
 		case "quote":
 			// A 2px bar and 14 of indent; caption-colored text.
 			left, top, bottom, gap = 14, 0, 8, 8
@@ -823,10 +893,20 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			left = 24 + float32(b.Indent)*24
 			bottom = 8
 		}
+		if b.Kind == "footnote" {
+			left, top = 36, 12
+		}
 		var spans []ui.Span
 		for _, run := range b.Runs {
 			style := run.Style
 			span := ui.Span{Text: run.Text, Italic: style.Italic, Underline: style.Underline, Strikethrough: style.Strike}
+			if style.Script != "" {
+				span.Size = font.Size * .72
+				span.BaselineShift = font.Size * .35
+				if style.Script == "sub" {
+					span.BaselineShift = -font.Size * .18
+				}
+			}
 			if style.Bold {
 				span.Weight = 600
 			}
@@ -869,7 +949,11 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			Align, Kind     string
 			Checked, Header bool
 		}{b.Runs, font, b.Align, b.Kind, b.Checked, header})
-		key := string(data)
+		revealed := ""
+		if strings.HasPrefix(e.inlineEditing, b.ID+":") {
+			revealed = e.inlineEditing
+		}
+		key := string(data) + revealed + e.noteKey()
 		cached, ok := e.cache[b.ID]
 		shapeWidth := max(24, w-left-right)
 		keepOffscreen := false
@@ -888,7 +972,10 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			if b.Align == "right" {
 				align = ui.End
 			}
-			cached = cachedShape{key: key, width: shapeWidth, layout: ui.ShapeRichTextWith(spans, font, ui.TextShape{Width: shapeWidth, Align: align})}
+			if b.Kind == "math" {
+				align = ui.Center
+			}
+			cached = cachedShape{key: key, width: shapeWidth, layout: e.shapeInline(b, spans, font, ui.TextShape{Width: shapeWidth, Align: align})}
 			e.cache[b.ID] = cached
 		}
 		seen[b.ID] = true
@@ -904,7 +991,7 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			row.rect.H = total
 		}
 		if b.Kind == "math" {
-			total = e.mathRow(&row, total, h, top, bottom)
+			total = e.mathRow(&row, h)
 			row.rect.H = total
 		}
 		e.rows = append(e.rows, row)
@@ -977,7 +1064,11 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		}
 		r := offset(d.rect)
 		switch d.kind {
-		case "code", "raw", "math":
+		case "column":
+			if !e.printing {
+				e.paintColumn(p, r, d)
+			}
+		case "code", "raw":
 			pg := e.page
 			border := pg.CodeBorder
 			if d.kind == "code" && (e.hovered(d.rect, 0) || e.langOpen && e.langID == d.id) {
@@ -1038,8 +1129,10 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	}
 	if !e.printing {
 		e.paintHoverControls(p, bounds, t)
+		e.paintGap(p, bounds, t)
 		e.paintTables(p, bounds)
 		e.paintMatches(p, bounds)
+		e.paintFlash(p, bounds)
 	}
 	selection := e.Selection().Range
 	for _, r := range e.rows {
@@ -1054,17 +1147,23 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		}
 		e.paintMarker(p, bounds, r, t)
 		if e.focused && selection.End > r.leaf.Start && selection.Start < r.leaf.End {
-			local := ui.TextInputRange{Start: max(0, selection.Start-r.leaf.Start), End: min(r.leaf.End, selection.End) - r.leaf.Start}
-			for _, rect := range r.layout.SelectionRects(local) {
-				rect.X += bounds.X + r.x
-				rect.Y += bounds.Y + r.y
-				p.Fill(rect, t.Selection, 2)
+			if r.mathHidden && r.math != nil {
+				w, h := r.math.W*r.mathScale, (r.math.Ascent+r.math.Descent)*r.mathScale
+				p.Fill(ui.Rect{X: bounds.X + r.rect.X + (r.rect.W-w)/2 - 3, Y: bounds.Y + r.rect.Y + r.mathTop - 2, W: w + 6, H: h + 4}, t.Selection, 3)
+			} else {
+				local := ui.TextInputRange{Start: max(0, selection.Start-r.leaf.Start), End: min(r.leaf.End, selection.End) - r.leaf.Start}
+				for _, rect := range r.layout.SelectionRects(local) {
+					rect.X += bounds.X + r.x
+					rect.Y += bounds.Y + r.y
+					p.Fill(rect, t.Selection, 2)
+				}
 			}
 		}
 		if e.paintMath(p, bounds, r, t) {
 			continue
 		}
-		p.TextLayout(r.layout, bounds.X+r.x, bounds.Y+r.y, t.Text)
+		p.TextLayout(r.layout.TextLayout, bounds.X+r.x, bounds.Y+r.y, t.Text)
+		e.paintInline(p, bounds, r, t)
 		if !e.printing {
 			e.paintHint(p, bounds, r, t)
 		}
@@ -1093,6 +1192,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		p.Icon(icon, offset(f.rect), color)
 	}
 	for _, h := range e.handles {
+		if e.ReadOnly {
+			break
+		}
 		if h.id != e.hoverID && h.id != e.dragID && !(e.menuOpen && e.menuID == h.id) {
 			continue
 		}
@@ -1207,8 +1309,11 @@ func (e *Editor) copyBlock(id string) {
 // paintHint shows what an empty block is for, as Notion does: the type
 // of an empty heading, and on the empty line being written, the slash menu.
 func (e *Editor) paintHint(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) {
+	if e.ReadOnly {
+		return
+	}
 	b := r.leaf.Block
-	if r.leaf.Start != r.leaf.End || e.mark != nil {
+	if r.leaf.Start != r.leaf.End || e.mark != nil || r.emptyColumn {
 		return
 	}
 	hint := ""
@@ -1339,9 +1444,16 @@ func (e *Editor) toggleTask(at int, x float32) bool {
 }
 
 func (e *Editor) structuralPointer(ev ui.InputEvent) bool {
+	if e.ReadOnly {
+		return false
+	}
 	if ev.Kind == ui.InputPointerDown && ev.Button == 0 {
 		e.closeHeader()
 		if e.hoverControl(ev.X, ev.Y) {
+			return true
+		}
+		if g, ok := e.gapAt(ev.X, ev.Y); ok && ev.Mods == 0 {
+			e.fillGap(g)
 			return true
 		}
 		e.colorOpen, e.langOpen = false, false

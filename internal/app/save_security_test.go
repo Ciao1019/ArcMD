@@ -58,7 +58,7 @@ func TestUnreadableDiskStopsAutosaveAndFlush(t *testing.T) {
 
 func TestMalformedTableLoadKeepsOriginal(t *testing.T) {
 	a, tt := newTestApp(t)
-	const original = `{"format":"arcmd","version":5,"blocks":[{"id":"t","kind":"table","children":[{"id":"r","kind":"row","children":[null]}]}]}`
+	const original = `{"format":"arcmd","version":6,"blocks":[{"id":"t","kind":"table","children":[{"id":"r","kind":"row","children":[null]}]}]}`
 	if err := vault.Write(root(a), "Malformed.arcmd", original); err != nil {
 		t.Fatal(err)
 	}

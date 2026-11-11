@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/egoist/mygo/ui"
@@ -20,56 +21,18 @@ func (a *App) openSettings(tab string) {
 	a.settingsTab = tab
 }
 
-// moreMenu is the ⋯ button at the right of the toolbar, as Arc's and
-// Zen's: what the window can do, and the settings.
+// moreMenu keeps document actions at hand. Library and settings lead to
+// app-wide tools without repeating their individual pages here.
 func (a *App) moreMenu(c *ui.Context) {
 	b := iconButton(c, "more", iconEllipsis, "更多", "更多", false).Role(ui.RoleMenuButton)
 	b.PopoverMenuButton(func(m *ui.Menu) {
-		dir := a.currentDir()
-		if a.menuKey(m.Item("新建文档"), "new-doc").Chosen() {
-			a.newDoc(dir)
-		}
-		if a.menuKey(m.Item("新建文件夹"), "new-folder").Chosen() {
-			a.newFolder(dir)
-		}
-		if m.Item("新建空间…").Chosen() {
-			a.newSpaceForm()
-		}
-		m.Separator()
-		if a.menuKey(m.Item("命令栏"), "palette").Chosen() {
-			a.openPalette()
-		}
-		if a.menuKey(m.Item("添加分屏"), "split-add").Disabled(a.doc == nil && a.split == nil).Chosen() {
-			a.addSplitPane()
-		}
-		if a.split != nil {
-			if a.menuKey(m.Item("关闭此分屏"), "split-close").Chosen() {
-				a.closePane(a.split.active)
-			}
-		}
-		label := "收起侧边栏"
-		if a.folded() {
-			label = "展开侧边栏"
-		}
-		if a.menuKey(m.Item(label), "sidebar").Chosen() {
-			a.toggleSidebar()
-		}
-		if a.menuKey(m.Item("资料库"), "library").Chosen() {
-			a.toggleLibrary()
-		}
-		if a.menuKey(m.Item("所有空间"), "overview").Chosen() {
-			a.toggleOverview()
-		}
+		noDoc := a.doc == nil || a.doc.loadErr != nil
 		if a.menuKey(m.Item("专注模式"), "focus").Checked(a.focus).Chosen() {
 			a.toggleFocus()
 		}
-		if a.menuKey(m.Item("目录"), "outline").Checked(a.outlineOpen()).Disabled(a.doc == nil || a.doc.loadErr != nil || a.doc.source).Chosen() {
+		if a.menuKey(m.Item("目录"), "outline").Checked(a.outlineOpen()).Disabled(noDoc || a.doc.source).Chosen() {
 			a.toggleOutline()
 		}
-		if m.Item("打字机滚动").Checked(a.prefs.Typewriter).Chosen() {
-			a.toggleTypewriter()
-		}
-		noDoc := a.doc == nil || a.doc.loadErr != nil
 		mode := "预览 Markdown 导出"
 		if a.doc != nil && a.doc.source {
 			mode = "返回富文本编辑"
@@ -77,15 +40,18 @@ func (a *App) moreMenu(c *ui.Context) {
 		if a.menuKey(m.Item(mode), "source").Disabled(noDoc).Chosen() {
 			a.toggleSource()
 		}
+		m.Separator()
 		if a.menuKey(m.Item("版本历史…"), "history").Disabled(noDoc).Chosen() {
 			a.openVersions()
 		}
-		if m.Item("导出 Markdown 文件").Disabled(noDoc).Chosen() {
-			a.exportMarkdown()
-		}
-		if a.menuKey(m.Item("导出 PDF"), "export-pdf").Disabled(noDoc).Chosen() {
-			a.exportPDF()
-		}
+		m.Submenu("导出", func(sub *ui.Menu) {
+			if sub.Item("导出 Markdown 文件").Disabled(noDoc).Chosen() {
+				a.exportMarkdown()
+			}
+			if a.menuKey(sub.Item("导出 PDF"), "export-pdf").Disabled(noDoc).Chosen() {
+				a.exportPDF()
+			}
+		}).Disabled(noDoc)
 		if m.Item("打印…").Disabled(noDoc).Chosen() {
 			a.printDoc()
 		}
@@ -93,28 +59,11 @@ func (a *App) moreMenu(c *ui.Context) {
 			a.revealIn(a.doc.space, a.doc.rel)
 		}
 		m.Separator()
-		sp := a.state.ActiveSpace()
-		if m.Item("编辑空间…").Disabled(sp == nil).Chosen() {
-			a.editSpace(sp)
+		if a.menuKey(m.Item("资料库"), "library").Chosen() {
+			a.toggleLibrary()
 		}
-		if m.Item("最近删除…").Chosen() {
-			a.openTrash()
-		}
-		if m.Item("插件…").Chosen() {
-			a.openPlugins()
-		}
-		m.Separator()
 		if a.menuKey(m.Item("设置…"), "settings").Chosen() {
 			a.openSettings(tabGeneral)
-		}
-		if m.Item("键盘快捷键").Chosen() {
-			a.openSettings(tabShortcuts)
-		}
-		if m.Item("关于 ArcMD").Chosen() {
-			a.openSettings(tabAbout)
-		}
-		if m.Item("检查更新…").Chosen() {
-			a.checkForUpdates()
 		}
 	})
 }
@@ -224,7 +173,7 @@ func (a *App) settingsGeneral(c *ui.Context) {
 		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
 		folderRow(c, "config", "配置文件夹（spaces.json、插件）", a.cfg.ConfigDir)
 	})
-	ui.Text(c, "颜色、外观与图标按空间设置：在侧边栏的空间名称上右键，或在 ⋯ 菜单中选择「编辑空间…」。").
+	ui.Text(c, "颜色、外观与图标按空间设置：在侧边栏的空间名称上右键，选择要修改的属性。").
 		FontSize(12).TextColor(t.TextMuted)
 	settingsHeading(c, "写作", "")
 	settingsGroup(c, "writing", func() {
@@ -234,6 +183,45 @@ func (a *App) settingsGeneral(c *ui.Context) {
 		toggleRow(c, "dim", "专注模式淡化其他段落", "专注模式（"+a.keyLabel("focus")+"）下只突出光标所在的段落。", &dim, nil)
 		if dim == a.prefs.NoDim {
 			a.toggleDim()
+		}
+	})
+	settingsHeading(c, "阅读与输入", "")
+	settingsGroup(c, "reading", func() {
+		for _, item := range []struct {
+			label string
+			value float32
+			step  float32
+			size  bool
+		}{{"正文字号", a.prefs.ReadingSize(), 1, true}, {"行距", a.prefs.ReadingLine(), .1, false}} {
+			ui.Row(c.Key(item.label)).Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, item.label).Grow(1)
+				change := float32(0)
+				if ui.Button(c, "−").Label("减小" + item.label).Clicked() {
+					change = -item.step
+				}
+				ui.Text(c, fmt.Sprintf("%.2g", item.value)).Width(42)
+				if ui.Button(c, "+").Label("增大" + item.label).Clicked() {
+					change = item.step
+				}
+				if change != 0 {
+					if item.size {
+						a.prefs.FontSize = max(12, min(28, item.value+change))
+					} else {
+						a.prefs.LineHeight = max(1.2, min(2.2, item.value+change))
+					}
+					a.savePrefs()
+				}
+			})
+		}
+		pair := !a.prefs.NoAutoPair
+		toggleRow(c, "auto-pair", "括号与引号自动配对", "支持中文符号、包裹选区和成对删除。", &pair, nil)
+		if pair == a.prefs.NoAutoPair {
+			a.prefs.NoAutoPair = !pair
+			a.savePrefs()
+		}
+		if ui.Button(c, "恢复阅读默认值").Margin(8, 12).Clicked() {
+			a.prefs.FontSize, a.prefs.LineHeight = 0, 0
+			a.savePrefs()
 		}
 	})
 	a.settingsUpdates(c)

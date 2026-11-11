@@ -405,6 +405,8 @@ func pageStyle(dark bool) editor.Page {
 	}
 	return editor.Page{
 		ImageShadow: ui.Hex("#00000014"),
+		MathBorder:  ui.Hex("#DEE0E3"),
+		MathShadow:  ui.Hex("#0000001F"),
 		Marker:      ui.Hex("#1456F0"),
 		Caption:     ui.Hex("#646A73"),
 		Placeholder: ui.Hex("#BBBFC4"),
@@ -495,6 +497,8 @@ func searchMark(t *ui.Theme) ui.Color {
 // as the same color on either paper.
 func darkPageStyle() editor.Page {
 	return editor.Page{
+		MathBorder:   ui.Hex("#393B40"),
+		MathShadow:   ui.Hex("#00000059"),
 		Marker:       ui.Hex("#4C88FF"),
 		Caption:      ui.Hex("#A2A5AB"),
 		Placeholder:  ui.Hex("#61646B"),

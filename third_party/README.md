@@ -29,11 +29,28 @@ The full MIT notice is in `cra/LICENSE`.
 [Cra source](https://github.com/VictorKildahl/cra)
 
 The image figures and missing-image recovery cards (`internal/editor/images.go`)
-follow Textus's image view and missing-image card design, under the MIT License,
+and formula presentation (`internal/editor/math.go`) follow Textus's image view,
+missing-image cards, unboxed display math, source panel and live preview design,
+under the MIT License,
 Copyright (c) 2026 CatVinci Studio. They are implemented with native Go drawing
-and controls. The MIT notice is in `textus/LICENSE`.
+and controls. Inline math, clipboard formats, link popovers, image resizing,
+bracket pairing, footnotes and reading controls also use Textus as a behavior
+reference, implemented against ArcMD’s own document model. The MIT notice is
+in `textus/LICENSE`.
 
 [Textus source](https://github.com/CatVinci-Studio/Textus)
+
+Formula presentation was checked against Textus commit
+`21dc743b84c5c8f518cfdc95c9654fe31b61507e` (its math preview plugin and editor CSS).
+The native renderer embeds the unmodified `KaTeX_Main-Regular.ttf` and
+`KaTeX_Math-Italic.ttf` faces from KaTeX commit
+`9b2280dee4acb4da7d866dbaccad120b00949c27` in `internal/editor/fonts/`.
+These fonts are under the SIL Open Font License 1.1, with copyright and reserved
+font names retained in `katex/OFL.txt` and in the font metadata. KaTeX's upstream
+MIT notice is also retained in `katex/LICENSE`; its JavaScript renderer is not
+included. Formula parsing and layout remain in ArcMD's `internal/tex` package.
+
+[KaTeX source](https://github.com/KaTeX/KaTeX)
 
 Icons are Lucide, under the ISC License. Attribution appears in
 `internal/app/icons.go`; `internal/app/spacesymbols.go` is generated from

@@ -405,6 +405,17 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 				}
 			}
 			menuSeparator(c)
+			if e.bookmarks.toggle != nil {
+				_, marked := e.bookmarks.marks[id]
+				label := "添加书签"
+				if marked {
+					label = "移除书签"
+				}
+				if hover(e.menuRow(c, "bm-bookmark", iconBookmark, e.page.CodeText, label, e.bookmarks.key, false), "").Clicked() {
+					toggle := e.bookmarks.toggle
+					act(func() { toggle(id) })()
+				}
+			}
 			if hover(e.menuRow(c, "bm-add", iconSquarePlus, e.page.CodeText, "在下方添加", "", false), "").Clicked() {
 				e.menuOpen, e.menuSub = false, ""
 				e.insertAfter(id)

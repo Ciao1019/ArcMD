@@ -32,7 +32,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.0.5"
+const Version = "0.0.6"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -75,6 +75,10 @@ type spaceSession struct {
 
 // App is ArcMD's state.
 type App struct {
+	// bookmarkGen counts changes to the bookmarks, which documents resolve
+	// again (bookmarks.go).
+	bookmarkGen uint64
+
 	cfg     Config
 	win     *mygo.Window
 	store   *space.Store

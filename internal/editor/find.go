@@ -66,6 +66,10 @@ func findIn(text, query string) [][2]int {
 // OpenFind opens the find box, with replace when replace is set. A
 // selection within one line seeds the query, as a browser's find bar does.
 func (e *Editor) OpenFind(replace bool) {
+	if e.ReadOnly {
+		replace = false
+		e.find.replace = false
+	}
 	r := e.Selection().Range
 	if r.Start != r.End {
 		if text, _ := e.TextForRange(r); !strings.ContainsAny(text, "\n ") {
@@ -226,7 +230,7 @@ func (e *Editor) findBox(c *ui.Context) {
 		Background(pg.Popover).Border(1, t.Border).Radius(6).Shadow(0, 4, 16, 0, t.Text.Alpha(.12))
 	box.Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			if button("find-toggle", "切换替换 (⇧⌘H)", iconChevronRight, f.replace).Clicked() {
+			if button("find-toggle", "切换替换 (⇧⌘H)", iconChevronRight, f.replace).Disabled(e.ReadOnly).Clicked() {
 				f.replace = !f.replace
 			}
 			query := field("find-query", "查找", &f.query, f.focus)

@@ -27,7 +27,8 @@ func ImportMarkdown(source string) *document.Document {
 			}
 		}
 	}
-	parsed := parser.Parse(text)
+	parsed := parser.New(parser.Default | parser.ExtDollarMath)
+	parsed.Set(text)
 	var blocks func(int, string, int) []*document.Block
 	blocks = func(parent int, context string, indent int) []*document.Block {
 		var out []*document.Block
@@ -85,6 +86,14 @@ func ImportMarkdown(source string) *document.Document {
 					out = append(out, children...)
 				}
 				continue
+			case parser.FootnoteDefinition:
+				b.Kind, b.NoteLabel = "footnote", node.Label()
+				for i, child := range blocks(index, "", 0) {
+					if i > 0 {
+						b.Runs = append(b.Runs, document.Run{Text: "\u2028"})
+					}
+					b.Runs = append(b.Runs, child.Runs...)
+				}
 			case parser.CodeBlock:
 				b.Kind, b.Language = "code", node.Language()
 				b.Runs = []document.Run{{Text: strings.TrimSuffix(parsed.Lines(index), "\n")}}
@@ -137,6 +146,24 @@ func importRuns(in []parser.Inline, style document.Style) []document.Run {
 		for i := start; i < stop; {
 			node := in[i]
 			end := min(stop, max(i+1, node.Next))
+			if node.Kind == parser.HTML {
+				switch strings.ToLower(node.Text) {
+				case "<sup>":
+					style.Script = "sup"
+				case "<sub>":
+					style.Script = "sub"
+				case "</sup>", "</sub>":
+					style.Script = ""
+				case "<u>":
+					style.Underline = true
+				case "</u>":
+					style.Underline = false
+				default:
+					runs = append(runs, document.Run{Text: node.Text, Style: style})
+				}
+				i = end
+				continue
+			}
 			next := style
 			switch node.Kind {
 			case parser.Strong:
@@ -149,6 +176,8 @@ func importRuns(in []parser.Inline, style document.Style) []document.Run {
 				next.Link = node.Dest
 			case parser.Code:
 				next.Code = true
+			case parser.Text:
+				next.NoMath = strings.Contains(node.Text, "$")
 			}
 			if end > i+1 && node.Kind != parser.Image {
 				runs = append(runs, walk(i+1, end, next)...)
@@ -180,6 +209,8 @@ func ExportMarkdown(doc *document.Document) string {
 		for _, b := range blocks {
 			text := exportRuns(b.Runs)
 			switch b.Kind {
+			case "footnote":
+				text = "[^" + b.NoteLabel + "]: " + strings.ReplaceAll(text, "\n", "\n    ")
 			case "heading":
 				text = strings.Repeat("#", max(1, b.Level)) + " " + text
 			case "bullet":
@@ -260,7 +291,22 @@ func exportRuns(runs []document.Run) string {
 	var out strings.Builder
 	escape := strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "`", "\\`")
 	for _, run := range runs {
-		text := escape.Replace(strings.ReplaceAll(run.Text, "\u2028", "  \n"))
+		source := strings.ReplaceAll(run.Text, "\u2028", "  \n")
+		var escaped strings.Builder
+		pos := 0
+		for _, token := range inlineTokens(source) {
+			if run.Style.NoMath && token.note == "" {
+				continue
+			}
+			escaped.WriteString(escape.Replace(source[pos:token.start]))
+			escaped.WriteString(source[token.start:token.end])
+			pos = token.end
+		}
+		escaped.WriteString(escape.Replace(source[pos:]))
+		text := escaped.String()
+		if run.Style.NoMath {
+			text = strings.ReplaceAll(text, "$", `\$`)
+		}
 		s := run.Style
 		if s.Code {
 			fence := "`"
@@ -277,6 +323,9 @@ func exportRuns(runs []document.Run) string {
 		}
 		if s.Strike {
 			text = "~~" + text + "~~"
+		}
+		if s.Script != "" {
+			text = "<" + s.Script + ">" + text + "</" + s.Script + ">"
 		}
 		if s.Underline {
 			text = "<u>" + text + "</u>"

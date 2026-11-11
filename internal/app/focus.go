@@ -145,6 +145,9 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		}
 	}
 	return editor.Options{
+		FontSize:     a.prefs.ReadingSize(),
+		LineHeight:   a.prefs.ReadingLine(),
+		NoAutoPair:   a.prefs.NoAutoPair,
 		Resizing:     a.splitResizing,
 		Width:        width,
 		Theme:        c.Theme(),
@@ -158,6 +161,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		OpenLink:     func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
 		OpenWiki:     func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
 		OpenTag:      func(tag string) { run(func() { a.openTag(tag) }) },
+		PreviewWiki:  func(name string) editor.WikiPreview { return a.previewWikiFor(d, name) },
 		WikiSuggest:  func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
 		Footer:       func(c *ui.Context) { a.pageFooterFor(c, d) },
 		Typewriter:   a.prefs.Typewriter,
@@ -166,5 +170,12 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		Bindings:     a.editorBindings(),
 		Outline:      !a.prefs.OutlineClosed,
 		SetOutline:   a.setOutline,
+		Bookmarks:    a.marksOf(d),
+		ToggleBookmark: func(id string) {
+			a.toggleBookmark(d, id)
+		},
+		LabelBookmark: func(id, label string) { a.labelBookmark(d.space.ID, d.rel, id, label) },
+		BookmarkKey:   a.shortKey("bookmark"),
+		Reserved:      a.reservedKeys(),
 	}
 }
