@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.0.9
+
+This update fixes jumping while selecting text across screens and replaces the README demonstrations with smooth vector animations.
+
+### Fixes
+
+- Keep the selection endpoint under the pointer while scrolling, even when the pointer stays still. Dragging and releasing no longer pull the page back to the caret, including in typewriter mode ([#1](https://github.com/Ciao1019/ArcMD/issues/1)).
+- Scroll smoothly at the viewport edges, preserve manual mouse-wheel scrolling, and stop selection scrolling on release or window focus loss.
+- Copy selected text without changing the viewport or selection.
+- Add regression coverage for touchpad scrolling, mouse-wheel animation, reverse selection, viewport boundaries, multiple clicks, and inset editors with the outline open.
+
+### Documentation
+
+- Replace the Chinese and English theme and bookmark demonstrations with lightweight, self-contained SVG animations in the README hero's style.
+- Animate theme colors, multi-color gradients, translucent frosted material, and light/dark appearance continuously. Animate bookmark placement, outline navigation, and the all-bookmarks command bar.
+- Keep seamless loops and reduced-motion illustrations, and include a reproducible vector-art generator.
+
+### Data compatibility
+
+Document, Space configuration, and preference formats are unchanged from 0.0.8.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates.
+
 ## 0.0.8
 
 This update fixes the cursor position after pasting rich content and adds native-client demonstrations to the README.

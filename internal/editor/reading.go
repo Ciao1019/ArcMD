@@ -13,6 +13,7 @@ func (e *Editor) SetReadOnly(on bool) {
 	e.find.replace = false
 	e.pairs = nil
 	e.dragID = ""
+	e.dragging = false
 	e.resizing = nil
 	e.imageResize = imageResize{}
 	e.imageCaptionID = ""

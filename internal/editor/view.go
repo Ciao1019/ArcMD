@@ -42,6 +42,7 @@ type Editor struct {
 	resizeScroll                     float32
 	cacheTheme                       ui.Theme
 	ready, focused, dragging, reveal bool
+	selectionDrag                    selectionDrag
 	preferredX                       float32
 	vertical                         bool
 	lastInput                        time.Time
@@ -487,7 +488,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 			}
 			e.reveal = false
 		}
-		scroll := ui.Scroll(c.Key("page-scroll")).Grow(1).MinHeight(0).TrackScroll(&e.Scroll)
+		scroll := ui.Scroll(c.Key("page-scroll")).Grow(1).MinHeight(0)
 		// Bounds are the last frame's: none yet in the first frame of a new
 		// document, where the window's height stands in, or painting would
 		// cull every row as out of view and nothing would draw until
@@ -498,6 +499,8 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		if e.viewport <= 0 {
 			_, e.viewport = c.Size()
 		}
+		e.stepSelectionDrag(c, scroll, reserve)
+		scroll.TrackScroll(&e.Scroll)
 		scroll.Children(func() {
 			height := e.height
 			if o.Footer != nil {

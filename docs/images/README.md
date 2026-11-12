@@ -9,37 +9,21 @@
   They use no SVG filters (no blur, drop shadow, or turbulence grain): an
   animated image is repainted every frame, and filters made the animations
   stutter. Glows are radial gradients and shadows are stacked translucent shapes.
-- `readme/spaces-*.svg`, `readme/themes-*.svg`, and
-  `readme/bookmarks-*.svg` use screenshots captured on 2026-11-12 from the
-  installed `/Applications/ArcMD.app` client (0.0.7). No development client,
-  `ARCMD_HOME`, or headless rendering was used for these captures. Public demo
-  text was entered into the native client; the original spaces and themes were
-  restored after capture. English captions accompany the same Chinese UI.
-  Captures are cropped and downsampled, then embedded as JPEGs. CSS cross-fades
-  and step indicators work in an SVG image without JavaScript or external assets.
-  Reduced motion keeps the first frame and its caption visible.
-  The space demo switches between the two captured spaces; the theme demo shows
-  three single colors, two- and three-color gradients, intensity changes, and
-  dark appearance. The bookmark demo shows adding, listing, jumping, and searching.
-- The theme graphic's **Material illustration** panel is separate vector art.
-  Window-only capture did not preserve the desktop behind the macOS material,
-  so the panel compares a clear background with a blurred, tinted version.
-  Only this small illustration uses an SVG blur filter; the app screenshots
-  are not blurred or recolored. ArcMD has an intensity control, not an independent
-  blur-radius or opacity slider. The illustrated single-color coverage uses
-  the application's `0.19 + 0.55 * intensity` relationship.
-  Source-frame hashes, crop rectangles, dimensions, and animation durations are
-  recorded in [`readme/live-capture.json`](readme/live-capture.json).
-  With the named 2480×1600 native captures in a folder, regenerate using Python 3
-  and ImageMagick:
-
-  ```sh
-  python3 scripts/readme_live_art.py --capture-dir /path/to/native-captures
-  ```
-
-  `internal/app/readme_art_test.go` remains a separate fixture-rendering utility;
-  point its `ARCMD_README` output at a temporary directory, not these published
-  assets.
+- `readme/themes-*.svg` and `readme/bookmarks-*.svg` use the same vector
+  illustration style, 1280 × 820 canvas, window proportions, system fonts,
+  and CSS easing as the hero. The installed `/Applications/ArcMD.app` is
+  the UI reference. Color stops, handles, pointer, opacity, scroll position,
+  and bookmark entries animate continuously; there are no embedded bitmap
+  frames, scripts, external resources, or SVG filters. Frosted material is
+  illustrated with soft radial gradients; the intensity control changes
+  the tint's opacity. It does not imply an independent blur control.
+  Both loops return to their starting state and provide a composed static
+  illustration under `prefers-reduced-motion`.
+  Regenerate all four localized files with
+  `python3 scripts/readme_vector_art.py`. Preview them as `<img>` elements,
+  as GitHub does. The older `TestReadmeArt` renderer is only a raster
+  reference utility; direct its output to a temporary folder rather than
+  replacing these vector assets.
 - `download-{macos,windows,linux}-{en,zh-CN}.svg` are the platform download
   buttons: plain white, a thin border and a monochrome glyph, 200×56. The Apple glyph path is adapted from
   [Quiet.md](https://github.com/s1dashu/quiet-md/tree/main/docs/images) (MIT,

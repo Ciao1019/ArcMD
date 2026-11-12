@@ -50,7 +50,9 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if e.toggleTask(at, ev.X) {
 			return true
 		}
-		e.dragging = true
+		e.dragging, e.reveal = true, false
+		e.selectionDrag = selectionDrag{scrollY: e.Scroll.Y, at: ev.Time}
+		e.outlineState.jump = outlineJump{}
 		if ev.Mods&ui.Shift != 0 {
 			e.SetSelection(e.Anchor, at)
 		} else {
@@ -69,16 +71,17 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if !e.dragging {
 			return false
 		}
-		if at, ok := e.IndexForPoint(ui.Point{X: ev.X, Y: ev.Y}); ok {
-			e.SetSelection(e.Anchor, at)
+		if !e.selectionDrag.moved {
+			e.selectionDrag.at = ev.Time
 		}
-		e.reveal = true
+		e.selectionDrag.moved = true
+		e.extendSelection(ev.X, min(max(ev.Y, e.Scroll.Y), e.Scroll.Y+e.viewport))
 		return true
 	case ui.InputPointerUp:
 		if !e.dragging {
 			return false
 		}
-		e.dragging, e.reveal = false, true
+		e.dragging = false
 		return true
 	case ui.InputSelect:
 		runes := []rune(e.text)
@@ -95,12 +98,16 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 }
 
 func (e *Editor) command(command string, read func() string, write func(string)) bool {
+	// Copy leaves the page where the reader scrolled, even when the
+	// selected text is now offscreen.
+	if command == "copy" {
+		e.copySelection(write)
+		return true
+	}
 	e.reveal, e.vertical = true, false
 	switch command {
 	case "selectAll":
 		e.SetSelection(0, e.Len())
-	case "copy":
-		e.copySelection(write)
 	case "cut":
 		e.copySelection(write)
 		e.ReplaceText(nil, "")
