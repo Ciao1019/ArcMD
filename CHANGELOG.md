@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.0.8
+
+This update fixes the cursor position after pasting rich content and adds native-client demonstrations to the README.
+
+### Fixes
+
+- Place the cursor at the end of the pasted content, including the final wrapped line, so continued typing appends to the paste instead of appearing at the start of its last block.
+- Find the final editable leaf when pasting tables or columns, including merged table cells, while preserving the destination's surrounding text and undo/redo selection.
+- Add regression coverage for native rich text, HTML, Markdown, plain text, CRLF line endings, emoji, and narrow and wide editor layouts.
+
+### Documentation
+
+- Update the Chinese and English READMEs with animated SVG demonstrations of space switching, theme colors and gradients, translucency, and bookmarks, captured from the locally installed client.
+- Include a separately labeled material illustration for background blur and tint, plus reduced-motion support and capture provenance.
+
+### Data compatibility
+
+Document, Space configuration, and preference formats are unchanged from 0.0.7.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates.
+
 ## 0.0.7
 
 This release adds a guided tour that introduces ArcMD the first time it opens.

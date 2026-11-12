@@ -46,7 +46,7 @@ func TestSnapshot(t *testing.T) {
 	for _, name := range []string{"writing", "writing-dark-system", "writing-narrow", "writing-editing", "writing-source", "writing-empty", "rich-blocks", "rich-lists", "writing-wide", "writing-selection", "rich-table-hover", "callouts", "block-menu", "table-select", "text-colors", "find", "fold", "table-merge", "outline-closed", "outline-float", "outline@dark",
 		// The same on dark paper, as the system's dark appearance shows it.
 		"writing-empty@dark", "writing-source@dark", "rich-blocks@dark", "rich-lists@dark", "writing-selection@dark", "callouts@dark",
-		"block-menu@dark", "table-select@dark", "text-colors@dark", "find@dark", "table-merge@dark"} {
+		"block-menu@dark", "table-select@dark", "text-colors@dark", "find@dark", "table-merge@dark", "writing-paste", "writing-paste-narrow"} {
 		name, dark := strings.CutSuffix(name, "@dark")
 		file := name
 		if dark {
@@ -57,6 +57,9 @@ func TestSnapshot(t *testing.T) {
 			text := writingSample
 			if name == "writing-empty" {
 				text = "# "
+			}
+			if strings.HasPrefix(name, "writing-paste") {
+				text = strings.Repeat("第一段文字会在页面中自动换行。", 4) + "\n\n" + strings.Repeat("最后一段也会换行，光标应该停在整段末尾。", 6) + "😀"
 			}
 			doc := editor.ImportMarkdown(text)
 			if name == "rich-blocks" || name == "rich-table-hover" || name == "table-select" || name == "table-merge" {
@@ -94,7 +97,7 @@ func TestSnapshot(t *testing.T) {
 				tt.Frame()
 				a.doc.ed.Scroll.Y = 260
 			}
-			if name == "writing-narrow" {
+			if name == "writing-narrow" || name == "writing-paste-narrow" {
 				tt.SetSize(640, 650)
 			}
 			if name == "outline-closed" {
@@ -128,6 +131,18 @@ func TestSnapshot(t *testing.T) {
 			}
 			for range 4 {
 				tt.Frame()
+			}
+			if strings.HasPrefix(name, "writing-paste") {
+				ed := a.doc.ed
+				ed.RequestFocus = true
+				tt.Frame()
+				tt.Key(ui.Cmd, ui.KeyA)
+				tt.Key(ui.Cmd, ui.KeyC)
+				tt.Key(0, ui.KeyBackspace)
+				tt.Key(ui.Cmd, ui.KeyV)
+				if ed.Anchor != ed.Len() || ed.Caret != ed.Len() {
+					t.Fatal("paste did not place the caret at the end")
+				}
 			}
 			if name == "rich-blocks" {
 				// Hover the callout to show its block handle.

@@ -119,7 +119,7 @@ func TestRandomEditsKeepValidDocument(t *testing.T) {
 		if rng.Intn(3) == 0 {
 			e.SetSelection(a, a)
 		}
-		switch rng.Intn(14) {
+		switch rng.Intn(15) {
 		case 0, 1, 2:
 			e.Replace(min(e.Anchor, e.Caret), max(e.Anchor, e.Caret), []string{"文", "😀", "a\nb", ""}[rng.Intn(4)])
 		case 3:
@@ -137,6 +137,10 @@ func TestRandomEditsKeepValidDocument(t *testing.T) {
 			e.Undo()
 		case 7:
 			e.Redo()
+		case 14:
+			fragment := New()
+			fragment.Blocks = []*Block{NewBlock("paragraph", "粘贴"), NewBlock("paragraph", "末尾😀")}
+			e.Paste(fragment)
 		case 12:
 			for _, b := range e.Doc.Blocks {
 				if b.Kind == "table" {

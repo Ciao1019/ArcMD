@@ -413,13 +413,15 @@ func (e *Engine) Paste(fragment *Document) {
 				fresh(child)
 			}
 		}
-		var last string
 		for _, block := range fragment.Blocks {
 			b := block.Clone()
 			fresh(b)
 			blocks = append(blocks, b)
-			last = b.ID
 		}
+		// Keep the last editable leaf before adding the destination's suffix.
+		// Containers can end in nested leaves or merged-over table cells.
+		leaves := (&Document{Blocks: blocks}).Leaves()
+		last := leaves[len(leaves)-1].Block.ID
 		if len(suffix) > 0 {
 			b := NewBlock("paragraph", "")
 			b.Runs = suffix
@@ -427,7 +429,12 @@ func (e *Engine) Paste(fragment *Document) {
 		}
 		parent, index := e.find(leaf.Block.ID)
 		*parent = append(append(append([]*Block(nil), (*parent)[:index]...), blocks...), (*parent)[index+1:]...)
-		e.FocusBlock(last)
+		for _, target := range e.Doc.Leaves() {
+			if target.Block.ID == last {
+				e.SetSelection(target.End, target.End)
+				break
+			}
+		}
 	})
 }
 

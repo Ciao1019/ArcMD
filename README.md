@@ -6,7 +6,7 @@
 
 简体中文 · [English](README.en.md)
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.7-F21158" alt="版本 0.0.7"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.8-F21158" alt="版本 0.0.8"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="支持 macOS、Windows 与 Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="使用 Go 与 MyGo 原生开发"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI 工作流配置"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-zh-CN.svg" height="56" alt="下载 ArcMD Windows 版：x64 安装程序与 ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-zh-CN.svg" height="56" alt="下载 ArcMD Linux 版：x64 与 ARM64，DEB 与 TAR.GZ"></a>
 
-<sub>当前预览版本为 0.0.7，按钮会打开发布页；也可以<a href="#从源码运行">从源码运行</a>。</sub>
+<sub>当前预览版本为 0.0.8，按钮会打开发布页；也可以<a href="#从源码运行">从源码运行</a>。</sub>
 
 <br><br>
 
@@ -59,20 +59,24 @@ MyGo 提供原生窗口、GPU 绘制、字形排版和系统输入接口，ArcMD
 
 ### 生活的每个部分，都有一个空间
 
+<p align="center"><img src="docs/images/readme/spaces-zh-CN.svg" width="100%" alt="本机 ArcMD 客户端实拍：从粉杏色的 Personal 切换到蓝紫绿渐变的灵感手记，空间颜色和当前文档一起变化"></p>
+
 每个空间对应一个文件夹，拥有自己的名称、图标和主题色——一到三种颜色，再加一点颗粒质感。
 在侧边栏上双指轻扫，或按 <kbd>⌃1</kbd>…<kbd>⌃9</kbd>，整个窗口就会滑入下一个空间。
 每个空间都记得你上次停留的页面；收藏则跟着你走遍所有空间。
 
-### 颜色、渐变、透明与颗粒，整个窗口实时预览
+### 颜色、渐变、透明与模糊，让空间有自己的质感
 
-<p align="center"><img src="docs/images/readme/themes-zh-CN.svg" width="100%" alt="ArcMD 的空间主题：在主题卡上换颜色，加到三种颜色的渐变，降低强度让窗口透出背后模糊的桌面，加上颗粒，再切到深色；整个窗口实时预览"></p>
+<p align="center"><img src="docs/images/readme/themes-zh-CN.svg" width="100%" alt="本机 ArcMD 的主题卡实拍：粉、橙、蓝换色，双色与三色渐变，高低强度和深色外观；右侧材质示意对比清晰背景与模糊后的透明叠色"></p>
 
 在空间名称的「•••」菜单里选择「编辑主题颜色…」，拖动色盘上的圆点换颜色，用 − / + 组合一到三种颜色的渐变。
-单色主题降低强度后，窗口会变得半透明，透出背后柔和模糊的桌面；再拧一拧颗粒旋钮，或切换跟随系统、浅色、深色。
+单色主题的强度控制颜色覆盖，降低后更能看见背后的窗口材质；macOS 原生材质为背景提供柔和模糊。还可以调整颗粒，或切换跟随系统、浅色、深色。
+
+<sub>空间、主题与书签演示取自本机安装的 ArcMD 0.0.7 客户端。主题图右侧为单独标注的材质示意；模糊由系统材质提供，目前没有独立的模糊度滑块。</sub>
 
 ### 书签：读到哪儿，回到哪儿
 
-<p align="center"><img src="docs/images/readme/bookmarks-zh-CN.svg" width="100%" alt="ArcMD 的书签：指针移到段落上，页边出现书签；点击加上书签，目录底部列出本文档的书签；按 Shift Command D 打开所有文档的书签列表"></p>
+<p align="center"><img src="docs/images/readme/bookmarks-zh-CN.svg" width="100%" alt="本机 ArcMD 的书签实拍：段落页边的书签入口、点击添加、目录中的两枚书签、点击跳转并高亮原文，以及 Shift Command D 打开的可搜索书签列表"></p>
 
 指针移到任意段落上，页边会出现书签图标，点一下（或按 <kbd>⌘D</kbd>）就标记好了。
 目录底部列出本文档的书签，<kbd>⌃⌘↑</kbd> / <kbd>⌃⌘↓</kbd> 在书签间跳转，<kbd>⇧⌘D</kbd> 列出所有文档的书签；书签不会改动文档本身。

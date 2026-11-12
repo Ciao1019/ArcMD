@@ -6,7 +6,7 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.7-F21158" alt="Version 0.0.7"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.8-F21158" alt="Version 0.0.8"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.0.7. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.0.8. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
@@ -61,25 +61,29 @@ is drawn directly from Go, with no HTML, JavaScript, WebView, Electron, or cgo.
 
 ### A space for every part of your life
 
+<p align="center"><img src="docs/images/readme/spaces-en.svg" width="100%" alt="Installed ArcMD client: switch from rose-and-apricot Personal to a blue, violet and mint Ideas space, with the space theme and active document changing together"></p>
+
 Each space is a folder with its own name, icon, and color theme — one, two, or
 three colors with a touch of grain. Swipe with two fingers on the sidebar, or
 press <kbd>⌃1</kbd>…<kbd>⌃9</kbd>, and the whole window glides into the next
 space. Every space remembers the page you left open there; favorites stay with
 you wherever you go.
 
-### Colors, gradients, translucency and grain, previewed live
+### Colors, gradients, translucency and blur
 
-<p align="center"><img src="docs/images/readme/themes-en.svg" width="100%" alt="ArcMD space themes: pick a color on the theme card, blend up to three colors, lower the intensity so the window shows the blurred desktop behind it, add grain, then switch to dark; the whole window previews live"></p>
+<p align="center"><img src="docs/images/readme/themes-en.svg" width="100%" alt="Installed ArcMD theme card: rose, orange and blue, two- and three-color gradients, high and low intensity, and dark appearance; a separate material illustration compares the background with blur and translucent tint"></p>
 
 Choose “编辑主题颜色…” (Edit Theme Colors) from the space name's ••• menu. Drag
 the dot on the color pad to change the color, and use − / + to blend one, two or
-three colors. Lower the intensity of a single-color theme and the window turns
-translucent, softly blurring the desktop behind it; turn the grain dial, or pick
-Auto, Light or Dark.
+three colors. Intensity controls the color coverage of a single-color theme;
+lower it to reveal more of the window material. The native macOS material
+softens the background. Adjust grain, or pick Auto, Light or Dark.
+
+<sub>The space, theme and bookmark demos use the locally installed ArcMD 0.0.7 client, with English captions over its Chinese UI. The theme graphic includes a separately labeled material illustration. Background blur comes from the system material; there is currently no separate blur slider.</sub>
 
 ### Bookmarks: pick up where you left off
 
-<p align="center"><img src="docs/images/readme/bookmarks-en.svg" width="100%" alt="ArcMD bookmarks: hover a paragraph and a bookmark appears in the margin; click to add it, and the outline lists the document's bookmarks; Shift Command D lists the bookmarks of every document"></p>
+<p align="center"><img src="docs/images/readme/bookmarks-en.svg" width="100%" alt="Installed ArcMD bookmarks: the paragraph marker, adding a bookmark, two bookmarks in the outline, jumping to a highlighted passage, and the searchable list opened with Shift Command D"></p>
 
 Hover any paragraph and a bookmark appears in the margin; click it (or press
 <kbd>⌘D</kbd>) to mark the spot. The outline lists the document's bookmarks,

@@ -1,0 +1,125 @@
+{
+  "client": "/Applications/ArcMD.app",
+  "version": "0.0.7",
+  "capturedOn": "2026-11-12",
+  "captureMethod": "Native app screenshots via Computer Use. No dev build or headless UI rendering.",
+  "processing": "Crop and downsample; JPEG quality 85; cross-fade in SVG. Material comparison is separately labeled vector artwork.",
+  "frames": {
+    "theme-01-pink.png": {
+      "sha256": "c3fe0b734d72b1db1b0fa5996c248c9b04b69aee6d28f8de30bea541307e88e0",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "adb490c7ba37278ceadba2599bbfe295fd0aa43a9a809bec3be38ca9daf02ff9"
+    },
+    "theme-02-orange.png": {
+      "sha256": "ad6d0dd47aef6f822ad0b526607c8362ea10d3b7aee1f1278bb5e64e75160560",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "f9df13c0ae933bc074fe8fba167b9e92074ed0f81f1d337f89e0424d8ec3d74a"
+    },
+    "theme-03-blue.png": {
+      "sha256": "e4978109bbdfd1d831293bd45a679e5075b226ccf1909fe21c48c0da14802abd",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "c6c4fd8c1c0b1469a071de01d0e352b96e817e7bb4ec806366d22637aa5f2ffa"
+    },
+    "theme-04-duo.png": {
+      "sha256": "29ca8a6bf0952d48c0c82234e61627376bb91d741c2844071ff7a3dc3600bf53",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "245eab3a5a29506367af4037cc5f5dc2b32de90e1eb311866f62c2c5cb225e85"
+    },
+    "theme-05-trio.png": {
+      "sha256": "c9afc3ed70b6f79d90805e4c42fa641dc83b5bd0a892768ebd79c80f7c794175",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "80695569548bdda3bbfd63204ed80f14d15bd103cdded824751df3e0eac17c3e"
+    },
+    "theme-07-strong.png": {
+      "sha256": "85ac43c2b36e7e6d62bdcb73a9c61a72697c0d8971efc3049be269ac047893f0",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "b72ad9d5ae05672394c0fd8a5a647a8ddec7adf662f43e0c58560eaafac430ed"
+    },
+    "theme-08-transparent.png": {
+      "sha256": "80f2edb719b3e025ae984b320a479916fff7bc01a2ae53282f0ab2ce97717b3c",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "6b3aba07ee43c1deb135100f0eee78ac6c7d8a7d7905522c28744607d2b6be60"
+    },
+    "theme-11-dark.png": {
+      "sha256": "f35c299964d0db14b15a3194d4d13374720a46f51b455bbf8e9f5ac7e13c5260",
+      "crop": "1200x1492+0+108",
+      "size": "680x846!",
+      "embeddedJpegSha256": "0ae25149732f8db1998d9eab04aa7b7de19e7b8a8413e426b638205f176bbfd7"
+    },
+    "bookmark-01-hover.png": {
+      "sha256": "f8380b74564c4216b157efee54e71c980069ab2280ff9a3b43c22c8c6534445d",
+      "crop": "2004x1212+460+108",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "33e5d506346e980255e08d3497eb5062d38afa5dc6a3d34d73ae8310be817505"
+    },
+    "bookmark-02-added.png": {
+      "sha256": "e8031013c5aff111e31fd2cd47a9b7c7af5252abbcdcfa93120b95c9450c24b5",
+      "crop": "2004x1212+460+108",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "a866bc9faaeb9adce15f3e0682fab2e8e318309f3dcc0298e911a90d2861dece"
+    },
+    "bookmark-03-outline.png": {
+      "sha256": "e20a847e739912ca11fc52b12fa884a4955049a0ce7b1ab89414904be2bc4c6b",
+      "crop": "2004x1212+460+108",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "5fc59a938b992e561525081d79897c73072dee2a1ad495421e8cc3e48cb1723b"
+    },
+    "bookmark-04-jump.png": {
+      "sha256": "e65e690c8e13ac9e4cbf35002c8fbcfdc1a1bf6b3c5ef7983b3b9cd784434c0b",
+      "crop": "2004x1212+460+108",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "ef98e6153c26e015b01bcf768b6d54db6b1be704131f5cccccbe4fa197c806cc"
+    },
+    "bookmark-05-all.png": {
+      "sha256": "7892ab4a2d7d6acc6ac3d50647bc3ac2ccef816eb02c638030a6ded3ce6251f3",
+      "crop": "2004x1212+460+108",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "fa8a62193c78abd258e601e75f88261f15e294685fe08bf974b9ca66a17ca450"
+    },
+    "space-02-personal.png": {
+      "sha256": "33add876c81702af03a84949a17474b01f23bbb438350dfa2b571cb4db364f68",
+      "crop": "2480x1500+0+100",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "4667ecae84331d4cdf8f334c7740c19c6d9f9aaa57bb5ad53b9dc75611a9fc90"
+    },
+    "space-01-ideas.png": {
+      "sha256": "50cea6b75de2f792c7495680f0e84f9edb6ebf78ab1195e4baae890ce89c3b53",
+      "crop": "2480x1500+0+100",
+      "size": "1200x726!",
+      "embeddedJpegSha256": "38ee78c67940af8c436885f09bcc2b475c845c66e0eba0bcec5585bfdb147e4b"
+    }
+  },
+  "animations": {
+    "themes-zh-CN.svg": {
+      "frames": 8,
+      "durationSeconds": 25.6
+    },
+    "themes-en.svg": {
+      "frames": 8,
+      "durationSeconds": 25.6
+    },
+    "bookmarks-zh-CN.svg": {
+      "frames": 5,
+      "durationSeconds": 19.0
+    },
+    "bookmarks-en.svg": {
+      "frames": 5,
+      "durationSeconds": 19.0
+    },
+    "spaces-zh-CN.svg": {
+      "frames": 2,
+      "durationSeconds": 7.6
+    },
+    "spaces-en.svg": {
+      "frames": 2,
+      "durationSeconds": 7.6
+    }
+  }
+}
