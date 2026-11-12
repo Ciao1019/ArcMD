@@ -1,8 +1,11 @@
 package editor
 
 import (
+	"sort"
+	"strconv"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -21,6 +24,10 @@ const (
 	outlineMinPage = 600
 	// outlineRow is the height of an entry.
 	outlineRow = 28
+	// outlineAll is how many headings the outline builds every row for;
+	// a longer one builds those in view and outlineSpare on either side.
+	outlineAll   = 120
+	outlineSpare = 12
 	// outlineIndent is how far each heading level steps in.
 	outlineIndent = 12
 	// outlineSlide is how long the page takes to slide over.
@@ -50,6 +57,11 @@ type outlineState struct {
 	buttonTop float32
 	scrollMax float32
 	jump      outlineJump
+	// list is where the entries are scrolled; dragging is the heading
+	// being dragged, whose row is built while it is out of view so that
+	// the drag goes on (outlineList).
+	list     ui.ScrollState
+	dragging string
 }
 
 // outlineSlideState moves the outline's room from one width to another.
@@ -113,7 +125,7 @@ func (e *Editor) outlineReserve(c *ui.Context, o Options) float32 {
 	// Beside the title, unless the page's margin without the outline is
 	// too narrow for the button and the title's handle: then above it.
 	s.buttonTop = pageTop + 12
-	if (o.Width-820)/2 < 96 {
+	if (o.Width-columnWidth(o.Column))/2 < 96 {
 		s.buttonTop = 12
 	}
 	s.target = 0
@@ -227,7 +239,7 @@ func (e *Editor) outlineView(c *ui.Context, pane ui.Element, reserve float32) {
 	}
 	if shown < 1 {
 		open := ui.ButtonBase(c.Key("outline-open")).Absolute().Left(16).Top(s.buttonTop).Size(28, 28).Radius(6).Center().
-			Label("展开目录").Tooltip("展开目录").KeepFocus().Cursor(ui.CursorPointer).Opacity(1 - shown)
+			Label(i18n.T("展开目录")).Tooltip(i18n.T("展开目录")).KeepFocus().Cursor(ui.CursorPointer).Opacity(1 - shown)
 		color := t.Text.Alpha(.55)
 		if open.Hovered() {
 			open.Background(t.Text.Alpha(.06))
@@ -248,7 +260,7 @@ func (e *Editor) outlineView(c *ui.Context, pane ui.Element, reserve float32) {
 	}
 	panel.Children(func() {
 		close := ui.ButtonBase(c.Key("outline-close")).Size(28, 28).Radius(6).Center().AlignSelf(ui.Start).
-			Label("收起目录").Tooltip("收起目录").KeepFocus().Cursor(ui.CursorPointer)
+			Label(i18n.T("收起目录")).Tooltip(i18n.T("收起目录")).KeepFocus().Cursor(ui.CursorPointer)
 		color := t.Text.Alpha(.55)
 		if close.Hovered() {
 			close.Background(t.Text.Alpha(.06))
@@ -274,12 +286,7 @@ func (e *Editor) outlineList(c *ui.Context) {
 	if len(e.Doc.Blocks) > 0 {
 		title = e.Doc.Blocks[0].ID
 	}
-	active := 0
-	for i, item := range e.outline {
-		if item.y <= e.Scroll.Y+96 {
-			active = i
-		}
-	}
+	active := max(0, sort.Search(len(e.outline), func(i int) bool { return e.outline[i].y > e.Scroll.Y+96 })-1)
 	if e.outlineState.jump.id != "" {
 		// A jump marks where it goes at once, not each heading it passes.
 		for i, item := range e.outline {
@@ -292,44 +299,90 @@ func (e *Editor) outlineList(c *ui.Context) {
 	for _, item := range e.outline {
 		top = min(top, item.level)
 	}
-	ui.Scroll(c.Key("outline-scroll")).Grow(1).MinHeight(0).Children(func() {
+	// Only the rows near what the list shows are built: a long page has
+	// thousands of headings, and building each one every frame was most of
+	// a frame. Spacers keep the rows out of view taking their room.
+	s := &e.outlineState
+	from, to := 0, len(e.outline)
+	if len(e.outline) > outlineAll {
+		// Y may be set past the end (the container clamps it as it lays
+		// out); MaxY is how far the last frame let it go.
+		y := max(0, min(s.list.Y, s.list.MaxY))
+		from = min(len(e.outline), max(0, int(y/outlineRow)-outlineSpare))
+		to = min(len(e.outline), from+int(e.viewport/outlineRow)+2*outlineSpare)
+	}
+	dragAt := -1
+	if s.dragging != "" {
 		for i, item := range e.outline {
-			on := i == active
-			row := ui.ButtonBase(c.Key("outline:"+item.id)).Height(outlineRow).Radius(6).
-				Padding(0, 8, 0, 8+float32(min(item.level-top, 4))*outlineIndent).
-				Label("跳到 " + item.text).Tooltip(item.text).KeepFocus().Cursor(ui.CursorPointer)
-			if item.id != title {
-				row.Drag(outlineDrag{item.id})
+			if item.id == s.dragging {
+				dragAt = i
+				break
 			}
-			if row.Hovered() {
-				row.Background(t.Text.Alpha(.05))
+		}
+	}
+	dragging := ""
+	ui.Scroll(c.Key("outline-scroll")).Grow(1).MinHeight(0).TrackScroll(&s.list).Children(func() {
+		// Keep the offscreen drag source at its original keyed position, with
+		// spacers for everything between it and the visible rows.
+		cursor := 0
+		rows := func(a, z int) {
+			if a >= z {
+				return
 			}
-			// A section dragged onto a heading goes before it.
-			dragged, over := ui.DragOver[outlineDrag](row)
-			over = over && dragged.id != item.id && item.id != title
-			if d, ok := ui.Drop[outlineDrag](row); ok && d.id != item.id && item.id != title {
-				e.Engine.MoveSection(d.id, item.id)
+			if a > cursor {
+				ui.Box(c.Key("outline-gap:" + strconv.Itoa(cursor))).Height(float32(a-cursor) * outlineRow)
 			}
-			if row.Dragging() {
-				row.Opacity(.4)
-			}
-			if over {
-				row.Draw(func(p *ui.Painter, r ui.Rect) {
-					p.Fill(ui.Rect{X: r.X, Y: r.Y - 1, W: r.W, H: 2}, t.Accent, 1)
+			for i := a; i < z; i++ {
+				item := e.outline[i]
+				on := i == active
+				row := ui.ButtonBase(c.Key("outline:"+item.id)).Height(outlineRow).Radius(6).
+					Padding(0, 8, 0, 8+float32(min(item.level-top, 4))*outlineIndent).
+					Label(i18n.T("跳到 ") + item.text).Tooltip(item.text).KeepFocus().Cursor(ui.CursorPointer)
+				if item.id != title {
+					row.Drag(outlineDrag{item.id})
+				}
+				if row.Hovered() {
+					row.Background(t.Text.Alpha(.05))
+				}
+				// A section dragged onto a heading goes before it.
+				dragged, over := ui.DragOver[outlineDrag](row)
+				over = over && dragged.id != item.id && item.id != title
+				if d, ok := ui.Drop[outlineDrag](row); ok && d.id != item.id && item.id != title {
+					e.Engine.MoveSection(d.id, item.id)
+				}
+				if row.Dragging() {
+					row.Opacity(.4)
+					dragging = item.id
+				}
+				if over {
+					row.Draw(func(p *ui.Painter, r ui.Rect) {
+						p.Fill(ui.Rect{X: r.X, Y: r.Y - 1, W: r.W, H: 2}, t.Accent, 1)
+					})
+				}
+				color, weight := t.Text.Alpha(.72), 400
+				if on {
+					color, weight = t.Accent, 500
+				}
+				row.Children(func() {
+					ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
+					})
 				})
+				if row.Clicked() {
+					e.jumpTo(c, item.id, item.y)
+				}
 			}
-			color, weight := t.Text.Alpha(.72), 400
-			if on {
-				color, weight = t.Accent, 500
-			}
-			row.Children(func() {
-				ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
-				})
-			})
-			if row.Clicked() {
-				e.jumpTo(c, item.id, item.y)
-			}
+			cursor = z
+		}
+		if dragAt >= 0 && dragAt < from {
+			rows(dragAt, dragAt+1)
+		}
+		rows(from, to)
+		if dragAt >= to {
+			rows(dragAt, dragAt+1)
+		}
+		if cursor < len(e.outline) {
+			ui.Box(c.Key("outline-gap:" + strconv.Itoa(cursor))).Height(float32(len(e.outline)-cursor) * outlineRow)
 		}
 		// Below the last heading: the end of the document.
 		end := ui.Box(c.Key("outline-end")).Height(16)
@@ -344,4 +397,5 @@ func (e *Editor) outlineList(c *ui.Context) {
 		}
 		e.bookmarkSection(c)
 	})
+	s.dragging = dragging
 }

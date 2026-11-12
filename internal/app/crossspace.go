@@ -4,6 +4,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -82,7 +83,7 @@ func (a *App) spacesMenu(m *ui.Menu, sp *space.Space, rel string) {
 	if len(a.state.Spaces) < 2 {
 		return
 	}
-	m.Submenu("移到空间", func(sub *ui.Menu) {
+	m.Submenu(i18n.T("移到空间"), func(sub *ui.Menu) {
 		for _, s := range a.state.Spaces {
 			name := s.Name
 			if s.Icon != "" {
@@ -141,6 +142,7 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	if follow && a.state.ActiveSpace() != dst {
 		a.followTo(dst)
 	}
+	a.offerUndo(i18n.T("已移到空间「")+dst.Name+"」", path.Base(to), func() { a.moveAcross(toID, to, fromID, parentDir(rel)) })
 	return to
 }
 

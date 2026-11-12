@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -71,6 +72,10 @@ func (a *App) View(c *ui.Context) {
 		c.Toast(n)
 	}
 	a.notices = a.notices[:0]
+	for _, u := range a.undos {
+		c.AddToast(u)
+	}
+	a.undos = a.undos[:0]
 	a.updateTick(c)
 	a.updateToastTick()
 
@@ -134,6 +139,8 @@ func (a *App) View(c *ui.Context) {
 	a.paletteView(c)
 	a.updateToast(c)
 	a.settingsView(c)
+	a.replaceView(c)
+	a.tagRenameView(c)
 	a.versionsView(c)
 	a.updateWindowView(c)
 	a.pdfExportView(c)
@@ -163,6 +170,10 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.newDoc(a.currentDir())
 	case a.pressed(c, "new-folder"):
 		a.newFolder(a.currentDir())
+	case a.pressed(c, "daily"):
+		a.openDaily()
+	case a.pressed(c, "replace-all"):
+		a.openReplaceAll()
 	case a.pressed(c, "sidebar"):
 		a.toggleSidebar()
 	case a.pressed(c, "focus"):
@@ -301,9 +312,9 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 	}
 	if d.loadErr != nil {
 		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
-			ui.Text(c, "文档无法打开").FontSize(20)
+			ui.Text(c, i18n.T("文档无法打开")).FontSize(20)
 			ui.Text(c, d.loadErr.Error()).TextColor(c.Theme().Danger).MaxWidth(460)
-			if ui.Button(c, "重新载入").Clicked() {
+			if ui.Button(c, i18n.T("重新载入")).Clicked() {
 				a.activateDocument(d)
 				a.reload()
 			}
@@ -313,13 +324,13 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 	if d.source {
 		ui.Column(c).Grow(1).Padding(24).Gap(12).Children(func() {
 			ui.Row(c).Gap(12).Children(func() {
-				ui.Text(c, "Markdown 导出预览").Grow(1)
-				if ui.Button(c, "导出 Markdown 文件").Clicked() {
+				ui.Text(c, i18n.T("Markdown 导出预览")).Grow(1)
+				if ui.Button(c, i18n.T("导出 Markdown 文件")).Clicked() {
 					a.activateDocument(d)
 					a.exportMarkdown()
 				}
 			})
-			ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).Label("Markdown 导出预览")
+			ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).Label(i18n.T("Markdown 导出预览"))
 		})
 		return
 	}
@@ -341,17 +352,17 @@ func (a *App) toolbar(c *ui.Context) {
 	ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, bar.Right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		if a.folded() {
 			ui.Box(c).Width(bar.Left + 4)
-			if iconButton(c, "show-sidebar", iconSidebar, "展开侧边栏", a.withKey("展开侧边栏", "sidebar"), false).Clicked() {
+			if iconButton(c, "show-sidebar", iconSidebar, i18n.T("展开侧边栏"), a.withKey(i18n.T("展开侧边栏"), "sidebar"), false).Clicked() {
 				a.toggleSidebar()
 			}
 		}
-		if iconButton(c, "back", iconBack, "后退", a.withKey("后退", "back"), !a.canGo(-1)).Clicked() {
+		if iconButton(c, "back", iconBack, i18n.T("后退"), a.withKey(i18n.T("后退"), "back"), !a.canGo(-1)).Clicked() {
 			a.goHistory(-1)
 		}
-		if iconButton(c, "forward", iconForward, "前进", a.withKey("前进", "forward"), !a.canGo(1)).Clicked() {
+		if iconButton(c, "forward", iconForward, i18n.T("前进"), a.withKey(i18n.T("前进"), "forward"), !a.canGo(1)).Clicked() {
 			a.goHistory(1)
 		}
-		if iconButton(c, "reload", iconReload, "重新载入", a.withKey("从磁盘重新载入", "reload"), a.doc == nil).Clicked() {
+		if iconButton(c, "reload", iconReload, i18n.T("重新载入"), a.withKey(i18n.T("从磁盘重新载入"), "reload"), a.doc == nil).Clicked() {
 			a.reload()
 		}
 		ui.Box(c).Width(8)
@@ -359,9 +370,6 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Box(c).Width(8)
 		if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
 			a.doc.ed.Corner(c)
-		}
-		if iconButton(c, "split", iconSplit, "添加分屏", a.withKey("添加分屏", "split-add"), a.doc == nil).Clicked() {
-			a.addSplitPane()
 		}
 		a.moreMenu(c)
 	})
@@ -372,7 +380,7 @@ func (a *App) toolbar(c *ui.Context) {
 func (a *App) address(c *ui.Context) {
 	t := c.Theme()
 	f := ui.Row(c.Key("address")).Grow(1).MinWidth(0).Height(32).Radius(9).PaddingX(12).Gap(8).
-		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label("文档路径").
+		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("文档路径")).
 		Background(field(t))
 	if f.Hovered() {
 		f.Background(field(t).Mix(white, 0.2))
@@ -380,12 +388,12 @@ func (a *App) address(c *ui.Context) {
 	f.Children(func() {
 		if a.spaceForm.open && a.spaceForm.id == "" {
 			ui.Icon(c, iconSearch).FontSize(14).TextColor(t.TextMuted)
-			ui.Text(c, "新空间").TextColor(t.TextMuted).NoWrap()
+			ui.Text(c, i18n.T("新空间")).TextColor(t.TextMuted).NoWrap()
 			return
 		}
 		if a.doc == nil {
 			ui.Icon(c, iconSearch).FontSize(14).TextColor(t.TextMuted)
-			ui.Text(c, "搜索或打开文档").TextColor(t.TextMuted).NoWrap()
+			ui.Text(c, i18n.T("搜索或打开文档")).TextColor(t.TextMuted).NoWrap()
 			return
 		}
 		docIcon(c, a.iconTitle(a.doc.space.ID, a.doc.rel), 16)
@@ -400,9 +408,9 @@ func (a *App) address(c *ui.Context) {
 		status, color := "", t.TextMuted
 		switch {
 		case a.doc.saveErr != nil:
-			status, color = "保存失败", t.Danger
+			status, color = i18n.T("保存失败"), t.Danger
 		case a.doc.dirty():
-			status = "已修改"
+			status = i18n.T("已修改")
 		}
 		if status != "" {
 			ui.Text(c, status).FontSize(12).TextColor(color).NoWrap().Tooltip(errText(a.doc.saveErr))
@@ -436,7 +444,7 @@ func errText(err error) string {
 	if err == nil {
 		return ""
 	}
-	return err.Error()
+	return i18n.T(err.Error())
 }
 
 // followLink opens a link of the document: another document of the space,
@@ -464,17 +472,17 @@ func (a *App) emptyState(c *ui.Context) {
 		}
 		switch {
 		case a.treeErr != nil:
-			ui.Text(c, "读取空间文件夹失败。"+a.treeErr.Error()).TextColor(t.Danger).MaxWidth(420).TextAlign(ui.Center)
+			ui.Text(c, i18n.T("读取空间文件夹失败。")+a.treeErr.Error()).TextColor(t.Danger).MaxWidth(420).TextAlign(ui.Center)
 		case len(a.docs) == 0:
-			ui.Text(c, "此空间暂无文档。").TextColor(t.TextMuted)
+			ui.Text(c, i18n.T("此空间暂无文档。")).TextColor(t.TextMuted)
 		default:
-			ui.Text(c, "选择一篇文档，或按 ⌘K 搜索。").TextColor(t.TextMuted)
+			ui.Text(c, i18n.T("选择一篇文档，或按 ⌘K 搜索。")).TextColor(t.TextMuted)
 		}
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.PrimaryButton(c.Key("empty-new"), "新建文档").Tooltip("⌘N").Clicked() {
+			if ui.PrimaryButton(c.Key("empty-new"), i18n.T("新建文档")).Tooltip("⌘N").Clicked() {
 				a.newDoc("")
 			}
-			if ui.Button(c.Key("empty-palette"), "命令栏").Tooltip("⌘K").Clicked() {
+			if ui.Button(c.Key("empty-palette"), i18n.T("命令栏")).Tooltip("⌘K").Clicked() {
 				a.openPalette()
 			}
 		})

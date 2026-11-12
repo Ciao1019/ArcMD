@@ -1,0 +1,120 @@
+--- a/ui/headless.go
++++ b/ui/headless.go
+@@ -17,7 +17,8 @@
+ 
+ // headless renders frames in memory with the software renderer.
+ type headless struct {
+-	w, h, scale float32
++	perfNoRaster bool
++	w, h, scale  float32
+ 	// maxButton is where the view shows the maximize button.
+ 	maxButton Rect
+ 	img       raster.Renderer
+@@ -96,7 +97,9 @@
+ func (h *headless) occluded() bool                    { return h.hidden }
+ func (h *headless) present(s *scene.Scene) {
+ 	h.last = s
+-	h.img.Render(s)
++	if !h.perfNoRaster {
++		h.img.Render(s)
++	}
+ }
+ func (h *headless) afterTimer(at time.Time) {
+ 	h.afterAt = at
+@@ -241,7 +244,7 @@
+ // elements given one key under one parent make it panic where the second
+ // was given, as apps only log it.
+ func coreNewTester(view func(c *context), width, height int) *Tester {
+-	h := &headless{w: float32(width), h: float32(height), scale: 1}
++	h := &headless{perfNoRaster: true, w: float32(width), h: float32(height), scale: 1}
+ 	t := &Tester{rt: newRuntime(view, h), h: h, now: time.Now()}
+ 	t.rt.clock = t.Now
+ 	h.clock = t.Now
+@@ -837,3 +840,87 @@
+ 	}
+ 	return false
+ }
++
++// PerfPrepare disables test-only accessibility label collection and fixes scale.
++// These methods exist only in the performance overlay, never in shipped builds.
++func (t *Tester) PerfPrepare() {
++	t.rt.collect = false
++	t.h.scale = 2
++	t.rt.changed()
++	t.settle()
++}
++
++// PerfOperation dispatches one event and constructs exactly one CPU scene.
++// GPU submission, rasterization and display latency are outside both timers.
++func (t *Tester) PerfOperation(action string) (step, frame time.Duration) {
++	t.now = t.now.Add(10 * time.Millisecond)
++	event := platform.SurfaceEvent{}
++	switch action {
++	case "type":
++		event = platform.SurfaceEvent{Kind: platform.TextInput, Text: "x"}
++	case "backspace":
++		event = platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(KeyBackspace)}
++	case "scroll":
++		event = platform.SurfaceEvent{Kind: platform.PointerScroll, X: 900, Y: 500, DY: 40, Precise: true}
++	default:
++		panic("unknown performance operation")
++	}
++	start := time.Now()
++	t.rt.event(event)
++	step = time.Since(start)
++	frame = t.PerfFrame()
++	return
++}
++
++// PerfPointer measures one split-divider event and one CPU scene.
++func (t *Tester) PerfPointer(action string, x, y float32) (step, frame time.Duration) {
++	t.now = t.now.Add(16 * time.Millisecond)
++	ev := platform.SurfaceEvent{X: float64(x), Y: float64(y)}
++	switch action {
++	case "press":
++		ev.Kind = platform.PointerDown
++		ev.Clicks = 1
++	case "move":
++		ev.Kind = platform.PointerMove
++	case "release":
++		ev.Kind = platform.PointerUp
++	default:
++		panic("unknown pointer operation")
++	}
++	start := time.Now()
++	t.rt.event(ev)
++	step = time.Since(start)
++	frame = t.PerfFrame()
++	return
++}
++
++// PerfFrame constructs one frame without the Tester's multi-frame settling.
++func (t *Tester) PerfFrame() time.Duration {
++	start := time.Now()
++	t.h.requested.Store(false)
++	t.h.invalidated.Store(false)
++	t.runLater()
++	t.rt.runFrame()
++	return time.Since(start)
++}
++
++// PerfSnapshot rasterizes the last scene outside the timing region.
++func (t *Tester) PerfSnapshot() *image.RGBA {
++	t.h.img.Render(t.h.last)
++	return t.h.image()
++}
++
++func (t *Tester) PerfReviewIdle(d time.Duration) time.Duration {
++	t.now = t.now.Add(d)
++	return t.PerfFrame()
++}
++
++// PerfAlgorithmPreedit includes native event dispatch and one CPU scene.
++func (t *Tester) PerfAlgorithmPreedit(text string, caret int) (step,frame time.Duration) {
++ t.now = t.now.Add(16*time.Millisecond)
++ start := time.Now()
++ t.rt.event(platform.SurfaceEvent{Kind:platform.TextComposition, Text:text, Caret:caret})
++ step = time.Since(start)
++ frame = t.PerfFrame()
++ return
++}

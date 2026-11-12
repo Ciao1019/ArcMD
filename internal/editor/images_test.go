@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -153,5 +154,20 @@ func TestImageSelectionDeleteAndUndo(t *testing.T) {
 	tt.Key(ui.Cmd, ui.KeyZ)
 	if len(e.Doc.Blocks) != 3 || e.Doc.Blocks[1].URL != "photo.png" {
 		t.Fatal("picture delete could not be undone")
+	}
+}
+
+func TestAnimatedFrameAt(t *testing.T) {
+	a, b := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1))), ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1)))
+	r := ImageResource{Bitmap: a, Frames: []*ui.Bitmap{a, b}, Delays: []time.Duration{100 * time.Millisecond, 300 * time.Millisecond}}
+	base := time.Unix(0, 0)
+	if f, next := r.frameAt(base.Add(50 * time.Millisecond)); f != a || next != 50*time.Millisecond {
+		t.Fatal("first frame", next)
+	}
+	if f, next := r.frameAt(base.Add(150 * time.Millisecond)); f != b || next != 250*time.Millisecond {
+		t.Fatal("second frame", next)
+	}
+	if f, next := (ImageResource{Bitmap: a}).frameAt(base); f != a || next != 0 {
+		t.Fatal("still")
 	}
 }

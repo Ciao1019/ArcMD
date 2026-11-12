@@ -21,6 +21,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/plugin"
 	"github.com/Ciao1019/ArcMD/internal/prefs"
 	"github.com/Ciao1019/ArcMD/internal/space"
@@ -32,7 +33,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.0.9"
+const Version = "0.0.11"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -181,6 +182,19 @@ type App struct {
 	revealFile func(path string)
 	// notices are messages for the user, shown as toasts by the next frame.
 	notices []string
+	// undos are toasts that offer to undo a file operation (undo.go).
+	undos []ui.Toast
+	// replace is the find and replace across documents (replace.go).
+	replace replaceState
+	// tagRename is the window renaming a #tag everywhere (tags.go).
+	tagRename tagRename
+	// systemLanguage is the language the system prefers of those the
+	// interface is written in.
+	systemLanguage string
+	// windows are the documents shown in windows of their own
+	// (windows.go); newWindow, when set, makes them in tests.
+	windows   []*docWindow
+	newWindow func(title string, view func(*ui.Context), close func() bool) windowHandle
 	// watchFiles follows a space's folder (watch.go), and watches are the
 	// folders followed, by space ID.
 	watchFiles watchFunc
@@ -244,6 +258,8 @@ func New(cfg Config) (*App, error) {
 		a.prefs, a.prefsBroken = &prefs.Prefs{Version: prefs.CurrentVersion}, true
 		a.notify("读取偏好设置失败，本次使用默认设置且不会覆盖原文件。%v", err)
 	}
+	a.systemLanguage = "zh-Hans"
+	a.applyLanguage()
 	st, err := a.store.Load()
 	if err != nil {
 		return nil, err
@@ -331,7 +347,9 @@ func (a *App) Run() error {
 			a.win.Focus()
 		}
 	})
-	mygo.App.SetLanguages("zh-Hans")
+	mygo.App.SetLanguages(i18n.Languages...)
+	a.systemLanguage = i18n.Pick(mygo.App.PreferredLanguages())
+	a.applyLanguage()
 	mygo.App.WhenReady(func() {
 		mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 			a.appMenu(),
@@ -343,10 +361,10 @@ func (a *App) Run() error {
 				{Role: mygo.RoleMinimize},
 				{Role: mygo.RoleZoom},
 				mygo.Separator(),
-				{Label: "下一个空间", Accelerator: "CmdOrCtrl+Alt+Right", Click: func(*mygo.MenuItem, *mygo.Window) {
+				{Label: i18n.T("下一个空间"), Accelerator: "CmdOrCtrl+Alt+Right", Click: func(*mygo.MenuItem, *mygo.Window) {
 					a.win.Update(func() { a.stepSpace(1) })
 				}},
-				{Label: "上一个空间", Accelerator: "CmdOrCtrl+Alt+Left", Click: func(*mygo.MenuItem, *mygo.Window) {
+				{Label: i18n.T("上一个空间"), Accelerator: "CmdOrCtrl+Alt+Left", Click: func(*mygo.MenuItem, *mygo.Window) {
 					a.win.Update(func() { a.stepSpace(-1) })
 				}},
 				mygo.Separator(),
@@ -404,11 +422,11 @@ func (a *App) appMenu() *mygo.MenuItem {
 	}
 	return &mygo.MenuItem{Label: "ArcMD", Submenu: []*mygo.MenuItem{
 		{Role: mygo.RoleAbout},
-		{Label: "检查更新…", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{Label: i18n.T("检查更新…"), Click: func(*mygo.MenuItem, *mygo.Window) {
 			a.win.Update(a.checkForUpdates)
 		}},
 		mygo.Separator(),
-		{Label: "设置…", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{Label: i18n.T("设置…"), Click: func(*mygo.MenuItem, *mygo.Window) {
 			a.win.Update(func() { a.openSettings(tabGeneral) })
 		}},
 		mygo.Separator(),
@@ -424,7 +442,7 @@ func (a *App) appMenu() *mygo.MenuItem {
 
 // notify queues a message for the user.
 func (a *App) notify(format string, args ...any) {
-	a.notices = append(a.notices, fmt.Sprintf(format, args...))
+	a.notices = append(a.notices, fmt.Sprintf(i18n.T(format), args...))
 }
 
 // savePrefs writes prefs.json, telling the user when it fails.
@@ -589,6 +607,11 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	active := sp == a.state.ActiveSpace()
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
 		return true
+	}
+	if w := a.windowOf(sp.ID, rel); w != nil {
+		// Its window has it: one file has one editor.
+		w.win.Focus()
+		return false
 	}
 	restoring := a.doc == nil && sp.LastOpen == rel
 	text, err := vault.Read(sp.Root, rel)
@@ -866,7 +889,7 @@ func docTitle(doc *model.Document) string {
 // newFolder makes a folder in dir and starts naming it.
 func (a *App) newFolder(dir string) {
 	sp := a.state.ActiveSpace()
-	rel, err := vault.Mkdir(sp.Root, dir, "新建文件夹")
+	rel, err := vault.Mkdir(sp.Root, dir, i18n.T("新建文件夹"))
 	if err != nil {
 		a.notify("新建文件夹失败。%v", err)
 		return
@@ -1044,7 +1067,7 @@ func (a *App) togglePin(sp *space.Space, rel string) {
 func (a *App) newFolderWith(rel string) {
 	sp := a.state.ActiveSpace()
 	dir := parentDir(rel)
-	folder, err := vault.Mkdir(sp.Root, dir, "新建文件夹")
+	folder, err := vault.Mkdir(sp.Root, dir, i18n.T("新建文件夹"))
 	if err != nil {
 		a.notify("新建文件夹失败。%v", err)
 		return
@@ -1093,6 +1116,9 @@ func (a *App) trash(rel string) {
 	a.state.Forget(sp.ID, rel)
 	a.saveState()
 	a.refreshTree()
+	if ok {
+		a.offerUndo(i18n.T("已移到废纸篓"), path.Base(rel), func() { a.restoreDeleted(kept) })
+	}
 }
 
 // revealInFinder shows the file or folder at rel of the active space in
@@ -1125,7 +1151,7 @@ func (a *App) defaultRoot(name string) string {
 		return r
 	}, strings.TrimSpace(name))
 	if name == "" {
-		name = "空间"
+		name = i18n.T("空间")
 	}
 	return filepath.Join(a.cfg.DocumentsDir, name)
 }
@@ -1138,7 +1164,7 @@ ArcMD is a calm place for writing, in the spirit of Arc and Zen. Documents save 
 - **The command bar** (⌘K) finds documents and runs commands; click the address above to open it.
 - **⌘N** makes a document, **⌘\\** folds the sidebar away (point at the window's left edge to peek at it), **⇧⌘M** opens the Markdown export preview.
 - [ ] Drag a document onto a folder to move it
-- [ ] Double-click a name to rename it
+- [ ] Right-click a name and choose Rename to rename it
 
 ## Plugins
 
@@ -1179,4 +1205,17 @@ func (a *App) exportMarkdown() {
 	}
 	a.refreshTree()
 	a.notify("已导出 %s", rel)
+}
+
+// applyLanguage shows the interface in the language the preferences pick,
+// or the system's.
+func (a *App) applyLanguage() {
+	tag := a.prefs.Language
+	if tag == "" {
+		tag = a.systemLanguage
+	}
+	i18n.SetLanguage(tag)
+	if a.win != nil {
+		mygo.App.SetLocale(i18n.Language())
+	}
 }

@@ -176,8 +176,9 @@ func TestSpacesSwitchAndRemember(t *testing.T) {
 		t.Fatalf("active = %+v", work)
 	}
 	tt.Frame()
-	if !tt.HasText("此空间暂无文档。") {
-		t.Errorf("empty state missing: %q", tt.Texts())
+	// An empty folder starts with the page showing how to write.
+	if a.doc == nil || a.doc.rel != starterName || !tt.HasText("从这里开始") {
+		t.Errorf("starter page missing: %q", tt.Texts())
 	}
 	tt.Key(ui.Cmd, ui.KeyN)
 	if a.doc == nil || a.doc.space != work {

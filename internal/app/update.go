@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/update"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -220,7 +221,7 @@ func (a *App) checked(rel updateRelease, err error) {
 	switch {
 	case err != nil:
 		if asked {
-			u.phase, u.failure = phaseFailed, "无法检查更新："+err.Error()
+			u.phase, u.failure = phaseFailed, i18n.T("无法检查更新：")+err.Error()
 		}
 	case rel == nil:
 		if asked {
@@ -286,7 +287,7 @@ func (a *App) downloaded(rel updateRelease, err error) {
 			return
 		}
 		if u.window && u.phase == phaseDownloading {
-			u.phase, u.failure = phaseFailed, "下载更新失败："+err.Error()
+			u.phase, u.failure = phaseFailed, i18n.T("下载更新失败：")+err.Error()
 		}
 		return
 	}
@@ -409,19 +410,19 @@ func (a *App) updateSummary() string {
 	u := &a.updates
 	switch {
 	case !a.updatesEnabled():
-		return "开发版本或无法写入的安装位置不会自动更新。"
+		return i18n.T("开发版本或无法写入的安装位置不会自动更新。")
 	case u.ready != "":
-		return "ArcMD " + u.ready + " 已下载，重新启动后安装。"
+		return "ArcMD " + u.ready + i18n.T(" 已下载，重新启动后安装。")
 	case u.downloading:
-		return "正在下载新版本…"
+		return i18n.T("正在下载新版本…")
 	case u.found != "":
-		return "ArcMD " + u.found + " 可以更新。"
+		return "ArcMD " + u.found + i18n.T(" 可以更新。")
 	case u.checking:
-		return "正在检查更新…"
+		return i18n.T("正在检查更新…")
 	case u.lastCheck.IsZero():
-		return "从 GitHub Releases 获取新版本。"
+		return i18n.T("从 GitHub Releases 获取新版本。")
 	case u.checkErr != nil:
-		return "上次检查失败：" + u.checkErr.Error()
+		return i18n.T("上次检查失败：") + u.checkErr.Error()
 	}
-	return "上次检查：" + u.lastCheck.Format("1月2日 15:04") + "，已是最新版本。"
+	return i18n.T("上次检查：") + u.lastCheck.Format(i18n.T("1月2日 15:04")) + i18n.T("，已是最新版本。")
 }

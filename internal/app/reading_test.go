@@ -12,7 +12,11 @@ import (
 func TestReadingSettingsAndToolbarLock(t *testing.T) {
 	a, tt := newTestApp(t)
 	tt.Frame()
-	a.openSettings(tabGeneral)
+	a.openSettings(tabAppearance)
+	tt.Frame()
+	// The reading group is below the writing group: scroll to it.
+	r, _ := tt.Find("增大正文字号")
+	tt.Scroll(r.X, 400, 0, 400)
 	tt.Frame()
 	if err := tt.Click("增大正文字号"); err != nil {
 		t.Fatal(err)
@@ -29,13 +33,13 @@ func TestReadingSettingsAndToolbarLock(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
-	if err := tt.Click("编辑中"); err != nil {
+	if err := tt.Click("编辑中，点击设为只读"); err != nil {
 		t.Fatal(err)
 	}
 	if !a.doc.ed.ReadOnly {
 		t.Fatal("not locked")
 	}
-	if err := tt.Click("只读"); err != nil {
+	if err := tt.Click("只读，点击恢复编辑"); err != nil {
 		t.Fatal(err)
 	}
 	if a.doc.ed.ReadOnly {

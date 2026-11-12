@@ -1,0 +1,64 @@
+Total: 3.16s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/document.(*Document).PlainText in /Users/cizai/agent/Prism/internal/document/model.go
+         0      430ms (flat, cum) 13.61% of Total
+         .          .    607:func (d *Document) PlainText() string {
+         .          .    608:	// Walked directly rather than through Leaves: search rereads the text
+         .          .    609:	// of an open page as it changes, and on a long page the leaf list and
+         .          .    610:	// the slice of parts would be most of that work.
+         .          .    611:	var out strings.Builder
+         .          .    612:	first := true
+         .          .    613:	var walk func([]*Block, map[*Block]bool)
+         .          .    614:	walk = func(blocks []*Block, covered map[*Block]bool) {
+         .          .    615:		for _, block := range blocks {
+         .          .    616:			if covered[block] {
+         .          .    617:				continue
+         .          .    618:			}
+         .          .    619:			if len(block.Children) > 0 {
+         .          .    620:				inner := covered
+         .          .    621:				if block.Kind == "table" {
+         .          .    622:					inner = CoveredCells(block)
+         .          .    623:				}
+         .          .    624:				walk(block.Children, inner)
+         .          .    625:				continue
+         .          .    626:			}
+         .          .    627:			if !first {
+         .          .    628:				out.WriteByte('\n')
+         .          .    629:			}
+         .          .    630:			first = false
+         .          .    631:			for _, run := range block.Runs {
+         .          .    632:				out.WriteString(run.Text)
+         .          .    633:			}
+         .          .    634:		}
+         .          .    635:	}
+         .      430ms    636:	walk(d.Blocks, nil)
+         .          .    637:	return out.String()
+         .          .    638:}
+         .          .    639:
+         .          .    640:// HasKind reports whether any block of the document, at any depth, is of
+         .          .    641:// the kind, without building the leaf list.
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/document.(*Document).PlainText.func1 in /Users/cizai/agent/Prism/internal/document/model.go
+         0      470ms (flat, cum) 14.87% of Total
+         .          .    614:	walk = func(blocks []*Block, covered map[*Block]bool) {
+         .          .    615:		for _, block := range blocks {
+         .       60ms    616:			if covered[block] {
+         .          .    617:				continue
+         .          .    618:			}
+         .          .    619:			if len(block.Children) > 0 {
+         .          .    620:				inner := covered
+         .          .    621:				if block.Kind == "table" {
+         .          .    622:					inner = CoveredCells(block)
+         .          .    623:				}
+         .       40ms    624:				walk(block.Children, inner)
+         .          .    625:				continue
+         .          .    626:			}
+         .          .    627:			if !first {
+         .       10ms    628:				out.WriteByte('\n')
+         .          .    629:			}
+         .          .    630:			first = false
+         .          .    631:			for _, run := range block.Runs {
+         .      360ms    632:				out.WriteString(run.Text)
+         .          .    633:			}
+         .          .    634:		}
+         .          .    635:	}
+         .          .    636:	walk(d.Blocks, nil)
+         .          .    637:	return out.String()

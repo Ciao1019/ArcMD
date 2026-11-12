@@ -3,12 +3,14 @@ package editor
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
@@ -17,6 +19,8 @@ type Editor struct {
 	notesDoc      *document.Document
 	notesRevision uint64
 	notesKey      string
+	noteRefs      []noteReferences
+	noteOrder     []string
 	imageResize   imageResize
 	linkRevision  uint64
 	wikiHover     wikiHoverState
@@ -28,6 +32,9 @@ type Editor struct {
 	*Buffer
 	Scroll                           ui.ScrollState
 	RequestFocus                     bool
+	handleIDs, decorationIDs         map[string]int
+	rowIDs                           map[string]int
+	rowSpace, decorationSpace        spatialIndex
 	rows                             []row
 	decorations                      []decoration
 	handles                          []blockHandle
@@ -59,10 +66,18 @@ type Editor struct {
 	revealKey                        [2]uint64
 	find                             finder
 	revealAt                         *ui.TextInputRange
-	colorPanel, colorPanelOpened     bool
-	lastColor, lastHighlight         string
-	tableDanger                      bool
-	attach                           func()
+	// lastAnnotation is the hand-drawn mark the bar's pen applies;
+	// drawIn the new mark drawing itself; annotatePanel the mark picker.
+	lastAnnotation, lastAnnotationColor string
+	drawIn                              annotationReveal
+	annotatePanel, annotatePanelOpened  bool
+	reduceMotion                        bool
+	markPop                             markPopover
+	openReveal                          openReveal
+	// refusedAt is when typing last reached the locked page.
+	refusedAt   time.Time
+	tableDanger bool
+	attach      func()
 	// pasteImage takes a picture pasted from the clipboard; dropFiles takes
 	// files dragged in from another app or pasted, to go before the top-level
 	// block at the index (-1: at the caret). fileOver is where files dragged
@@ -131,16 +146,33 @@ type Editor struct {
 	bookmarks bookmarkState
 	// reserved are keys the host takes, which the page leaves alone.
 	reserved []Combo
+	// blocks is the block selection (blockselect.go).
+	blocks blockSelection
+	// column is the text column's width as last laid out.
+	column float32
+	// complete is the list of emoji and mentions being typed (complete.go);
+	// autoSpace puts a space between Chinese and Latin text as it is typed.
+	complete  completion
+	autoSpace bool
+	// goalEditing shows the box that takes a word goal of the writer's own.
+	goalEditing bool
+	goalText    string
+	// cropper is the crop dialog (crop.go); cropImage the host's cut.
+	cropper   imageCropper
+	cropImage func(id, url string, r image.Rectangle)
 }
 
 type row struct {
-	leaf    document.Leaf
-	layout  *textLayout
-	rect    ui.Rect
-	x, y    float32
-	picture *imageFigure
+	leafRevision uint64
+	leaf         document.Leaf
+	layout       *textLayout
+	rect         ui.Rect
+	x, y         float32
+	picture      *imageFigure
 	// number is the position of a numbered item in its list, from 1.
 	number int
+	// size is the font size, which sizes the row's hand-drawn marks.
+	size float32
 	// emptyColumn uses its outline as the hint, keeping the writing area clear.
 	emptyColumn bool
 	// Math geometry is relative to rect, so moving preceding paragraphs
@@ -208,7 +240,7 @@ var codeLanguages = []struct{ name, label string }{
 func languageLabel(name string) string {
 	for _, l := range codeLanguages {
 		if strings.EqualFold(l.name, name) {
-			return l.label
+			return i18n.T(l.label)
 		}
 	}
 	return name
@@ -217,7 +249,7 @@ func languageLabel(name string) string {
 // paintLanguage draws a code block's language button.
 func (e *Editor) paintLanguage(p *ui.Painter, r ui.Rect, d decoration, t *ui.Theme) {
 	label := languageLabel(d.label)
-	if label == "纯文本" || label == "" {
+	if label == i18n.T("纯文本") || label == "" {
 		label = "Plain Text"
 	}
 	span := ui.Span{Text: label, Size: 14, Color: t.Text}
@@ -259,15 +291,15 @@ func calloutIcon(tone string) *ui.SVG {
 func CalloutName(tone string) string {
 	switch tone {
 	case "green":
-		return "绿色 · 提示"
+		return i18n.T("绿色 · 提示")
 	case "purple":
-		return "紫色 · 重要"
+		return i18n.T("紫色 · 重要")
 	case "yellow":
-		return "黄色 · 警告"
+		return i18n.T("黄色 · 警告")
 	case "red":
-		return "红色 · 危险"
+		return i18n.T("红色 · 危险")
 	}
-	return "蓝色 · 说明"
+	return i18n.T("蓝色 · 说明")
 }
 
 // blockHandle is the grip beside a top-level block, with the add button
@@ -291,6 +323,8 @@ type foldButton struct {
 	id     string
 	rect   ui.Rect
 	folded bool
+	// always shows the triangle, as a toggle's, not only under the pointer.
+	always bool
 }
 
 func isList(kind string) bool { return kind == "bullet" || kind == "numbered" || kind == "task" }
@@ -335,13 +369,21 @@ type Options struct {
 	Resizing             bool
 	NoAutoPair           bool
 	FontSize, LineHeight float32
-	Width                float32
-	Theme                *ui.Theme
-	LoadImage            func(string) ImageResource
+	// FontFamily is the body text's family list, "" for the system's; Column
+	// is the text column's width, 0 for 820. Code keeps its monospace.
+	FontFamily string
+	Column     float32
+	Width      float32
+	Theme      *ui.Theme
+	LoadImage  func(string) ImageResource
 	// ReplaceImage selects a new file for a stable block ID. RevealImage
 	// opens its local file (or nearest existing folder) in the file manager.
 	ReplaceImage func(id, url string)
 	RevealImage  func(url string)
+	// CropImage, when set, lets a picture be cropped: the host keeps the
+	// part r, in the picture's pixels, as a new file and points the
+	// picture id at it.
+	CropImage func(id, url string, r image.Rectangle)
 	// Attach, when set, lets the slash menu insert images: the host picks
 	// them and inserts them at the caret.
 	Attach func()
@@ -362,10 +404,19 @@ type Options struct {
 	OpenWiki    func(name string)
 	OpenTag     func(tag string)
 	WikiSuggest func(typed string) []WikiItem
+	// EmojiSuggest lists the emoji whose shortcodes match what is typed
+	// after a colon, the best first.
+	EmojiSuggest func(typed string) []EmojiItem
+	// AutoSpace puts a space between Chinese and Latin letters or digits
+	// as they are typed next to each other.
+	AutoSpace   bool
 	PreviewWiki func(name string) WikiPreview
 	// Footer, when set, draws below the document, in the page's text
 	// column: the host's backlinks.
 	Footer func(c *ui.Context)
+	// DrawAnnotations lets the marks in view draw themselves, one after
+	// another, the first time this editor shows its document.
+	DrawAnnotations bool
 	// Typewriter keeps the caret's line in the middle of the page; Dim
 	// fades every block but the caret's.
 	Typewriter, Dim bool
@@ -397,14 +448,25 @@ type Options struct {
 func New(markdown string) *Editor { return FromDocument(ImportMarkdown(markdown)) }
 func FromDocument(doc *document.Document) *Editor {
 	// The color button starts out as a yellow highlighter.
-	return &Editor{Buffer: newBuffer(doc), cache: make(map[string]cachedShape), images: make(map[string]ImageResource), dropIndex: -1, lastHighlight: "light-yellow",
-		wiki: wikiState{dismissed: -1}}
+	return &Editor{Buffer: newBuffer(doc), cache: make(map[string]cachedShape), images: make(map[string]ImageResource), dropIndex: -1, lastAnnotation: "wavy",
+		wiki: wikiState{dismissed: -1}, complete: completion{dismissed: -1}}
 }
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	if e.ReadOnly {
+		e.refused = true
 		return
 	}
 	e.editImageCaption()
+	e.clearBlocks()
+	if e.autoSpace {
+		// Typed at the caret, or committed by an input method in place of
+		// what it was composing.
+		if m, composing := e.MarkedRange(); composing && (r == nil || *r == m) {
+			text = e.spaced(text, m.Start)
+		} else if r == nil && e.Anchor == e.Caret {
+			text = e.spaced(text, e.Caret)
+		}
+	}
 	if !e.pairInput(r, text) {
 		e.Buffer.ReplaceText(r, text)
 	}
@@ -413,6 +475,7 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 }
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
 	if e.ReadOnly {
+		e.refused = e.refused || text != ""
 		return
 	}
 	e.editImageCaption()
@@ -422,18 +485,23 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 
 func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.services = c.Services()
-	e.noAutoPair = o.NoAutoPair
+	e.noAutoPair, e.autoSpace = o.NoAutoPair, o.AutoSpace
 	if e.ReadOnly {
 		o.Attach = nil
 		o.DropFiles = nil
 		o.PasteImage = nil
 		o.ReplaceImage = nil
 		o.PickCover = nil
+		o.CropImage = nil
 	}
 	e.page = pageOf(o.Page, o.Theme)
 	e.attach = o.Attach
+	e.cropImage = o.CropImage
 	e.dropFiles, e.pasteImage = o.DropFiles, o.PasteImage
 	e.typewriter, e.dim, e.bindings = o.Typewriter, o.Dim, o.Bindings
+	if !e.openReveal.checked {
+		e.openReveal = openReveal{checked: true, pending: o.DrawAnnotations && hasAnnotations(e.Doc.Blocks)}
+	}
 	e.openWiki, e.openTag, e.openLink = o.OpenWiki, o.OpenTag, o.OpenLink
 	e.header.pickCover = o.PickCover
 	e.bookmarks.marks, e.bookmarks.toggle, e.bookmarks.label, e.bookmarks.key = o.Bookmarks, o.ToggleBookmark, o.LabelBookmark, o.BookmarkKey
@@ -457,8 +525,11 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		o.Resizing = true
 	}
 	e.layout(o)
+	e.pruneBlocks()
+	e.announceBlocks(c)
 	e.watchSlash()
 	e.watchWiki(o.WikiSuggest)
+	e.watchComplete(c.Now(), o.EmojiSuggest, o.WikiSuggest)
 	var surface ui.Element
 	pane.Children(func() {
 		e.stepJump(c)
@@ -521,7 +592,8 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 			content := ui.Box(c.Key("page-content")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).MarginStart(reserve)
 			content.Children(func() {
 				surface = ui.Box(c.Key("writing-surface")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).
-					HandleTextInput(e).Role(ui.RoleTextField).Label("文档").Value(e.text).FocusRing(false)
+					HandleTextInput(e).Role(ui.RoleTextField).Label(i18n.T("文档")).FocusRing(false)
+				accessTextValue(surface.Access, e.displayText)
 				if e.RequestFocus {
 					surface.Focus()
 					e.lastInput = c.Now()
@@ -548,10 +620,8 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				}
 				e.hoverID = ""
 				if inside {
-					for _, h := range e.handles {
-						if py >= h.top-4 {
-							e.hoverID = h.id
-						}
+					if i := sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top > py+4 }) - 1; i >= 0 {
+						e.hoverID = e.handles[i].id
 					}
 				}
 				services := c.Services()
@@ -559,14 +629,15 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					return e.input(ev, services.ReadClipboard, services.WriteClipboard, o.OpenLink)
 				})
 				surface.ContextMenu(func(menu *ui.Menu) {
-					menuAction(menu, "加粗", func() { e.Wrap("**") })
-					menuAction(menu, "斜体", func() { e.Wrap("*") })
-					menuAction(menu, "插入表格", func() { e.Engine.Insert(document.Table(3, 3)); e.RequestFocus = true })
+					menuAction(menu, i18n.T("加粗"), func() { e.Wrap("**") })
+					menuAction(menu, i18n.T("斜体"), func() { e.Wrap("*") })
+					menuAction(menu, i18n.T("插入表格"), func() { e.Engine.Insert(document.Table(3, 3)); e.RequestFocus = true })
 				})
 				caret := !e.ReadOnly && e.focused && (c.Now().Sub(e.lastInput) < time.Second || c.Now().UnixMilli()/530%2 == 0)
 				if e.focused {
 					c.After(530 * time.Millisecond)
 				}
+				e.reduceMotion = c.Preferences().ReduceMotion
 				surface.Draw(func(p *ui.Painter, r ui.Rect) { e.paint(p, r, o.Theme, caret) })
 				// Beside the surface, not in it: the surface takes the
 				// pointer's presses before anything inside it.
@@ -592,9 +663,11 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	if !e.ReadOnly {
 		e.popups(c, surface)
 		e.wikiMenu(c, surface)
+		e.completeMenu(c, surface)
 		e.headerPopups(c, surface)
 	}
 	e.imagePreview(c)
+	e.cropView(c)
 	e.wikiPreview(c, surface, o.PreviewWiki)
 	return pane
 }
@@ -613,7 +686,7 @@ func (e *Editor) layout(o Options) {
 	e.collectNotes()
 	e.readingSize, e.readingLine = o.FontSize, o.LineHeight
 	defer func() { e.laidInline = e.inlineEditing }()
-	pageKey := fmt.Sprint(e.page, o.FontSize, o.LineHeight, e.noteKey())
+	pageKey := fmt.Sprint(e.page, o.FontSize, o.LineHeight, o.FontFamily, o.Column, e.noteKey())
 	finishResize := e.resizePending && !o.Resizing
 	refreshResize := e.resizePending && e.resizeScroll != e.Scroll.Y
 	anchor := resizeAnchor{}
@@ -637,8 +710,9 @@ func (e *Editor) layout(o Options) {
 	e.resizeScroll = e.Scroll.Y
 	e.ready, e.width, e.cacheRevision, e.cacheTheme, e.pageKey = true, o.Width, e.Revision(), *o.Theme, pageKey
 	e.laidMath = e.mathEditing
-	// The text column is 820 wide.
-	e.padding = max(46, (o.Width-820)/2)
+	// The text column is 820 wide unless the reader picked another.
+	e.column = columnWidth(o.Column)
+	e.padding = max(46, (o.Width-e.column)/2)
 	width := max(80, o.Width-2*e.padding)
 	e.rows = nil
 	e.decorations = nil
@@ -681,7 +755,11 @@ func (e *Editor) layout(o Options) {
 			if isList(b.Kind) {
 				fx += float32(b.Indent) * 24
 			}
-			e.foldButtons = append(e.foldButtons, foldButton{b.ID, ui.Rect{X: fx, Y: hy + 4, W: 16, H: 16}, b.Folded})
+			if b.Kind == "toggle" {
+				// A toggle's triangle is its marker, always shown.
+				fx = e.padding + float32(b.Indent)*20 - 1
+			}
+			e.foldButtons = append(e.foldButtons, foldButton{b.ID, ui.Rect{X: fx, Y: hy + 4, W: 16, H: 16}, b.Folded, b.Kind == "toggle"})
 			if fx-hx < 26 {
 				hx = fx - 28
 			}
@@ -697,6 +775,20 @@ func (e *Editor) layout(o Options) {
 			delete(e.cache, id)
 		}
 	}
+	e.handleIDs = make(map[string]int, len(e.handles))
+	for i, h := range e.handles {
+		e.handleIDs[h.id] = i
+	}
+	e.decorationIDs = make(map[string]int, len(e.decorations))
+	for i, d := range e.decorations {
+		e.decorationIDs[d.id] = i
+	}
+	e.rowIDs = make(map[string]int, len(e.rows))
+	for i, r := range e.rows {
+		e.rowIDs[r.leaf.Block.ID] = i
+	}
+	e.rowSpace.reset(len(e.rows), func(i int) ui.Rect { return e.rows[i].rect })
+	e.decorationSpace.reset(len(e.decorations), func(i int) ui.Rect { return e.decorations[i].rect })
 	if finishResize {
 		e.restoreResizeAnchor(anchor)
 	}
@@ -821,14 +913,14 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			}
 			return y - start + 22
 		}
-		if b.Kind != "bullet" && b.Kind != "numbered" && b.Kind != "task" && b.Indent > 0 {
+		if b.Kind != "bullet" && b.Kind != "numbered" && b.Kind != "task" && b.Kind != "toggle" && b.Indent > 0 {
 			indent := min(float32(b.Indent)*20, max(0, w-80))
 			x += indent
 			w -= indent
 		}
 		// Body text is 16 on 26 with 8 between blocks; table
 		// cells are 14 on 22.
-		font := ui.Font{Family: "system-ui", Size: 16, LineHeight: 26.0 / 16}
+		font := ui.Font{Family: bodyFamily(o.FontFamily), Size: 16, LineHeight: 26.0 / 16}
 		if o.FontSize >= 12 && o.FontSize <= 28 {
 			font.Size = o.FontSize
 		}
@@ -895,6 +987,9 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			// The marker takes 24 (a task's box 24 too) per level.
 			left = 24 + float32(b.Indent)*24
 			bottom = 8
+		case "toggle":
+			// The triangle takes the marker's place.
+			left = 20 + float32(b.Indent)*20
 		}
 		if b.Kind == "footnote" {
 			left, top = 36, 12
@@ -942,6 +1037,8 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 		}
 		if b.Kind == "code" {
 			spans = codeSpans(b.Text(), pg)
+		} else if b.Kind != "math" && b.Kind != "raw" {
+			spans = padAnnotations(spans, b.Runs, font.Size)
 		}
 		if len(spans) == 0 {
 			spans = []ui.Span{{Text: ""}}
@@ -985,7 +1082,7 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 		_, h := cached.layout.Size()
 		h = max(h, font.Size*font.LineHeight)
 		total := top + h + bottom
-		row := row{leaf: leaves[b.ID], layout: cached.layout, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number}
+		row := row{leafRevision: e.Revision(), leaf: leaves[b.ID], layout: cached.layout, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size}
 		if b.Kind == "image" {
 			total = e.layoutImage(&row, o)
 		}
@@ -1013,13 +1110,31 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 	return blockLayout
 }
 
-func (e *Editor) rowAt(at int) *row {
-	if len(e.rows) > 0 {
-		i := sort.Search(len(e.rows), func(i int) bool { return at <= e.rows[i].leaf.End })
-		return &e.rows[min(i, len(e.rows)-1)]
+// indexedRow resolves absolute text offsets only when a row is used. Geometry
+// and shaping stay cached, so text edits need not rewrite every later row.
+func (e *Editor) indexedRow(i int) *row {
+	r := &e.rows[i]
+	if r.leafRevision != e.Revision() {
+		if leaf, ok := e.Engine.LeafByID(r.leaf.Block.ID); ok {
+			r.leaf = leaf
+		}
+		r.leafRevision = e.Revision()
 	}
-	return nil
+	return r
 }
+func (e *Editor) rowAt(at int) *row {
+	if len(e.rows) == 0 {
+		return nil
+	}
+	leaf := e.Engine.LeafAt(at)
+	if i, ok := e.rowIDs[leaf.Block.ID]; ok {
+		return e.indexedRow(i)
+	}
+	// A folded leaf has no row: retain the previous next-visible-row behavior.
+	i := sort.Search(len(e.rows), func(i int) bool { return at <= e.indexedRow(i).leaf.End })
+	return e.indexedRow(min(i, len(e.rows)-1))
+}
+
 func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange, bool) {
 	row := e.rowAt(r.Start)
 	if row == nil {
@@ -1041,17 +1156,7 @@ func (e *Editor) IndexForPoint(point ui.Point) (int, bool) {
 	if len(e.rows) == 0 {
 		return 0, false
 	}
-	best := &e.rows[0]
-	distance := float32(math.MaxFloat32)
-	for i := range e.rows {
-		r := &e.rows[i]
-		dx := max(r.rect.X-point.X, point.X-r.rect.X-r.rect.W, 0)
-		dy := max(r.rect.Y-point.Y, point.Y-r.rect.Y-r.rect.H, 0)
-		d := dy*dy + dx*dx
-		if d < distance {
-			best, distance = r, d
-		}
-	}
+	best := e.indexedRow(e.rowSpace.nearest(point))
 	if best.picture != nil && e.imageCaptionID != best.leaf.Block.ID {
 		return best.leaf.Start, true
 	}
@@ -1061,10 +1166,14 @@ func (e *Editor) IndexForPoint(point ui.Point) (int, bool) {
 func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
 	e.paintHeader(p, bounds)
-	for _, d := range e.decorations {
-		if d.rect.Y+d.rect.H < e.Scroll.Y-1 || d.rect.Y > e.Scroll.Y+e.viewport+1 {
+	// The loops below test each entry in place and copy only those in
+	// view: a long page has tens of thousands, and copying them all was a
+	// good part of each frame.
+	for i := range e.visibleDecorations(1) {
+		if d := &e.decorations[i]; d.rect.Y+d.rect.H < e.Scroll.Y-1 || d.rect.Y > e.Scroll.Y+e.viewport+1 {
 			continue
 		}
+		d := e.decorations[i]
 		r := offset(d.rect)
 		switch d.kind {
 		case "column":
@@ -1118,10 +1227,11 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	}
 	// Cell rules go over every fill, so a filled cell never hides the rule
 	// of the merged cell beside it.
-	for _, d := range e.decorations {
-		if d.kind != "cell" || d.rect.Y+d.rect.H < e.Scroll.Y-1 || d.rect.Y > e.Scroll.Y+e.viewport+1 {
+	for i := range e.visibleDecorations(1) {
+		if d := &e.decorations[i]; d.kind != "cell" || d.rect.Y+d.rect.H < e.Scroll.Y-1 || d.rect.Y > e.Scroll.Y+e.viewport+1 {
 			continue
 		}
+		d := e.decorations[i]
 		r := offset(d.rect)
 		if d.right {
 			p.Line(r.X+r.W, r.Y, r.X+r.W, r.Y+r.H, 1, e.page.TableLine)
@@ -1130,6 +1240,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 			p.Line(r.X, r.Y+r.H, r.X+r.W, r.Y+r.H, 1, e.page.TableLine)
 		}
 	}
+	e.paintBlockSelection(p, bounds, t)
 	if !e.printing {
 		e.paintHoverControls(p, bounds, t)
 		e.paintGap(p, bounds, t)
@@ -1137,11 +1248,13 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		e.paintMatches(p, bounds)
 		e.paintFlash(p, bounds)
 	}
+	e.openReveal.order = nil
 	selection := e.Selection().Range
-	for _, r := range e.rows {
-		if r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
+	for i := range e.visibleRows(40) {
+		if r := &e.rows[i]; r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
 			continue
 		}
+		r := *e.indexedRow(i)
 		if r.picture != nil {
 			e.paintImage(p, bounds, r, t)
 			if e.imageCaptionID != r.leaf.Block.ID || e.printing {
@@ -1149,7 +1262,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 			}
 		}
 		e.paintMarker(p, bounds, r, t)
-		if e.focused && selection.End > r.leaf.Start && selection.Start < r.leaf.End {
+		if e.focused && len(e.blocks.ids) == 0 && selection.End > r.leaf.Start && selection.Start < r.leaf.End {
 			if r.mathHidden && r.math != nil {
 				w, h := r.math.W*r.mathScale, (r.math.Ascent+r.math.Descent)*r.mathScale
 				p.Fill(ui.Rect{X: bounds.X + r.rect.X + (r.rect.W-w)/2 - 3, Y: bounds.Y + r.rect.Y + r.mathTop - 2, W: w + 6, H: h + 4}, t.Selection, 3)
@@ -1165,8 +1278,10 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		if e.paintMath(p, bounds, r, t) {
 			continue
 		}
+		e.paintAnnotations(p, bounds, r, true)
 		p.TextLayout(r.layout.TextLayout, bounds.X+r.x, bounds.Y+r.y, t.Text)
 		e.paintInline(p, bounds, r, t)
+		e.paintAnnotations(p, bounds, r, false)
 		if !e.printing {
 			e.paintHint(p, bounds, r, t)
 		}
@@ -1180,8 +1295,10 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	if e.printing {
 		return
 	}
-	for _, f := range e.foldButtons {
-		if !f.folded && f.id != e.hoverID {
+	e.paintReadOnlyNotice(p, bounds, t)
+	for i := sort.Search(len(e.foldButtons), func(i int) bool { return e.foldButtons[i].rect.Y+16 >= e.Scroll.Y }); i < len(e.foldButtons) && e.foldButtons[i].rect.Y <= e.Scroll.Y+e.viewport; i++ {
+		f := e.foldButtons[i]
+		if !f.folded && !f.always && f.id != e.hoverID {
 			continue
 		}
 		color := e.page.Caption
@@ -1194,11 +1311,12 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		}
 		p.Icon(icon, offset(f.rect), color)
 	}
-	for _, h := range e.handles {
+	for i := max(0, sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top > e.Scroll.Y })-1); i < len(e.handles) && e.handles[i].top <= e.Scroll.Y+e.viewport; i++ {
+		h := e.handles[i]
 		if e.ReadOnly {
 			break
 		}
-		if h.id != e.hoverID && h.id != e.dragID && !(e.menuOpen && e.menuID == h.id) {
+		if h.id != e.hoverID && h.id != e.dragID && !(e.menuOpen && e.menuID == h.id) && !(len(e.blocks.ids) > 0 && e.blocks.ids[0] == h.id) {
 			continue
 		}
 		if h.rect.Y < e.Scroll.Y || h.rect.Y > e.Scroll.Y+e.viewport {
@@ -1222,11 +1340,11 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		y := bounds.Y + e.fileOver - 4
 		p.Fill(ui.Rect{X: bounds.X + e.padding, Y: y - 1, W: e.width - 2*e.padding, H: 2}, t.Accent, 1)
 	}
-	if len(e.Doc.Blocks) == 1 && e.Doc.Blocks[0].Kind == "paragraph" && e.text == "" && !e.focused {
+	if len(e.Doc.Blocks) == 1 && e.Doc.Blocks[0].Kind == "paragraph" && e.Len() == 0 && !e.focused {
 		// The starter below says the rest.
-		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, "开始写作", 16, t.TextMuted.Alpha(.8))
+		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, i18n.T("开始写作"), 16, t.TextMuted.Alpha(.8))
 	}
-	if caret && selection.Start == selection.End && (e.Engine.LeafAt(e.Caret).Block.Kind != "image" || e.imageCaptionID == e.Engine.LeafAt(e.Caret).Block.ID) {
+	if caret && len(e.blocks.ids) == 0 && selection.Start == selection.End && (e.Engine.LeafAt(e.Caret).Block.Kind != "image" || e.imageCaptionID == e.Engine.LeafAt(e.Caret).Block.ID) {
 		if r, _, ok := e.BoundsForRange(selection); ok {
 			r = offset(r)
 			r.W = 1.5
@@ -1239,7 +1357,12 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 // a code block's copy button. Tables draw their bars in paintTables.
 func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
-	for _, d := range e.decorations {
+	// The copied indicator expires even if its code block was scrolled away.
+	if i, ok := e.decorationIDs[e.copiedID]; ok && e.decorations[i].kind == "code" && p.Now().Sub(e.copiedAt) < 1500*time.Millisecond {
+		p.After(1500*time.Millisecond - p.Now().Sub(e.copiedAt))
+	}
+	for i := range e.visibleDecorations(1) {
+		d := e.decorations[i]
 		switch {
 		case d.kind == "code" && d.id != "":
 			copied := d.id == e.copiedID && p.Now().Sub(e.copiedAt) < 1500*time.Millisecond
@@ -1255,9 +1378,9 @@ func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) 
 			if e.hovered(copyButton(d), 0) {
 				p.Fill(r, e.page.Hover, 4)
 			}
-			icon, label := iconCopy, "复制"
+			icon, label := iconCopy, i18n.T("复制")
 			if copied {
-				icon, label = iconCheck, "已复制"
+				icon, label = iconCheck, i18n.T("已复制")
 			}
 			p.Icon(icon, ui.Rect{X: r.X + 4, Y: r.Y + 3, W: 16, H: 16}, e.page.Caption)
 			span := ui.Span{Text: label, Size: 14, Color: e.page.Caption}
@@ -1271,7 +1394,7 @@ func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) 
 func (e *Editor) hoverControl(x, y float32) bool {
 	in := func(r ui.Rect) bool { return x >= r.X && x <= r.X+r.W && y >= r.Y && y <= r.Y+r.H }
 	for _, f := range e.foldButtons {
-		if (f.folded || f.id == e.hoverID) && in(ui.Rect{X: f.rect.X - 2, Y: f.rect.Y - 2, W: f.rect.W + 4, H: f.rect.H + 4}) {
+		if (f.folded || f.always || f.id == e.hoverID) && in(ui.Rect{X: f.rect.X - 2, Y: f.rect.Y - 2, W: f.rect.W + 4, H: f.rect.H + 4}) {
 			e.toggleFold(f.id)
 			return true
 		}
@@ -1325,12 +1448,14 @@ func (e *Editor) paintHint(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) {
 	case b.Kind == "heading":
 		size = []float32{26, 22, 20, 18, 16, 16}[max(1, min(6, b.Level))-1]
 		if len(e.Doc.Blocks) > 0 && e.Doc.Blocks[0].ID == b.ID {
-			size, hint = 34, "请输入标题"
+			size, hint = 34, i18n.T("请输入标题")
 		} else {
 			hint = blockLabel(b)
 		}
+	case b.Kind == "toggle":
+		hint = i18n.T("折叠块")
 	case e.focused && e.Caret == r.leaf.Start && (b.Kind == "paragraph" || b.Kind == "bullet" || b.Kind == "numbered" || b.Kind == "task"):
-		hint = "输入「/」插入内容"
+		hint = i18n.T("输入「/」插入内容")
 	}
 	if hint == "" {
 		return
@@ -1475,6 +1600,9 @@ func (e *Editor) structuralPointer(ev ui.InputEvent) bool {
 				return true
 			}
 			if ev.X >= h.rect.X && ev.X <= h.rect.X+h.rect.W && ev.Y >= h.rect.Y && ev.Y <= h.rect.Y+h.rect.H {
+				if !e.blockSelected(h.id) {
+					e.clearBlocks()
+				}
 				e.dragID, e.dropIndex = h.id, h.index
 				return true
 			}
@@ -1513,9 +1641,14 @@ func (e *Editor) structuralPointer(ev ui.InputEvent) bool {
 					old = h.index
 				}
 			}
-			if old == e.dropIndex {
+			switch {
+			case old == e.dropIndex:
 				e.menuOpen, e.menuID = true, e.dragID
-			} else {
+			case len(e.blocks.ids) > 1 && e.blockSelected(e.dragID):
+				// The selected blocks go together, before the block the line
+				// shows.
+				e.Engine.MoveBlocks(e.BlockSelection(), e.dropIndex)
+			default:
 				e.Engine.MoveBlock(e.dragID, e.dropIndex)
 			}
 			e.dragID = ""
@@ -1546,23 +1679,25 @@ func (e *Editor) fileDropAt(y float32) (int, float32) {
 func blockLabel(b *document.Block) string {
 	switch b.Kind {
 	case "heading":
-		return fmt.Sprintf("标题 %d", b.Level)
+		return fmt.Sprintf(i18n.T("标题 %d"), b.Level)
 	case "code":
-		return "代码块"
+		return i18n.T("代码块")
 	case "cell":
-		return "表格"
+		return i18n.T("表格")
 	case "quote":
-		return "引用"
+		return i18n.T("引用")
 	case "task":
-		return "任务"
+		return i18n.T("任务")
 	case "bullet":
-		return "无序列表"
+		return i18n.T("无序列表")
 	case "numbered":
-		return "有序列表"
+		return i18n.T("有序列表")
 	case "callout":
-		return "高亮块"
+		return i18n.T("高亮块")
+	case "toggle":
+		return i18n.T("折叠块")
 	}
-	return "正文"
+	return i18n.T("正文")
 }
 
 func (e *Editor) Focused() bool { return e.focused }
@@ -1646,3 +1781,24 @@ func (e *Editor) UnfoldAll() {
 	walk(e.Doc.Blocks)
 	e.sync()
 }
+
+// columnWidth is the text column's width: the reader's, kept between 560
+// and 1200, or 820.
+func columnWidth(w float32) float32 {
+	if w <= 0 {
+		return 820
+	}
+	return max(560, min(1200, w))
+}
+
+// bodyFamily is the family list body text is set in.
+func bodyFamily(family string) string {
+	if family == "" {
+		return "system-ui"
+	}
+	return family
+}
+
+// Padding is the page's margin either side of its text column, as last
+// laid out.
+func (e *Editor) Padding() float32 { return e.padding }

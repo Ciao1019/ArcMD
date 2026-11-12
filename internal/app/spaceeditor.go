@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -107,7 +108,7 @@ func (a *App) themeCard(c *ui.Context, f *spaceForm, anchor ui.Element) {
 			card.
 				Width(editorCardW).Radius(22).Clip().Padding(9, 0, 14, 0).Gap(14).AlignItems(ui.Center).
 				Shadow(0, 8, 24, 0, black.Alpha(0.20)).Border(0.5, rim).
-				Role(ui.RoleDialog).Label("空间主题")
+				Role(ui.RoleDialog).Label(i18n.T("空间主题"))
 			a.tourMark("theme-card", card)
 			card.Draw(func(p *ui.Painter, r ui.Rect) {
 				p.FillGradient(r, fill, 22)
@@ -139,12 +140,12 @@ func appearanceSwitch(c *ui.Context, th *space.Theme, ink ui.Color) ui.Element {
 		value, label string
 		icon         *ui.SVG
 	}{
-		{space.AppearanceAuto, "跟随系统", iconSparkles},
-		{space.AppearanceLight, "浅色", iconSun},
-		{space.AppearanceDark, "深色", iconMoon},
+		{space.AppearanceAuto, i18n.T("跟随系统"), iconSparkles},
+		{space.AppearanceLight, i18n.T("浅色"), iconSun},
+		{space.AppearanceDark, i18n.T("深色"), iconMoon},
 	}
 	return ui.Row(c.Key("appearance")).Padding(3).Gap(2).Radius(10).Background(ink.Alpha(0.08)).
-		Role(ui.RoleRadioGroup).Label("外观").FocusGroup(ui.Horizontal).Children(func() {
+		Role(ui.RoleRadioGroup).Label(i18n.T("外观")).FocusGroup(ui.Horizontal).Children(func() {
 		for _, m := range modes {
 			on := th.Appearance == m.value
 			b := ui.Box(c.Key("mode-"+m.value)).Size(40, 26).Radius(7).Center().Cursor(ui.CursorPointer).
@@ -179,8 +180,8 @@ func (a *App) colorPad(c *ui.Context, f *spaceForm, ink ui.Color, size float32) 
 	half, scale := size/2, size/padSize
 	ui.Box(c.Key("pad")).Size(size, size).Shrink(0).Children(func() {
 		pad := ui.Box(c.Key("wheel")).Absolute().Left(0).Top(0).Size(size, size).Radius(12).
-			Focusable().Role(ui.RoleSlider).Label("空间颜色").
-			Value(fmt.Sprint(th.Colors)).Tooltip("拖动选择颜色；方向键调整色相与饱和度")
+			Focusable().Role(ui.RoleSlider).Label(i18n.T("空间颜色")).
+			Value(fmt.Sprint(th.Colors)).Tooltip(i18n.T("拖动选择颜色；方向键调整色相与饱和度"))
 		pad.Draw(func(p *ui.Painter, r ui.Rect) {
 			p.Fill(r, ink.Alpha(0.06), 12)
 			bw, bh := padDots.Size()
@@ -241,10 +242,10 @@ func (a *App) colorPad(c *ui.Context, f *spaceForm, ink ui.Color, size float32) 
 
 		appearanceSwitch(c, th, ink).Absolute().Left(half - 66).Top(16)
 		ui.Row(c.Key("keys")).Absolute().Left(half - 29).Top(size - 42).Gap(6).Children(func() {
-			if editorButton(c, "less", iconMinus, "减少颜色", 26, ink, false, len(th.Colors) > 1).Clicked() {
+			if editorButton(c, "less", iconMinus, i18n.T("减少颜色"), 26, ink, false, len(th.Colors) > 1).Clicked() {
 				th.Colors = th.Colors[:len(th.Colors)-1]
 			}
-			if editorButton(c, "more", iconPlus, "增加颜色", 26, ink, false, len(th.Colors) < 3).Clicked() {
+			if editorButton(c, "more", iconPlus, i18n.T("增加颜色"), 26, ink, false, len(th.Colors) < 3).Clicked() {
 				addKey(th)
 			}
 		})
@@ -291,13 +292,13 @@ func editorButton(c *ui.Context, key string, icon *ui.SVG, label string, size fl
 func swatches(c *ui.Context, f *spaceForm, ink ui.Color) {
 	page := space.PresetPages[f.page]
 	ui.Row(c.Key("swatches")).AlignItems(ui.Center).Gap(2).Children(func() {
-		if editorButton(c, "prev", iconChevronLeft, "上一页预设颜色", 24, ink, false, f.page > 0).Clicked() {
+		if editorButton(c, "prev", iconChevronLeft, i18n.T("上一页预设颜色"), 24, ink, false, f.page > 0).Clicked() {
 			f.page--
 		}
 		ui.Row(c).Gap(6).Children(func() {
 			for i, colors := range page.Swatches {
 				sw := ui.Box(c.Key(fmt.Sprintf("swatch%d", i))).Size(20, 20).Radius(10).Cursor(ui.CursorPointer).
-					Focusable().Role(ui.RoleButton).Label(fmt.Sprintf("将空间颜色设为 %s %d", page.Name, i+1))
+					Focusable().Role(ui.RoleButton).Label(fmt.Sprintf(i18n.T("将空间颜色设为 %s %d"), page.Name, i+1))
 				to := colors[len(colors)-1]
 				sw.LinearGradient(ui.LinearGradient{From: ui.Hex(colors[0]), To: ui.Hex(to), Angle: 135})
 				s := sw.Animate("scale", knobScale(sw.Pressed(), sw.Hovered()), 120*time.Millisecond)
@@ -313,7 +314,7 @@ func swatches(c *ui.Context, f *spaceForm, ink ui.Color) {
 				}
 			}
 		})
-		if editorButton(c, "next", iconChevronRight, "下一页预设颜色", 24, ink, false, f.page < len(space.PresetPages)-1).Clicked() {
+		if editorButton(c, "next", iconChevronRight, i18n.T("下一页预设颜色"), 24, ink, false, f.page < len(space.PresetPages)-1).Clicked() {
 			f.page++
 		}
 	})
@@ -322,8 +323,8 @@ func swatches(c *ui.Context, f *spaceForm, ink ui.Color) {
 // waveSlider sets the intensity: a wave over a faint track that grows with
 // the value, solid up to the thumb and faint after it.
 func waveSlider(c *ui.Context, value *float64, ink ui.Color) {
-	s := ui.SliderBase(c.Key("intensity"), value, 0, 1).Height(40).Grow(1).PaddingX(6).Label("强度").FocusRing(false).
-		Tooltip("强度")
+	s := ui.SliderBase(c.Key("intensity"), value, 0, 1).Height(40).Grow(1).PaddingX(6).Label(i18n.T("强度")).FocusRing(false).
+		Tooltip(i18n.T("强度"))
 	v := float32(*value)
 	focused := s.FocusVisible()
 	s.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -359,8 +360,8 @@ func grainDial(c *ui.Context, value *float64, ink ui.Color) {
 		size = 50
 		half = size / 2
 	)
-	d := ui.Box(c.Key("grain")).Size(size, size).Shrink(0).Focusable().Role(ui.RoleSlider).Label("颗粒").
-		Value(fmt.Sprintf("%.0f%%", *value*100)).Cursor(ui.CursorPointer).Tooltip("颗粒")
+	d := ui.Box(c.Key("grain")).Size(size, size).Shrink(0).Focusable().Role(ui.RoleSlider).Label(i18n.T("颗粒")).
+		Value(fmt.Sprintf("%.0f%%", *value*100)).Cursor(ui.CursorPointer).Tooltip(i18n.T("颗粒"))
 	if _, _, held := d.Dragged(); held {
 		x, y, _ := d.PointerPosition()
 		a := math.Atan2(float64(y-half), float64(x-half)) + math.Pi/2

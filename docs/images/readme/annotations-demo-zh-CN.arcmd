@@ -1,0 +1,177 @@
+{
+  "format": "arcmd",
+  "version": 8,
+  "blocks": [
+    {
+      "id": "promo-zh-CN-00",
+      "kind": "heading",
+      "runs": [
+        {
+          "text": "让重点，有一点温度",
+          "style": {}
+        }
+      ],
+      "level": 1
+    },
+    {
+      "id": "promo-zh-CN-01",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "一页笔记，也可以有自己的语气。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-02",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "留住 ",
+          "style": {}
+        },
+        {
+          "text": "一闪而过的灵感",
+          "style": {
+            "annotation": "wavy"
+          }
+        },
+        {
+          "text": "。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-03",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "圈出 ",
+          "style": {}
+        },
+        {
+          "text": "真正重要的事",
+          "style": {
+            "annotation": "circle"
+          }
+        },
+        {
+          "text": "。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-04",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "把 ",
+          "style": {}
+        },
+        {
+          "text": "喜欢的句子",
+          "style": {
+            "annotation": "highlight"
+          }
+        },
+        {
+          "text": "，留给未来的自己。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-05",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "给 ",
+          "style": {}
+        },
+        {
+          "text": "今天的小目标",
+          "style": {
+            "annotation": "double"
+          }
+        },
+        {
+          "text": "，一个认真的承诺。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-06",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "划掉 ",
+          "style": {}
+        },
+        {
+          "text": "等准备好了再开始",
+          "style": {
+            "annotation": "cross"
+          }
+        },
+        {
+          "text": "。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-07",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "让 ",
+          "style": {}
+        },
+        {
+          "text": "下一步行动",
+          "style": {
+            "annotation": "arrow"
+          }
+        },
+        {
+          "text": "，变得清晰。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-08",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "现在，",
+          "style": {}
+        },
+        {
+          "text": "写下第一句",
+          "style": {
+            "annotation": "box"
+          }
+        },
+        {
+          "text": "。",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-zh-CN-09",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "不必等完美，先让想法发生。",
+          "style": {}
+        }
+      ]
+    }
+  ]
+}

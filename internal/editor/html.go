@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
@@ -253,7 +254,7 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		// beside the document.
 		label := attr(n, "alt")
 		if label == "" {
-			label = "图片"
+			label = i18n.T("图片")
 		}
 		h.text(label, document.Style{Link: src})
 		h.flush()

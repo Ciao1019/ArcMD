@@ -105,7 +105,7 @@ const searchLimit = 5
 // revision.
 func (d *document) plainText() string {
 	if rev := d.ed.Revision(); !d.plainKnown || rev != d.plainRev {
-		d.plain, d.plainRev, d.plainKnown = d.ed.Committed().PlainText(), rev, true
+		d.plain, d.plainRev, d.plainKnown = d.ed.Text(), rev, true
 	}
 	return d.plain
 }

@@ -1,0 +1,33 @@
+Total: 5.35s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/app.(*App).liveIndex in /Users/cizai/agent/Prism/internal/app/search.go
+      10ms      720ms (flat, cum) 13.46% of Total
+         .          .    183:func (a *App) liveIndex() *search.Index {
+         .          .    184:	s := &a.search
+         .          .    185:	visible := map[*document]bool{}
+         .          .    186:	for _, d := range a.visibleDocuments() {
+         .          .    187:		visible[d] = true
+         .          .    188:	}
+         .          .    189:	var docs []*document
+         .          .    190:	unchanged := s.overlayReady && s.liveBase == s.index
+         .          .    191:	for _, d := range a.residentDocuments() {
+         .          .    192:		if d.loadErr != nil || !visible[d] && !d.dirty() {
+         .          .    193:			continue
+         .          .    194:		}
+         .          .    195:		docs = append(docs, d)
+         .          .    196:		stamp := liveStamp{d.ed.Revision(), place{d.space.ID, d.rel}}
+         .          .    197:		if previous, ok := s.liveDocs[d]; !ok || previous != stamp {
+         .          .    198:			unchanged = false
+         .          .    199:		}
+         .          .    200:	}
+         .          .    201:	if unchanged && len(docs) == len(s.liveDocs) {
+         .          .    202:		return s.overlay
+         .          .    203:	}
+         .          .    204:	s.liveDocs = make(map[*document]liveStamp, len(docs))
+         .          .    205:	live := make([]search.Live, 0, len(docs))
+         .          .    206:	for _, d := range docs {
+         .          .    207:		s.liveDocs[d] = liveStamp{d.ed.Revision(), place{d.space.ID, d.rel}}
+         .      710ms    208:		live = append(live, search.Live{Space: d.space.ID, Path: d.rel, Text: d.plainText()})
+         .          .    209:	}
+      10ms       10ms    210:	s.overlay, s.liveBase, s.overlayReady = s.index.WithLive(live), s.index, true
+         .          .    211:	return s.overlay
+         .          .    212:}

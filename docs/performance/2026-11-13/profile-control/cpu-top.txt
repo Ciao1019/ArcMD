@@ -1,0 +1,58 @@
+File: review.test
+Type: cpu
+Time: 2026-11-13 05:45:55 CST
+Duration: 2.44s, Total samples = 2.92s (119.46%)
+Showing nodes accounting for 0.66s, 22.60% of 2.92s total
+Dropped 116 nodes (cum <= 0.01s)
+Showing top 50 nodes out of 165
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      1.98s 67.81%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+         0     0%     0%      1.98s 67.81%  github.com/egoist/mygo/ui.(*Tester).PerfOperation
+         0     0%     0%      1.98s 67.81%  testing.tRunner
+         0     0%     0%      1.51s 51.71%  github.com/egoist/mygo/ui.(*Tester).PerfFrame
+         0     0%     0%      1.51s 51.71%  github.com/egoist/mygo/ui.(*engine).runFrame
+         0     0%     0%      1.11s 38.01%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+         0     0%     0%      1.11s 38.01%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0%     0%      1.11s 38.01%  github.com/Ciao1019/ArcMD/internal/app.(*App).main
+         0     0%     0%      1.11s 38.01%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1
+         0     0%     0%      1.11s 38.01%  github.com/egoist/mygo/ui.(*node).Children
+         0     0%     0%      1.11s 38.01%  github.com/egoist/mygo/ui.Element.Children
+         0     0%     0%      1.11s 38.01%  github.com/egoist/mygo/ui.NewTester.func1
+         0     0%     0%      1.10s 37.67%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0%     0%      1.10s 37.67%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3
+         0     0%     0%      1.10s 37.67%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1.1
+         0     0%     0%      1.09s 37.33%  github.com/Ciao1019/ArcMD/internal/editor.View
+         0     0%     0%      0.73s 25.00%  runtime.systemstack
+         0     0%     0%      0.67s 22.95%  runtime.gcBgMarkWorker.func2
+         0     0%     0%      0.67s 22.95%  runtime.gcDrain
+         0     0%     0%      0.65s 22.26%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).layout
+     0.16s  5.48%  5.48%      0.62s 21.23%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).relayoutText
+         0     0%  5.48%      0.52s 17.81%  runtime.gcBgMarkWorker
+         0     0%  5.48%      0.50s 17.12%  runtime.gcDrainMarkWorkerIdle (inline)
+         0     0%  5.48%      0.47s 16.10%  github.com/egoist/mygo/ui.(*engine).event
+     0.01s  0.34%  5.82%      0.46s 15.75%  github.com/egoist/mygo/ui.shapeTextAligned
+         0     0%  5.82%      0.40s 13.70%  github.com/egoist/mygo/internal/text.(*System).Shape
+         0     0%  5.82%      0.40s 13.70%  github.com/egoist/mygo/internal/text.(*System).layout
+         0     0%  5.82%      0.40s 13.70%  github.com/egoist/mygo/internal/text.(*System).paragraph
+         0     0%  5.82%      0.37s 12.67%  github.com/egoist/mygo/internal/text.(*System).breakLines
+         0     0%  5.82%      0.37s 12.67%  github.com/egoist/mygo/internal/text.(*coreText).shape
+         0     0%  5.82%      0.36s 12.33%  github.com/ebitengine/purego.syscall_SyscallN
+         0     0%  5.82%      0.36s 12.33%  github.com/egoist/mygo/ui.(*Painter).element
+         0     0%  5.82%      0.36s 12.33%  github.com/egoist/mygo/ui.(*engine).paint
+     0.36s 12.33% 18.15%      0.36s 12.33%  runtime.cgocall
+         0     0% 18.15%      0.34s 11.64%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).blockLayouter.func1
+         0     0% 18.15%      0.34s 11.64%  github.com/egoist/mygo/ui.(*Painter).draw
+         0     0% 18.15%      0.33s 11.30%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).ReplaceText
+         0     0% 18.15%      0.33s 11.30%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).pairInput
+         0     0% 18.15%      0.33s 11.30%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).shapeInline
+         0     0% 18.15%      0.32s 10.96%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).ReplaceText
+         0     0% 18.15%      0.32s 10.96%  github.com/egoist/mygo/ui.ShapeRichTextWith
+     0.13s  4.45% 22.60%      0.30s 10.27%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paint
+         0     0% 22.60%      0.30s 10.27%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1.3
+         0     0% 22.60%      0.28s  9.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).delete
+         0     0% 22.60%      0.28s  9.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).input
+         0     0% 22.60%      0.28s  9.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).key
+         0     0% 22.60%      0.28s  9.59%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1.1
+         0     0% 22.60%      0.28s  9.59%  github.com/ebitengine/purego.SyscallN
+         0     0% 22.60%      0.28s  9.59%  github.com/egoist/mygo/ui.(*engine).deliver
+         0     0% 22.60%      0.28s  9.59%  github.com/egoist/mygo/ui.(*engine).keyDownPhysical

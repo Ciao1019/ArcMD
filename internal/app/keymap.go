@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -26,6 +27,8 @@ var bindings = []binding{
 	{id: "palette", label: "命令栏", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyK), combo(ui.Cmd, ui.KeyL), combo(ui.Cmd, ui.KeyP)}},
 	{id: "new-doc", label: "新建文档", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyN)}},
 	{id: "new-folder", label: "新建文件夹", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyN)}},
+	{id: "daily", label: "今日笔记", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyT)}},
+	{id: "replace-all", label: "在所有文档中查找和替换", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyR)}},
 	{id: "sidebar", label: "收起/展开侧边栏", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyBackslash)}},
 	{id: "focus", label: "专注模式", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyF)}},
 	{id: "settings", label: "设置", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyComma)}},
@@ -76,6 +79,7 @@ var fixedShortcuts = []struct{ keys, label string }{
 	{"⌘Z / ⇧⌘Z", "撤销 / 重做"},
 	{"⌘ 点击", "打开链接、[[双链]] 或 #标签"},
 	{"[[", "链接到其他文档"},
+	{"Esc / ⇧↑ / ⇧↓", "选择内容块（选中后 ⇧⌘↑ / ⇧⌘↓ 一起移动）"},
 }
 
 // unbound is how prefs.json writes a command with no key.
@@ -179,7 +183,7 @@ func (a *App) rebind(id string, k *editor.Combo) bool {
 			}
 			for _, other := range a.combos(b.id) {
 				if other == *k {
-					a.notify("%s 已被「%s」使用。", k.Label(), b.label)
+					a.notify("%s 已被「%s」使用。", k.Label(), i18n.T(b.label))
 					return false
 				}
 			}
@@ -238,9 +242,9 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
-			settingsHeading(c, "快捷键", "点击快捷键后按下新的组合键；Esc 取消，⌫ 清除。所有功能也都能从命令栏找到。")
+			settingsHeading(c, i18n.T("快捷键"), i18n.T("点击快捷键后按下新的组合键；Esc 取消，⌫ 清除。所有功能也都能从命令栏找到。"))
 		})
-		if ui.Button(c.Key("keys-reset-all"), "全部恢复默认").Disabled(a.prefs == nil || len(a.prefs.Keys) == 0).Clicked() {
+		if ui.Button(c.Key("keys-reset-all"), i18n.T("全部恢复默认")).Disabled(a.prefs == nil || len(a.prefs.Keys) == 0).Clicked() {
 			a.resetKeys("")
 			a.recording = ""
 		}
@@ -253,14 +257,14 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 				row.Background(t.Text.Alpha(0.025))
 			}
 			row.Children(func() {
-				ui.Text(c, b.label).Grow(1).MinWidth(0)
+				ui.Text(c, i18n.T(b.label)).Grow(1).MinWidth(0)
 				_, custom := a.prefs.Keys[id]
 				if custom && a.recording != id {
-					reset := ui.ButtonBase(c.Key("key-reset:" + id)).Height(24).PaddingX(6).Radius(5).Label("恢复默认：" + b.label).Cursor(ui.CursorPointer)
+					reset := ui.ButtonBase(c.Key("key-reset:" + id)).Height(24).PaddingX(6).Radius(5).Label(i18n.T("恢复默认：") + i18n.T(b.label)).Cursor(ui.CursorPointer)
 					if reset.Hovered() {
 						reset.Background(hoverFill(t))
 					}
-					reset.Children(func() { ui.Text(c, "恢复默认").FontSize(12).TextColor(t.TextMuted) })
+					reset.Children(func() { ui.Text(c, i18n.T("恢复默认")).FontSize(12).TextColor(t.TextMuted) })
 					if reset.Clicked() {
 						a.resetKeys(id)
 					}
@@ -276,8 +280,8 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 				row.Background(t.Text.Alpha(0.025))
 			}
 			row.Children(func() {
-				ui.Text(c, s.label).Grow(1).MinWidth(0)
-				ui.Text(c, s.keys).FontSize(12).TextColor(t.TextMuted).NoWrap()
+				ui.Text(c, i18n.T(s.label)).Grow(1).MinWidth(0)
+				ui.Text(c, i18n.T(s.keys)).FontSize(12).TextColor(t.TextMuted).NoWrap()
 			})
 		}
 	})
@@ -288,7 +292,7 @@ func (a *App) keyField(c *ui.Context, b binding) {
 	t := c.Theme()
 	recording := a.recording == b.id
 	f := ui.Box(c.Key("key-field:" + b.id)).Height(26).MinWidth(96).PaddingX(10).Radius(6).Center().Focusable().
-		Role(ui.RoleButton).Label("更改快捷键：" + b.label).Cursor(ui.CursorPointer).Background(t.Text.Alpha(0.06))
+		Role(ui.RoleButton).Label(i18n.T("更改快捷键：") + i18n.T(b.label)).Cursor(ui.CursorPointer).Background(t.Text.Alpha(0.06))
 	if recording {
 		f.Border(1.5, t.Accent).Background(t.Accent.Alpha(0.1))
 		if a.recordFocus {
@@ -326,9 +330,9 @@ func (a *App) keyField(c *ui.Context, b binding) {
 	f.Children(func() {
 		switch label := a.keyLabel(b.id); {
 		case recording:
-			ui.Text(c, "按下快捷键…").FontSize(12).TextColor(t.Accent).NoWrap()
+			ui.Text(c, i18n.T("按下快捷键…")).FontSize(12).TextColor(t.Accent).NoWrap()
 		case label == "":
-			ui.Text(c, "未设置").FontSize(12).TextColor(t.TextMuted).NoWrap()
+			ui.Text(c, i18n.T("未设置")).FontSize(12).TextColor(t.TextMuted).NoWrap()
 		default:
 			ui.Text(c, label).FontSize(12).NoWrap()
 		}

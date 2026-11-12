@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Node is a folder or a Markdown file of the vault's tree.
@@ -19,6 +20,9 @@ type Node struct {
 	// Children of a folder: its folders first, then its files, each
 	// sorted by name, case-insensitively.
 	Children []*Node
+	// Modified is when the file last changed; for a folder, the latest of
+	// what it holds, or the folder's own time when empty.
+	Modified time.Time
 }
 
 // Title returns a file's name without its extension, or a folder's name.
@@ -84,9 +88,22 @@ func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
 			if err != nil {
 				continue // unreadable folders are left out
 			}
-			dirs = append(dirs, &Node{Name: name, Path: p, Dir: true, Children: kids})
+			n := &Node{Name: name, Path: p, Dir: true, Children: kids}
+			if fi, err := e.Info(); err == nil {
+				n.Modified = fi.ModTime()
+			}
+			for _, k := range kids {
+				if k.Modified.After(n.Modified) || n.Modified.IsZero() {
+					n.Modified = k.Modified
+				}
+			}
+			dirs = append(dirs, n)
 		case !strings.HasPrefix(name, ".") && IsDocument(name):
-			files = append(files, &Node{Name: name, Path: p})
+			n := &Node{Name: name, Path: p}
+			if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				n.Modified = fi.ModTime()
+			}
+			files = append(files, n)
 		}
 	}
 	byName := func(a, b *Node) int { return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)) }

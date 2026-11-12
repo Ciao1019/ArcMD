@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
@@ -104,7 +105,7 @@ func (e *Editor) mathRow(r *row, textH float32) float32 {
 	}
 	shape := e.formula(b.ID, src)
 	if shape.err != nil {
-		r.mathErr = "公式有误：" + strings.TrimPrefix(shape.err.Error(), "tex: ")
+		r.mathErr = i18n.T("公式有误：") + strings.TrimPrefix(shape.err.Error(), "tex: ")
 		r.mathError = ui.ShapeText(r.mathErr, ui.Font{Family: "system-ui", Size: 12}, max(24, r.rect.W-2*mathPaddingX))
 		_, errorH := r.mathError.Size()
 		if r.mathHidden {
@@ -151,7 +152,7 @@ func (e *Editor) paintMath(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bo
 	}
 	if r.math == nil {
 		if !e.printing {
-			hint := ui.ShapeText("输入 LaTeX 公式", ui.Font{Family: "system-ui", Size: 14}, 0)
+			hint := ui.ShapeText(i18n.T("输入 LaTeX 公式"), ui.Font{Family: "system-ui", Size: 14}, 0)
 			hw, hh := hint.Size()
 			p.TextLayout(hint, x+(r.rect.W-hw)/2, bounds.Y+r.y+(22-hh)/2, e.page.Placeholder)
 		}

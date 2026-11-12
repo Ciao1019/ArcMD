@@ -48,3 +48,22 @@ func TestReadingPreferencesDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatal("invalid reading values", q, err)
 	}
 }
+
+func TestFontAndPageWidth(t *testing.T) {
+	store := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	p := &Prefs{Font: "serif", Page: "wide"}
+	if err := store.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load()
+	if err != nil || got.BodyFamily() == "" || got.Column() != 1040 {
+		t.Fatal(got, err)
+	}
+	got.Font, got.Page = "comic", "huge"
+	if err := store.Save(got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Font != "" || got.Page != "" || got.BodyFamily() != "" || got.Column() != 0 {
+		t.Fatal("unknown choices fall back to the defaults")
+	}
+}

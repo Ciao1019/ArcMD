@@ -1,0 +1,38 @@
+File: review.test
+Type: cpu
+Time: 2026-11-13 05:45:59 CST
+Duration: 1.93s, Total samples = 3.16s (163.69%)
+Showing nodes accounting for 2.57s, 81.33% of 3.16s total
+Dropped 109 nodes (cum <= 0.02s)
+Showing top 30 nodes out of 199
+      flat  flat%   sum%        cum   cum%
+     0.27s  8.54%  8.54%      0.27s  8.54%  runtime.pthread_kill
+     0.22s  6.96% 15.51%      0.22s  6.96%  runtime.memmove
+     0.22s  6.96% 22.47%      0.22s  6.96%  runtime.pthread_cond_wait
+     0.21s  6.65% 29.11%      0.21s  6.65%  runtime.memclrNoHeapPointers
+     0.18s  5.70% 34.81%      0.34s 10.76%  runtime.tryDeferToSpanScan
+     0.15s  4.75% 39.56%      0.48s 15.19%  runtime.scanObject
+     0.14s  4.43% 43.99%      0.14s  4.43%  runtime.usleep
+     0.13s  4.11% 48.10%      0.34s 10.76%  runtime.scanObjectsSmall
+     0.11s  3.48% 51.58%      0.11s  3.48%  runtime.kevent
+     0.10s  3.16% 54.75%      0.11s  3.48%  runtime.cgocall
+     0.09s  2.85% 57.59%      0.09s  2.85%  runtime.pthread_cond_signal
+     0.09s  2.85% 60.44%      0.11s  3.48%  runtime.typePointers.next
+     0.08s  2.53% 62.97%      0.22s  6.96%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paint
+     0.07s  2.22% 65.19%      0.07s  2.22%  runtime.alignDown (inline)
+     0.06s  1.90% 67.09%      0.06s  1.90%  internal/runtime/atomic.(*Int64).Add
+     0.06s  1.90% 68.99%      0.06s  1.90%  runtime.madvise
+     0.05s  1.58% 70.57%      0.05s  1.58%  github.com/Ciao1019/ArcMD/internal/document.(*Document).HasKind.func1
+     0.04s  1.27% 71.84%      0.05s  1.58%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paintHoverControls
+     0.04s  1.27% 73.10%      0.06s  1.90%  runtime.mapaccess1_fast64
+     0.04s  1.27% 74.37%      0.04s  1.27%  runtime.memequal
+     0.03s  0.95% 75.32%      0.03s  0.95%  github.com/Ciao1019/ArcMD/internal/document.(*Engine).publishTextChange
+     0.03s  0.95% 76.27%      0.03s  0.95%  runtime.arenaIndex (inline)
+     0.02s  0.63% 76.90%      0.02s  0.63%  github.com/Ciao1019/ArcMD/internal/document.siblingLists
+     0.02s  0.63% 77.53%      0.02s  0.63%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).imageControls
+     0.02s  0.63% 78.16%      0.03s  0.95%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paintTables
+     0.02s  0.63% 78.80%      0.21s  6.65%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).relayoutText
+     0.02s  0.63% 79.43%      0.02s  0.63%  internal/runtime/atomic.(*UnsafePointer).Load
+     0.02s  0.63% 80.06%      0.02s  0.63%  runtime.(*mspan).typePointersOfUnchecked
+     0.02s  0.63% 80.70%      0.03s  0.95%  runtime.(*spanInlineMarkBits).tryAcquire
+     0.02s  0.63% 81.33%      0.02s  0.63%  runtime.asyncPreempt

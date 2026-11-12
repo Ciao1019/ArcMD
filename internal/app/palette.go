@@ -8,6 +8,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fuzzy"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/update"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -31,6 +32,8 @@ type palette struct {
 	renameOn      bool
 	renameFocused bool
 	newLabel      string
+	// confirm is the dangerous command waiting for its second Enter.
+	confirm string
 }
 
 // action is a result of the command bar.
@@ -48,6 +51,9 @@ type action struct {
 	// whose block is gone.
 	bookmark *space.Bookmark
 	faded    bool
+	// danger asks for a second Enter or click before running: what it
+	// cannot take back, as discarding edits.
+	danger bool
 }
 
 func (a *App) openPalette() {
@@ -67,7 +73,7 @@ func (a *App) actions() []action {
 	var out []action
 	doc := func(id string, n *vault.Node) {
 		rel := n.Path
-		out = append(out, action{kind: "文档", title: n.Title(), hint: a.docHint(id, rel),
+		out = append(out, action{kind: i18n.T("文档"), title: n.Title(), hint: a.docHint(id, rel),
 			doc: place{id, rel}, run: func() { a.openAnywhere(id, rel) }})
 	}
 	active := a.state.ActiveSpace()
@@ -102,130 +108,148 @@ func (a *App) actions() []action {
 			continue
 		}
 		id := s.ID
-		out = append(out, action{kind: "空间", title: "切换到 " + s.Name, hint: s.Icon, run: func() { a.switchSpace(id) }})
+		out = append(out, action{kind: i18n.T("空间"), title: i18n.T("切换到 ") + s.Name, hint: s.Icon, run: func() { a.switchSpace(id) }})
 	}
 	cmd := func(title, hint string, run func()) {
-		out = append(out, action{kind: "命令", title: title, hint: hint, run: run})
+		out = append(out, action{kind: i18n.T("命令"), title: title, hint: hint, run: run})
+	}
+	danger := func(title, hint string, run func()) {
+		out = append(out, action{kind: i18n.T("命令"), title: title, hint: hint, run: run, danger: true})
 	}
 	if a.doc != nil {
-		cmd("添加分屏", a.keyLabel("split-add"), a.addSplitPane)
+		cmd(i18n.T("添加分屏"), a.keyLabel("split-add"), a.addSplitPane)
 	}
 	if a.split != nil {
-		cmd("关闭此分屏", a.keyLabel("split-close"), func() { a.closePane(a.split.active) })
-		cmd("切换到下一个分屏", a.keyLabel("split-next"), a.cyclePane)
-		cmd("切换分屏排列方向", "", func() { a.split.vertical = !a.split.vertical })
-		cmd("均分所有分屏", "", a.equalSplit)
-		cmd("从分屏中分离", "", a.separateSplit)
+		cmd(i18n.T("关闭此分屏"), a.keyLabel("split-close"), func() { a.closePane(a.split.active) })
+		cmd(i18n.T("切换到下一个分屏"), a.keyLabel("split-next"), a.cyclePane)
+		cmd(i18n.T("切换分屏排列方向"), "", func() { a.split.vertical = !a.split.vertical })
+		cmd(i18n.T("均分所有分屏"), "", a.equalSplit)
+		cmd(i18n.T("从分屏中分离"), "", a.separateSplit)
 	}
 	dir := a.currentDir()
-	cmd("新建文档", a.keyLabel("new-doc"), func() { a.newDoc(dir) })
-	cmd("新建文件夹", a.keyLabel("new-folder"), func() { a.newFolder(dir) })
-	cmd("新建空间…", "", a.newSpaceForm)
-	if active != nil {
-		cmd("编辑主题颜色…", "", func() { a.editSpace(active) })
-		cmd("更改空间图标…", "", func() { a.editSpaceProperty(active, "icon") })
-		cmd("重命名空间…", "", func() { a.editSpaceProperty(active, "name") })
+	cmd(i18n.T("新建文档"), a.keyLabel("new-doc"), func() { a.newDoc(dir) })
+	cmd(i18n.T("新建文件夹"), a.keyLabel("new-folder"), func() { a.newFolder(dir) })
+	cmd(i18n.T("今日笔记"), a.keyLabel("daily"), a.openDaily)
+	cmd(i18n.T("在所有文档中查找和替换…"), a.keyLabel("replace-all"), a.openReplaceAll)
+	for _, t := range a.spaceTemplates(a.state.ActiveSpace()) {
+		cmd(i18n.T("从模板新建：")+t.Name, "", func() { a.newFromTemplate(dir, t) })
 	}
-	cmd("切换侧边栏", a.keyLabel("sidebar"), a.toggleSidebar)
-	cmd("资料库", a.keyLabel("library"), a.toggleLibrary)
-	cmd("所有空间", a.keyLabel("overview"), a.toggleOverview)
-	focus := "进入专注模式"
+	cmd(i18n.T("打开模板文件夹"), "", a.openTemplatesFolder)
+	cmd(i18n.T("新建空间…"), "", a.newSpaceForm)
+	if active != nil {
+		cmd(i18n.T("编辑主题颜色…"), "", func() { a.editSpace(active) })
+		cmd(i18n.T("更改空间图标…"), "", func() { a.editSpaceProperty(active, "icon") })
+		cmd(i18n.T("重命名空间…"), "", func() { a.editSpaceProperty(active, "name") })
+	}
+	cmd(i18n.T("切换侧边栏"), a.keyLabel("sidebar"), a.toggleSidebar)
+	cmd(i18n.T("资料库"), a.keyLabel("library"), a.toggleLibrary)
+	cmd(i18n.T("所有空间"), a.keyLabel("overview"), a.toggleOverview)
+	focus := i18n.T("进入专注模式")
 	if a.focus {
-		focus = "退出专注模式"
+		focus = i18n.T("退出专注模式")
 	}
 	cmd(focus, a.keyLabel("focus"), a.toggleFocus)
 	if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
-		outline := "展开目录"
+		outline := i18n.T("展开目录")
 		if a.outlineOpen() {
-			outline = "收起目录"
+			outline = i18n.T("收起目录")
 		}
 		cmd(outline, a.keyLabel("outline"), a.toggleOutline)
 	}
-	typewriter := "开启打字机滚动"
+	typewriter := i18n.T("开启打字机滚动")
 	if a.prefs.Typewriter {
-		typewriter = "关闭打字机滚动"
+		typewriter = i18n.T("关闭打字机滚动")
 	}
 	cmd(typewriter, "", a.toggleTypewriter)
-	dim := "专注模式下不淡化其他段落"
+	dim := i18n.T("专注模式下不淡化其他段落")
 	if a.prefs.NoDim {
-		dim = "专注模式下淡化其他段落"
+		dim = i18n.T("专注模式下淡化其他段落")
 	}
 	cmd(dim, "", a.toggleDim)
-	cmd("书签…", a.keyLabel("bookmarks"), a.openBookmarks)
-	cmd("按标签浏览", "#", func() { a.openPalette(); a.palette.query = "#" })
-	cmd("最近删除…", "", a.openTrash)
+	space := i18n.T("开启中英文自动加空格")
+	if a.prefs.AutoSpace {
+		space = i18n.T("关闭中英文自动加空格")
+	}
+	cmd(space, "", func() { a.prefs.AutoSpace = !a.prefs.AutoSpace; a.savePrefs() })
+	cmd(i18n.T("外观设置…"), "", func() { a.openSettings(tabAppearance) })
+	cmd(i18n.T("书签…"), a.keyLabel("bookmarks"), a.openBookmarks)
+	cmd(i18n.T("按标签浏览"), "#", func() { a.openPalette(); a.palette.query = "#" })
+	cmd(i18n.T("最近删除…"), "", a.openTrash)
 	if len(a.state.Spaces) > 1 {
-		cmd("下一个空间", a.keyLabel("next-space"), func() { a.stepSpace(1) })
-		cmd("上一个空间", a.keyLabel("prev-space"), func() { a.stepSpace(-1) })
+		cmd(i18n.T("下一个空间"), a.keyLabel("next-space"), func() { a.stepSpace(1) })
+		cmd(i18n.T("上一个空间"), a.keyLabel("prev-space"), func() { a.stepSpace(-1) })
 	}
-	cmd("插件…", "", a.openPlugins)
-	cmd("设置…", a.keyLabel("settings"), func() { a.openSettings(tabGeneral) })
-	cmd("键盘快捷键", "", func() { a.openSettings(tabShortcuts) })
-	cmd("关于 ArcMD", "", func() { a.openSettings(tabAbout) })
-	cmd("新手教程", "", a.startTour)
-	cmd("检查更新…", "", a.checkForUpdates)
+	cmd(i18n.T("插件…"), "", a.openPlugins)
+	cmd(i18n.T("设置…"), a.keyLabel("settings"), func() { a.openSettings(tabGeneral) })
+	cmd(i18n.T("键盘快捷键"), "", func() { a.openSettings(tabShortcuts) })
+	cmd(i18n.T("关于 ArcMD"), "", func() { a.openSettings(tabAbout) })
+	cmd(i18n.T("新手教程"), "", a.startTour)
+	cmd(i18n.T("检查更新…"), "", a.checkForUpdates)
 	if n := a.updateNotice(); n != nil && n.Kind == update.Ready {
-		cmd("重新启动以安装更新", "", a.installUpdate)
+		cmd(i18n.T("重新启动以安装更新"), "", a.installUpdate)
 	}
-	auto := "关闭自动更新"
+	auto := i18n.T("关闭自动更新")
 	if a.prefs.NoAutoUpdate {
-		auto = "开启自动更新"
+		auto = i18n.T("开启自动更新")
 	}
 	cmd(auto, "", a.toggleAutoUpdate)
-	cmd("刷新文档列表", "", a.refreshTree)
+	cmd(i18n.T("刷新文档列表"), "", a.refreshTree)
 	if a.canGo(-1) {
-		cmd("后退", "⌘[", func() { a.goHistory(-1) })
+		cmd(i18n.T("后退"), "⌘[", func() { a.goHistory(-1) })
 	}
 	if a.canGo(1) {
-		cmd("前进", "⌘]", func() { a.goHistory(1) })
+		cmd(i18n.T("前进"), "⌘]", func() { a.goHistory(1) })
 	}
 	if a.doc != nil {
 		rel := a.doc.rel
 		sp := a.doc.space
-		fav := "添加到收藏"
+		fav := i18n.T("添加到收藏")
 		if a.state.IsFavorite(sp.ID, rel) {
-			fav = "从收藏中移除"
+			fav = i18n.T("从收藏中移除")
 		}
 		cmd(fav, "", func() { a.toggleFavorite(sp, rel) })
-		pin := "置顶文档"
+		pin := i18n.T("置顶文档")
 		if sp.IsPinned(rel) {
-			pin = "取消置顶文档"
+			pin = i18n.T("取消置顶文档")
 		}
 		cmd(pin, "", func() { a.togglePin(sp, rel) })
 		if d := a.bookmarkable(); d != nil {
-			mark := "添加书签"
+			mark := i18n.T("添加书签")
 			if a.caretMarked(d) {
-				mark = "移除书签"
+				mark = i18n.T("移除书签")
 			}
 			cmd(mark, a.keyLabel("bookmark"), a.toggleBookmarkAtCaret)
-			cmd("上一个书签", a.keyLabel("prev-bookmark"), func() { a.stepBookmark(-1) })
-			cmd("下一个书签", a.keyLabel("next-bookmark"), func() { a.stepBookmark(1) })
+			cmd(i18n.T("上一个书签"), a.keyLabel("prev-bookmark"), func() { a.stepBookmark(-1) })
+			cmd(i18n.T("下一个书签"), a.keyLabel("next-bookmark"), func() { a.stepBookmark(1) })
 		}
 		if inPins(sp, rel) {
-			cmd("关闭并保持置顶", "", func() { a.closeOpen(sp, rel) })
+			cmd(i18n.T("关闭并保持置顶"), "", func() { a.closeOpen(sp, rel) })
 		}
 		switch {
 		case a.doc.conflict:
-			cmd("保留我的修改", "", a.keepMine)
-			cmd("使用磁盘上的版本", "⌘R", a.useDisk)
+			cmd(i18n.T("保留我的修改"), "", a.keepMine)
+			danger(i18n.T("使用磁盘上的版本（放弃我的修改）"), "⌘R", a.useDisk)
 		case a.doc.missing:
-			cmd("重新保存到原位置", "", a.keepMine)
-			cmd("放弃修改并关闭", "", a.useDisk)
+			cmd(i18n.T("重新保存到原位置"), "", a.keepMine)
+			danger(i18n.T("放弃修改并关闭"), "", a.useDisk)
 		}
-		mode := "预览 Markdown 导出"
+		mode := i18n.T("预览 Markdown 导出")
 		if a.doc.source {
-			mode = "返回富文本编辑"
+			mode = i18n.T("返回富文本编辑")
 		}
 		cmd(mode, a.keyLabel("source"), a.toggleSource)
-		cmd("版本历史…", a.keyLabel("history"), a.openVersions)
-		cmd("导出 PDF", a.keyLabel("export-pdf"), a.exportPDF)
-		cmd("打印…", "", a.printDoc)
-		cmd("重命名文档", "", func() { a.renameIn(sp, rel) })
+		cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
+		cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
+		cmd(i18n.T("打印…"), "", a.printDoc)
+		cmd(i18n.T("重命名文档"), "", func() { a.renameIn(sp, rel) })
 		if a.doc.loadErr == nil && !a.doc.source {
 			a.editorActions(cmd)
 		}
-		cmd("导出 Markdown 文件", "", a.exportMarkdown)
-		cmd("在访达中显示文档", "", func() { a.revealIn(sp, rel) })
+		cmd(i18n.T("导出 Markdown 文件"), "", a.exportMarkdown)
+		cmd(i18n.T("将当前文档存为模板"), "", a.saveAsTemplate)
+		cmd(i18n.T("导出 HTML 网页"), "", a.exportHTML)
+		cmd(i18n.T("在新窗口中打开当前文档"), "", func() { a.openInWindow(sp, rel) })
+		cmd(i18n.T("在访达中显示文档"), "", func() { a.revealIn(sp, rel) })
 	}
 	for _, p := range a.installed {
 		if !p.Enabled {
@@ -233,7 +257,7 @@ func (a *App) actions() []action {
 		}
 		for _, pc := range p.Manifest.Contributes.Commands {
 			name := p.Manifest.Name
-			out = append(out, action{kind: "插件", title: pc.Title, hint: name, run: func() {
+			out = append(out, action{kind: i18n.T("插件"), title: pc.Title, hint: name, run: func() {
 				a.notify("%s 需要插件运行时支持，该功能正在开发中。", name)
 			}})
 		}
@@ -266,6 +290,9 @@ func (a *App) results() []action {
 		if !ok {
 			continue
 		}
+		if act.kind == i18n.T("命令") && slices.Contains(a.prefs.RecentCommands, act.title) {
+			s += recentBonus // a command used lately before its peers
+		}
 		ms = append(ms, scored{act, s})
 	}
 	slices.SortStableFunc(ms, func(x, y scored) int { return y.score - x.score })
@@ -278,7 +305,7 @@ func (a *App) results() []action {
 	named := map[place]bool{}
 	for _, m := range ms[:min(len(ms), limit)] {
 		out = append(out, m.action)
-		if m.kind == "文档" {
+		if m.kind == i18n.T("文档") {
 			named[m.doc] = true
 		}
 	}
@@ -290,13 +317,28 @@ func (a *App) results() []action {
 		}
 		hint := a.docHint(h.Space, h.Path)
 		if h.Count > 1 {
-			hint = strings.TrimPrefix(hint+fmt.Sprintf(" · %d 处", h.Count), " · ")
+			hint = strings.TrimPrefix(hint+fmt.Sprintf(i18n.T(" · %d 处"), h.Count), " · ")
 		}
 		id, rel := h.Space, h.Path
-		out = append(out, action{kind: "内容", title: vault.Title(rel), hint: hint, doc: p,
+		out = append(out, action{kind: i18n.T("内容"), title: vault.Title(rel), hint: hint, doc: p,
 			snippet: h.Snippet, match: h.Match, run: func() { a.openAtText(id, rel, query) }})
 	}
 	return out
+}
+
+// recentBonus lifts the commands used lately in the bar's matches, and
+// recentCommands is how many it remembers.
+const (
+	recentBonus    = 12
+	recentCommands = 5
+)
+
+// rememberCommand keeps title as the command used last.
+func (a *App) rememberCommand(title string) {
+	list := slices.DeleteFunc(slices.Clone(a.prefs.RecentCommands), func(s string) bool { return s == title })
+	list = append([]string{title}, list...)
+	a.prefs.RecentCommands = list[:min(len(list), recentCommands)]
+	a.savePrefs()
 }
 
 // recentLimit is how many documents last shown the idle bar lists.
@@ -308,17 +350,29 @@ func (a *App) idleResults() []action {
 	var out []action
 	for _, p := range a.recentPlaces(recentLimit) {
 		id, rel := p.space, p.rel
-		out = append(out, action{kind: "最近", title: vault.Title(rel), hint: a.docHint(id, rel), doc: p,
+		out = append(out, action{kind: i18n.T("最近"), title: vault.Title(rel), hint: a.docHint(id, rel), doc: p,
 			run: func() { a.openAnywhere(id, rel) }})
 	}
 	all := a.actions()
+	// The commands used last come first.
+	recent := map[string]bool{}
+	for _, title := range a.prefs.RecentCommands {
+		for _, act := range all {
+			if act.kind == i18n.T("命令") && act.title == title && !act.danger {
+				act.hint = strings.TrimPrefix(act.hint+i18n.T(" · 最近使用"), " · ")
+				out = append(out, act)
+				recent[title] = true
+				break
+			}
+		}
+	}
 	for _, act := range all {
-		if act.kind == "命令" {
+		if act.kind == i18n.T("命令") && !recent[act.title] {
 			out = append(out, act)
 		}
 	}
 	for _, act := range all {
-		if act.kind != "命令" {
+		if act.kind != i18n.T("命令") {
 			out = append(out, act)
 		}
 	}
@@ -342,7 +396,7 @@ func (a *App) paletteView(c *ui.Context) {
 	panel := ui.Modal(c.Key("palette"), &p.open, func() {
 		res := a.results()
 		if p.query != p.lastQuery {
-			p.lastQuery, p.index = p.query, 0
+			p.lastQuery, p.index, p.confirm = p.query, 0, ""
 		}
 		if c.Shortcut(0, ui.KeyDown) {
 			p.index++
@@ -354,27 +408,27 @@ func (a *App) paletteView(c *ui.Context) {
 		run := func(act action) {
 			a.runPaletteAction(act)
 		}
-		placeholder := "搜索文档、内容或执行命令"
+		placeholder := i18n.T("搜索文档、内容或执行命令")
 		if p.pane != nil {
-			placeholder = "选择分屏文档"
+			placeholder = i18n.T("选择分屏文档")
 		}
 		if p.bookmarks {
-			placeholder = "搜索书签"
+			placeholder = i18n.T("搜索书签")
 		}
 		ui.Column(c).Width(width).Gap(6).Children(func() {
 			input := ui.TextInput(c.Key("query"), &p.query).Placeholder(placeholder).
-				AutoFocus().Label("命令栏").FontSize(16).Padding(10, 12)
+				AutoFocus().Label(i18n.T("命令栏")).FontSize(16).Padding(10, 12)
 			if input.Submitted() && len(res) > 0 {
 				run(res[p.index])
 				return
 			}
 			if len(res) == 0 {
-				empty := "没有匹配的结果"
+				empty := i18n.T("没有匹配的结果")
 				switch {
 				case p.bookmarks && len(a.state.Bookmarks) == 0:
-					empty = "还没有书签 · 按 " + a.firstKey("bookmark") + " 标记当前段落"
+					empty = i18n.T("还没有书签 · 按 ") + a.firstKey("bookmark") + i18n.T(" 标记当前段落")
 				case p.bookmarks:
-					empty = "没有匹配的书签"
+					empty = i18n.T("没有匹配的书签")
 				}
 				ui.Text(c, empty).TextColor(t.TextMuted).Padding(10, 12)
 				return
@@ -390,13 +444,24 @@ func (a *App) paletteView(c *ui.Context) {
 					if act.faded {
 						row.Opacity(.55)
 					}
+					confirming := act.danger && p.confirm == act.title
+					if confirming {
+						row.Background(t.Danger.Alpha(0.14))
+					}
 					if act.bookmark != nil && a.bookmarkRow(c, row, act) {
 						continue
 					}
 					row.Children(func() {
 						ui.Text(c, act.kind).FontSize(11).TextColor(t.TextMuted).Width(64).NoWrap()
 						if act.snippet == "" {
-							ui.Text(c, act.title).Grow(1).SingleLine().MinWidth(0)
+							title := ui.Text(c, act.title).Grow(1).SingleLine().MinWidth(0)
+							if act.danger {
+								title.TextColor(t.Danger)
+							}
+							if confirming {
+								ui.Text(c, i18n.T("再按一次确认，此操作无法撤销")).FontSize(12).TextColor(t.Danger).NoWrap()
+								return
+							}
 							if act.hint != "" {
 								ui.Text(c, act.hint).FontSize(12).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
 							}
@@ -438,84 +503,103 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	after := func(run func()) func() {
 		return func() { run(); ed.RequestFocus = true }
 	}
-	lock := "锁定文档（只读）"
+	lock := i18n.T("锁定文档（只读）")
 	if ed.ReadOnly {
-		lock = "解锁文档"
+		lock = i18n.T("解锁文档")
 	}
 	cmd(lock, "", func() { ed.SetReadOnly(!ed.ReadOnly) })
-	cmd("阅读设置…", "", func() { a.openSettings(tabGeneral) })
-	cmd("跳转脚注 / 返回正文", "", func() { ed.FollowFootnote() })
-	cmd("查找", a.keyLabel("find"), func() { ed.OpenFind(false) })
+	cmd(i18n.T("阅读设置…"), "", func() { a.openSettings(tabAppearance) })
+	cmd(i18n.T("跳转脚注 / 返回正文"), "", func() { ed.FollowFootnote() })
+	cmd(i18n.T("查找"), a.keyLabel("find"), func() { ed.OpenFind(false) })
 	if ed.ReadOnly {
 		return
 	}
-	cmd("查找和替换", a.keyLabel("replace"), func() { ed.OpenFind(true) })
-	cmd("插入双链…", "[[", after(ed.StartWikiLink))
-	cmd("插入公式", "", after(ed.InsertMath))
-	cmd("插入行内公式", "", after(ed.InsertInlineMath))
-	cmd("插入脚注", "", after(ed.InsertFootnote))
-	cmd("上标", "", after(func() { ed.SetScript("sup") }))
-	cmd("下标", "", after(func() { ed.SetScript("sub") }))
+	cmd(i18n.T("查找和替换"), a.keyLabel("replace"), func() { ed.OpenFind(true) })
+	for _, n := range []int{500, 1000, 2000, 3000, 5000} {
+		cmd(fmt.Sprintf(i18n.T("字数目标：%d 字"), n), "", after(func() { ed.SetGoal(n) }))
+	}
+	if ed.Doc.Goal > 0 {
+		cmd(i18n.T("移除字数目标"), "", after(func() { ed.SetGoal(0) }))
+	}
+	cmd(i18n.T("插入双链…"), "[[", after(ed.StartWikiLink))
+	cmd(i18n.T("插入公式"), "", after(ed.InsertMath))
+	cmd(i18n.T("插入行内公式"), "", after(ed.InsertInlineMath))
+	cmd(i18n.T("插入脚注"), "", after(ed.InsertFootnote))
+	cmd(i18n.T("上标"), "", after(func() { ed.SetScript("sup") }))
+	cmd(i18n.T("下标"), "", after(func() { ed.SetScript("sub") }))
 	if ed.Doc.Icon == "" {
-		cmd("添加页面图标", "", ed.EditPageIcon)
+		cmd(i18n.T("添加页面图标"), "", ed.EditPageIcon)
 	} else {
-		cmd("更换页面图标", "", ed.EditPageIcon)
-		cmd("移除页面图标", "", after(func() { ed.Engine.SetPageIcon("") }))
+		cmd(i18n.T("更换页面图标"), "", ed.EditPageIcon)
+		cmd(i18n.T("移除页面图标"), "", after(func() { ed.Engine.SetPageIcon("") }))
 	}
 	if ed.Doc.Cover == "" {
-		cmd("添加封面", "", ed.EditCover)
+		cmd(i18n.T("添加封面"), "", ed.EditCover)
 	} else {
-		cmd("更换封面", "", ed.EditCover)
-		cmd("移除封面", "", after(func() { ed.Engine.SetCover("") }))
+		cmd(i18n.T("更换封面"), "", ed.EditCover)
+		cmd(i18n.T("移除封面"), "", after(func() { ed.Engine.SetCover("") }))
 	}
-	cmd("章节上移", "", after(func() { ed.MoveSectionAtCaret(-1) }))
-	cmd("章节下移", "", after(func() { ed.MoveSectionAtCaret(1) }))
-	cmd("折叠/展开当前块", "", after(ed.ToggleFoldAtCaret))
-	cmd("全部展开", "", after(ed.UnfoldAll))
-	cmd("合并选中的单元格", "", after(ed.MergeSelectedCells))
-	cmd("拆分单元格", "", after(ed.SplitCaretCell))
-	cmd("撤销", "⌘Z", after(ed.Undo))
-	cmd("重做", "⇧⌘Z", after(ed.Redo))
-	cmd("加粗", a.keyLabel("bold"), after(func() { ed.Wrap("**") }))
-	cmd("斜体", a.keyLabel("italic"), after(func() { ed.Wrap("*") }))
-	cmd("删除线", a.keyLabel("strike"), after(func() { ed.Wrap("~~") }))
-	cmd("行内代码", a.keyLabel("code"), after(func() { ed.Wrap("`") }))
+	cmd(i18n.T("章节上移"), "", after(func() { ed.MoveSectionAtCaret(-1) }))
+	cmd(i18n.T("章节下移"), "", after(func() { ed.MoveSectionAtCaret(1) }))
+	cmd(i18n.T("折叠/展开当前块"), "", after(ed.ToggleFoldAtCaret))
+	cmd(i18n.T("全部展开"), "", after(ed.UnfoldAll))
+	cmd(i18n.T("合并选中的单元格"), "", after(ed.MergeSelectedCells))
+	cmd(i18n.T("拆分单元格"), "", after(ed.SplitCaretCell))
+	cmd(i18n.T("撤销"), "⌘Z", after(ed.Undo))
+	cmd(i18n.T("重做"), "⇧⌘Z", after(ed.Redo))
+	cmd(i18n.T("加粗"), a.keyLabel("bold"), after(func() { ed.Wrap("**") }))
+	cmd(i18n.T("斜体"), a.keyLabel("italic"), after(func() { ed.Wrap("*") }))
+	cmd(i18n.T("删除线"), a.keyLabel("strike"), after(func() { ed.Wrap("~~") }))
+	cmd(i18n.T("行内代码"), a.keyLabel("code"), after(func() { ed.Wrap("`") }))
 	for _, item := range []struct{ name, prefix string }{
-		{"正文", ""}, {"一级标题", "# "}, {"二级标题", "## "}, {"三级标题", "### "},
-		{"四级标题", "#### "}, {"五级标题", "##### "}, {"六级标题", "###### "},
-		{"引用", "> "}, {"无序列表", "- "}, {"有序列表", "1. "}, {"任务列表", "- [ ] "},
+		{i18n.T("正文"), ""}, {i18n.T("一级标题"), "# "}, {i18n.T("二级标题"), "## "}, {i18n.T("三级标题"), "### "},
+		{i18n.T("四级标题"), "#### "}, {i18n.T("五级标题"), "##### "}, {i18n.T("六级标题"), "###### "},
+		{i18n.T("引用"), "> "}, {i18n.T("无序列表"), "- "}, {i18n.T("有序列表"), "1. "}, {i18n.T("任务列表"), "- [ ] "},
 	} {
-		cmd("转换为"+item.name, "", after(func() { ed.Prefix(item.prefix) }))
+		cmd(i18n.T("转换为")+item.name, "", after(func() { ed.Prefix(item.prefix) }))
 	}
-	cmd("在下方新建段落", a.keyLabel("newline"), after(func() { ed.Engine.Insert(model.NewBlock("paragraph", "")) }))
-	cmd("插入链接…", "", ed.EditLink)
-	cmd("下划线", a.keyLabel("underline"), after(func() { ed.Wrap("_") }))
-	cmd("插入表格", "", after(func() { ed.Engine.Insert(model.Table(3, 3)) }))
-	cmd("插入双栏", "", after(func() { ed.Engine.Insert(model.Columns()) }))
-	for _, item := range []struct{ name, kind string }{{"插入代码块", "code"}, {"插入高亮块", "callout"}, {"插入分隔线", "rule"}} {
+	cmd(i18n.T("在下方新建段落"), a.keyLabel("newline"), after(func() { ed.Engine.Insert(model.NewBlock("paragraph", "")) }))
+	cmd(i18n.T("插入链接…"), "", ed.EditLink)
+	cmd(i18n.T("下划线"), a.keyLabel("underline"), after(func() { ed.Wrap("_") }))
+	cmd(i18n.T("插入表格"), "", after(func() { ed.Engine.Insert(model.Table(3, 3)) }))
+	cmd(i18n.T("插入双栏"), "", after(func() { ed.Engine.Insert(model.Columns()) }))
+	cmd(i18n.T("插入折叠块"), "", after(func() { ed.InsertToggle() }))
+	for _, item := range []struct{ name, kind string }{{i18n.T("插入代码块"), "code"}, {i18n.T("插入高亮块"), "callout"}, {i18n.T("插入分隔线"), "rule"}} {
 		cmd(item.name, "", after(func() { ed.Engine.Insert(model.NewBlock(item.kind, "")) }))
 	}
-	for _, item := range []struct{ name, align string }{{"左对齐", "left"}, {"居中对齐", "center"}, {"右对齐", "right"}} {
+	for _, item := range []struct{ name, align string }{{i18n.T("左对齐"), "left"}, {i18n.T("居中对齐"), "center"}, {i18n.T("右对齐"), "right"}} {
 		cmd(item.name, "", after(func() { ed.Engine.Align(item.align) }))
 	}
 	for _, tone := range model.CalloutColors {
-		cmd("高亮块颜色："+editor.CalloutName(tone), "", after(func() { ed.Engine.SetColor("", tone) }))
+		cmd(i18n.T("高亮块颜色：")+editor.CalloutName(tone), "", after(func() { ed.Engine.SetColor("", tone) }))
 	}
-	for _, name := range model.TextColors {
-		cmd("文字颜色："+editor.ColorName(name, false), "", after(func() { ed.Engine.SetTextColor(&name, nil) }))
+	for _, name := range model.Annotations {
+		cmd(i18n.T("手绘标注：")+i18n.T(editor.AnnotationNames[name]), "", after(func() { ed.Annotate(name, "") }))
 	}
-	for _, name := range model.TextHighlights[:8] {
-		cmd("背景颜色："+editor.ColorName(name, true), "", after(func() { ed.Engine.SetTextColor(nil, &name) }))
-	}
-	cmd("清除文字颜色", "", after(func() { none := ""; ed.Engine.SetTextColor(&none, &none) }))
-	cmd("增加表格行", "", after(func() { ed.Engine.ResizeTable(true, 1) }))
-	cmd("增加表格列", "", after(func() { ed.Engine.ResizeTable(false, 1) }))
-	cmd("删除表格末行", "", after(func() { ed.Engine.ResizeTable(true, -1) }))
-	cmd("删除表格末列", "", after(func() { ed.Engine.ResizeTable(false, -1) }))
+	cmd(i18n.T("移除手绘标注"), "", after(func() { ed.Annotate("", "") }))
+	cmd(i18n.T("增加表格行"), "", after(func() { ed.Engine.ResizeTable(true, 1) }))
+	cmd(i18n.T("表格按当前列升序排序"), "", after(func() {
+		if !ed.SortCaretColumn(false) {
+			a.notify("光标不在可排序的表格里（需要表头以下至少两行，且没有合并单元格）。")
+		}
+	}))
+	cmd(i18n.T("表格按当前列降序排序"), "", after(func() {
+		if !ed.SortCaretColumn(true) {
+			a.notify("光标不在可排序的表格里（需要表头以下至少两行，且没有合并单元格）。")
+		}
+	}))
+	cmd(i18n.T("将剪贴板粘贴为表格"), "", after(func() {
+		if !ed.PasteAsTable() {
+			a.notify("剪贴板里没有可以转换为表格的文字（用制表符、逗号或分号分隔，至少两行两列）。")
+		}
+	}))
+	cmd(i18n.T("增加表格列"), "", after(func() { ed.Engine.ResizeTable(false, 1) }))
+	cmd(i18n.T("删除表格末行"), "", after(func() { ed.Engine.ResizeTable(true, -1) }))
+	cmd(i18n.T("删除表格末列"), "", after(func() { ed.Engine.ResizeTable(false, -1) }))
 	for _, item := range []struct {
 		name  string
 		delta int
-	}{{"上移内容块", -1}, {"下移内容块", 1}} {
+	}{{i18n.T("上移内容块"), -1}, {i18n.T("下移内容块"), 1}} {
 		cmd(item.name, "", after(func() {
 			id := ed.Engine.LeafAt(ed.Caret).Owner
 			for i, b := range ed.Doc.Blocks {
@@ -526,9 +610,14 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 			}
 		}))
 	}
-	cmd("复制内容块", "", after(func() { ed.Engine.Duplicate(ed.Engine.LeafAt(ed.Caret).Owner) }))
-	cmd("删除内容块", "", after(func() { ed.Engine.DeleteBlock(ed.Engine.LeafAt(ed.Caret).Owner) }))
-	cmd("增加缩进", "", after(func() { ed.Engine.Indent(1) }))
-	cmd("减少缩进", "", after(func() { ed.Engine.Indent(-1) }))
-	cmd("插入图片…", "", a.pickImages)
+	cmd(i18n.T("选择当前内容块"), "Esc", after(func() { ed.SelectCaretBlock() }))
+	cmd(i18n.T("选择全部内容块"), "", after(func() { ed.SelectAllBlocks() }))
+	cmd(i18n.T("复制内容块"), "", after(func() { ed.Engine.Duplicate(ed.Engine.LeafAt(ed.Caret).Owner) }))
+	cmd(i18n.T("删除内容块"), "", after(func() { ed.Engine.DeleteBlock(ed.Engine.LeafAt(ed.Caret).Owner) }))
+	cmd(i18n.T("增加缩进"), "", after(func() { ed.Engine.Indent(1) }))
+	cmd(i18n.T("减少缩进"), "", after(func() { ed.Engine.Indent(-1) }))
+	cmd(i18n.T("插入图片…"), "", a.pickImages)
+	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" {
+		cmd(i18n.T("裁剪图片…"), "", func() { ed.OpenCropper(b.ID) })
+	}
 }

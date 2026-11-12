@@ -1,0 +1,15 @@
+Total: 2.92s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).sync in /Users/cizai/agent/Prism/internal/editor/buffer.go
+         0      230ms (flat, cum)  7.88% of Total
+         .          .     30:func (b *Buffer) sync() {
+         .          .     31:	if b.textDoc == b.Doc && b.textVersion == b.Revision() {
+         .          .     32:		return
+         .          .     33:	}
+         .          .     34:	if change, ok := b.TextChangeSince(b.textVersion); ok && b.textDoc == b.Doc {
+         .          .     35:		start := document.ByteOffset(b.text, change.Start)
+         .      230ms     36:		b.text = b.text[:start] + change.After + b.text[start+len(change.Before):]
+         .          .     37:		b.textLength += change.AfterEnd - change.BeforeEnd
+         .          .     38:	} else {
+         .          .     39:		b.text = b.Doc.PlainText()
+         .          .     40:		b.textLength = document.Len(b.text)
+         .          .     41:	}

@@ -7,6 +7,7 @@ package editor
 
 import (
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -69,26 +70,26 @@ func (e *Editor) starter(c *ui.Context) {
 	t := c.Theme()
 	top := e.contentEnd + 16
 	ui.Column(c.Key("starter")).Absolute().Left(e.padding).Top(top).Width(e.width - 2*e.padding).Gap(12).Children(func() {
-		ui.Text(c, "快速开始").FontSize(13).TextColor(e.page.Caption)
+		ui.Text(c, i18n.T("快速开始")).FontSize(13).TextColor(e.page.Caption)
 		ui.Row(c).Gap(8).Wrap().Children(func() {
 			for _, it := range e.starterItems() {
 				chip := ui.ButtonBase(c.Key("starter:"+it.kind)).Height(34).PaddingX(12).Gap(8).Radius(8).
-					Border(1, e.page.TableLine).AlignItems(ui.Center).Label("插入" + it.name).Cursor(ui.CursorPointer)
+					Border(1, e.page.TableLine).AlignItems(ui.Center).Label(i18n.T("插入") + it.label()).Cursor(ui.CursorPointer)
 				if chip.Hovered() {
 					chip.Background(e.page.Hover)
 				}
 				chip.Children(func() {
 					ui.Icon(c, it.icon).FontSize(16).TextColor(e.tint(it.tint))
-					ui.Text(c, it.name).FontSize(14).TextColor(t.Text)
+					ui.Text(c, it.label()).FontSize(14).TextColor(t.Text)
 				})
 				if chip.Clicked() {
 					e.start(it)
 				}
 			}
 		})
-		hint := "或直接开始输入，输入「/」插入更多内容"
+		hint := i18n.T("或直接开始输入，输入「/」插入更多内容")
 		if e.dropFiles != nil {
-			hint += "，也可以把图片拖到这里"
+			hint += i18n.T("，也可以把图片拖到这里")
 		}
 		ui.Text(c, hint+"。").FontSize(13).TextColor(e.page.Placeholder)
 	})

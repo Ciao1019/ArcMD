@@ -14,10 +14,25 @@ func TestSpaceNameEditsInPlace(t *testing.T) {
 	sp := a.state.ActiveSpace()
 	before, _ := tt.Find("Personal")
 	row, _ := tt.Find("Journal")
-	if err := tt.Click("Personal"); err != nil {
-		t.Fatal(err)
+	for click := 1; click <= 2; click++ {
+		if err := tt.Click("Personal"); err != nil {
+			t.Fatal(err)
+		}
+		if _, editing := tt.Find("空间名称"); editing || a.spaceForm.open || sp.PinsCollapsed {
+			t.Fatalf("click %d started renaming or folded the pins", click)
+		}
 	}
-	tt.Frame()
+	rename := func() {
+		t.Helper()
+		if err := tt.RightClick(sp.Name); err != nil {
+			t.Fatal(err)
+		}
+		if err := tt.ChooseMenuItem("重命名空间…"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+	}
+	rename()
 	field, ok := tt.Find("空间名称")
 	after, _ := tt.Find("Journal")
 	if !ok || field.X != before.X || field.Y != before.Y || after != row || sp.PinsCollapsed {
@@ -29,24 +44,21 @@ func TestSpaceNameEditsInPlace(t *testing.T) {
 	if sp.Name != "工作空间" || a.spaceForm.open {
 		t.Fatalf("Enter did not rename: %q", sp.Name)
 	}
-	tt.Click("工作空间")
-	tt.Frame()
+	rename()
 	tt.Type("取消这个名称")
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
 	if sp.Name != "工作空间" || a.spaceForm.open {
 		t.Fatal("Escape did not cancel the rename")
 	}
-	tt.Click("工作空间")
-	tt.Frame()
+	rename()
 	tt.Type("阅读")
 	tt.Click("Journal")
 	tt.Frame()
 	if sp.Name != "阅读" || a.spaceForm.open {
 		t.Fatal("blur did not save the name")
 	}
-	tt.Click("阅读")
-	tt.Frame()
+	rename()
 	tt.Type("  ")
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()

@@ -65,7 +65,7 @@ func TestReadingFeaturesSnapshot(t *testing.T) {
 				a.prefs.LineHeight = 1.8
 			}
 			if name == "reading-settings" {
-				a.openSettings(tabGeneral)
+				a.openSettings(tabAppearance)
 			}
 			for range 3 {
 				tt.Frame()

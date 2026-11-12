@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -102,31 +103,31 @@ func (e *Editor) linkPopover(c *ui.Context, surface ui.Element) {
 		y = max(float32(12), b.Y+r.Y-213)
 	}
 	ui.Overlay(c, func() {
-		back := ui.ButtonBase(c.Key("link-outside")).Absolute().Left(0).Top(0).Size(w, h).KeepFocus()
+		back := ui.ButtonBase(c.Key("link-outside")).Absolute().Left(0).Top(0).Size(w, h).KeepFocus().Label(i18n.T("关闭链接编辑"))
 		if back.Clicked() {
 			e.linkOpen = false
 			e.RequestFocus = true
 		}
 		ui.Column(c.Key("edit-link")).Absolute().Left(x).Top(y).Width(pw).Padding(12).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).Children(func() {
-			ui.Text(c, "编辑链接").FontSize(13).FontWeight(600)
-			label := ui.TextInput(c.Key("link-label"), &e.linkText).Label("链接文字").Placeholder("链接文字")
-			address := ui.TextInput(c.Key("link-address"), &e.linkURL).Label("链接地址").Placeholder("https://")
+			ui.Text(c, i18n.T("编辑链接")).FontSize(13).FontWeight(600)
+			label := ui.TextInput(c.Key("link-label"), &e.linkText).Label(i18n.T("链接文字")).Placeholder(i18n.T("链接文字"))
+			address := ui.TextInput(c.Key("link-address"), &e.linkURL).Label(i18n.T("链接地址")).Placeholder("https://")
 			if !e.linkOpened {
 				address.Focus()
 				e.linkOpened = true
 			}
 			if !safeHTMLURL(e.linkURL) {
-				ui.Text(c, "请输入有效的链接地址").FontSize(12).TextColor(c.Theme().Danger)
+				ui.Text(c, i18n.T("请输入有效的链接地址")).FontSize(12).TextColor(c.Theme().Danger)
 			}
 			apply := label.Submitted() || address.Submitted()
 			ui.Row(c).Gap(6).Children(func() {
-				if ui.Button(c, "打开链接").Disabled(e.linkURL == "" || !safeHTMLURL(e.linkURL)).Clicked() && e.openLink != nil {
+				if ui.Button(c, i18n.T("打开链接")).Disabled(e.linkURL == "" || !safeHTMLURL(e.linkURL)).Clicked() && e.openLink != nil {
 					e.openLink(e.linkURL)
 				}
-				if ui.Button(c, "移除链接").Clicked() {
+				if ui.Button(c, i18n.T("移除链接")).Clicked() {
 					e.applyLink(true)
 				}
-				if ui.PrimaryButton(c, "应用链接").Disabled(!safeHTMLURL(e.linkURL)).Clicked() {
+				if ui.PrimaryButton(c, i18n.T("应用链接")).Disabled(!safeHTMLURL(e.linkURL)).Clicked() {
 					apply = true
 				}
 			})
@@ -210,13 +211,13 @@ func (e *Editor) wikiPreview(c *ui.Context, surface ui.Element, load func(string
 			ui.Text(c, p.Location).FontSize(11).TextColor(c.Theme().TextMuted).MaxLines(1)
 			text := p.Text
 			if p.Missing {
-				text = "尚未创建这篇笔记"
+				text = i18n.T("尚未创建这篇笔记")
 			}
 			if text == "" {
-				text = "这篇笔记还是空的"
+				text = i18n.T("这篇笔记还是空的")
 			}
 			ui.Text(c, text).FontSize(13).MaxLines(6)
-			if !p.Missing && ui.Button(c, "打开笔记").Clicked() && e.openWiki != nil {
+			if !p.Missing && ui.Button(c, i18n.T("打开笔记")).Clicked() && e.openWiki != nil {
 				e.openWiki(name)
 				*hover = wikiHoverState{scroll: e.Scroll.Y}
 			}
@@ -225,7 +226,10 @@ func (e *Editor) wikiPreview(c *ui.Context, surface ui.Element, load func(string
 }
 
 func (e *Editor) inlineClick(x, y float32) bool {
-	for _, r := range e.rows {
+	// A footnote's return target stays 26 DIP high even with small fonts;
+	// include its overhang before applying the original exact hit tests.
+	for i := range e.rowSpace.between(y-26, y+26) {
+		r := e.indexedRow(i)
 		if r.leaf.Block.Kind == "footnote" && x >= r.rect.X && x < r.x && y >= r.y && y < r.y+26 {
 			return e.ReturnFootnote()
 		}

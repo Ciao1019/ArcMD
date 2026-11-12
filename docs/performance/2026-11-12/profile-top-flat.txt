@@ -1,0 +1,43 @@
+File: arcmd-perf.test
+Type: cpu
+Time: 2026-11-12 18:10:02 CST
+Duration: 4.64s, Total samples = 5.35s (115.19%)
+Showing nodes accounting for 3.77s, 70.47% of 5.35s total
+Dropped 193 nodes (cum <= 0.03s)
+Showing top 35 nodes out of 243
+      flat  flat%   sum%        cum   cum%
+     0.42s  7.85%  7.85%      0.44s  8.22%  github.com/Ciao1019/ArcMD/internal/editor.inlineTokens
+     0.37s  6.92% 14.77%      0.49s  9.16%  runtime.tryDeferToSpanScan
+     0.34s  6.36% 21.12%      0.34s  6.36%  runtime.decoderune
+     0.29s  5.42% 26.54%      0.29s  5.42%  syscall.rawsyscalln
+     0.22s  4.11% 30.65%      0.22s  4.11%  runtime.memclrNoHeapPointers
+     0.14s  2.62% 33.27%      0.48s  8.97%  github.com/Ciao1019/ArcMD/internal/document.Len (inline)
+     0.14s  2.62% 35.89%      0.14s  2.62%  runtime.cgocall
+     0.12s  2.24% 38.13%      0.12s  2.24%  runtime.pthread_cond_signal
+     0.12s  2.24% 40.37%      0.51s  9.53%  runtime.scanObject
+     0.11s  2.06% 42.43%      0.11s  2.06%  runtime.memmove
+     0.11s  2.06% 44.49%      0.37s  6.92%  runtime.scanObjectsSmall
+     0.10s  1.87% 46.36%      0.10s  1.87%  runtime.pthread_cond_wait
+     0.09s  1.68% 48.04%      0.13s  2.43%  github.com/egoist/mygo/ui.(*context).alloc
+     0.08s  1.50% 49.53%      1.07s 20.00%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).collectNotes
+     0.08s  1.50% 51.03%      0.08s  1.50%  type:.eq.SM11K1FFFFFFFFFFFFFFFM1K3FM1K3FM1K3FM1K3FM1K3FM1K3FFFM1K3FM1K3FM1K3FM1K3FM1K3FM12K4M10K6S
+     0.07s  1.31% 52.34%      0.92s 17.20%  github.com/Ciao1019/ArcMD/internal/document.(*Document).Leaves.func1
+     0.07s  1.31% 53.64%      0.21s  3.93%  github.com/egoist/mygo/ui.(*engine).commitElement
+     0.07s  1.31% 54.95%      0.07s  1.31%  runtime.pthread_kill
+     0.06s  1.12% 56.07%      0.43s  8.04%  github.com/Ciao1019/ArcMD/internal/document.(*Block).Text (inline)
+     0.06s  1.12% 57.20%      0.29s  5.42%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paint
+     0.06s  1.12% 58.32%      0.06s  1.12%  github.com/egoist/mygo/internal/scene.Affine.Mul
+     0.06s  1.12% 59.44%      0.15s  2.80%  github.com/egoist/mygo/ui.sameLayout
+     0.06s  1.12% 60.56%      0.08s  1.50%  runtime.greyobject
+     0.06s  1.12% 61.68%      0.06s  1.12%  runtime.madvise
+     0.05s  0.93% 62.62%      0.05s  0.93%  github.com/egoist/mygo/ui.(*node).prepareSelectable
+     0.05s  0.93% 63.55%      0.09s  1.68%  github.com/egoist/mygo/ui.(*node).transformAt
+     0.05s  0.93% 64.49%      0.05s  0.93%  runtime.usleep
+     0.04s  0.75% 65.23%      0.04s  0.75%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paintTables
+     0.04s  0.75% 65.98%      0.04s  0.75%  github.com/Ciao1019/ArcMD/internal/editor.closed (inline)
+     0.04s  0.75% 66.73%      0.04s  0.75%  github.com/egoist/mygo/ui.(*engine).finalizeInputs
+     0.04s  0.75% 67.48%      0.04s  0.75%  internal/runtime/atomic.(*Int64).Add
+     0.04s  0.75% 68.22%      0.04s  0.75%  internal/runtime/maps.(*Iter).Next
+     0.04s  0.75% 68.97%      0.04s  0.75%  runtime.(*gcBits).bytep (inline)
+     0.04s  0.75% 69.72%      0.04s  0.75%  runtime.alignDown (inline)
+     0.04s  0.75% 70.47%      0.04s  0.75%  runtime.getGCMask (inline)

@@ -91,6 +91,20 @@ func ExportHTML(doc *document.Document) string {
 			case "code":
 				out.WriteString("<pre><code>" + html.EscapeString(b.Text()) + "</code></pre>")
 				continue
+			case "toggle":
+				var inner []*document.Block
+				for i+1 < len(bs) && bs[i+1].Kind != "heading" && bs[i+1].Indent > b.Indent {
+					c := *bs[i+1]
+					c.Indent -= b.Indent + 1
+					inner = append(inner, &c)
+					i++
+				}
+				open := ""
+				if !b.Folded {
+					open = " open"
+				}
+				out.WriteString("<details" + open + "><summary>" + body + "</summary>" + blocks(inner) + "</details>")
+				continue
 			case "raw", "math":
 				tag = "pre"
 				body = html.EscapeString(b.Text())

@@ -130,6 +130,7 @@ func TestLibraryTrash(t *testing.T) {
 	a.trashFile = os.RemoveAll
 	a.trash("Journal/Ideas.arcmd")
 	a.trash("Welcome.arcmd")
+	a.undos = nil // the toasts name the documents, as the page does
 	a.openTrash()
 	settle(tt)
 	if !tt.HasText("今天") || !tt.HasText("Ideas") || !tt.HasText("Welcome") {

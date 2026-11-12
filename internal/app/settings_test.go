@@ -94,7 +94,7 @@ func TestMoreMenuExport(t *testing.T) {
 			}
 			if keyboard {
 				tt.Key(0, ui.KeyHome)
-				for range 4 {
+				for range 5 {
 					tt.Key(0, ui.KeyDown)
 				}
 				tt.Key(0, ui.KeyEnter)
@@ -149,7 +149,7 @@ func TestMoreMenuWithoutUsableDocument(t *testing.T) {
 // TestSettingsSnapshot renders the ⋯ menu and each settings tab, for review.
 func TestSettingsSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the settings")
-	for _, name := range []string{"more-menu", "more-menu@dark", "more-menu@narrow", "export-menu", tabGeneral, tabSpaces, tabShortcuts, tabAbout, "about@dark", "about@narrow"} {
+	for _, name := range []string{"more-menu", "more-menu@dark", "more-menu@narrow", "export-menu", tabGeneral, tabAppearance, tabSpaces, tabShortcuts, tabAbout, "about@dark", "about@narrow"} {
 		t.Run(name, func(t *testing.T) {
 			a, tt := newTestApp(t)
 			tt.SetSize(1240, 760)
@@ -199,7 +199,7 @@ func TestToolbarCorner(t *testing.T) {
 	if err := tt.Click("更多格式"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(tt.Menu(), "删除线") {
+	if menu := tt.Menu(); !slices.Contains(menu, "文字") || !slices.Contains(menu, "段落") || !slices.Contains(menu, "插入") || slices.Contains(menu, "撤销") {
 		t.Fatalf("format menu: %q", tt.Menu())
 	}
 	tt.CloseMenu()

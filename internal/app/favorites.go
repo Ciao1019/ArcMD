@@ -3,6 +3,7 @@ package app
 import (
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -128,7 +129,7 @@ func (a *App) favorites(c *ui.Context) {
 		// The height the layout takes is the animated one, so the list
 		// under the tiles slides with them rather than jumping when a slot
 		// adds a row.
-		box := ui.Box(c.Key("favorites-grid")).Label("收藏")
+		box := ui.Box(c.Key("favorites-grid")).Label(i18n.T("收藏"))
 		box.Height(box.AnimateTo("height", g.h, listAnim))
 		a.favoritesDrag(c, box, resting)
 		dragging := false
@@ -241,16 +242,16 @@ func (a *App) favoriteTile(c *ui.Context, i int, f space.Favorite, g favoriteGri
 		a.renameUnder(c, tile)
 	}
 	tile.ContextMenu(func(m *ui.Menu) {
-		if m.Item("在分屏中打开").Disabled(sp == nil || a.doc == nil && a.split == nil).Chosen() {
+		if m.Item(i18n.T("在分屏中打开")).Disabled(sp == nil || a.doc == nil && a.split == nil).Chosen() {
 			a.openSplit(sp, f.Path, false, false)
 		}
-		if m.Item("重命名…").Disabled(sp == nil).Chosen() {
+		if m.Item(i18n.T("重命名…")).Disabled(sp == nil).Chosen() {
 			a.renameIn(sp, f.Path)
 		}
-		if m.Item("从收藏中移除").Chosen() {
+		if m.Item(i18n.T("从收藏中移除")).Chosen() {
 			a.toggleFavorite(sp, f.Path)
 		}
-		if m.Item("在访达中显示").Disabled(sp == nil).Chosen() {
+		if m.Item(i18n.T("在访达中显示")).Disabled(sp == nil).Chosen() {
 			a.revealIn(sp, f.Path)
 		}
 	})
@@ -298,7 +299,7 @@ func (a *App) favoritesStrip(c *ui.Context, has bool) {
 	}
 	strip.Height(strip.AnimateTo("height", h, listAnim)).Children(func() {
 		if targeted {
-			ui.Text(c, "添加到收藏").FontSize(11).FontWeight(500).TextColor(t.TextMuted).NoWrap()
+			ui.Text(c, i18n.T("添加到收藏")).FontSize(11).FontWeight(500).TextColor(t.TextMuted).NoWrap()
 		}
 	})
 }
@@ -312,7 +313,7 @@ func (a *App) favoritesCard(c *ui.Context) {
 	col := ui.Column(c.Key("favorites")).PaddingX(10)
 	a.tourMark("favorites", col)
 	col.Children(func() {
-		card := ui.Column(c.Key("favorites-card")).Height(favoriteCardH).Radius(12).AlignItems(ui.Center).Label("收藏")
+		card := ui.Column(c.Key("favorites-card")).Height(favoriteCardH).Radius(12).AlignItems(ui.Center).Label(i18n.T("收藏"))
 		if d, ok := ui.Drop[dragged](card); ok && a.isDocOf(d) {
 			a.pinAt(d, 0)
 			a.listDrop = nil
@@ -354,12 +355,12 @@ func (a *App) favoritesCard(c *ui.Context) {
 				ui.Box(c).Size(16, 16).Margin(11.75, 0, 0, 0).Radius(8).Background(ink).Center().Children(func() {
 					ui.Icon(c, iconStar).FontSize(10).TextColor(star)
 				})
-				ui.Text(c, "拖动以添加收藏").FontSize(13).FontWeight(600).TextColor(text).Margin(5.75, 0, 0, 0).NoWrap()
-				ui.Text(c, "收藏常用的文档，在每个空间都能一键打开").FontSize(11).LineHeight(15.0/11).TextColor(text.Alpha(0.7)).
+				ui.Text(c, i18n.T("拖动以添加收藏")).FontSize(13).FontWeight(600).TextColor(text).Margin(5.75, 0, 0, 0).NoWrap()
+				ui.Text(c, i18n.T("收藏常用的文档，在每个空间都能一键打开")).FontSize(11).LineHeight(15.0/11).TextColor(text.Alpha(0.7)).
 					MaxWidth(150).Margin(3.5, 0, 0, 0).TextAlign(ui.Center)
 			})
 			x := ui.Box(c.Key("card-close")).Absolute().Right(8).Top(8).Size(14, 14).Center().Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label("关闭").Tooltip("不再显示")
+				Focusable().Role(ui.RoleButton).Label(i18n.T("关闭")).Tooltip(i18n.T("不再显示"))
 			x.Children(func() { ui.Icon(c, iconX).FontSize(10).TextColor(text.Alpha(0.7)) })
 			if x.Clicked() {
 				a.state.FavoritesHintDismissed = true

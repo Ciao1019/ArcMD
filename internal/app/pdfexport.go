@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdf"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -41,7 +42,7 @@ func (a *App) startPDF(printing bool) {
 	source := &document{space: &space.Space{Root: d.space.Root}, rel: d.rel}
 	dir := filepath.Dir(d.fullPath())
 	if printing {
-		dir = filepath.Join(os.TempDir(), "ArcMD 打印")
+		dir = filepath.Join(os.TempDir(), i18n.T("ArcMD 打印"))
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			a.notify("准备打印失败。%v", err)
 			return
@@ -83,14 +84,14 @@ func (a *App) pdfExportView(c *ui.Context) {
 	if job.open {
 		ui.Modal(c.Key("pdf-export"), &job.open, func() {
 			ui.Column(c).Width(300).Gap(12).Children(func() {
-				ui.Text(c, "正在导出 PDF").FontSize(18).FontWeight(600)
+				ui.Text(c, i18n.T("正在导出 PDF")).FontSize(18).FontWeight(600)
 				ui.Text(c, job.title).SingleLine().MinWidth(0).TextColor(c.Theme().TextMuted)
-				status := "正在准备页面…"
+				status := i18n.T("正在准备页面…")
 				if job.tops != nil {
-					status = fmt.Sprintf("已完成 %d / %d 页", job.page, len(job.tops))
+					status = fmt.Sprintf(i18n.T("已完成 %d / %d 页"), job.page, len(job.tops))
 				}
-				ui.Text(c, status).Label("导出进度")
-				if ui.Button(c.Key("cancel-pdf"), "取消导出").Clicked() {
+				ui.Text(c, status).Label(i18n.T("导出进度"))
+				if ui.Button(c.Key("cancel-pdf"), i18n.T("取消导出")).Clicked() {
 					job.open = false
 				}
 			})

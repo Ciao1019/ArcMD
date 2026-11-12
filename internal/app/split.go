@@ -3,6 +3,7 @@ package app
 import (
 	"slices"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -264,6 +265,9 @@ func (a *App) residentDocuments() []*document {
 	for _, d := range a.openDocs {
 		add(d)
 	}
+	for _, w := range a.windows {
+		add(w.doc)
+	}
 	return out
 }
 
@@ -322,6 +326,11 @@ func (a *App) withDocument(d *document, fn func()) {
 			} else {
 				a.openDocs[key] = replacement
 			}
+		}
+	}
+	for _, w := range a.windows {
+		if w.doc == d {
+			w.doc = replacement
 		}
 	}
 	if selected != d {
@@ -384,6 +393,14 @@ func (a *App) fillPane(pane *splitPane, id, rel string) bool {
 }
 
 func (a *App) runPaletteAction(act action) {
+	if act.danger && a.palette.confirm != act.title {
+		a.palette.confirm = act.title // the second Enter runs it
+		return
+	}
+	a.palette.confirm = ""
+	if act.kind == i18n.T("命令") && !act.danger && a.palette.pane == nil && !a.palette.bookmarks {
+		a.rememberCommand(act.title)
+	}
 	pane := a.palette.pane
 	if pane != nil && act.doc.rel == "" {
 		act.run()
@@ -393,7 +410,7 @@ func (a *App) runPaletteAction(act action) {
 	a.palette.open = false
 	a.palette.pane = nil
 	if pane != nil && act.doc.rel != "" {
-		if a.fillPane(pane, act.doc.space, act.doc.rel) && act.kind == "内容" && a.doc.loadErr == nil {
+		if a.fillPane(pane, act.doc.space, act.doc.rel) && act.kind == i18n.T("内容") && a.doc.loadErr == nil {
 			a.doc.ed.FindText(a.palette.query)
 		}
 		return
@@ -404,6 +421,11 @@ func (a *App) runPaletteAction(act action) {
 func (a *App) replaceReferences(old, replacement *document) {
 	if a.doc == old {
 		a.doc = replacement
+	}
+	for _, w := range a.windows {
+		if w.doc == old && old != nil {
+			w.doc = replacement
+		}
 	}
 	for _, session := range a.sessions {
 		if session.doc == old {

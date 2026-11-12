@@ -6,6 +6,7 @@ package editor
 
 import (
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -96,7 +97,8 @@ func (e *Editor) selectedLine() (decoration, bool) {
 func (e *Editor) paintTables(p *ui.Painter, bounds ui.Rect) {
 	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
 	pg := e.page
-	for _, d := range e.decorations {
+	for i := range e.visibleDecorations(24) {
+		d := e.decorations[i]
 		// Include the bars and insertion pins above and beside the table.
 		if d.kind != "table" || d.rect.Y+d.rect.H+24 < e.Scroll.Y || d.rect.Y-24 > e.Scroll.Y+e.viewport || len(d.cols) < 2 || !e.barsShown(d) {
 			continue
@@ -248,7 +250,7 @@ func (e *Editor) caretCell() (*document.Block, bool) {
 
 // cellFillButton opens the cell background panel.
 func (e *Editor) cellFillButton(c *ui.Context) {
-	b := ui.ButtonBase(c.Key("table:fill")).Size(24, 24).Radius(4).Center().Label("单元格背景颜色").Tooltip("单元格背景颜色").KeepFocus().Cursor(ui.CursorPointer)
+	b := ui.ButtonBase(c.Key("table:fill")).Size(24, 24).Radius(4).Center().Label(i18n.T("单元格背景颜色")).Tooltip(i18n.T("单元格背景颜色")).KeepFocus().Cursor(ui.CursorPointer)
 	if b.Hovered() || e.cellFillOpen {
 		b.Background(e.page.Hover)
 	}
@@ -267,15 +269,15 @@ func (e *Editor) cellFillPanel(c *ui.Context, x, y float32, id string, r documen
 	pg := e.page
 	panel := ui.Column(c.Key("cell-fill-panel")).Absolute().Left(max(8, x)).Top(y).Width(230).Padding(4, 10, 12, 10)
 	e.popover(c, panel).Children(func() {
-		ui.Text(c, "单元格背景颜色").FontSize(12).TextColor(t.Text).Margin(7, 0, 4, 0)
+		ui.Text(c, i18n.T("单元格背景颜色")).FontSize(12).TextColor(t.Text).Margin(7, 0, 4, 0)
 		names := append([]string{""}, document.TextHighlights...)
 		ui.Column(c).Gap(4).Children(func() {
 			for row := 0; row < len(names); row += 8 {
 				ui.Row(c.Key(row)).Justify(ui.SpaceBetween).Children(func() {
 					for _, name := range names[row:min(row+8, len(names))] {
-						label := "无背景颜色"
+						label := i18n.T("无背景颜色")
 						if name != "" {
-							label = "单元格背景：" + ColorName(name, true)
+							label = i18n.T("单元格背景：") + ColorName(name, true)
 						}
 						s := ui.ButtonBase(c.Key("cf:"+name)).Size(26, 26).Radius(4).Center().Label(label).Tooltip(label).KeepFocus().Cursor(ui.CursorPointer)
 						if current == name {
@@ -325,12 +327,12 @@ func (e *Editor) tableToolbar(c *ui.Context, surface ui.Element) {
 	}
 	sel := e.tableSel
 	x, y := d.cols[sel.index], d.rect.Y-tableBarGap-tableBar-46
-	before, after, remove := "在左侧插入列", "在右侧插入列", "删除列"
+	before, after, remove := i18n.T("在左侧插入列"), i18n.T("在右侧插入列"), i18n.T("删除列")
 	beforeIcon, afterIcon := iconInsertLeft, iconInsertRight
 	lines := document.CellRange{Row0: 0, Col0: sel.index, Row1: len(d.rows) - 2, Col1: sel.index}
 	if sel.rows {
 		x, y = d.rect.X, d.rows[sel.index]-46
-		before, after, remove = "在上方插入行", "在下方插入行", "删除行"
+		before, after, remove = i18n.T("在上方插入行"), i18n.T("在下方插入行"), i18n.T("删除行")
 		beforeIcon, afterIcon = iconInsertAbove, iconInsertBelow
 		lines = document.CellRange{Row0: sel.index, Col0: 0, Row1: sel.index, Col1: len(d.cols) - 2}
 	}
@@ -351,6 +353,22 @@ func (e *Editor) tableToolbar(c *ui.Context, surface ui.Element) {
 				insert(sel.index + 1)
 			}
 			e.cellFillButton(c)
+			if !sel.rows && e.Doc.CanSortTable(sel.id) {
+				// A column sorts the rows below the header by it.
+				for _, s := range []struct {
+					key, tip string
+					icon     *ui.SVG
+					desc     bool
+				}{{"table:sort-up", i18n.T("按此列升序排序"), iconSortUp, false}, {"table:sort-down", i18n.T("按此列降序排序"), iconSortDown, true}} {
+					if markButton(c, e.page, s.key, s.icon, s.tip, false).Clicked() {
+						id, col := sel.id, sel.index
+						e.tableSel, e.tableDanger = tableSelection{}, false
+						e.Engine.SortTable(id, col, s.desc)
+						e.sync()
+						e.RequestFocus = true
+					}
+				}
+			}
 			ui.Box(c).Size(1, 20).Background(c.Theme().Border)
 			del := ui.ButtonBase(c.Key("table:delete")).Size(24, 24).Radius(4).Center().Label(remove).Tooltip(remove + " (⌫)").KeepFocus().Cursor(ui.CursorPointer)
 			e.tableDanger = del.Hovered()
@@ -399,12 +417,12 @@ func (e *Editor) cellToolbar(c *ui.Context, bounds ui.Rect, id string, r documen
 	ui.Overlay(c, func() {
 		bar := ui.Row(c.Key("cell-toolbar")).Absolute().Left(bounds.X + x).Top(bounds.Y + y).Height(40).PaddingX(8).Gap(8).AlignItems(ui.Center)
 		e.popover(c, bar).Children(func() {
-			if !single && markButton(c, e.page, "cell:merge", iconMerge, "合并单元格", false).Clicked() {
+			if !single && markButton(c, e.page, "cell:merge", iconMerge, i18n.T("合并单元格"), false).Clicked() {
 				e.Engine.MergeCells(id, r)
 				e.sync()
 				e.RequestFocus = true
 			}
-			if merged && markButton(c, e.page, "cell:split", iconSplit, "拆分单元格", false).Clicked() {
+			if merged && markButton(c, e.page, "cell:split", iconSplit, i18n.T("拆分单元格"), false).Clicked() {
 				e.Engine.Edit(func() {
 					for ri := r.Row0; ri <= r.Row1; ri++ {
 						for ci := r.Col0; ci <= r.Col1; ci++ {
@@ -437,4 +455,20 @@ func (e *Editor) SplitCaretCell() {
 		e.Engine.SplitCell(cell.ID)
 		e.sync()
 	}
+}
+
+// SortCaretColumn sorts the table holding the caret by the caret's column.
+// It reports whether there was a table it could sort.
+func (e *Editor) SortCaretColumn(descending bool) bool {
+	cell, ok := e.caretCell()
+	if !ok {
+		return false
+	}
+	table, _, col, ok := e.Doc.CellAt(cell.ID)
+	if !ok || !e.Doc.CanSortTable(table.ID) {
+		return false
+	}
+	e.Engine.SortTable(table.ID, col, descending)
+	e.sync()
+	return true
 }

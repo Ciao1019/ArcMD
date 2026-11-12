@@ -4,6 +4,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -338,7 +339,7 @@ func (d *tourDraw) bookmarks() {
 		d.p.Shadow(list, 10, 0, 8, 24, 0, faded(tl.shadow, k*1.4))
 		d.p.Fill(list, faded(tl.paper, k), 10)
 		d.p.Stroke(list, ink.Alpha(0.12*k), 10, 1)
-		d.p.Text(list.X+12, list.Y+9, "书签 · 1", 11, ink.Alpha(0.55*k))
+		d.p.Text(list.X+12, list.Y+9, i18n.T("书签 · 1"), 11, ink.Alpha(0.55*k))
 		row := ui.Rect{X: list.X + 6, Y: list.Y + 31, W: list.W - 12, H: 24}
 		d.p.Fill(row, tl.accent.Alpha(0.1*k), 6)
 		d.ribbon(row.X+8, row.Y+6, 8.5, 12, faded(tl.accent, k), true)

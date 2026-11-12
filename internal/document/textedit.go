@@ -2,7 +2,6 @@ package document
 
 import (
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -31,15 +30,16 @@ type historyEntry struct {
 func (e *Engine) recordUndo(entry historyEntry) {
 	e.undo = append(e.undo, entry)
 	if len(e.undo) > 200 {
-		e.undo = append([]historyEntry(nil), e.undo[len(e.undo)-200:]...)
+		e.undo[0] = historyEntry{}
+		e.undo = e.undo[1:]
 	}
 	e.redo = nil
 }
 
 func (e *Engine) captureHistory(id string) historyEntry {
 	if id != "" {
-		if parent, i := e.find(id); parent != nil {
-			return historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone((*parent)[i].Runs)}
+		if leaf, ok := e.LeafByID(id); ok {
+			return historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(leaf.Block.Runs)}
 		}
 	}
 	return historyEntry{state: e.Capture()}
@@ -53,12 +53,12 @@ func (e *Engine) restoreHistory(entry historyEntry) {
 		return
 	}
 	// Undoing later structural entries has already restored this block.
-	e.LeafAt(0)
-	i := slices.IndexFunc(e.leaves, func(l Leaf) bool { return l.Block.ID == entry.blockID })
-	if i < 0 {
+	e.ensureIndex()
+	i, ok := e.leafIDs[entry.blockID]
+	if !ok {
 		panic("document: text history lost its block")
 	}
-	leaf := e.leaves[i]
+	leaf := e.leafAtIndex(i)
 	before := leaf.Block.Text()
 	leaf.Block.Runs = slices.Clone(entry.runs)
 	e.publishTextChange(i, before, leaf.Block.Text())
@@ -67,7 +67,9 @@ func (e *Engine) restoreHistory(entry historyEntry) {
 
 // replaceText handles changes entirely inside one leaf, preserving the existing
 // transaction/selection semantics without copying unrelated blocks for undo.
-func (e *Engine) replaceText(a, z int, text string) bool {
+func (e *Engine) replaceText(a, z int, text string) bool { return e.replaceTextMode(a, z, text, true) }
+
+func (e *Engine) replaceTextMode(a, z int, text string, committed bool) bool {
 	if e.depth != 0 || strings.ContainsAny(text, "\r\n") {
 		return false
 	}
@@ -90,29 +92,37 @@ func (e *Engine) replaceText(a, z int, text string) bool {
 	if text == " " && b.Kind == "paragraph" && first.End-first.Start-(z-a)+1 <= 7 {
 		return false
 	}
-	entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, b.ID, slices.Clone(b.Runs)}
+	var entry historyEntry
+	if committed {
+		entry = historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, b.ID, slices.Clone(b.Runs)}
+	}
 	e.Anchor, e.Caret = a+Len(text), a+Len(text)
 	e.Typing, e.Explicit = style, true
 	if slices.Equal(b.Runs, runs) {
 		return true
 	}
-	i := sort.Search(len(e.leaves), func(i int) bool { return first.Start <= e.leaves[i].Start })
+	i := e.leafIDs[first.Block.ID]
 	b.Runs = runs
-	e.recordUndo(entry)
+	if committed {
+		e.recordUndo(entry)
+		e.version++
+	}
 	e.publishTextChange(i, before, b.Text())
-	e.version++
 	return true
 }
 
 func (e *Engine) publishTextChange(index int, before, after string) {
-	leaf := e.leaves[index]
+	leaf := e.leafAtIndex(index)
 	delta := Len(after) - (leaf.End - leaf.Start)
+	byteDelta := len(after) - len(before)
+	if e.hiddenDoc == e.Doc && e.hiddenRevision == e.revision {
+		e.hiddenRevision++
+	}
 	e.revision++
 	e.textChange = TextChange{leaf.Block.ID, before, after, leaf.Start, leaf.End, leaf.End + delta, e.revision}
 	e.leaves[index].End += delta
-	for i := index + 1; i < len(e.leaves); i++ {
-		e.leaves[i].Start += delta
-		e.leaves[i].End += delta
-	}
+	e.leaves[index].ByteEnd += byteDelta
+	e.unitIndex.add(index, delta)
+	e.byteIndex.add(index, byteDelta)
 	e.indexDoc, e.indexRevision = e.Doc, e.revision
 }

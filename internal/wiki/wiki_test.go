@@ -61,3 +61,19 @@ func TestOpen(t *testing.T) {
 		t.Error("just the brackets")
 	}
 }
+
+func TestRenameTag(t *testing.T) {
+	got, ok := RenameTag("去 #工作 和 #工作/2026，不是 #工作室 也不是 C#工作", "工作", "职场")
+	if !ok || got != "去 #职场 和 #职场/2026，不是 #工作室 也不是 C#工作" {
+		t.Fatal(got)
+	}
+	if _, ok := RenameTag("#Go", "go", ""); ok {
+		t.Fatal("no empty name")
+	}
+	if got, _ := RenameTag("#Go #go", "GO", "golang"); got != "#golang #golang" {
+		t.Fatal("ignores case", got)
+	}
+	if !ValidTag("旅行/2026") || ValidTag("两 个") || ValidTag("123") || ValidTag("") {
+		t.Fatal("valid tags")
+	}
+}

@@ -1,8 +1,8 @@
 package document
 
 // Folding: a folded heading hides what follows it up to the next
-// heading of its level or above; a folded list item hides the blocks after
-// it indented deeper. Whether a block is folded is saved with the document
+// heading of its level or above; a folded list item or toggle hides the
+// blocks after it indented deeper, which for a toggle are its content. Whether a block is folded is saved with the document
 // but kept out of the undo history, so undo never folds or unfolds.
 
 func isListKind(kind string) bool {
@@ -19,7 +19,7 @@ func foldReach(blocks []*Block, i int) int {
 			if next.Kind == "heading" && next.Level <= b.Level {
 				return n
 			}
-		case isListKind(b.Kind):
+		case isListKind(b.Kind) || b.Kind == "toggle":
 			if next.Kind == "heading" || next.Indent <= b.Indent {
 				return n
 			}
@@ -54,10 +54,10 @@ func (d *Document) CanFold(id string) bool {
 				continue
 			}
 			switch {
-			case b.Kind == "heading":
+			case b.Kind == "heading" || b.Kind == "toggle":
 				return true
 			case isListKind(b.Kind):
-				return b.Folded || foldReach(list, i) > 0
+				return b.Folded || i+1 < len(list) && list[i+1].Kind != "heading" && list[i+1].Indent > b.Indent
 			}
 			return false
 		}
@@ -71,7 +71,7 @@ func (d *Document) FoldableBlocks() map[string]bool {
 	out := make(map[string]bool)
 	for _, list := range siblingLists(d) {
 		for i, b := range list {
-			if b.Kind == "heading" || isListKind(b.Kind) && (b.Folded || foldReach(list, i) > 0) {
+			if b.Kind == "heading" || b.Kind == "toggle" || isListKind(b.Kind) && (b.Folded || i+1 < len(list) && list[i+1].Kind != "heading" && list[i+1].Indent > b.Indent) {
 				out[b.ID] = true
 			}
 		}
@@ -123,7 +123,7 @@ func (e *Engine) ToggleFold(id string) {
 func (e *Engine) Reveal(id string) bool {
 	changed := false
 	for {
-		by, ok := e.Doc.HiddenBlocks()[id]
+		by, ok := e.hiddenBlocks()[id]
 		if !ok {
 			return changed
 		}
@@ -159,9 +159,22 @@ func (e *Engine) keepFolds(folded map[string]bool) {
 	var walk func([]*Block)
 	walk = func(blocks []*Block) {
 		for _, b := range blocks {
-			b.Folded = folded[b.ID] && (b.Kind == "heading" || isListKind(b.Kind))
+			b.Folded = folded[b.ID] && (b.Kind == "heading" || isListKind(b.Kind) || b.Kind == "toggle")
 			walk(b.Children)
 		}
 	}
 	walk(e.Doc.Blocks)
+}
+
+// Text edits cannot change section visibility. Reuse the folded-block lookup
+// while the caret moves or text changes; structural/fold revisions rebuild it.
+func (e *Engine) hiddenBlocks() map[string]string {
+	if e.depth > 0 {
+		return e.Doc.HiddenBlocks()
+	}
+	if e.hiddenDoc != e.Doc || e.hiddenRevision != e.revision {
+		e.hidden = e.Doc.HiddenBlocks()
+		e.hiddenDoc, e.hiddenRevision = e.Doc, e.revision
+	}
+	return e.hidden
 }

@@ -1,0 +1,177 @@
+{
+  "format": "arcmd",
+  "version": 8,
+  "blocks": [
+    {
+      "id": "promo-en-00",
+      "kind": "heading",
+      "runs": [
+        {
+          "text": "Give your ideas a human touch",
+          "style": {}
+        }
+      ],
+      "level": 1
+    },
+    {
+      "id": "promo-en-01",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "A page of notes can have a voice of its own.",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-02",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Keep ",
+          "style": {}
+        },
+        {
+          "text": "a fleeting idea",
+          "style": {
+            "annotation": "wavy"
+          }
+        },
+        {
+          "text": " before it slips away.",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-03",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Circle ",
+          "style": {}
+        },
+        {
+          "text": "what matters",
+          "style": {
+            "annotation": "circle"
+          }
+        },
+        {
+          "text": " most.",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-04",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Save ",
+          "style": {}
+        },
+        {
+          "text": "a favorite line",
+          "style": {
+            "annotation": "highlight"
+          }
+        },
+        {
+          "text": " for your future self.",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-05",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Give ",
+          "style": {}
+        },
+        {
+          "text": "one small goal",
+          "style": {
+            "annotation": "double"
+          }
+        },
+        {
+          "text": " your full attention.",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-06",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Cross out ",
+          "style": {}
+        },
+        {
+          "text": "waiting for perfect",
+          "style": {
+            "annotation": "cross"
+          }
+        },
+        {
+          "text": ".",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-07",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Make ",
+          "style": {}
+        },
+        {
+          "text": "the next step",
+          "style": {
+            "annotation": "arrow"
+          }
+        },
+        {
+          "text": " a little clearer.",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-08",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Now, ",
+          "style": {}
+        },
+        {
+          "text": "write the first line",
+          "style": {
+            "annotation": "box"
+          }
+        },
+        {
+          "text": ".",
+          "style": {}
+        }
+      ]
+    },
+    {
+      "id": "promo-en-09",
+      "kind": "paragraph",
+      "runs": [
+        {
+          "text": "Start with a sentence. Let the rest follow.",
+          "style": {}
+        }
+      ]
+    }
+  ]
+}

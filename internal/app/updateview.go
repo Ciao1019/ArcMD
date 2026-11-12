@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/update"
 	"github.com/egoist/mygo/ui"
 )
@@ -127,7 +128,7 @@ func (a *App) readyCard(c *ui.Context, n update.Notice, bl bannerLook, entering 
 			})
 		if hovered {
 			closeX := ui.Box(c.Key("dismiss")).Absolute().Right(4).Top(4).Size(14, 14).Center().
-				Role(ui.RoleButton).Label("关闭").Tooltip("关闭").Cursor(ui.CursorPointer)
+				Role(ui.RoleButton).Label(i18n.T("关闭")).Tooltip(i18n.T("关闭")).Cursor(ui.CursorPointer)
 			closeX.Children(func() { ui.Icon(c, iconX).FontSize(10).TextColor(bl.tertiary) })
 			if closeX.Clicked() {
 				a.dismissBanner()
@@ -149,14 +150,14 @@ func (a *App) updatedCard(c *ui.Context, bl bannerLook, entering bool) {
 	} else {
 		card.AnimatePose(ui.Pose{}, ui.Animation{Spring: ui.SpringOptions{Mass: 1, Stiffness: 220, Damping: 16}})
 	}
-	title := "ArcMD 已更新！"
+	title := i18n.T("ArcMD 已更新！")
 	since := u.shownSince
 	still := a.reduceMotion
 	card.Children(func() {
 		ui.Text(c, title).Absolute().Left(12).Top(9.5).FontSize(14).FontWeight(500).TextColor(bl.title).SingleLine().
 			DrawOver(func(p *ui.Painter, r ui.Rect) { paintSparkles(p, r, bl.accent, since, still) })
 		closeX := ui.Box(c.Key("dismiss")).Absolute().Right(10).Top(12).Size(14, 14).Center().
-			Role(ui.RoleButton).Label("关闭").Tooltip("关闭").Cursor(ui.CursorPointer)
+			Role(ui.RoleButton).Label(i18n.T("关闭")).Tooltip(i18n.T("关闭")).Cursor(ui.CursorPointer)
 		closeX.Children(func() { ui.Icon(c, iconX).FontSize(12).TextColor(bl.tertiary) })
 		if closeX.Clicked() {
 			a.dismissBanner()
@@ -168,8 +169,8 @@ func (a *App) updatedCard(c *ui.Context, bl bannerLook, entering bool) {
 			icon       *ui.SVG
 			url        string
 		}{
-			{"whats-new", "新功能", iconHeart, update.ReleaseURL(version)},
-			{"star", "在 GitHub 上点星", iconStar, update.Repository},
+			{"whats-new", i18n.T("新功能"), iconHeart, update.ReleaseURL(version)},
+			{"star", i18n.T("在 GitHub 上点星"), iconStar, update.Repository},
 		} {
 			r := ui.Row(c.Key(row.key)).Absolute().Left(4).Right(4).Top(49.4 + float32(i)*31.7 - 15).Height(30).
 				AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleLink).Label(row.label)
@@ -492,7 +493,7 @@ func (a *App) updateToast(c *ui.Context) {
 				ui.Text(c, n.Button()).FontSize(13).FontWeight(600).TextColor(tl.text)
 			})
 			x := ui.Box(c.Key("close")).Size(26, 26).Radius(13).Center().Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label("关闭").Tooltip("关闭")
+				Focusable().Role(ui.RoleButton).Label(i18n.T("关闭")).Tooltip(i18n.T("关闭"))
 			if x.Hovered() {
 				x.Background(tl.text.Alpha(0.1))
 			}
@@ -523,10 +524,10 @@ func (a *App) updateWindowView(c *ui.Context) {
 				paintUpdateHeart(p, ui.Rect{X: r.X + 10, Y: r.Y + 10, W: r.W - 20, H: r.H - 20}, t.Accent, 0)
 			})
 			title := "ArcMD"
-			sub := "版本 " + Version
+			sub := i18n.T("版本 ") + Version
 			if u.release != nil && (u.phase == phaseFound || u.phase == phaseDownloading || u.phase == phaseReady) {
 				title = "ArcMD " + u.release.Version()
-				sub = "当前版本 " + Version
+				sub = i18n.T("当前版本 ") + Version
 			}
 			ui.Text(c, title).Margin(10, 0, 0, 0).FontSize(24).FontWeight(700)
 			ui.Text(c, sub).FontSize(11).TextColor(t.Text.Alpha(0.5))
@@ -542,13 +543,13 @@ func (a *App) updateWindowView(c *ui.Context) {
 			}
 			switch u.phase {
 			case phaseChecking:
-				status("正在检查更新…")
-				if updaterButtonView(c, "取消", false) {
+				status(i18n.T("正在检查更新…"))
+				if updaterButtonView(c, i18n.T("取消"), false) {
 					a.closeUpdateWindow()
 				}
 			case phaseUpToDate:
-				status("ArcMD 已是最新版本")
-				if updaterButtonView(c, "好", false) {
+				status(i18n.T("ArcMD 已是最新版本"))
+				if updaterButtonView(c, i18n.T("好"), false) {
 					a.closeUpdateWindow()
 				}
 			case phaseFound:
@@ -556,47 +557,47 @@ func (a *App) updateWindowView(c *ui.Context) {
 				if len(lines) > 0 {
 					releaseNotes(c, lines)
 				} else {
-					status("有新版本可用")
+					status(i18n.T("有新版本可用"))
 				}
-				if updaterButtonView(c, "下载并安装", false) {
+				if updaterButtonView(c, i18n.T("下载并安装"), false) {
 					a.downloadUpdate()
 				}
-				if laterButton(c, "以后再说") {
+				if laterButton(c, i18n.T("以后再说")) {
 					a.closeUpdateWindow()
 				}
 			case phaseDownloading:
 				if u.total > 0 {
 					progress(float64(u.received)/float64(u.total), byteSize(u.received)+" / "+byteSize(u.total))
 				} else {
-					progress(-1, "正在下载…")
+					progress(-1, i18n.T("正在下载…"))
 				}
-				if updaterButtonView(c, "取消", false) {
+				if updaterButtonView(c, i18n.T("取消"), false) {
 					a.closeUpdateWindow()
 				}
 			case phaseReady:
-				status("更新已准备就绪，重新启动即可安装")
-				if updaterButtonView(c, "安装并重新启动", false) {
+				status(i18n.T("更新已准备就绪，重新启动即可安装"))
+				if updaterButtonView(c, i18n.T("安装并重新启动"), false) {
 					a.installUpdate()
 				}
-				if laterButton(c, "以后再说") {
+				if laterButton(c, i18n.T("以后再说")) {
 					a.closeUpdateWindow()
 				}
 			case phaseFailed:
 				status(u.failure)
-				if updaterButtonView(c, "手动下载", false) {
+				if updaterButtonView(c, i18n.T("手动下载"), false) {
 					a.closeUpdateWindow()
 					a.openUpdatePage(update.ReleaseURL(""))
 				}
-				if laterButton(c, "关闭") {
+				if laterButton(c, i18n.T("关闭")) {
 					a.closeUpdateWindow()
 				}
 			case phaseDisabled:
-				status("这个版本无法自动更新：开发版本，或安装在无法写入的位置。可以从 GitHub 下载新版本。")
-				if updaterButtonView(c, "前往下载页面", false) {
+				status(i18n.T("这个版本无法自动更新：开发版本，或安装在无法写入的位置。可以从 GitHub 下载新版本。"))
+				if updaterButtonView(c, i18n.T("前往下载页面"), false) {
 					a.closeUpdateWindow()
 					a.openUpdatePage(update.ReleaseURL(""))
 				}
-				if laterButton(c, "关闭") {
+				if laterButton(c, i18n.T("关闭")) {
 					a.closeUpdateWindow()
 				}
 			}

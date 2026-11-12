@@ -15,8 +15,12 @@ type Buffer struct {
 	textDoc     *document.Document
 	textVersion uint64
 	textLength  int
+	textKnown   bool
 	mark        *ui.TextInputRange
 	composition *document.Snapshot
+	// refused is set when typing reached a read-only document, so the page
+	// can say why nothing happened.
+	refused bool
 }
 
 func newBuffer(doc *document.Document) *Buffer {
@@ -28,21 +32,25 @@ func (b *Buffer) sync() {
 	if b.textDoc == b.Doc && b.textVersion == b.Revision() {
 		return
 	}
-	if change, ok := b.TextChangeSince(b.textVersion); ok && b.textDoc == b.Doc {
-		start := document.ByteOffset(b.text, change.Start)
-		b.text = b.text[:start] + change.After + b.text[start+len(change.Before):]
-		b.textLength += change.AfterEnd - change.BeforeEnd
-	} else {
-		b.text = b.Doc.PlainText()
-		b.textLength = document.Len(b.text)
-	}
+	b.textLength = b.Engine.TextLength()
+	b.text, b.textKnown = "", false
 	b.textDoc, b.textVersion = b.Doc, b.Revision()
 }
 func (b *Buffer) Text() string {
 	if b.composition != nil {
 		return b.composition.Doc.PlainText()
 	}
+	return b.displayText()
+}
+
+// displayText materializes only when a consumer needs the complete value.
+// Native input ranges and navigation read the engine's leaves directly.
+func (b *Buffer) displayText() string {
 	b.sync()
+	if !b.textKnown {
+		b.text = b.Engine.TextRange(0, b.textLength)
+		b.textKnown = true
+	}
 	return b.text
 }
 func (b *Buffer) Committed() *document.Document {
@@ -66,15 +74,35 @@ func (b *Buffer) TextForRange(r ui.TextInputRange) (string, ui.TextInputRange) {
 	r = b.validRange(r)
 	return b.slice(r.Start, r.End), r
 }
-func (b *Buffer) clamp(at int) int { return ui.UTF16Len(b.text[:ui.UTF16ByteOffset(b.text, at)]) }
+
+// Position conversion reads only the containing leaf. The engine updates both
+// offset indexes on text edits and rebuilds them after structural changes/IME.
+func (b *Buffer) byteOffset(at int) int {
+	b.sync()
+	l := b.Engine.LeafAt(at)
+	return l.ByteStart + ui.UTF16ByteOffset(l.Block.Text(), at-l.Start)
+}
+func (b *Buffer) textOffset(at int) int {
+	b.sync()
+	l := b.Engine.LeafAtByte(at)
+	return l.Start + ui.UTF16Len(l.Block.Text()[:max(0, min(at-l.ByteStart, l.ByteEnd-l.ByteStart))])
+}
+func (b *Buffer) clamp(at int) int {
+	b.sync()
+	l := b.Engine.LeafAt(at)
+	text := l.Block.Text()
+	return l.Start + ui.UTF16Len(text[:ui.UTF16ByteOffset(text, at-l.Start)])
+}
 func (b *Buffer) validRange(r ui.TextInputRange) ui.TextInputRange {
 	return ui.TextInputRange{Start: b.clamp(min(r.Start, r.End)), End: b.clamp(max(r.Start, r.End))}
 }
 func (b *Buffer) slice(a, z int) string {
-	return b.text[ui.UTF16ByteOffset(b.text, a):ui.UTF16ByteOffset(b.text, z)]
+	b.sync()
+	return b.Engine.TextRange(a, z)
 }
 func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 	if b.ReadOnly {
+		b.refused = true
 		return
 	}
 	b.sync()
@@ -100,6 +128,7 @@ func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 }
 func (b *Buffer) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
 	if b.ReadOnly {
+		b.refused = text != ""
 		return
 	}
 	b.sync()
@@ -171,16 +200,18 @@ func (b *Buffer) Prefix(prefix string) {
 func (b *Buffer) newline() { b.UnmarkText(); b.Engine.Enter(false); b.sync() }
 
 func (b *Buffer) lineRange(at int) (int, int) {
-	i := ui.UTF16ByteOffset(b.text, at)
-	a := strings.LastIndexByte(b.text[:i], '\n') + 1
-	z := len(b.text)
-	if n := strings.IndexByte(b.text[i:], '\n'); n >= 0 {
+	l := b.Engine.LeafAt(at)
+	text := l.Block.Text()
+	i := ui.UTF16ByteOffset(text, at-l.Start)
+	a := strings.LastIndexByte(text[:i], '\n') + 1
+	z := len(text)
+	if n := strings.IndexByte(text[i:], '\n'); n >= 0 {
 		z = i + n
 	}
-	if z > a && b.text[z-1] == '\r' {
+	if z > a && text[z-1] == '\r' {
 		z--
 	}
-	return ui.UTF16Len(b.text[:a]), ui.UTF16Len(b.text[:z])
+	return l.Start + ui.UTF16Len(text[:a]), l.Start + ui.UTF16Len(text[:z])
 }
 
 func (b *Buffer) boundary(at, direction int) int {
@@ -205,37 +236,51 @@ func (b *Buffer) boundary(at, direction int) int {
 }
 
 func (b *Buffer) wordBoundary(at, direction int) int {
-	pos := ui.UTF16ByteOffset(b.text, at)
-	if direction < 0 {
-		for pos > 0 {
-			r, n := utf8.DecodeLastRuneInString(b.text[:pos])
-			if !unicode.IsSpace(r) {
-				break
+	at = b.clamp(at)
+	spaces := direction < 0
+	for {
+		l := b.Engine.LeafAt(at)
+		text := l.Block.Text()
+		i := ui.UTF16ByteOffset(text, at-l.Start)
+		if direction < 0 {
+			for i > 0 {
+				r, n := utf8.DecodeLastRuneInString(text[:i])
+				if unicode.IsSpace(r) {
+					if !spaces {
+						return at
+					}
+				} else {
+					spaces = false
+				}
+				i -= n
+				at -= runeUnits(r)
 			}
-			pos -= n
-		}
-		for pos > 0 {
-			r, n := utf8.DecodeLastRuneInString(b.text[:pos])
-			if unicode.IsSpace(r) {
-				break
+			if at == 0 || !spaces {
+				return at
 			}
-			pos -= n
-		}
-	} else {
-		for pos < len(b.text) {
-			r, n := utf8.DecodeRuneInString(b.text[pos:])
-			if unicode.IsSpace(r) {
-				break
+			at-- // the separator belongs to the preceding leaf
+		} else {
+			for i < len(text) {
+				r, n := utf8.DecodeRuneInString(text[i:])
+				if unicode.IsSpace(r) {
+					spaces = true
+				} else if spaces {
+					return at
+				}
+				i += n
+				at += runeUnits(r)
 			}
-			pos += n
-		}
-		for pos < len(b.text) {
-			r, n := utf8.DecodeRuneInString(b.text[pos:])
-			if !unicode.IsSpace(r) {
-				break
+			if at == b.Len() {
+				return at
 			}
-			pos += n
+			spaces = true
+			at++
 		}
 	}
-	return ui.UTF16Len(b.text[:pos])
+}
+func runeUnits(r rune) int {
+	if r > 0xffff {
+		return 2
+	}
+	return 1
 }

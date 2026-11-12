@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"os"
 	"strings"
 
@@ -121,6 +123,12 @@ func (a *App) submitSpace() {
 	s := a.state.Add(name, root)
 	s.SetIcon(icon, f.symbol)
 	s.SetTheme(f.theme)
+	// An empty folder starts with a page showing how to write.
+	if docs, err := vault.List(root); err == nil && len(docs) == 0 {
+		if name := starterFile(); writeStarter(root, name) == nil {
+			s.LastOpen = name
+		}
+	}
 	f.open = false
 	a.saveState()
 	a.switchSpace(s.ID)
@@ -157,7 +165,7 @@ func (a *App) removeSpace(id string) {
 func (a *App) chooseFolder() {
 	win := a.win
 	go func() {
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: "选择空间文件夹", Directory: true})
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: i18n.T("选择空间文件夹"), Directory: true})
 		if err != nil || len(paths) == 0 {
 			return
 		}

@@ -1,0 +1,10 @@
+Total: 2.90s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).validRange in /Users/cizai/agent/Prism/internal/editor/buffer.go
+         0      1.38s (flat, cum) 47.59% of Total
+         .          .     73:func (b *Buffer) validRange(r ui.TextInputRange) ui.TextInputRange {
+         .      1.38s     74:	return ui.TextInputRange{Start: b.clamp(min(r.Start, r.End)), End: b.clamp(max(r.Start, r.End))}
+         .          .     75:}
+         .          .     76:func (b *Buffer) slice(a, z int) string {
+         .          .     77:	return b.text[ui.UTF16ByteOffset(b.text, a):ui.UTF16ByteOffset(b.text, z)]
+         .          .     78:}
+         .          .     79:func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {

@@ -38,6 +38,7 @@ type document struct {
 	baseline      string
 	// dirtyRev, dirtyKnown and dirtyNow remember dirty for a revision.
 	dirtyRev       uint64
+	dirtyVersion   uint64
 	dirtyKnown     bool
 	dirtyNow       bool
 	textDirtyKnown bool
@@ -60,7 +61,11 @@ type document struct {
 	plain      string
 	plainRev   uint64
 	plainKnown bool
-	footer     pageFooterCache
+	// typedRev and typedAt are the last revision footers saw and when they
+	// first saw it (liveTyping).
+	typedRev uint64
+	typedAt  time.Time
+	footer   pageFooterCache
 	// marks are the document's bookmarks resolved to its blocks
 	// (bookmarks.go).
 	marks docMarks
@@ -99,7 +104,15 @@ func (d *document) dirty() bool {
 		return false
 	}
 	if rev := d.ed.Revision(); !d.dirtyKnown || rev != d.dirtyRev {
-		if change, ok := d.ed.TextChangeSince(d.dirtyRev); ok && d.dirtyKnown && d.textDirtyKnown {
+		// Preedit revisions update display indexes but leave committed content
+		// unchanged. In particular, saving during composition establishes a
+		// clean baseline that subsequent candidate updates must preserve.
+		composing := d.ed.Committed() != d.ed.Doc
+		if composing && d.dirtyKnown && d.dirtyVersion == d.ed.Version() {
+			d.dirtyRev = rev
+			return d.dirtyNow
+		}
+		if change, ok := d.ed.TextChangeSince(d.dirtyRev); ok && !composing && d.dirtyKnown && d.textDirtyKnown {
 			current := d.ed.Engine.LeafAt(change.Start).Block
 			if saved, exists := d.baselineRuns[change.ID]; exists && slices.Equal(saved, current.Runs) {
 				delete(d.textDirty, change.ID)
@@ -113,6 +126,7 @@ func (d *document) dirty() bool {
 			clear(d.textDirty)
 		}
 		d.dirtyRev, d.dirtyKnown = rev, true
+		d.dirtyVersion = d.ed.Version()
 	}
 	return d.dirtyNow
 }
@@ -127,6 +141,7 @@ func (d *document) rememberBaseline(doc *model.Document) {
 	d.textDirty = make(map[string]bool)
 	d.textDirtyKnown = true
 	d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.ed.Revision(), true, false
+	d.dirtyVersion = d.ed.Version()
 }
 
 // changed encodes the document and compares it with the saved baseline.
@@ -255,7 +270,11 @@ func (d *document) imageResource(url string) editor.ImageResource {
 	if err != nil {
 		return editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}
 	}
-	return editor.ImageResource{Bitmap: image, Local: true}
+	res := editor.ImageResource{Bitmap: image, Local: true}
+	if frames, delays, ok := gifFrames(data); ok {
+		res.Frames, res.Delays = frames, delays
+	}
+	return res
 }
 
 // localImageFile resolves read-only resources against the document, not the

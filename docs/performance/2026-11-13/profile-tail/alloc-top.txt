@@ -1,0 +1,22 @@
+File: review.test
+Type: alloc_space
+Time: 2026-11-13 05:45:47 CST
+Showing nodes accounting for 540.36MB, 96.63% of 559.22MB total
+Dropped 70 nodes (cum <= 2.80MB)
+Showing top 15 nodes out of 44
+      flat  flat%   sum%        cum   cum%
+  528.17MB 94.45% 94.45%   528.17MB 94.45%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).sync
+       4MB  0.72% 95.16%        4MB  0.72%  github.com/egoist/mygo/internal/scene.(*Atlas).Grow
+    3.54MB  0.63% 95.80%     4.04MB  0.72%  github.com/egoist/mygo/internal/text.(*System).paragraph
+    2.65MB  0.47% 96.27%   559.22MB   100%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+       1MB  0.18% 96.45%     5.04MB   0.9%  github.com/egoist/mygo/internal/text.(*System).layout
+    0.50MB 0.089% 96.54%     8.03MB  1.44%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).blockLayouter.func1
+    0.50MB 0.089% 96.63%    11.04MB  1.97%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).layout
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).main
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1
+         0     0% 96.63%    18.04MB  3.23%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1.1
+         0     0% 96.63%   528.17MB 94.45%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).ReplaceText

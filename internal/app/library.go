@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/trashbin"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -222,13 +223,13 @@ func (a *App) libraryRail(c *ui.Context) {
 		ui.Spacer(c)
 		ui.Column(c).Gap(20).Children(func() {
 			for _, pg := range libraryPages {
-				a.libraryButton(c, pg.page, pg.title, pg.icon)
+				a.libraryButton(c, pg.page, i18n.T(pg.title), pg.icon)
 			}
 		})
 		ui.Spacer(c)
 		ui.Row(c).AlignSelf(ui.Stretch).Height(32).Margin(0, 0, 8, 8).Children(func() {
 			b := ui.Box(c.Key("library-back")).Size(32, 32).Radius(8).Center().Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label("退出资料库").Tooltip("退出资料库 (Esc)")
+				Focusable().Role(ui.RoleButton).Label(i18n.T("退出资料库")).Tooltip(i18n.T("退出资料库 (Esc)"))
 			if b.Hovered() {
 				b.Background(hoverFill(t))
 			}
@@ -322,7 +323,7 @@ func (a *App) librarySpaces(c *ui.Context) {
 			}
 			plus := ui.Box(c.Key("library-new-space")).Size(libraryPlus, libraryPlus).Shrink(0).AlignSelf(ui.Center).
 				Margin(0, 0, 0, libraryPlusGap-libraryCardGap).Radius(libraryPlus / 2).Center().Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label("新建空间").Tooltip("新建空间").Background(t.Accent)
+				Focusable().Role(ui.RoleButton).Label(i18n.T("新建空间")).Tooltip(i18n.T("新建空间")).Background(t.Accent)
 			if plus.Hovered() {
 				plus.Background(t.Accent.Mix(white, 0.15))
 			}
@@ -381,7 +382,7 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 	}
 	card.Children(func() {
 		h := ui.Row(c.Key("head")).Height(34).PaddingX(8).Gap(8).Radius(9).AlignItems(ui.Center).
-			Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label("打开空间 " + s.Name)
+			Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("打开空间 ") + s.Name)
 		hovered := h.Hovered()
 		if hovered {
 			h.Background(hoverFill(t))
@@ -389,7 +390,7 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 		h.Children(func() {
 			spaceGlyph(c, s.Icon, s.Symbol, s.Name, 15, t.Accent)
 			ui.Text(c, s.Name).FontWeight(650).SingleLine().Grow(1).MinWidth(0)
-			edit := iconButton(c, "edit", iconPalette, "编辑空间", "编辑空间", false).Size(26, 26)
+			edit := iconButton(c, "edit", iconPalette, i18n.T("编辑空间"), i18n.T("编辑空间"), false).Size(26, 26)
 			edit.Opacity(map[bool]float32{true: 1, false: 0}[hovered || edit.Hovered()])
 			if edit.Clicked() {
 				a.closeLibrary()
@@ -405,35 +406,35 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 		body := ui.Scroll(c.Key("body")).Grow(1).MinHeight(0).Gap(1)
 		body.Children(func() {
 			if err := a.library.errs[s.ID]; err != nil {
-				ui.Text(c, "读取文件夹失败。"+err.Error()).TextColor(t.Danger).FontSize(12).Padding(4, 8)
+				ui.Text(c, i18n.T("读取文件夹失败。")+err.Error()).TextColor(t.Danger).FontSize(12).Padding(4, 8)
 				return
 			}
 			nodes := a.library.trees[s.ID]
 			if len(nodes) == 0 {
-				ui.Text(c, "暂无文档").FontSize(12).TextColor(t.TextMuted).Padding(6, 10)
+				ui.Text(c, i18n.T("暂无文档")).FontSize(12).TextColor(t.TextMuted).Padding(6, 10)
 			}
 			a.cardNodes(c, s, nodes, 0)
 		})
 		ui.Row(c.Key("foot")).Height(30).Gap(2).AlignItems(ui.Center).Children(func() {
 			a.cardGrip(c, s, slices.Index(a.state.Spaces, s))
 			ui.Spacer(c)
-			iconButton(c, "menu", iconEllipsis, s.Name+" 的菜单", "更多", false).Size(28, 28).Menu(func(m *ui.Menu) {
-				if m.Item("编辑空间…").Chosen() {
+			iconButton(c, "menu", iconEllipsis, s.Name+i18n.T(" 的菜单"), i18n.T("更多"), false).Size(28, 28).Menu(func(m *ui.Menu) {
+				if m.Item(i18n.T("编辑空间…")).Chosen() {
 					a.closeLibrary()
 					a.editSpace(s)
 				}
-				if m.Item("新建文档").Chosen() {
+				if m.Item(i18n.T("新建文档")).Chosen() {
 					a.switchSpace(s.ID)
 					if a.state.ActiveSpace() == s {
 						a.closeLibrary()
 						a.newDoc("")
 					}
 				}
-				if m.Item("在访达中显示").Chosen() {
+				if m.Item(i18n.T("在访达中显示")).Chosen() {
 					revealDir(s.Root)
 				}
 				m.Separator()
-				if m.Item("从 ArcMD 移除").Disabled(len(a.state.Spaces) < 2).Chosen() {
+				if m.Item(i18n.T("从 ArcMD 移除")).Disabled(len(a.state.Spaces) < 2).Chosen() {
 					a.removeSpace(s.ID)
 					a.loadLibrary()
 				}
@@ -511,7 +512,7 @@ func (a *App) cardRow(c *ui.Context, key, label string, depth int) ui.Element {
 // libraryPlugins is the Plugins page, empty until the market opens.
 func (a *App) libraryPlugins(c *ui.Context) {
 	ui.Box(c).Height(46).Shrink(0)
-	libraryEmpty(c, iconPlugins, "插件市场即将开放", "扩展能力将以插件提供，敬请期待。")
+	libraryEmpty(c, iconPlugins, i18n.T("插件市场即将开放"), i18n.T("扩展能力将以插件提供，敬请期待。"))
 }
 
 // libraryEmpty is a page with nothing on it: a glyph, a title and a line
@@ -538,15 +539,15 @@ func (a *App) libraryTrash(c *ui.Context) {
 		AlignItems(ui.Center).Background(librarySearch(t)).Children(func() {
 		ui.Icon(c, iconSearch).FontSize(14).TextColor(ink.Alpha(0.5))
 		ui.TextInput(c.Key("trash-query"), &l.query).Grow(1).MinWidth(0).Height(24).Padding(0).
-			Placeholder("搜索最近删除…").Label("搜索最近删除").TextColor(ink.Alpha(0.82)).
+			Placeholder(i18n.T("搜索最近删除…")).Label(i18n.T("搜索最近删除")).TextColor(ink.Alpha(0.82)).
 			Background(ui.Transparent).Border(0, ui.Transparent).FontSize(14).AutoFocus()
 	})
 	switch {
 	case l.err != nil:
-		ui.Text(c, "读取失败。"+l.err.Error()).TextColor(t.Danger).FontSize(13).Margin(16, 12, 0, 12)
+		ui.Text(c, i18n.T("读取失败。")+l.err.Error()).TextColor(t.Danger).FontSize(13).Margin(16, 12, 0, 12)
 		return
 	case len(l.items) == 0:
-		libraryEmpty(c, iconTrash, "这里什么都没有", "从 ArcMD 删除的文档和文件夹会在这里保留 30 天，可以放回原处。")
+		libraryEmpty(c, iconTrash, i18n.T("这里什么都没有"), i18n.T("从 ArcMD 删除的文档和文件夹会在这里保留 30 天，可以放回原处。"))
 		return
 	}
 	words := strings.Fields(strings.ToLower(l.query))
@@ -565,7 +566,7 @@ func (a *App) libraryTrash(c *ui.Context) {
 		}
 	}
 	if len(shown) == 0 {
-		ui.Text(c, "没有符合搜索的项目").FontSize(13).TextColor(ink.Alpha(0.55)).AlignSelf(ui.Center).Margin(24, 0, 0, 0)
+		ui.Text(c, i18n.T("没有符合搜索的项目")).FontSize(13).TextColor(ink.Alpha(0.55)).AlignSelf(ui.Center).Margin(24, 0, 0, 0)
 		return
 	}
 	now := time.Now()
@@ -618,16 +619,16 @@ func (a *App) trashRow(c *ui.Context, it trashbin.Item, now time.Time) {
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
 				ui.Text(c, docName(title)).FontSize(14).TextColor(ink.Alpha(0.82)).SingleLine()
-				ui.Text(c, where+" · "+strings.TrimSpace(ago(it.Deleted, now))+"删除").FontSize(12).
+				ui.Text(c, where+" · "+strings.TrimSpace(ago(it.Deleted, now))+i18n.T("删除")).FontSize(12).
 					TextColor(ink.Alpha(0.55)).SingleLine()
 			})
-			forget := a.trashButton(c, "forget", iconTrash, "从列表移除 "+name, "只移除 ArcMD 保留的副本，系统废纸篓中的原件不受影响", hovered)
+			forget := a.trashButton(c, "forget", iconTrash, i18n.T("从列表移除 ")+name, i18n.T("只移除 ArcMD 保留的副本，系统废纸篓中的原件不受影响"), hovered)
 			if forget.Clicked() {
 				acted = true
 				a.bin.Forget(it)
 				a.library.items, a.library.err = a.bin.List(time.Now())
 			}
-			restore := a.trashButton(c, "restore", iconUndo, "恢复 "+name, "放回原处", hovered).Margin(0, 0, 0, 10)
+			restore := a.trashButton(c, "restore", iconUndo, i18n.T("恢复 ")+name, i18n.T("放回原处"), hovered).Margin(0, 0, 0, 10)
 			if restore.Clicked() {
 				acted = true
 				a.restoreDeleted(it)
@@ -663,13 +664,13 @@ func dayLabel(t, now time.Time) string {
 	day := time.Date(y1, m1, d1, 0, 0, 0, 0, t.Location())
 	switch {
 	case day.Equal(today):
-		return "今天"
+		return i18n.T("今天")
 	case day.Equal(today.AddDate(0, 0, -1)):
-		return "昨天"
+		return i18n.T("昨天")
 	case y1 == y2:
-		return t.Format("1月2日")
+		return t.Format(i18n.T("1月2日"))
 	}
-	return t.Format("2006年1月2日")
+	return t.Format(i18n.T("2006年1月2日"))
 }
 
 // libraryFootButton is the library's button at the sidebar's foot: Arc's
@@ -678,7 +679,7 @@ func dayLabel(t, now time.Time) string {
 func (a *App) libraryFootButton(c *ui.Context) ui.Element {
 	t := c.Theme()
 	b := ui.Box(c.Key("library")).Size(30, 30).Shrink(0).Radius(8).Cursor(ui.CursorPointer).Focusable().
-		Role(ui.RoleButton).Label("资料库").Tooltip(a.withKey("资料库", "library")).Checked(a.library.open)
+		Role(ui.RoleButton).Label(i18n.T("资料库")).Tooltip(a.withKey(i18n.T("资料库"), "library")).Checked(a.library.open)
 	if b.Hovered() || a.library.open {
 		b.Background(hoverFill(t))
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 )
@@ -49,7 +50,7 @@ func (a *App) openSystemFile(file string) bool {
 		root := filepath.Dir(full)
 		name := filepath.Base(root)
 		if name == string(filepath.Separator) || name == "." {
-			name = "文档"
+			name = i18n.T("文档")
 		}
 		target = a.state.Add(name, root)
 		rel = filepath.Base(full)

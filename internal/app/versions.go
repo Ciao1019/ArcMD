@@ -8,6 +8,7 @@ import (
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/history"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -127,13 +128,13 @@ func versionTime(at, now time.Time) string {
 	y2, m2, d2 := now.Date()
 	switch {
 	case y1 == y2 && m1 == m2 && d1 == d2:
-		return "今天 " + at.Format("15:04")
+		return i18n.T("今天 ") + at.Format("15:04")
 	case y1 == y2 && m1 == m2 && d1 == d2-1:
-		return "昨天 " + at.Format("15:04")
+		return i18n.T("昨天 ") + at.Format("15:04")
 	case y1 == y2:
-		return fmt.Sprintf("%d月%d日 %s", m1, d1, at.Format("15:04"))
+		return fmt.Sprintf(i18n.T("%d月%d日 %s"), m1, d1, at.Format("15:04"))
 	}
-	return fmt.Sprintf("%d年%d月%d日 %s", y1, m1, d1, at.Format("15:04"))
+	return fmt.Sprintf(i18n.T("%d年%d月%d日 %s"), y1, m1, d1, at.Format("15:04"))
 }
 
 // versionsView is the history window.
@@ -154,9 +155,9 @@ func (a *App) versionsView(c *ui.Context) {
 		ui.Column(c.Key("versions-body")).Size(760, 500).Gap(12).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
 				ui.Icon(c, iconHistory).FontSize(16).TextColor(t.TextMuted)
-				ui.Text(c, "版本历史 · "+v.for_.title()).FontSize(16).FontWeight(600).Grow(1).SingleLine().MinWidth(0)
+				ui.Text(c, i18n.T("版本历史 · ")+v.for_.title()).FontSize(16).FontWeight(600).Grow(1).SingleLine().MinWidth(0)
 				if v.doc != nil {
-					if ui.PrimaryButton(c.Key("version-restore"), "恢复此版本").Clicked() {
+					if ui.PrimaryButton(c.Key("version-restore"), i18n.T("恢复此版本")).Clicked() {
 						a.restoreVersion()
 					}
 				}
@@ -165,10 +166,10 @@ func (a *App) versionsView(c *ui.Context) {
 				ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
 					switch {
 					case v.err != nil:
-						ui.Text(c, "读取版本历史失败。"+v.err.Error()).TextColor(t.Danger)
+						ui.Text(c, i18n.T("读取版本历史失败。")+v.err.Error()).TextColor(t.Danger)
 					default:
-						ui.Text(c, "还没有历史版本").FontSize(15)
-						ui.Text(c, "编辑并保存后，ArcMD 会自动保留版本（每 10 分钟至多一个，最多 100 个），保存在空间文件夹的 .arcmd/history 里。").
+						ui.Text(c, i18n.T("还没有历史版本")).FontSize(15)
+						ui.Text(c, i18n.T("编辑并保存后，ArcMD 会自动保留版本（每 10 分钟至多一个，最多 100 个），保存在空间文件夹的 .arcmd/history 里。")).
 							FontSize(12).TextColor(t.TextMuted).MaxWidth(420).TextAlign(ui.Center)
 					}
 				})
@@ -179,7 +180,7 @@ func (a *App) versionsView(c *ui.Context) {
 					now := time.Now()
 					for i, ver := range v.versions {
 						on := i == v.sel
-						row := ui.ButtonBase(c.Key("version:"+ver.File)).Padding(8, 10).Radius(8).Gap(2).Label("版本 " + versionTime(ver.Time, now)).
+						row := ui.ButtonBase(c.Key("version:"+ver.File)).Padding(8, 10).Radius(8).Gap(2).Label(i18n.T("版本 ") + versionTime(ver.Time, now)).
 							Cursor(ui.CursorPointer).Justify(ui.Start)
 						switch {
 						case on:
@@ -192,7 +193,7 @@ func (a *App) versionsView(c *ui.Context) {
 								ui.Text(c, versionTime(ver.Time, now)).FontSize(13).FontWeight(500)
 								note := strings.TrimSpace(ago(ver.Time, now))
 								if ver.Kept {
-									note += " · 打开时的版本"
+									note += i18n.T(" · 打开时的版本")
 								}
 								ui.Text(c, note).FontSize(11).TextColor(t.TextMuted)
 							})
@@ -206,14 +207,14 @@ func (a *App) versionsView(c *ui.Context) {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 					switch {
 					case v.err != nil:
-						ui.Text(c, "无法读取这个版本。"+v.err.Error()).TextColor(t.Danger)
+						ui.Text(c, i18n.T("无法读取这个版本。")+v.err.Error()).TextColor(t.Danger)
 						return
 					case v.doc == nil:
 						return
 					case v.added == 0 && v.gone == 0:
-						ui.Text(c, "与当前内容相同。").FontSize(12).TextColor(t.TextMuted)
+						ui.Text(c, i18n.T("与当前内容相同。")).FontSize(12).TextColor(t.TextMuted)
 					default:
-						ui.Text(c, fmt.Sprintf("与当前内容相比：恢复后增加 %d 行、删除 %d 行", v.added, v.gone)).FontSize(12).TextColor(t.TextMuted)
+						ui.Text(c, fmt.Sprintf(i18n.T("与当前内容相比：恢复后增加 %d 行、删除 %d 行"), v.added, v.gone)).FontSize(12).TextColor(t.TextMuted)
 					}
 					pg := pageStyle(a.paperDark)
 					ui.Scroll(c.Key("version-diff:" + v.shown)).Grow(1).MinHeight(0).Children(func() {

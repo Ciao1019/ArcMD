@@ -1,0 +1,58 @@
+File: review.test
+Type: cpu
+Time: 2026-11-13 05:45:59 CST
+Duration: 1.93s, Total samples = 3.16s (163.69%)
+Showing nodes accounting for 0.79s, 25.00% of 3.16s total
+Dropped 109 nodes (cum <= 0.02s)
+Showing top 50 nodes out of 199
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      1.51s 47.78%  runtime.systemstack
+         0     0%     0%      1.25s 39.56%  runtime.gcBgMarkWorker.func2
+         0     0%     0%      1.24s 39.24%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+     0.02s  0.63%  0.63%      1.24s 39.24%  runtime.gcDrain
+         0     0%  0.63%      1.24s 39.24%  testing.tRunner
+         0     0%  0.63%      1.09s 34.49%  github.com/egoist/mygo/ui.(*Tester).PerfFrame
+         0     0%  0.63%      1.09s 34.49%  github.com/egoist/mygo/ui.(*engine).runFrame
+         0     0%  0.63%      0.97s 30.70%  runtime.gcBgMarkWorker
+         0     0%  0.63%      0.91s 28.80%  runtime.gcDrainMarkWorkerIdle (inline)
+         0     0%  0.63%      0.82s 25.95%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+         0     0%  0.63%      0.82s 25.95%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0%  0.63%      0.82s 25.95%  github.com/Ciao1019/ArcMD/internal/app.(*App).main
+         0     0%  0.63%      0.82s 25.95%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1
+         0     0%  0.63%      0.82s 25.95%  github.com/egoist/mygo/ui.(*node).Children
+         0     0%  0.63%      0.82s 25.95%  github.com/egoist/mygo/ui.Element.Children
+         0     0%  0.63%      0.82s 25.95%  github.com/egoist/mygo/ui.NewTester.func1
+         0     0%  0.63%      0.79s 25.00%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0%  0.63%      0.79s 25.00%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3
+         0     0%  0.63%      0.79s 25.00%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1.1
+         0     0%  0.63%      0.79s 25.00%  github.com/Ciao1019/ArcMD/internal/editor.View
+         0     0%  0.63%      0.64s 20.25%  github.com/egoist/mygo/ui.(*Tester).PerfReviewIdle
+         0     0%  0.63%      0.60s 18.99%  github.com/egoist/mygo/ui.(*Tester).PerfOperation
+         0     0%  0.63%      0.48s 15.19%  github.com/Ciao1019/ArcMD/internal/editor.View.func1
+     0.15s  4.75%  5.38%      0.48s 15.19%  runtime.scanObject
+         0     0%  5.38%      0.47s 14.87%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1
+         0     0%  5.38%      0.47s 14.87%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1
+         0     0%  5.38%      0.45s 14.24%  github.com/Ciao1019/ArcMD/internal/app.(*App).editorOptionsFor.func13
+         0     0%  5.38%      0.45s 14.24%  github.com/Ciao1019/ArcMD/internal/app.(*App).footerData
+         0     0%  5.38%      0.45s 14.24%  github.com/Ciao1019/ArcMD/internal/app.(*App).pageFooterFor
+         0     0%  5.38%      0.45s 14.24%  github.com/Ciao1019/ArcMD/internal/app.(*App).settledFooter
+         0     0%  5.38%      0.45s 14.24%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1.4
+         0     0%  5.38%      0.44s 13.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).liveIndex
+         0     0%  5.38%      0.43s 13.61%  github.com/Ciao1019/ArcMD/internal/app.(*document).plainText
+         0     0%  5.38%      0.43s 13.61%  github.com/Ciao1019/ArcMD/internal/document.(*Document).PlainText
+         0     0%  5.38%      0.43s 13.61%  github.com/Ciao1019/ArcMD/internal/document.(*Document).PlainText.func1
+         0     0%  5.38%      0.43s 13.61%  runtime.mcall
+         0     0%  5.38%      0.43s 13.61%  runtime.park_m
+     0.01s  0.32%  5.70%      0.43s 13.61%  runtime.schedule
+         0     0%  5.70%      0.39s 12.34%  runtime.findRunnable
+     0.02s  0.63%  6.33%      0.37s 11.71%  runtime.scanSpan
+     0.01s  0.32%  6.65%      0.36s 11.39%  strings.(*Builder).WriteString (inline)
+         0     0%  6.65%      0.35s 11.08%  runtime.growslice
+     0.13s  4.11% 10.76%      0.34s 10.76%  runtime.scanObjectsSmall
+     0.18s  5.70% 16.46%      0.34s 10.76%  runtime.tryDeferToSpanScan
+         0     0% 16.46%      0.33s 10.44%  runtime.gcDrainMarkWorkerDedicated (inline)
+         0     0% 16.46%      0.29s  9.18%  runtime.(*gcControllerState).enlistWorker
+         0     0% 16.46%      0.28s  8.86%  runtime.preemptM
+         0     0% 16.46%      0.27s  8.54%  runtime.preemptone
+     0.27s  8.54% 25.00%      0.27s  8.54%  runtime.pthread_kill
+         0     0% 25.00%      0.27s  8.54%  runtime.signalM (inline)

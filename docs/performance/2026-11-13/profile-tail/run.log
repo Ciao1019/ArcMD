@@ -1,0 +1,5 @@
+=== RUN   TestPerformanceReview
+    performance_test.go:328: tail type frame p50=0.860 p95=1.952 total p50=2.745 p95=4.593 MB/op=2.914
+    performance_test.go:328: tail backspace frame p50=1.038 p95=1.486 total p50=27.750 p95=30.094 MB/op=2.878
+--- PASS: TestPerformanceReview (4.26s)
+PASS

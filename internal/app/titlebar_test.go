@@ -50,7 +50,7 @@ func TestTitleBarControlsStayClear(t *testing.T) {
 			for _, width := range []int{640, 1240} {
 				t.Run(fmt.Sprintf("%s/%s/%d", profile.name, mode, width), func(t *testing.T) {
 					a, tt := titleBarTestApp(t, mode, width, profile.bar)
-					labels := []string{"后退", "前进", "重新载入", "文档路径", "更多格式", "添加分屏", "更多"}
+					labels := []string{"后退", "前进", "重新载入", "文档路径", "更多格式", "更多"}
 					if a.focus {
 						labels = []string{"退出专注模式"}
 					} else if a.split != nil {
@@ -115,7 +115,7 @@ func TestLongDocumentNameKeepsToolbarReachable(t *testing.T) {
 	a, tt := titleBarTestApp(t, "folded", 640, windowsTitleBar)
 	a.doc.rel = "这是一篇标题很长很长的文档用于检查窄窗口中的工具栏不会丢失任何操作按钮.arcmd"
 	settle(tt)
-	for _, label := range []string{"文档路径", "更多格式", "添加分屏", "更多"} {
+	for _, label := range []string{"文档路径", "更多格式", "更多"} {
 		r, ok := tt.Find(label)
 		if !ok || r.W <= 0 || r.X+r.W > 640-windowsTitleBar.Right {
 			t.Fatalf("%s is unreachable: %+v", label, r)

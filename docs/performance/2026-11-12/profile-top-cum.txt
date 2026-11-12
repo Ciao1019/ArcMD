@@ -1,0 +1,43 @@
+File: arcmd-perf.test
+Type: cpu
+Time: 2026-11-12 18:10:02 CST
+Duration: 4.64s, Total samples = 5.35s (115.19%)
+Showing nodes accounting for 0.19s, 3.55% of 5.35s total
+Dropped 193 nodes (cum <= 0.03s)
+Showing top 35 nodes out of 243
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      3.82s 71.40%  github.com/Ciao1019/ArcMD/internal/app.TestPerformance
+         0     0%     0%      3.82s 71.40%  testing.tRunner
+         0     0%     0%      3.41s 63.74%  github.com/egoist/mygo/ui.(*Tester).PerfOperation
+         0     0%     0%      3.40s 63.55%  github.com/egoist/mygo/ui.(*Tester).PerfFrame
+         0     0%     0%      3.40s 63.55%  github.com/egoist/mygo/ui.(*engine).runFrame
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).main
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1.1
+         0     0%     0%      2.51s 46.92%  github.com/Ciao1019/ArcMD/internal/editor.View
+         0     0%     0%      2.51s 46.92%  github.com/egoist/mygo/ui.(*node).Children
+         0     0%     0%      2.51s 46.92%  github.com/egoist/mygo/ui.Element.Children
+         0     0%     0%      2.51s 46.92%  github.com/egoist/mygo/ui.NewTester.func1
+         0     0%     0%      1.31s 24.49%  github.com/Ciao1019/ArcMD/internal/editor.View.func1
+         0     0%     0%      1.30s 24.30%  runtime.systemstack
+     0.08s  1.50%  1.50%      1.07s 20.00%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).collectNotes
+         0     0%  1.50%      1.07s 20.00%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).watchInline
+         0     0%  1.50%      1.02s 19.07%  runtime.gcBgMarkWorker.func2
+         0     0%  1.50%      1.02s 19.07%  runtime.gcDrain
+         0     0%  1.50%      0.94s 17.57%  runtime.gcBgMarkWorker
+         0     0%  1.50%      0.92s 17.20%  github.com/Ciao1019/ArcMD/internal/document.(*Document).Leaves
+     0.07s  1.31%  2.80%      0.92s 17.20%  github.com/Ciao1019/ArcMD/internal/document.(*Document).Leaves.func1
+         0     0%  2.80%      0.90s 16.82%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1
+         0     0%  2.80%      0.90s 16.82%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1
+         0     0%  2.80%      0.72s 13.46%  github.com/Ciao1019/ArcMD/internal/app.(*App).editorOptionsFor.func13
+         0     0%  2.80%      0.72s 13.46%  github.com/Ciao1019/ArcMD/internal/app.(*App).footerData
+     0.01s  0.19%  2.99%      0.72s 13.46%  github.com/Ciao1019/ArcMD/internal/app.(*App).liveIndex
+         0     0%  2.99%      0.72s 13.46%  github.com/Ciao1019/ArcMD/internal/app.(*App).pageFooterFor
+         0     0%  2.99%      0.72s 13.46%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1.4
+         0     0%  2.99%      0.71s 13.27%  github.com/Ciao1019/ArcMD/internal/app.(*document).plainText
+     0.03s  0.56%  3.55%      0.71s 13.27%  github.com/Ciao1019/ArcMD/internal/document.(*Document).PlainText
+         0     0%  3.55%      0.62s 11.59%  runtime.gcDrainMarkWorkerIdle (inline)

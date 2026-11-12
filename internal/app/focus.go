@@ -1,9 +1,11 @@
 package app
 
 import (
+	"image"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -98,7 +100,7 @@ func (a *App) focusView(c *ui.Context) {
 				words.Opacity(words.Animate("shown", b2f(show), 150*time.Millisecond))
 			}
 			ui.Spacer(c)
-			exit := iconButton(c, "focus-exit", iconMinimize, "退出专注模式", a.withKey("退出专注模式", "focus"), false)
+			exit := iconButton(c, "focus-exit", iconMinimize, i18n.T("退出专注模式"), a.withKey(i18n.T("退出专注模式"), "focus"), false)
 			exit.Opacity(exit.Animate("shown", b2f(show || exit.Focused()), 150*time.Millisecond))
 			if exit.Clicked() {
 				a.toggleFocus()
@@ -109,8 +111,8 @@ func (a *App) focusView(c *ui.Context) {
 		card.Children(func() {
 			if a.doc == nil || a.doc.loadErr != nil || a.doc.source {
 				ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
-					ui.Text(c, "专注模式下没有可编辑的文档。").TextColor(c.Theme().TextMuted)
-					if ui.Button(c.Key("focus-leave"), "退出专注模式").Clicked() {
+					ui.Text(c, i18n.T("专注模式下没有可编辑的文档。")).TextColor(c.Theme().TextMuted)
+					if ui.Button(c.Key("focus-leave"), i18n.T("退出专注模式")).Clicked() {
 						a.toggleFocus()
 					}
 				})
@@ -140,37 +142,47 @@ func (a *App) editorOptions(c *ui.Context, width float32, focus bool) editor.Opt
 
 func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *document) editor.Options {
 	run := func(fn func()) {
-		if a.activateDocument(d) {
+		switch {
+		case a.activateDocument(d):
 			fn()
+		case a.inWindow(d):
+			// A document in its own window acts as the document.
+			a.withDocument(d, fn)
 		}
 	}
 	return editor.Options{
-		FontSize:     a.prefs.ReadingSize(),
-		LineHeight:   a.prefs.ReadingLine(),
-		NoAutoPair:   a.prefs.NoAutoPair,
-		Resizing:     a.splitResizing,
-		Width:        width,
-		Theme:        c.Theme(),
-		Page:         pageStyle(a.paperDark),
-		Attach:       func() { run(a.pickImages) },
-		DropFiles:    func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
-		PasteImage:   func(data []byte) { run(func() { a.pasteImage(data) }) },
-		LoadImage:    d.imageResource,
-		ReplaceImage: func(id, url string) { a.pickReplacementImage(d, id, url) },
-		RevealImage:  func(url string) { a.revealImage(d, url) },
-		OpenLink:     func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
-		OpenWiki:     func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
-		OpenTag:      func(tag string) { run(func() { a.openTag(tag) }) },
-		PreviewWiki:  func(name string) editor.WikiPreview { return a.previewWikiFor(d, name) },
-		WikiSuggest:  func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
-		Footer:       func(c *ui.Context) { a.pageFooterFor(c, d) },
-		Typewriter:   a.prefs.Typewriter,
-		Dim:          focus && !a.prefs.NoDim,
-		PickCover:    func(done func(string)) { run(func() { a.pickCover(done) }) },
-		Bindings:     a.editorBindings(),
-		Outline:      !a.prefs.OutlineClosed,
-		SetOutline:   a.setOutline,
-		Bookmarks:    a.marksOf(d),
+		FontSize:        a.prefs.ReadingSize(),
+		LineHeight:      a.prefs.ReadingLine(),
+		FontFamily:      a.prefs.BodyFamily(),
+		Column:          a.prefs.Column(),
+		NoAutoPair:      a.prefs.NoAutoPair,
+		AutoSpace:       a.prefs.AutoSpace,
+		EmojiSuggest:    suggestEmoji,
+		Resizing:        a.splitResizing,
+		Width:           width,
+		Theme:           c.Theme(),
+		Page:            pageStyle(a.paperDark),
+		Attach:          func() { run(a.pickImages) },
+		DropFiles:       func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
+		PasteImage:      func(data []byte) { run(func() { a.pasteImage(data) }) },
+		LoadImage:       d.imageResource,
+		ReplaceImage:    func(id, url string) { a.pickReplacementImage(d, id, url) },
+		RevealImage:     func(url string) { a.revealImage(d, url) },
+		CropImage:       func(id, url string, r image.Rectangle) { a.cropImage(d, id, url, r) },
+		OpenLink:        func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
+		OpenWiki:        func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
+		OpenTag:         func(tag string) { run(func() { a.openTag(tag) }) },
+		PreviewWiki:     func(name string) editor.WikiPreview { return a.previewWikiFor(d, name) },
+		WikiSuggest:     func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
+		Footer:          func(c *ui.Context) { a.pageFooterFor(c, d) },
+		Typewriter:      a.prefs.Typewriter,
+		DrawAnnotations: a.prefs.DrawAnnotations,
+		Dim:             focus && !a.prefs.NoDim,
+		PickCover:       func(done func(string)) { run(func() { a.pickCover(done) }) },
+		Bindings:        a.editorBindings(),
+		Outline:         !a.prefs.OutlineClosed,
+		SetOutline:      a.setOutline,
+		Bookmarks:       a.marksOf(d),
 		ToggleBookmark: func(id string) {
 			a.toggleBookmark(d, id)
 		},

@@ -43,7 +43,7 @@ const writingSample = `# 留一点空白
 
 func TestSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the writing surface")
-	for _, name := range []string{"writing", "writing-dark-system", "writing-narrow", "writing-editing", "writing-source", "writing-empty", "rich-blocks", "rich-lists", "writing-wide", "writing-selection", "rich-table-hover", "callouts", "block-menu", "table-select", "text-colors", "find", "fold", "table-merge", "outline-closed", "outline-float", "outline@dark",
+	for _, name := range []string{"writing", "writing-dark-system", "writing-narrow", "writing-editing", "writing-source", "writing-empty", "rich-blocks", "rich-lists", "writing-wide", "writing-selection", "rich-table-hover", "callouts", "block-menu", "table-select", "text-colors", "annotations", "annotations@dark", "annotations-page", "annotations-mark", "writing-readonly", "find", "fold", "table-merge", "outline-closed", "outline-float", "outline@dark",
 		// The same on dark paper, as the system's dark appearance shows it.
 		"writing-empty@dark", "writing-source@dark", "rich-blocks@dark", "rich-lists@dark", "writing-selection@dark", "callouts@dark",
 		"block-menu@dark", "table-select@dark", "text-colors@dark", "find@dark", "table-merge@dark", "writing-paste", "writing-paste-narrow"} {
@@ -72,6 +72,22 @@ func TestSnapshot(t *testing.T) {
 				doc.Blocks = append(doc.Blocks, callout, cols)
 				doc.Blocks = append(doc.Blocks, table.Blocks...)
 				doc.Blocks = append(doc.Blocks, model.NewBlock("task", "用一段文字，开始今天的写作。"))
+			}
+			if strings.HasPrefix(name, "annotations") {
+				// Each variant on a phrase of its own line, the
+				// default color, then two in another color.
+				doc = editor.ImportMarkdown("# 手绘标注")
+				for i, v := range model.Annotations {
+					color := ""
+					if i >= len(model.Annotations)-2 {
+						color = "green"
+					}
+					doc.Blocks = append(doc.Blocks, &model.Block{ID: model.NewID(), Kind: "paragraph", Runs: []model.Run{
+						{Text: "用手绘标注写下"},
+						{Text: editor.AnnotationNames[v] + "的效果", Style: model.Style{Annotation: v, AnnotationColor: color}},
+						{Text: "，安静地强调重点。"},
+					}})
+				}
 			}
 			if name == "callouts" {
 				doc = editor.ImportMarkdown("# 高亮块\n\n> [!NOTE]\n> 说明：文档会自动保存。\n\n> [!TIP]\n> 提示：输入 / 可以插入任何内容。\n\n> [!IMPORTANT]\n> 重要：.arcmd 是完整保存格式。\n\n> [!WARNING]\n> 警告：导出 Markdown 会丢失表格宽度。\n\n> [!CAUTION]\n> 危险：删除会移到废纸篓。")
@@ -207,7 +223,34 @@ func TestSnapshot(t *testing.T) {
 				ed.SetSelection(leaf.Start, leaf.Start+5)
 				ed.RequestFocus = true
 				tt.Frame()
-				ed.OpenTextColors()
+			}
+			if name == "writing-readonly" {
+				// Typing on the locked page says why nothing happens.
+				a.doc.ed.SetReadOnly(true)
+				a.doc.ed.RequestFocus = true
+				tt.Frame()
+				tt.Type("x")
+				tt.Frame()
+			}
+			if name == "annotations-mark" {
+				// The bar a click on marked text opens.
+				ed := a.doc.ed
+				ed.RequestFocus = true
+				tt.Frame()
+				leaf := ed.Doc.Leaves()[3]
+				ed.SetSelection(leaf.Start+9, leaf.Start+9)
+				ed.OpenMarkBar(leaf.Start + 9)
+				tt.Frame()
+			}
+			if name == "annotations" {
+				// Open the picker over a selection of the first line.
+				ed := a.doc.ed
+				leaf := ed.Doc.Leaves()[1]
+				ed.SetSelection(leaf.Start, leaf.Start+2)
+				ed.RequestFocus = true
+				tt.Advance(time.Second)
+				tt.Frame()
+				ed.OpenAnnotations()
 				tt.Frame()
 			}
 			if name == "table-select" {

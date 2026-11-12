@@ -110,7 +110,8 @@ func (e *Editor) columnTab(backward bool) bool {
 		}
 	}
 	collect(column)
-	for _, r := range e.rows {
+	for i := range e.rows {
+		r := e.indexedRow(i)
 		if ids[r.leaf.Block.ID] {
 			e.SetSelection(r.leaf.Start, r.leaf.Start)
 			e.reveal, e.vertical = true, false

@@ -15,6 +15,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fsutil"
 	"github.com/Ciao1019/ArcMD/internal/history"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 )
@@ -31,7 +32,7 @@ type movingDocument struct {
 // remain untouched until the caller trashes them after this function succeeds.
 func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, dir string) (to string, copied bool, err error) {
 	if !a.flush() {
-		return "", false, errors.New("请先保存文档并解决文件冲突")
+		return "", false, errors.New(i18n.T("请先保存文档并解决文件冲突"))
 	}
 	docs, err := a.movingDocuments(src, rel)
 	if err != nil {
@@ -54,7 +55,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		// Restore only files written by this operation before moving back.
 		for _, d := range rewritten {
 			if restoreErr := vault.Write(dst.Root, to+d.rel[len(rel):], d.original); restoreErr != nil {
-				err = errors.Join(err, fmt.Errorf("恢复原文：%w", restoreErr))
+				err = errors.Join(err, fmt.Errorf(i18n.T("恢复原文：%w"), restoreErr))
 			}
 		}
 		for _, p := range created {
@@ -65,10 +66,10 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 			moved, _ := vault.Resolve(dst.Root, to)
 			if _, statErr := os.Lstat(old); errors.Is(statErr, fs.ErrNotExist) {
 				if rollbackErr := os.Rename(moved, old); rollbackErr != nil {
-					err = errors.Join(err, fmt.Errorf("移回原位置：%w", rollbackErr))
+					err = errors.Join(err, fmt.Errorf(i18n.T("移回原位置：%w"), rollbackErr))
 				}
 			} else {
-				err = errors.Join(err, errors.New("原位置已被占用，文档仍保留在目标位置"))
+				err = errors.Join(err, errors.New(i18n.T("原位置已被占用，文档仍保留在目标位置")))
 			}
 		} else {
 			// This is an unpublished copy; the user's original still exists.
@@ -233,7 +234,7 @@ func relocateText(rel, text string, urls map[string]string) (string, error) {
 	if vault.IsMarkdown(rel) {
 		// Preserve Markdown source exactly. Refuse an ambiguous destination
 		// rather than round-trip a user's import source through the exporter.
-		return "", errors.New("移动图片需要调整引用；请先将 Markdown 转为 ArcMD 文档再移动")
+		return "", errors.New(i18n.T("移动图片需要调整引用；请先将 Markdown 转为 ArcMD 文档再移动"))
 	}
 	doc, err := model.Decode(text)
 	if err != nil {

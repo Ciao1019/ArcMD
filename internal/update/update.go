@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 )
 
 const (
@@ -68,15 +70,15 @@ func Current(ready, found string, dismissed bool) *Notice {
 // Title is the banner's title, also the toast's text.
 func (n Notice) Title() string {
 	if n.Kind == Ready {
-		return "更新已准备就绪！"
+		return i18n.T("更新已准备就绪！")
 	}
-	return "ArcMD 有新版本"
+	return i18n.T("ArcMD 有新版本")
 }
 
 // Subtitle is the banner's second line.
 func (n Notice) Subtitle() string {
 	if n.Kind == Ready {
-		return "点击重新启动"
+		return i18n.T("点击重新启动")
 	}
 	return "ArcMD " + n.Version
 }
@@ -84,9 +86,9 @@ func (n Notice) Subtitle() string {
 // Button is the toast's button: what clicking the banner does.
 func (n Notice) Button() string {
 	if n.Kind == Ready {
-		return "重新启动"
+		return i18n.T("重新启动")
 	}
-	return "更新"
+	return i18n.T("更新")
 }
 
 // Toast returns the notice to toast, or nil: only while the sidebar, which

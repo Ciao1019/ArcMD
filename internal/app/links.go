@@ -5,10 +5,12 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fuzzy"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/search"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -217,11 +219,15 @@ func (a *App) live() *search.Live {
 func (a *App) tagResults(q string) []action {
 	name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(q), "#"))
 	var out []action
+	if name != "" && a.tagCount(name) > 0 {
+		tag := name
+		out = append(out, action{kind: i18n.T("命令"), title: i18n.T("重命名或合并标签 #") + tag + "…", run: func() { a.openTagRename(tag) }})
+	}
 	if name != "" {
 		for _, h := range a.liveIndex().Tagged(name, nil) {
 			id, rel := h.Space, h.Path
 			hint := a.docHint(id, rel)
-			out = append(out, action{kind: "标签", title: vault.Title(rel), hint: hint, doc: place{id, rel},
+			out = append(out, action{kind: i18n.T("标签"), title: vault.Title(rel), hint: hint, doc: place{id, rel},
 				snippet: h.Snippet, match: h.Match, run: func() { a.openAnywhere(id, rel) }})
 		}
 	}
@@ -232,7 +238,7 @@ func (a *App) tagResults(q string) []action {
 			}
 		}
 		tag := tc.Name
-		out = append(out, action{kind: "标签", title: "#" + tag, hint: fmt.Sprintf("%d 篇文档", tc.Count), run: func() {
+		out = append(out, action{kind: i18n.T("标签"), title: "#" + tag, hint: fmt.Sprintf(i18n.T("%d 篇文档"), tc.Count), run: func() {
 			a.palette.open = true
 			a.palette.query = "#" + tag
 		}})
@@ -247,6 +253,48 @@ type pageFooterCache struct {
 	location place
 	tags     []string
 	hits     []search.Hit
+}
+
+// footerSettle is how long footers wait for typing on a long page to
+// pause before they reread it: the page's tags and the live search index
+// both need its whole text, which on a long page costs more than a frame.
+const footerSettle = 400 * time.Millisecond
+
+// footerLong is how many bytes of text make a page long enough for the
+// footers to wait for it; a shorter page is reread at each keystroke.
+const footerLong = 64 << 10
+
+// settledFooter is footerData, except that while a long page is being
+// typed in, footers keep what they last read until the typing pauses.
+func (a *App) settledFooter(c *ui.Context, d *document) *pageFooterCache {
+	cache := &d.footer
+	if cache.ready && cache.location == (place{d.space.ID, d.rel}) {
+		if wait := a.liveTyping(c); wait > 0 {
+			c.After(wait)
+			return cache
+		}
+	}
+	return a.footerData(d)
+}
+
+// liveTyping is how long until a long page whose edits the live index
+// has not read yet has gone unchanged for footerSettle; 0 when none has.
+func (a *App) liveTyping(c *ui.Context) time.Duration {
+	var wait time.Duration
+	for _, d := range a.residentDocuments() {
+		if d.loadErr != nil || len(d.plain) < footerLong {
+			continue
+		}
+		rev := d.ed.Revision()
+		if rev != d.typedRev {
+			d.typedRev, d.typedAt = rev, c.Now()
+		}
+		if stamp, ok := a.search.liveDocs[d]; ok && stamp.revision == rev || !ok && !d.dirty() {
+			continue
+		}
+		wait = max(wait, footerSettle-c.Now().Sub(d.typedAt))
+	}
+	return wait
 }
 
 func (a *App) footerData(d *document) *pageFooterCache {
@@ -273,7 +321,7 @@ func (a *App) pageFooterFor(c *ui.Context, d *document) {
 	}
 	t := c.Theme()
 	pg := pageStyle(a.paperDark)
-	data := a.footerData(d)
+	data := a.settledFooter(c, d)
 	tags, hits := data.tags, data.hits
 	if len(hits) == 0 && len(tags) == 0 && d.ed.Blank() {
 		return // a blank page shows its starter alone
@@ -284,7 +332,7 @@ func (a *App) pageFooterFor(c *ui.Context, d *document) {
 			ui.Row(c.Key("page-tags")).Gap(6).Wrap().AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, iconHash).FontSize(14).TextColor(t.TextMuted)
 				for _, tag := range tags {
-					chip := ui.ButtonBase(c.Key("tag:" + tag)).Height(24).PaddingX(8).Radius(6).Label("标签 " + tag).
+					chip := ui.ButtonBase(c.Key("tag:" + tag)).Height(24).PaddingX(8).Radius(6).Label(i18n.T("标签 ") + tag).
 						Cursor(ui.CursorPointer).Background(pg.TagFill)
 					if chip.Hovered() {
 						chip.Background(t.Accent.Alpha(0.18))
@@ -294,24 +342,33 @@ func (a *App) pageFooterFor(c *ui.Context, d *document) {
 						a.activateDocument(d)
 						a.openTag(tag)
 					}
+					chip.ContextMenu(func(m *ui.Menu) {
+						if m.Item(i18n.T("查看使用此标签的文档")).Chosen() {
+							a.activateDocument(d)
+							a.openTag(tag)
+						}
+						if m.Item(i18n.T("重命名或合并标签…")).Chosen() {
+							a.openTagRename(tag)
+						}
+					})
 				}
 			})
 		}
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, iconLink).FontSize(14).TextColor(t.TextMuted)
-			label := "反向链接"
+			label := i18n.T("反向链接")
 			if len(hits) > 0 {
-				label = fmt.Sprintf("反向链接 · %d", len(hits))
+				label = fmt.Sprintf(i18n.T("反向链接 · %d"), len(hits))
 			}
 			ui.Text(c, label).FontSize(13).FontWeight(500).TextColor(t.TextMuted)
 		})
 		if len(hits) == 0 {
-			ui.Text(c, "还没有文档链接到这里。在其他文档中输入 [[ 即可链接到「"+d.title()+"」。").FontSize(13).TextColor(t.TextMuted.Alpha(0.8))
+			ui.Text(c, i18n.T("还没有文档链接到这里。在其他文档中输入 [[ 即可链接到「")+d.title()+"」。").FontSize(13).TextColor(t.TextMuted.Alpha(0.8))
 			return
 		}
 		for _, h := range hits {
 			id, rel := h.Space, h.Path
-			row := ui.ButtonBase(c.Key("backlink:"+id+"/"+rel)).Padding(8, 10).Radius(8).Gap(4).Label("打开 " + vault.Title(rel)).
+			row := ui.ButtonBase(c.Key("backlink:"+id+"/"+rel)).Padding(8, 10).Radius(8).Gap(4).Label(i18n.T("打开 ") + vault.Title(rel)).
 				Cursor(ui.CursorPointer).AlignItems(ui.Stretch)
 			if row.Hovered() {
 				row.Background(pg.Hover)
@@ -425,7 +482,7 @@ func (a *App) previewWikiFor(source *document, name string) editor.WikiPreview {
 		d = a.thumbOf(sp, rel)
 	}
 	if d == nil || d.loadErr != nil {
-		p.Text = "无法读取这篇笔记"
+		p.Text = i18n.T("无法读取这篇笔记")
 		p.Missing = false
 		return p
 	}

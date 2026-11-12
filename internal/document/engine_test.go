@@ -102,7 +102,7 @@ func TestNestedTransactionsAndContainers(t *testing.T) {
 }
 
 func TestRejectUnsupportedOrCorruptFormat(t *testing.T) {
-	for _, text := range []string{`{"format":"arcmd","version":7,"blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":4,"icon":"🚀","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"../x.png","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"gradient:nope","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":1,"blocks":[]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"future"}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph","future":true}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph"},{"id":"a","kind":"paragraph"}]}`} {
+	for _, text := range []string{`{"format":"arcmd","version":9,"blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":4,"icon":"🚀","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"../x.png","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"gradient:nope","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":1,"blocks":[]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"future"}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph","future":true}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph"},{"id":"a","kind":"paragraph"}]}`} {
 		if _, err := Decode(text); err == nil {
 			t.Fatal("accepted unsupported document", text)
 		}
@@ -174,6 +174,7 @@ func TestRandomEditsKeepValidDocument(t *testing.T) {
 			t.Fatal(err)
 		}
 		length := Len(e.Doc.PlainText())
+		assertLeafOffsets(t, e)
 		if e.Anchor < 0 || e.Caret < 0 || e.Anchor > length || e.Caret > length {
 			t.Fatalf("invalid selection %d %d / %d", e.Anchor, e.Caret, length)
 		}

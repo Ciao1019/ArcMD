@@ -2,10 +2,13 @@ package editor
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -34,6 +37,9 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			// The host picks the images and inserts it at the caret.
 		case "wiki":
 			e.Engine.Replace(e.Caret, e.Caret, "[[")
+		case "toggle":
+			e.Engine.SetKind("toggle", 0)
+			e.Engine.OpenToggle(e.Engine.LeafAt(e.Caret).Block.ID)
 		default:
 			e.Engine.SetKind(item.kind, item.level)
 		}
@@ -51,78 +57,110 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 // formatted from the bar over a selection, blocks from "/", the "+" and the
 // handle beside each block, and everything from the command bar.
 func (e *Editor) Corner(c *ui.Context) {
-	t := c.Theme()
 	leaf := e.Engine.LeafAt(e.Caret)
 	ui.Row(c.Key("page-corner")).Gap(2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, fmt.Sprintf("%d 字", e.wordCount())).FontSize(12).TextColor(t.TextMuted).NoWrap().Padding(0, 6).Tooltip("字数（中文按字、英文按词）")
-		label := "编辑中"
-		if e.ReadOnly {
-			label = "只读"
-		}
-		if ui.Button(c.Key("reading-lock"), label).FontSize(12).Tooltip("切换文档只读模式").Clicked() {
-			e.SetReadOnly(!e.ReadOnly)
-		}
+		e.wordButton(c)
+		// The lock and the format menu keep their places in both modes, so
+		// the toolbar never shifts under the pointer: read-only dims the
+		// format menu rather than taking it away.
 		if !e.ReadOnly {
 			e.moreMenu(c, leaf)
+		} else {
+			toolButton(c, "more", iconFormat, i18n.T("只读时不能修改格式"), false).Disabled(true).Opacity(.4)
+		}
+		icon, tip := iconUnlocked, i18n.T("编辑中，点击设为只读")
+		if e.ReadOnly {
+			icon, tip = iconLocked, i18n.T("只读，点击恢复编辑")
+		}
+		if toolButton(c, "reading-lock", icon, tip, e.ReadOnly).Clicked() {
+			e.SetReadOnly(!e.ReadOnly)
 		}
 	})
 }
 
-// moreMenu holds the formats and actions of the caret's block.
+// moreMenu holds the formats and actions of the caret's block, grouped:
+// text, marks, paragraph and insertions always, then what the caret's
+// block offers. What the selection bar or a shortcut already does (bold
+// and the other marks, undo and redo) is not repeated here.
 func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
-	toolButton(c, "more", iconFormat, "更多格式", false).Menu(func(m *ui.Menu) {
-		menuAction(m, "下划线", func() { e.Wrap("_") })
-		menuAction(m, "删除线", func() { e.Wrap("~~") })
-		menuAction(m, "行内代码", func() { e.Wrap("`") })
-		menuAction(m, "上标", func() { e.SetScript("sup") })
-		menuAction(m, "下标", func() { e.SetScript("sub") })
-		menuAction(m, "插入行内公式", e.InsertInlineMath)
-		menuAction(m, "插入脚注", func() { e.InsertFootnote(); e.RequestFocus, e.reveal = true, true })
-		menuAction(m, "跳转脚注 / 返回正文", func() { e.FollowFootnote() })
-		m.Separator()
-		menuAction(m, "撤销", func() { e.Undo(); e.RequestFocus = true })
-		menuAction(m, "重做", func() { e.Redo(); e.RequestFocus = true })
-		m.Separator()
-		for _, align := range []struct{ name, value string }{{"左对齐", "left"}, {"居中", "center"}, {"右对齐", "right"}} {
-			menuAction(m, align.name, func() { e.Engine.Align(align.value); e.RequestFocus = true })
-		}
-		menuAction(m, "增加缩进", func() { e.Engine.Indent(1) })
-		menuAction(m, "减少缩进", func() { e.Engine.Indent(-1) })
-		if leaf.Block.Kind == "callout" {
-			m.Separator()
-			for _, tone := range document.CalloutColors {
-				if m.Item("高亮块：" + CalloutName(tone)).Checked(leaf.Block.Color == tone).Chosen() {
-					e.Engine.SetColor(leaf.Block.ID, tone)
+	toolButton(c, "more", iconFormat, i18n.T("更多格式"), false).Menu(func(m *ui.Menu) {
+		style := e.Engine.CurrentStyle()
+		m.Submenu(i18n.T("文字"), func(sub *ui.Menu) {
+			if sub.Item(i18n.T("上标")).Checked(style.Script == "sup").Chosen() {
+				e.SetScript("sup")
+			}
+			if sub.Item(i18n.T("下标")).Checked(style.Script == "sub").Chosen() {
+				e.SetScript("sub")
+			}
+		})
+		m.Submenu(i18n.T("手绘标注"), func(sub *ui.Menu) {
+			for _, name := range document.Annotations {
+				if sub.Item(i18n.T(AnnotationNames[name])).Checked(style.Annotation == name).Chosen() {
+					e.Annotate(name, style.AnnotationColor)
+				}
+			}
+			sub.Separator()
+			if sub.Item(i18n.T("移除标注")).Disabled(style.Annotation == "").Chosen() {
+				e.Annotate("", "")
+			}
+		})
+		m.Submenu(i18n.T("段落"), func(sub *ui.Menu) {
+			for _, a := range []struct{ name, value string }{{i18n.T("左对齐"), "left"}, {i18n.T("居中"), "center"}, {i18n.T("右对齐"), "right"}} {
+				on := leaf.Block.Align == a.value || a.value == "left" && leaf.Block.Align == ""
+				if sub.Item(a.name).Radio(on).Chosen() {
+					e.Engine.Align(a.value)
 					e.RequestFocus = true
 				}
 			}
-		}
-		if leaf.Block.Kind == "code" {
+			sub.Separator()
+			menuAction(sub, i18n.T("增加缩进"), func() { e.Engine.Indent(1) })
+			menuAction(sub, i18n.T("减少缩进"), func() { e.Engine.Indent(-1) })
+		})
+		m.Submenu(i18n.T("插入"), func(sub *ui.Menu) {
+			menuAction(sub, i18n.T("行内公式"), e.InsertInlineMath)
+			menuAction(sub, i18n.T("脚注"), func() { e.InsertFootnote(); e.RequestFocus, e.reveal = true, true })
+			sub.Separator()
+			menuAction(sub, i18n.T("跳转脚注 / 返回正文"), func() { e.FollowFootnote() })
+		})
+		switch leaf.Block.Kind {
+		case "callout":
 			m.Separator()
-			menuAction(m, "复制代码", func() { e.copyBlock(leaf.Block.ID) })
-		}
-		if leaf.Block.Kind == "cell" {
-			m.Separator()
-			if table, row, col, ok := e.Doc.CellAt(leaf.Block.ID); ok {
-				m.Submenu("单元格背景颜色", func(sub *ui.Menu) {
-					for _, name := range append([]string{""}, document.TextHighlights...) {
-						label := "无"
-						if name != "" {
-							label = ColorName(name, true)
-						}
-						if sub.Item(label).Checked(leaf.Block.Background == name).Chosen() {
-							e.Engine.SetCellBackground(table.ID, document.CellRange{Row0: row, Col0: col, Row1: row, Col1: col}, name)
-						}
+			m.Submenu(i18n.T("高亮块颜色"), func(sub *ui.Menu) {
+				for _, tone := range document.CalloutColors {
+					if sub.Item(CalloutName(tone)).Radio(leaf.Block.Color == tone).Chosen() {
+						e.Engine.SetColor(leaf.Block.ID, tone)
+						e.RequestFocus = true
 					}
-				})
-				if cols, rows := document.Span(leaf.Block); cols > 1 || rows > 1 {
-					menuAction(m, "拆分单元格", func() { e.Engine.SplitCell(leaf.Block.ID) })
 				}
-			}
-			menuAction(m, "增加表格行", func() { e.Engine.ResizeTable(true, 1) })
-			menuAction(m, "增加表格列", func() { e.Engine.ResizeTable(false, 1) })
-			menuAction(m, "删除末行", func() { e.Engine.ResizeTable(true, -1) })
-			menuAction(m, "删除末列", func() { e.Engine.ResizeTable(false, -1) })
+			})
+		case "code":
+			m.Separator()
+			menuAction(m, i18n.T("复制代码"), func() { e.copyBlock(leaf.Block.ID) })
+		case "cell":
+			m.Separator()
+			m.Submenu(i18n.T("表格"), func(sub *ui.Menu) {
+				if table, row, col, ok := e.Doc.CellAt(leaf.Block.ID); ok {
+					sub.Submenu(i18n.T("单元格背景颜色"), func(fill *ui.Menu) {
+						for _, name := range append([]string{""}, document.TextHighlights...) {
+							label := i18n.T("无")
+							if name != "" {
+								label = ColorName(name, true)
+							}
+							if fill.Item(label).Radio(leaf.Block.Background == name).Chosen() {
+								e.Engine.SetCellBackground(table.ID, document.CellRange{Row0: row, Col0: col, Row1: row, Col1: col}, name)
+							}
+						}
+					})
+					if cols, rows := document.Span(leaf.Block); cols > 1 || rows > 1 {
+						menuAction(sub, i18n.T("拆分单元格"), func() { e.Engine.SplitCell(leaf.Block.ID) })
+					}
+					sub.Separator()
+				}
+				menuAction(sub, i18n.T("增加一行"), func() { e.Engine.ResizeTable(true, 1) })
+				menuAction(sub, i18n.T("增加一列"), func() { e.Engine.ResizeTable(false, 1) })
+				menuAction(sub, i18n.T("删除末行"), func() { e.Engine.ResizeTable(true, -1) })
+				menuAction(sub, i18n.T("删除末列"), func() { e.Engine.ResizeTable(false, -1) })
+			})
 		}
 	})
 }
@@ -148,9 +186,9 @@ func (e *Editor) emojiGrid(c *ui.Context, id string, done func()) {
 		for row := 0; row < len(items); row += 8 {
 			ui.Row(c.Key(row)).Justify(ui.SpaceBetween).Children(func() {
 				for _, emoji := range items[row:min(row+8, len(items))] {
-					label := "使用颜色图标"
+					label := i18n.T("使用颜色图标")
 					if emoji != "" {
-						label = "图标：" + emoji
+						label = i18n.T("图标：") + emoji
 					}
 					cell := ui.ButtonBase(c.Key("emoji:"+emoji)).Size(26, 26).Radius(4).Center().Label(label).Tooltip(label).KeepFocus().Cursor(ui.CursorPointer)
 					if b.Emoji == emoji {
@@ -189,7 +227,7 @@ func (e *Editor) colorSwatches(c *ui.Context, id string, done func()) {
 		for _, tone := range document.CalloutColors {
 			hue := e.calloutHue(tone, t)
 			name := CalloutName(tone)
-			s := ui.ButtonBase(c.Key("swatch:"+tone)).Size(28, 28).Radius(14).Center().Label("高亮块颜色："+name).Tooltip(name).
+			s := ui.ButtonBase(c.Key("swatch:"+tone)).Size(28, 28).Radius(14).Center().Label(i18n.T("高亮块颜色：")+name).Tooltip(name).
 				KeepFocus().Cursor(ui.CursorPointer).Background(hue.Alpha(.14)).Border(1, hue.Alpha(.4))
 			if b.Color == tone {
 				s.Border(2, hue)
@@ -250,7 +288,7 @@ func (e *Editor) wordCount() int {
 		e.words += countWords(change.After) - countWords(change.Before)
 	} else {
 		e.sync()
-		e.words = countWords(e.text)
+		e.words = countWords(e.displayText())
 	}
 	e.wordsRevision, e.wordsReady = e.Revision(), true
 	return e.words
@@ -316,14 +354,15 @@ func (e *Editor) popups(c *ui.Context, surface ui.Element) {
 	t := c.Theme()
 	e.slashMenu(c, surface)
 	e.selectionBar(c, surface)
+	e.markBar(c, surface)
 	if e.colorOpen && e.colorID != "" {
 		bounds := surface.Bounds()
 		ui.Overlay(c, func() {
 			panel := ui.Column(c.Key("callout-colors")).Absolute().Left(bounds.X + e.colorAt.X - 6).Top(bounds.Y + e.colorAt.Y + e.colorAt.H + 6).Width(230).Padding(10).Gap(6)
 			e.popover(c, panel).Children(func() {
-				ui.Text(c, "高亮块颜色").FontSize(12).TextColor(t.Text)
+				ui.Text(c, i18n.T("高亮块颜色")).FontSize(12).TextColor(t.Text)
 				e.colorSwatches(c, e.colorID, func() { e.colorOpen = false })
-				ui.Text(c, "图标").FontSize(12).TextColor(t.Text).Margin(6, 0, 0, 0)
+				ui.Text(c, i18n.T("图标")).FontSize(12).TextColor(t.Text).Margin(6, 0, 0, 0)
 				e.emojiGrid(c, e.colorID, func() { e.colorOpen = false })
 			})
 		})
@@ -339,13 +378,13 @@ func (e *Editor) popups(c *ui.Context, surface ui.Element) {
 				Padding(6).Radius(10).Background(t.Background).Border(1, t.Border).Shadow(0, 8, 24, 0, t.Text.Alpha(.14)).KeepFocus().Children(func() {
 				ui.Scroll(c).MaxHeight(280).Children(func() {
 					for _, l := range codeLanguages {
-						row := ui.ButtonBase(c.Key("lang:" + l.name)).Height(30).PaddingX(8).Radius(6).KeepFocus().Label("代码语言：" + l.label).Cursor(ui.CursorPointer)
+						row := ui.ButtonBase(c.Key("lang:" + l.name)).Height(30).PaddingX(8).Radius(6).KeepFocus().Label(i18n.T("代码语言：") + i18n.T(l.label)).Cursor(ui.CursorPointer)
 						if row.Hovered() {
 							row.Background(t.Text.Alpha(.05))
 						}
 						row.Children(func() {
 							ui.Row(c).Grow(1).AlignItems(ui.Center).Children(func() {
-								ui.Text(c, l.label).FontSize(13).Grow(1)
+								ui.Text(c, i18n.T(l.label)).FontSize(13).Grow(1)
 								if strings.EqualFold(current, l.name) {
 									ui.Icon(c, iconCheck).FontSize(14).TextColor(t.Accent)
 								}
@@ -402,4 +441,146 @@ func menuAction(m *ui.Menu, label string, run func()) {
 	if m.Item(label).Chosen() {
 		run()
 	}
+}
+
+// goalPresets are the word goals the count's menu offers.
+var goalPresets = []int{500, 1000, 2000, 3000, 5000}
+
+// readingMinutes is how long the page takes to read: 400 Chinese
+// characters or 200 other words a minute, at least one.
+func readingMinutes(text string) int {
+	han, words, inWord := 0, 0, false
+	for _, r := range text {
+		switch {
+		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
+			han++
+			inWord = false
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			if !inWord {
+				words++
+			}
+			inWord = true
+		default:
+			inWord = false
+		}
+	}
+	return max(1, int(math.Ceil(float64(han)/400+float64(words)/200)))
+}
+
+// wordButton is the word count, with the goal and its progress under it
+// when the page has one; its menu sets the goal and says how long the
+// page takes to read.
+func (e *Editor) wordButton(c *ui.Context) {
+	t := c.Theme()
+	words, goal := e.wordCount(), e.Doc.Goal
+	count := fmt.Sprintf(i18n.T("%d 字"), words)
+	if goal > 0 {
+		count = fmt.Sprintf(i18n.T("%d / %d 字"), words, goal)
+	}
+	if sel := e.Selection().Range; sel.Start != sel.End {
+		text, _ := e.TextForRange(sel)
+		count = fmt.Sprintf(i18n.T("已选 %d / %d 字"), countWords(text), words)
+	}
+	reached := goal > 0 && words >= goal
+	b := ui.ButtonBase(c.Key("word-count")).Height(30).PaddingX(6).Radius(7).Label(count).
+		Tooltip(i18n.T("字数（中文按字、英文按词）· 点击设置字数目标")).KeepFocus().Cursor(ui.CursorPointer)
+	if b.Hovered() {
+		b.Background(t.Text.Alpha(.06))
+	}
+	b.Children(func() {
+		ui.Column(c).Gap(3).AlignItems(ui.Center).Children(func() {
+			color := t.TextMuted
+			if reached {
+				color = t.Accent
+			}
+			ui.Text(c, count).FontSize(12).TextColor(color).NoWrap()
+			if goal > 0 {
+				// A thin bar under the count fills toward the goal.
+				const w = 44
+				done := float32(min(words, goal)) / float32(goal)
+				ui.Box(c).Size(w, 2).Radius(1).Background(t.Text.Alpha(.1)).Children(func() {
+					ui.Box(c).Size(w*done, 2).Radius(1).Background(t.Accent)
+				})
+			}
+		})
+	})
+	b.Menu(func(m *ui.Menu) {
+		e.sync()
+		m.Item(fmt.Sprintf(i18n.T("约 %d 分钟读完"), readingMinutes(e.displayText()))).Disabled(true)
+		if goal > 0 {
+			left := goal - words
+			if left > 0 {
+				m.Item(fmt.Sprintf(i18n.T("距离目标还差 %d 字"), left)).Disabled(true)
+			} else {
+				m.Item(i18n.T("已达成字数目标 🎉")).Disabled(true)
+			}
+		}
+		if e.ReadOnly {
+			return
+		}
+		m.Separator()
+		m.Submenu(i18n.T("字数目标"), func(sub *ui.Menu) {
+			for _, n := range goalPresets {
+				if sub.Item(fmt.Sprintf(i18n.T("%d 字"), n)).Checked(goal == n).Chosen() {
+					e.Engine.SetGoal(n)
+				}
+			}
+			sub.Separator()
+			if sub.Item(i18n.T("自定义…")).Chosen() {
+				e.goalEditing, e.goalText = true, ""
+				if goal > 0 {
+					e.goalText = fmt.Sprint(goal)
+				}
+			}
+			if sub.Item(i18n.T("移除目标")).Disabled(goal == 0).Chosen() {
+				e.Engine.SetGoal(0)
+			}
+		})
+	})
+	if e.goalEditing {
+		e.goalPopover(c, b)
+	}
+}
+
+// SetGoal sets the page's word goal, 0 for none.
+func (e *Editor) SetGoal(words int) { e.Engine.SetGoal(words) }
+
+// goalPopover takes a goal of the writer's own below the count: Enter
+// sets it, Escape or a press outside puts it away.
+func (e *Editor) goalPopover(c *ui.Context, anchor ui.Element) {
+	r := anchor.Bounds()
+	windowW, _ := c.Size()
+	ui.Overlay(c, func() {
+		panel := ui.Column(c.Key("goal-popover")).Absolute().Left(max(8, min(r.X+r.W-220, windowW-228))).Top(r.Y + r.H + 6).Width(220).Padding(12).Gap(8)
+		e.popover(c, panel).Children(func() {
+			ui.Text(c, i18n.T("字数目标")).FontSize(12).TextColor(e.page.Caption)
+			in := ui.TextInput(c.Key("goal-input"), &e.goalText).Placeholder(i18n.T("例如 1500")).AutoFocus().Label(i18n.T("字数目标"))
+			set := func() {
+				n, err := strconv.Atoi(strings.TrimSpace(e.goalText))
+				if err == nil && n >= 0 && n <= 1000000 {
+					e.Engine.SetGoal(n)
+					e.goalEditing = false
+					e.RequestFocus = true
+				}
+			}
+			if in.Submitted() {
+				set()
+			}
+			if in.Shortcut(0, ui.KeyEscape) {
+				e.goalEditing = false
+				e.RequestFocus = true
+			}
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if ui.Button(c.Key("goal-cancel"), i18n.T("取消")).Clicked() {
+					e.goalEditing = false
+				}
+				if ui.PrimaryButton(c.Key("goal-set"), i18n.T("设定")).Clicked() {
+					set()
+				}
+			})
+		})
+		if panel.PressedOutside() {
+			e.goalEditing = false
+		}
+	})
 }

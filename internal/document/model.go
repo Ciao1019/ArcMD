@@ -17,10 +17,10 @@ import (
 // of callouts, version 3 the color and highlight of text, version 4 folded
 // headings and list items, cell backgrounds, merged cells and callout
 // emoji, version 5 the page's icon and cover, version 6 scripts, image widths
-// and footnotes. Older documents are read and
-// migrated in memory, and written back as the current version only when
-// edited.
-const CurrentVersion = 6
+// and footnotes, version 7 hand-drawn text annotations, version 8 toggle
+// blocks and the word goal. Older documents are read and migrated in memory, and written back
+// as the current version only when edited.
+const CurrentVersion = 8
 
 // CoverGradients are the covers drawn rather than pictured, as
 // "gradient:name" in Document.Cover.
@@ -37,6 +37,11 @@ var (
 	TextHighlights = []string{"light-gray", "light-red", "light-orange", "light-yellow", "light-green", "light-blue", "light-purple",
 		"medium-gray", "gray", "red", "orange", "yellow", "green", "blue", "purple"}
 )
+
+// Annotations are the hand-drawn marks text may carry, after Opensource UI's
+// AnnotatedText: drawn over the text, except a highlight, drawn under it.
+var Annotations = []string{"wavy", "circle", "highlight", "underline", "line", "dotted", "double",
+	"strike", "cross", "arrow", "bracket", "box"}
 
 func oneOf(value string, set []string) bool {
 	for _, v := range set {
@@ -69,6 +74,11 @@ type Style struct {
 	// TextColors and TextHighlights (version 3).
 	Color     string `json:"color,omitempty"`
 	Highlight string `json:"highlight,omitempty"`
+	// Annotation is a hand-drawn mark, one of Annotations, in
+	// AnnotationColor, one of TextColors, or its own color when ""
+	// (version 7).
+	Annotation      string `json:"annotation,omitempty"`
+	AnnotationColor string `json:"annotationColor,omitempty"`
 }
 
 type Run struct {
@@ -116,6 +126,9 @@ type Document struct {
 	// CoverY is which part of a picture cover taller than its band shows:
 	// 0 its middle, -1 its top, 1 its bottom.
 	CoverY float64 `json:"coverY,omitempty"`
+	// Goal is how many words the writer means the page to reach, 0 for
+	// none (version 8).
+	Goal int `json:"goal,omitempty"`
 	// ImportSource preserves the original interchange file for recovery.
 	ImportSource string `json:"importSource,omitempty"`
 }
@@ -287,8 +300,40 @@ func (d *Document) migrate() error {
 		}
 		return false
 	}
-	if v6(d.Blocks) {
+	if d.Version < 6 && v6(d.Blocks) {
 		return errors.New("document: scripts, image widths and footnotes require version 6")
+	}
+	var v7 func([]*Block) bool
+	v7 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b == nil {
+				continue
+			}
+			for _, r := range b.Runs {
+				if r.Style.Annotation != "" || r.Style.AnnotationColor != "" {
+					return true
+				}
+			}
+			if v7(b.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	if d.Version < 7 && v7(d.Blocks) {
+		return errors.New("document: annotations require version 7")
+	}
+	var v8 func([]*Block) bool
+	v8 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b != nil && (b.Kind == "toggle" || v8(b.Children)) {
+				return true
+			}
+		}
+		return false
+	}
+	if v8(d.Blocks) || d.Goal != 0 {
+		return errors.New("document: toggle blocks and word goals require version 8")
 	}
 	d.Version = CurrentVersion
 	return nil
@@ -319,6 +364,9 @@ func (d *Document) Validate() error {
 	if !ValidCover(d.Cover) || !(d.CoverY >= -1 && d.CoverY <= 1) {
 		return errors.New("document: invalid cover")
 	}
+	if d.Goal < 0 || d.Goal > 1000000 {
+		return errors.New("document: invalid word goal")
+	}
 	ids := make(map[string]bool)
 	var visit func(*Block, string, int) error
 	visit = func(b *Block, parent string, depth int) error {
@@ -338,7 +386,7 @@ func (d *Document) Validate() error {
 		if b.Color != "" && (b.Kind != "callout" || !validCalloutColor(b.Color)) {
 			return errors.New("document: invalid block color")
 		}
-		if b.Folded && b.Kind != "heading" && b.Kind != "bullet" && b.Kind != "numbered" && b.Kind != "task" {
+		if b.Folded && b.Kind != "heading" && b.Kind != "bullet" && b.Kind != "numbered" && b.Kind != "task" && b.Kind != "toggle" {
 			return errors.New("document: only headings and list items fold")
 		}
 		if (b.Background != "" || b.ColSpan != 0 || b.RowSpan != 0) && b.Kind != "cell" {
@@ -365,6 +413,10 @@ func (d *Document) Validate() error {
 			}
 			if r.Style.Color != "" && !oneOf(r.Style.Color, TextColors) || r.Style.Highlight != "" && !oneOf(r.Style.Highlight, TextHighlights) {
 				return errors.New("document: invalid text color")
+			}
+			if r.Style.Annotation != "" && !oneOf(r.Style.Annotation, Annotations) ||
+				r.Style.AnnotationColor != "" && (r.Style.Annotation == "" || !oneOf(r.Style.AnnotationColor, TextColors)) {
+				return errors.New("document: invalid annotation")
 			}
 		}
 		switch b.Kind {
@@ -412,7 +464,7 @@ func (d *Document) Validate() error {
 			if parent != "row" {
 				return errors.New("document: cell outside row")
 			}
-		case "paragraph", "heading", "quote", "bullet", "numbered", "task", "code", "callout", "image", "rule", "raw", "math", "footnote":
+		case "paragraph", "heading", "quote", "bullet", "numbered", "task", "code", "callout", "image", "rule", "raw", "math", "footnote", "toggle":
 		default:
 			return fmt.Errorf("document: unsupported block %q", b.Kind)
 		}
@@ -519,11 +571,13 @@ type Leaf struct {
 	Index      int
 	Owner      string
 	Start, End int
+	// ByteStart and ByteEnd address the same leaf in PlainText's UTF-8 string.
+	ByteStart, ByteEnd int
 }
 
 func (d *Document) Leaves() []Leaf {
 	var out []Leaf
-	position := 0
+	position, bytePosition := 0, 0
 	var walk func(*[]*Block, string, map[*Block]bool)
 	walk = func(blocks *[]*Block, owner string, covered map[*Block]bool) {
 		for i, block := range *blocks {
@@ -543,9 +597,11 @@ func (d *Document) Leaves() []Leaf {
 				walk(&block.Children, top, inner)
 				continue
 			}
-			end := position + Len(block.Text())
-			out = append(out, Leaf{Block: block, Parent: blocks, Index: i, Owner: top, Start: position, End: end})
+			text := block.Text()
+			end, byteEnd := position+Len(text), bytePosition+len(text)
+			out = append(out, Leaf{Block: block, Parent: blocks, Index: i, Owner: top, Start: position, End: end, ByteStart: bytePosition, ByteEnd: byteEnd})
 			position = end + 1
+			bytePosition = byteEnd + 1
 		}
 	}
 	walk(&d.Blocks, "", nil)
@@ -553,11 +609,51 @@ func (d *Document) Leaves() []Leaf {
 }
 
 func (d *Document) PlainText() string {
-	var parts []string
-	for _, leaf := range d.Leaves() {
-		parts = append(parts, leaf.Block.Text())
+	// Walked directly rather than through Leaves: search rereads the text
+	// of an open page as it changes, and on a long page the leaf list and
+	// the slice of parts would be most of that work.
+	var out strings.Builder
+	first := true
+	var walk func([]*Block, map[*Block]bool)
+	walk = func(blocks []*Block, covered map[*Block]bool) {
+		for _, block := range blocks {
+			if covered[block] {
+				continue
+			}
+			if len(block.Children) > 0 {
+				inner := covered
+				if block.Kind == "table" {
+					inner = CoveredCells(block)
+				}
+				walk(block.Children, inner)
+				continue
+			}
+			if !first {
+				out.WriteByte('\n')
+			}
+			first = false
+			for _, run := range block.Runs {
+				out.WriteString(run.Text)
+			}
+		}
 	}
-	return strings.Join(parts, "\n")
+	walk(d.Blocks, nil)
+	return out.String()
+}
+
+// HasKind reports whether any block of the document, at any depth, is of
+// the kind, without building the leaf list.
+func (d *Document) HasKind(kind string) bool {
+	var walk func([]*Block) bool
+	walk = func(blocks []*Block) bool {
+		for _, block := range blocks {
+			if block.Kind == kind || walk(block.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(d.Blocks)
 }
 
 func Table(rows, columns int) *Block {

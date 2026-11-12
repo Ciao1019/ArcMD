@@ -214,3 +214,25 @@ func TestMovedAcross(t *testing.T) {
 		t.Errorf("favorites = %v", st.Favorites)
 	}
 }
+
+func TestFolderSortFollowsAndClears(t *testing.T) {
+	s := &Space{}
+	s.SetSort("Notes", "modified")
+	s.SetSort("", "name")
+	s.SetSort("x", "bogus")
+	if s.SortOf("Notes") != "modified" || s.SortOf("") != "name" || s.SortOf("x") != "" {
+		t.Fatal(s.Sort)
+	}
+	s.Renamed("Notes", "Journal")
+	if s.SortOf("Journal") != "modified" || s.SortOf("Notes") != "" {
+		t.Fatal("renaming follows", s.Sort)
+	}
+	s.Place("", []string{"a", "b"}, "b", 0)
+	if s.SortOf("") != "" {
+		t.Fatal("placing by hand ends the sort")
+	}
+	s.Forget("Journal")
+	if len(s.Sort) != 0 {
+		t.Fatal("forgetting drops it", s.Sort)
+	}
+}

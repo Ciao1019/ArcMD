@@ -10,7 +10,7 @@ import (
 func TestVersionSixMigrationAndAttributes(t *testing.T) {
 	old := `{"format":"arcmd","version":5,"icon":"📖","cover":"gradient:sea","blocks":[{"id":"p","kind":"paragraph","runs":[{"text":"H2O"}]}]}`
 	d, err := Decode(old)
-	if err != nil || d.Version != 6 || d.Icon != "📖" {
+	if err != nil || d.Version != CurrentVersion || d.Icon != "📖" {
 		t.Fatal(d, err)
 	}
 	e := NewEngine(d)
@@ -30,7 +30,7 @@ func TestVersionSixMigrationAndAttributes(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(decoded, e.Doc) {
 		t.Fatal("v6 round trip", err)
 	}
-	if _, err := Decode(strings.Replace(s, `"version": 6`, `"version": 5`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, `"version": 8`, `"version": 5`, 1)); err == nil {
 		t.Fatal("accepted new attributes in v5")
 	}
 	e.Undo()

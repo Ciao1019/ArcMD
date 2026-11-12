@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -48,14 +49,27 @@ func arrangeNodes(sp *space.Space, dir string, nodes []*vault.Node) {
 	if len(nodes) == 0 {
 		return
 	}
-	names := make([]string, len(nodes))
-	byName := make(map[string]*vault.Node, len(nodes))
-	for i, n := range nodes {
-		names[i] = n.Name
-		byName[n.Name] = n
-	}
-	for i, name := range sp.Arrange(dir, names) {
-		nodes[i] = byName[name]
+	switch sp.SortOf(dir) {
+	case "name":
+		// Folders first, then documents, each by name as people read it.
+		slices.SortStableFunc(nodes, func(x, y *vault.Node) int {
+			if x.Dir != y.Dir {
+				return b2i(y.Dir) - b2i(x.Dir)
+			}
+			return strings.Compare(strings.ToLower(x.Title()), strings.ToLower(y.Title()))
+		})
+	case "modified":
+		slices.SortStableFunc(nodes, func(x, y *vault.Node) int { return y.Modified.Compare(x.Modified) })
+	default:
+		names := make([]string, len(nodes))
+		byName := make(map[string]*vault.Node, len(nodes))
+		for i, n := range nodes {
+			names[i] = n.Name
+			byName[n.Name] = n
+		}
+		for i, name := range sp.Arrange(dir, names) {
+			nodes[i] = byName[name]
+		}
 	}
 	for _, n := range nodes {
 		if n.Dir {
@@ -488,11 +502,20 @@ func (a *App) placeEntry(rel, dir string, index int) {
 		a.refreshTree()
 		return
 	}
+	from := parentDir(rel)
+	back := slices.IndexFunc(a.childrenOf(from), func(n *vault.Node) bool { return n.Path == rel })
 	to, _, err := a.moveWithResources(sp, rel, sp, dir)
 	if err != nil {
 		a.notify("移动 %s 失败。%v", path.Base(rel), err)
 		return
 	}
+	defer a.offerUndo(i18n.T("已移到「")+folderName(sp, dir)+"」", path.Base(to), func() {
+		if a.state.ActiveSpace() != sp {
+			a.notify("「%s」已不在当前空间，无法撤销移动。", path.Base(to))
+			return
+		}
+		a.placeEntry(to, from, max(0, back))
+	})
 	if dir != "" {
 		sp.SetExpanded(dir, true)
 	}
@@ -554,6 +577,6 @@ func intoBadge(c *ui.Context) {
 	ui.Row(c.Key("into-badge")).Absolute().Right(8).Top(6).Height(22).PaddingX(8).Gap(4).Radius(11).
 		AlignItems(ui.Center).Background(fill).Shadow(0, 1, 2, 0, black.Alpha(0.08)).Children(func() {
 		ui.Icon(c, iconFolder).FontSize(12).TextColor(t.Text)
-		ui.Text(c, "移到文件夹").FontSize(11).FontWeight(600).TextColor(t.Text).NoWrap()
+		ui.Text(c, i18n.T("移到文件夹")).FontSize(11).FontWeight(600).TextColor(t.Text).NoWrap()
 	})
 }

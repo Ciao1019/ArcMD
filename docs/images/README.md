@@ -19,11 +19,30 @@
   the tint's opacity. It does not imply an independent blur control.
   Both loops return to their starting state and provide a composed static
   illustration under `prefers-reduced-motion`.
-  Regenerate all four localized files with
-  `python3 scripts/readme_vector_art.py`. Preview them as `<img>` elements,
-  as GitHub does. The older `TestReadmeArt` renderer is only a raster
+  Preview the localized files as `<img>` elements, as GitHub does.
+  The older `TestReadmeArt` renderer is only a raster
   reference utility; direct its output to a temporary folder rather than
   replacing these vector assets.
+- `readme/annotations-{zh-CN,en}.svg` illustrate hand-drawn text annotations in
+  the same window style. The 26-second loop selects seven phrases, opens the
+  12-style picker, and draws a wave, circle, highlight, double underline,
+  cross, arrow, and box. The completed page rests before fading back to the
+  start. It is a vector illustration, not a screen recording. The picker is
+  placed beside the page so the strokes remain visible.
+  The paths and annotation geometry come from `internal/editor/annotate.go`;
+  their Opensource UI MIT notice is included in each SVG. There are no filters,
+  raster frames, scripts, fonts to download, or external resources. Reduced
+  motion shows all completed marks and the picker without a pointer or selection.
+  The accompanying `readme/annotations-demo-{zh-CN,en}.arcmd` files contain
+  the original sample copy and marks, ready to open in ArcMD.
+  Regenerate both languages and sample documents from the repository root:
+
+  ```sh
+  CGO_ENABLED=0 go run ./tools/readme-art
+  ```
+
+  The generator reads the existing localized bookmark illustrations for their
+  window shell, and uses only Go's standard library and the document model.
 - `download-{macos,windows,linux}-{en,zh-CN}.svg` are the platform download
   buttons: plain white, a thin border and a monochrome glyph, 200×56. The Apple glyph path is adapted from
   [Quiet.md](https://github.com/s1dashu/quiet-md/tree/main/docs/images) (MIT,

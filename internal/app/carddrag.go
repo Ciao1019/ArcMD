@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -94,7 +95,7 @@ func (a *App) cardGrip(c *ui.Context, s *space.Space, index int) {
 	t := c.Theme()
 	l := &a.library
 	grip := ui.Box(c.Key("grip")).Size(28, 28).Radius(8).Center().Cursor(ui.CursorGrab).Focusable().
-		Role(ui.RoleButton).Label("移动空间 " + s.Name).Tooltip("拖动以调整空间顺序")
+		Role(ui.RoleButton).Label(i18n.T("移动空间 ") + s.Name).Tooltip(i18n.T("拖动以调整空间顺序"))
 	m := l.move
 	held := m != nil && m.id == s.ID && !m.settling
 	if held {

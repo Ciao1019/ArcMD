@@ -114,3 +114,38 @@ func (e *Engine) MoveSection(id, before string) {
 		e.FocusBlock(id)
 	})
 }
+
+// SetGoal sets how many words the page means to reach, as one step of the
+// history: 0 takes the goal away.
+func (e *Engine) SetGoal(words int) {
+	if words < 0 || words > 1000000 {
+		return
+	}
+	e.Edit(func() { e.Doc.Goal = words })
+}
+
+// MapProse runs change over the text of every run that is prose, not
+// code, a formula or source kept as written, as one step of the history,
+// and reports whether anything changed: tags that are renamed.
+func (e *Engine) MapProse(change func(string) string) bool {
+	before := e.version
+	e.Edit(func() {
+		var walk func([]*Block)
+		walk = func(blocks []*Block) {
+			for _, b := range blocks {
+				if !isVerbatim(b) {
+					for i := range b.Runs {
+						if !b.Runs[i].Style.Code {
+							b.Runs[i].Text = change(b.Runs[i].Text)
+						}
+					}
+				}
+				walk(b.Children)
+			}
+		}
+		walk(e.Doc.Blocks)
+		a, z := e.Anchor, e.Caret
+		e.SetSelection(a, z)
+	})
+	return e.version != before
+}

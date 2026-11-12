@@ -6,7 +6,7 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.9-F21158" alt="Version 0.0.9"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.11-F21158" alt="Version 0.0.11"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.0.9. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.0.11. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
@@ -77,6 +77,17 @@ three colors. Lower the intensity of a single-color theme and the window turns
 translucent, softly blurring the desktop behind it; turn the grain dial, or pick
 Auto, Light or Dark.
 
+### Hand-drawn marks: give your ideas a human touch
+
+<p align="center"><img src="docs/images/readme/annotations-en.svg" width="100%" alt="Smooth vector animation of ArcMD hand-drawn marks: select words and draw a wave, circle, highlight, double underline, cross, arrow and box as an idea journal takes shape"></p>
+
+Select a few words and open the dropdown beside the annotation button in the
+floating toolbar. Choose from 12 hand-drawn styles to circle what matters,
+cross out hesitation, or point to the next step. Each stroke draws itself in,
+and you can choose its color. Marks are saved in your `.arcmd` document.
+Try the [idea journal](docs/images/readme/annotations-demo-en.arcmd), or start
+with a sentence of your own.
+
 ### Bookmarks: pick up where you left off
 
 <p align="center"><img src="docs/images/readme/bookmarks-en.svg" width="100%" alt="Smooth vector animation of ArcMD bookmarks: click the margin to add bookmarks, watch their outline entries appear, jump smoothly back to a passage, and open all bookmarks with Shift Command D"></p>
@@ -106,21 +117,28 @@ its own.
 
 ## Features
 
-Inline and block TeX, footnotes, superscript/subscript, Markdown and HTML clipboard exchange, anchored link editing, local wiki previews, image resizing and continuous zoom, bracket pairing, reading typography and a per-editor reading lock are supported.
-
 ### Write on a rich-text canvas
 
 - **Rich formatting** — headings, bold, italic, underline, strikethrough, links,
   inline code, text colors, and highlights. Select text to reveal a floating
   toolbar; use `/` to insert a block.
+- **Hand-drawn marks** — 12 styles with selectable colors, including circles,
+  waves, highlights, arrows, and boxes, with animated strokes.
 - **More than paragraphs** — nested lists, tasks, quotes, colored callouts,
-  code blocks, images, TeX formula blocks, editable tables with merged cells,
-  and two-column layouts.
+  code blocks, images, inline and block TeX, footnotes, superscript/subscript,
+  editable tables with merged cells, and two-column layouts.
+- **Comfortable input** — Markdown and HTML clipboard exchange, bracket and
+  quote pairing, and optional Chinese–Latin spacing. Type `:sm` to search emoji,
+  or use `@` for dates and document links.
 - **A document with structure** — a navigable outline, collapsible headings
-  and lists, draggable blocks and sections, page icons, and image or gradient
-  covers.
+  and lists, and dedicated toggle blocks. Select multiple blocks to move,
+  indent, duplicate, or delete them together. Add page icons and image or
+  gradient covers.
+- **Tables and images** — paste CSV or tab-separated text as a table and sort
+  rows by a column. Resize, zoom, and crop images while retaining the original;
+  animated GIFs play in the page.
 - **Bring your content along** — import and export Markdown, paste rich content
-  from webpages and document apps, and export pages to PDF.
+  from webpages and document apps, and export pages to PDF or HTML.
 
 ### Give every project its own space
 
@@ -133,20 +151,28 @@ Inline and block TeX, footnotes, superscript/subscript, Markdown and HTML clipbo
   ⌘D) to mark it, jump between marks with ⌃⌘↑ / ⌃⌘↓,
   and find them all in the outline or the command bar. Bookmarks never change
   the document itself.
-- **Split views** — work with up to four documents at once, with resizable panes
-  and independent cursors, scrolling, and undo histories.
-- **Quick navigation** — a command bar, full-text search, document previews,
-  folder previews, and back/forward history keep your work close at hand.
+- **Split views and windows** — work in up to four resizable panes, or move a
+  document into its own native window, preserving its cursor, scroll position,
+  and undo history.
+- **Navigation and organization** — recent commands, full-text search,
+  cross-document replacement, document and folder previews, and back/forward
+  history. Sort folders by name or modification time.
+- **Templates and daily notes** — reuse Space templates with date, time,
+  weekday, and title placeholders; open or create today's note in one command.
 
 ### Connect ideas and stay in flow
 
 - **Linked notes** — connect documents with `[[wiki links]]`, see backlinks,
-  and browse `#tags`. Renaming a document updates links to it.
+  and browse, rename, or merge `#tags`. Renaming a document updates links to it.
 - **Focused writing** — a distraction-free mode, optional paragraph dimming,
-  typewriter scrolling, and customizable keyboard shortcuts.
+  typewriter scrolling, word goals, estimated reading time, and customizable
+  keyboard shortcuts.
+- **Your reading preferences** — Chinese and English UI, a choice of fonts,
+  page width, text size, and line height, plus a per-editor reading lock.
 - **Local ownership** — documents and attachments stay in your folders.
   Autosave, version history, external-change detection, and a 30-day recently
-  deleted collection help you recover your work.
+  deleted collection help you recover your work. Undo deletion and moves from
+  their notifications.
 
 ### A small core, room to extend
 
@@ -163,16 +189,23 @@ the median of the three per-run P50 and P95 values.
 
 | Operation | P50 | P95 |
 | --- | ---: | ---: |
-| ⌨️ Typing | **0.589 ms** | 1.105 ms |
-| ⌫ Backspace | **0.572 ms** | 1.002 ms |
-| 🖱️ Scrolling | **0.489 ms** | 1.136 ms |
+| ⌨️ Typing | **0.273 ms** | 0.291 ms |
+| ⌫ Backspace | **0.271 ms** | 0.306 ms |
+| 🖱️ Scrolling | **0.548 ms** | 1.132 ms |
 
 A 120 Hz display gives each frame **8.3 ms**. In this workload, CPU frame
 construction takes less than **1.2 ms at P95**, leaving room in that budget for
 input handling and presentation.
 
-Apple M5 / 24 GiB, macOS 26.5.1, Go 1.27.3, MyGo v0.7.4; measured on
-November 8, 2026. The benchmark runs the normal frame pipeline through a headless
+Including event handling, body typing in the same million-character document
+takes **0.275 ms P50**, typing with find open takes **0.281 ms**, and repeated IME
+candidate updates take **0.264 ms** (excluding composition start and commit).
+Position indexes, local layout, incremental find, and viewport culling reduce
+whole-document scans. Ordinary typing allocates about **0.067 MB per operation**;
+this is allocation volume, not resident memory.
+
+Apple M5 / 24 GiB, macOS 26.5.1, Go 1.27.3, MyGo v0.7.4, `CGO_ENABLED=0`.
+The benchmark runs the normal frame pipeline through a headless
 host and measures CPU scene construction. Input dispatch, rasterization, GPU
 presentation, and display latency are outside the frame timer; these numbers
 are not end-to-end input latency or measured display FPS.
@@ -180,14 +213,9 @@ are not end-to-end input latency or measured display FPS.
 Methodology, raw measurements, and reproduction scripts:
 [Performance report](docs/performance.md) · [Benchmark harness](tools/perf/README.md).
 
-| | |
-| --- | --- |
-| macOS download | ~3.9 MB Apple Silicon / ~4.6 MB Intel (`.dmg`) |
-| Windows executable | ~13.6 MB x64, before installer compression |
-| Runtime | Native Go + MyGo; no WebView, no Electron, no separate background service |
-
-Sizes are from local development builds made before the first release, in decimal MB. Download size varies
-by platform and release.
+Native Go + MyGo; no WebView, Electron, or separate background service. See
+[GitHub Releases](https://github.com/Ciao1019/ArcMD/releases/latest) for actual
+package sizes on each platform.
 
 ## Markdown and your files
 
@@ -200,7 +228,7 @@ The first edit saves a new `.arcmd` document beside it and keeps the original
 Markdown file. Markdown export creates a separate `.md` file for sharing and
 use in other tools.
 
-Markdown cannot represent every rich-text feature: text colors, some table
+Markdown cannot represent every rich-text feature: text colors, hand-drawn marks, some table
 formatting, and merged-cell structure are not preserved on export. Keep the
 `.arcmd` file for a complete copy of your document.
 

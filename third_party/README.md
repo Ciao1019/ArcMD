@@ -40,6 +40,14 @@ in `textus/LICENSE`.
 
 [Textus source](https://github.com/CatVinci-Studio/Textus)
 
+The hand-drawn text annotations (`internal/editor/annotate.go`) port Opensource
+UI's AnnotatedText, under the MIT License, Copyright (c) 2026 Bidyut Kundu.
+Its SVG paths are kept; its turbulence filter is replaced by a seeded
+displacement of the flattened strokes, drawn natively. The MIT notice is in
+`opensourceui/LICENSE`.
+
+[Opensource UI source](https://github.com/bidyut10/opensourceui)
+
 Formula presentation was checked against Textus commit
 `21dc743b84c5c8f518cfdc95c9654fe31b61507e` (its math preview plugin and editor CSS).
 The native renderer embeds the unmodified `KaTeX_Main-Regular.ttf` and

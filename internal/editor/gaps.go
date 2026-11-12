@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -103,7 +104,7 @@ func (e *Editor) paintGap(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 	}
 	p.Fill(r, e.page.Hover, 6)
 	p.Icon(iconPlus, ui.Rect{X: r.X + 10, Y: r.Y + (r.H-16)/2, W: 16, H: 16}, e.page.Caption)
-	span := ui.Span{Text: "点击添加段落", Size: 14, Color: e.page.Caption}
+	span := ui.Span{Text: i18n.T("点击添加段落"), Size: 14, Color: e.page.Caption}
 	_, h := p.MeasureText(0, span)
 	p.RichText(r.X+32, r.Y+(r.H-h)/2, 0, span)
 }

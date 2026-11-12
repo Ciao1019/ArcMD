@@ -1,0 +1,7 @@
+=== RUN   TestPerformanceReview
+    performance_test.go:328: pause type frame p50=1.036 p95=1.636 total p50=1.127 p95=1.771 MB/op=19.692
+    performance_test.go:331: type delayed frame p50=1.372 p95=2.836
+    performance_test.go:328: pause backspace frame p50=0.994 p95=1.662 total p50=1.169 p95=1.998 MB/op=19.744
+    performance_test.go:331: backspace delayed frame p50=1.354 p95=3.002
+--- PASS: TestPerformanceReview (2.93s)
+PASS

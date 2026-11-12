@@ -524,3 +524,28 @@ func TestSplitResizeKeepsSearchAndSavedLayoutStable(t *testing.T) {
 		t.Fatal("focus-only change rebuilt search")
 	}
 }
+
+// Adding a split lives in the "⋯" menu, not as its own toolbar button.
+func TestSplitAddFromMoreMenu(t *testing.T) {
+	a, tt := newTestApp(t)
+	if err := writeNative(root(a), "Left.arcmd", "# Left\n\nLeft body"); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("Left.arcmd")
+	settle(tt)
+	if _, ok := tt.Find("添加分屏"); ok {
+		t.Fatal("the split button is still in the toolbar")
+	}
+	if err := tt.Click("更多"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("添加分屏"); err != nil {
+		t.Fatal(err)
+	}
+	settle(tt)
+	if a.split == nil || len(a.split.panes) != 2 {
+		t.Fatal("the menu item did not add a split")
+	}
+}

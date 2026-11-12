@@ -1,0 +1,5 @@
+=== RUN   TestPerformanceReview
+    performance_test.go:328: control type frame p50=0.910 p95=1.341 total p50=1.031 p95=1.531 MB/op=2.924
+    performance_test.go:328: control backspace frame p50=0.847 p95=1.068 total p50=1.062 p95=1.370 MB/op=2.996
+--- PASS: TestPerformanceReview (3.37s)
+PASS

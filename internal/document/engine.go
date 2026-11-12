@@ -2,7 +2,6 @@ package document
 
 import (
 	"reflect"
-	"sort"
 	"strings"
 )
 
@@ -16,18 +15,23 @@ type Snapshot struct {
 // Engine applies structural changes atomically and owns one history for every
 // paragraph, table cell and column. Snapshots never alias mutable documents.
 type Engine struct {
-	ReadOnly          bool // Session reading lock; does not change the stored document.
-	depth             int
-	Doc               *Document
-	Anchor, Caret     int
-	Typing            Style
-	Explicit          bool
-	version, revision uint64
-	undo, redo        []historyEntry
-	indexDoc          *Document
-	indexRevision     uint64
-	leaves            []Leaf
-	textChange        TextChange
+	ReadOnly             bool // Session reading lock; does not change the stored document.
+	depth                int
+	Doc                  *Document
+	Anchor, Caret        int
+	Typing               Style
+	Explicit             bool
+	version, revision    uint64
+	undo, redo           []historyEntry
+	indexDoc             *Document
+	indexRevision        uint64
+	leaves               []Leaf
+	leafIDs              map[string]int
+	unitIndex, byteIndex offsetIndex
+	hiddenDoc            *Document
+	hiddenRevision       uint64
+	hidden               map[string]string
+	textChange           TextChange
 }
 
 func NewEngine(doc *Document) *Engine   { return &Engine{Doc: doc.Clone()} }
@@ -90,7 +94,7 @@ func dropStrayColors(blocks []*Block) {
 		if b.Kind != "callout" {
 			b.Color, b.Emoji = "", ""
 		}
-		if b.Kind != "heading" && !isListKind(b.Kind) {
+		if b.Kind != "heading" && !isListKind(b.Kind) && b.Kind != "toggle" {
 			b.Folded = false
 		}
 		if b.Kind == "table" {
@@ -162,21 +166,6 @@ func (e *Engine) Redo() {
 	e.version++
 }
 
-func (e *Engine) LeafAt(at int) Leaf {
-	// A transaction may query intermediate mutations before its revision is
-	// published. Only the committed state can retain an index across queries.
-	leaves := e.leaves
-	if e.depth > 0 {
-		leaves = e.Doc.Leaves()
-	} else if e.indexDoc != e.Doc || e.indexRevision != e.revision {
-		e.leaves = e.Doc.Leaves()
-		e.indexDoc, e.indexRevision = e.Doc, e.revision
-		leaves = e.leaves
-	}
-	i := sort.Search(len(leaves), func(i int) bool { return at <= leaves[i].End })
-	return leaves[min(i, len(leaves)-1)]
-}
-
 func (e *Engine) CurrentStyle() Style {
 	if e.Explicit {
 		return e.Typing
@@ -208,21 +197,26 @@ func (e *Engine) PreviewReplace(a, z int, text string) {
 	if e.ReadOnly {
 		return
 	}
+	if e.replaceTextMode(a, z, text, false) {
+		return
+	}
 	e.replace(a, z, text)
 	e.revision++
 }
 
 func (e *Engine) replace(a, z int, text string) {
-	plain := e.Doc.PlainText()
-	a, z = Len(plain[:ByteOffset(plain, max(0, min(a, z)))]), Len(plain[:ByteOffset(plain, max(a, z))])
+	a, z = max(0, min(a, z)), max(0, max(a, z))
 	first, last := e.LeafAt(a), e.LeafAt(z)
+	left, right := first.Block.Text(), last.Block.Text()
+	a = first.Start + Len(left[:ByteOffset(left, a-first.Start)])
+	z = last.Start + Len(right[:ByteOffset(right, z-last.Start)])
 	style := e.CurrentStyle()
 	style.NoMath = false
 	before := SliceRuns(first.Block.Runs, 0, a-first.Start)
 	after := SliceRuns(last.Block.Runs, z-last.Start, last.End-last.Start)
 	runs := Compact(append(append(before, Run{Text: strings.ReplaceAll(text, "\r\n", "\n"), Style: style}), after...))
 	if first.Parent != last.Parent || first.Block != last.Block && first.Block.Kind == "cell" {
-		if a == 0 && z == Len(plain) {
+		if a == 0 && z == e.TextLength() {
 			e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
 			first = e.Doc.Leaves()[0]
 			first.Block.Runs = runs
@@ -309,11 +303,54 @@ func (e *Engine) Enter(soft bool) {
 	if e.enterMath(leaf) {
 		return
 	}
-	if !soft && e.Anchor == e.Caret && leaf.Block.Text() == "" && (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task" || leaf.Block.Kind == "quote") {
+	if !soft && e.Anchor == e.Caret && leaf.Block.Text() == "" && (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task" || leaf.Block.Kind == "quote" || leaf.Block.Kind == "toggle") {
 		e.SetKind("paragraph", 0)
 		return
 	}
+	if b := leaf.Block; b.Kind == "toggle" && e.Anchor == e.Caret && e.Caret == leaf.End && leaf.Owner == b.ID {
+		e.enterToggle(b)
+		return
+	}
 	e.Replace(min(e.Anchor, e.Caret), max(e.Anchor, e.Caret), "\n")
+}
+
+// OpenToggle gives the toggle id an empty line of content, indented under
+// it, unless it has content already, keeping the caret in its title.
+func (e *Engine) OpenToggle(id string) {
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent == nil || (*parent)[index].Kind != "toggle" {
+			return
+		}
+		b := (*parent)[index]
+		b.Folded = false
+		if index+1 < len(*parent) && (*parent)[index+1].Indent > b.Indent && (*parent)[index+1].Kind != "heading" {
+			return
+		}
+		inner := NewBlock("paragraph", "")
+		inner.Indent = min(12, b.Indent+1)
+		*parent = append(append(append([]*Block(nil), (*parent)[:index+1]...), inner), (*parent)[index+1:]...)
+	})
+}
+
+// enterToggle starts a line after the end of toggle b, as Notion's: inside
+// it, indented, when it is open; after what it hides when it is folded.
+func (e *Engine) enterToggle(b *Block) {
+	e.Edit(func() {
+		parent, index := e.find(b.ID)
+		if parent == nil {
+			return
+		}
+		next := NewBlock("paragraph", "")
+		next.Indent = min(12, b.Indent+1)
+		at := index + 1
+		if b.Folded {
+			next.Indent = b.Indent
+			at += foldReach(*parent, index)
+		}
+		*parent = append(append(append([]*Block(nil), (*parent)[:at]...), next), (*parent)[at:]...)
+		e.FocusBlock(next.ID)
+	})
 }
 
 // Fragment captures selected structure for ArcMD's clipboard representation.
@@ -494,6 +531,27 @@ func (e *Engine) SetTextColor(color, highlight *string) {
 			s.Highlight = *highlight
 		}
 	}
+	if e.Anchor == e.Caret {
+		style := e.CurrentStyle()
+		change(&style)
+		e.Typing, e.Explicit = style, true
+		return
+	}
+	e.Edit(func() { e.format(change) })
+}
+
+// SetAnnotation draws a hand-drawn mark on the selection, or on what is
+// typed next at a collapsed caret: variant is one of Annotations, or ""
+// to take the mark away; color one of TextColors, or "" for the variant's
+// own.
+func (e *Engine) SetAnnotation(variant, color string) {
+	if e.ReadOnly {
+		return
+	}
+	if variant == "" {
+		color = ""
+	}
+	change := func(s *Style) { s.Annotation, s.AnnotationColor = variant, color }
 	if e.Anchor == e.Caret {
 		style := e.CurrentStyle()
 		change(&style)

@@ -63,6 +63,28 @@ type Space struct {
 	// as dragging them leaves it. What a list leaves out follows it, in
 	// the folder's own order.
 	Order map[string][]string `json:"order,omitempty"`
+	// Sort is how a folder, by its path ("" for the root), sorts its files
+	// and folders instead of the order dragging leaves: "name" or
+	// "modified", newest first (version 8).
+	Sort map[string]string `json:"sort,omitempty"`
+}
+
+// Sorts are the ways a folder may sort, beside its own order ("").
+var Sorts = []string{"", "name", "modified"}
+
+// SortOf is how the folder dir sorts: "" for the order dragging leaves.
+func (s *Space) SortOf(dir string) string { return s.Sort[dir] }
+
+// SetSort sets how the folder dir sorts; "" goes back to its own order.
+func (s *Space) SetSort(dir, mode string) {
+	if mode != "name" && mode != "modified" {
+		delete(s.Sort, dir)
+		return
+	}
+	if s.Sort == nil {
+		s.Sort = map[string]string{}
+	}
+	s.Sort[dir] = mode
 }
 
 // Arrange orders the names of the folder dir's files and folders as the
@@ -98,6 +120,8 @@ func (s *Space) Arrange(dir string, names []string) []string {
 func (s *Space) Place(dir string, shown []string, name string, index int) {
 	list := slices.DeleteFunc(slices.Clone(shown), func(n string) bool { return n == name })
 	index = min(max(index, 0), len(list))
+	// Placing by hand is the folder's own order again.
+	delete(s.Sort, dir)
 	if s.Order == nil {
 		s.Order = map[string][]string{}
 	}
@@ -174,6 +198,11 @@ func under(p, rel string) bool { return p == rel || strings.HasPrefix(p, rel+"/"
 func (s *Space) Renamed(from, to string) {
 	s.reorderRenamed(from, to)
 	re := renamer(from, to)
+	sorts := s.Sort
+	s.Sort = nil
+	for k, v := range sorts {
+		s.SetSort(re(k), v)
+	}
 	for i, p := range s.Pins {
 		s.Pins[i] = re(p)
 	}
@@ -208,6 +237,11 @@ func (s *Space) Forget(rel string) {
 	for k := range s.Order {
 		if under(k, rel) {
 			delete(s.Order, k)
+		}
+	}
+	for k := range s.Sort {
+		if under(k, rel) {
+			delete(s.Sort, k)
 		}
 	}
 	s.Expanded = slices.DeleteFunc(s.Expanded, func(p string) bool { return under(p, rel) })
@@ -305,6 +339,11 @@ func (st *State) MovedAcross(fromID, from, toID, to string) {
 				dst.Order[re(k)] = slices.Clone(names)
 			}
 		}
+		for k, mode := range src.Sort {
+			if under(k, from) {
+				dst.SetSort(re(k), mode)
+			}
+		}
 	}
 	if src != nil {
 		src.Forget(from)
@@ -361,8 +400,9 @@ type State struct {
 // sidebar in, and State.FavoritesHintDismissed; older states have neither.
 // Version 6 added Space.Pins, what is pinned at the top of a space's list,
 // and Space.PinsCollapsed. Version 7 added State.Bookmarks, the places
-// marked in documents; older states have none.
-const CurrentVersion = 7
+// marked in documents; older states have none. Version 8 added
+// Space.Sort, folders sorted by name or time.
+const CurrentVersion = 8
 
 // ErrNotFound reports a space ID the state does not have.
 var ErrNotFound = errors.New("space: not found")

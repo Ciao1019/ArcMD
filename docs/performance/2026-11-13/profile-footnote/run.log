@@ -1,0 +1,5 @@
+=== RUN   TestPerformanceReview
+    performance_test.go:328: footnote type frame p50=4.238 p95=7.108 total p50=4.334 p95=7.203 MB/op=15.579
+    performance_test.go:328: footnote backspace frame p50=4.299 p95=7.673 total p50=4.510 p95=7.895 MB/op=15.633
+--- PASS: TestPerformanceReview (4.06s)
+PASS

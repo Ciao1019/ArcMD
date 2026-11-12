@@ -27,7 +27,10 @@ var (
 	iconOutline      = lucide(`<path d="M21 5H3"/><path d="M15 12H3"/><path d="M17 19H3"/>`)
 	iconAlignLeft    = lucide(`<path d="M21 5H3"/><path d="M15 12H3"/><path d="M17 19H3"/>`)
 	iconAlignCenter  = lucide(`<path d="M21 5H3"/><path d="M17 12H7"/><path d="M19 19H5"/>`)
-	iconAlignRight   = lucide(`<path d="M21 5H3"/><path d="M21 12H9"/><path d="M21 19H7"/>`)
+	// The read-only toggle: Lucide's lock and lock-open.
+	iconLocked     = lucide(`<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`)
+	iconUnlocked   = lucide(`<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>`)
+	iconAlignRight = lucide(`<path d="M21 5H3"/><path d="M21 12H9"/><path d="M21 19H7"/>`)
 )
 
 // Icons drawn on the page.
@@ -55,6 +58,9 @@ var (
 	iconCodeBlock = lucide(`<path d="m10 9-3 3 3 3"/><path d="m14 15 3-3-3-3"/><rect x="3" y="3" width="18" height="18" rx="2"/>`)
 	iconTable     = lucide(`<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>`)
 	iconColumns   = lucide(`<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>`)
+	iconSortUp    = lucide(`<path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/>`)
+	iconSortDown  = lucide(`<path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M15 4h5l-5 6h5"/><path d="M15 20v-3.5a2.5 2.5 0 0 1 5 0V20"/><path d="M20 18h-5"/>`)
+	iconToggle    = lucide(`<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 4 4-4 4"/>`)
 	iconRule      = lucide(`<path d="M5 12h14"/>`)
 	iconHeading4  = lucide(`<path d="M12 18V6"/><path d="M17 10v3a1 1 0 0 0 1 1h3"/><path d="M21 10v8"/><path d="M4 12h8"/><path d="M4 18V6"/>`)
 	iconHeading5  = lucide(`<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 13v-3h4"/><path d="M17 17.7c.4.2.8.3 1.3.3 1.5 0 2.7-1.1 2.7-2.5S19.8 13 18.3 13H17"/>`)

@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -127,7 +129,7 @@ func (a *App) iconPicker(c *ui.Context, f *spaceForm, anchor ui.Element) {
 		pop := ui.PopoverBase(c.Key("space-icons"), anchor, &f.iconsOpen, func(panel ui.Element) {
 			panel.Width(pickerW).Height(310).Padding(10, 10, 8, 10).Radius(18).
 				LinearGradient(fill).Border(0.5, rim).Shadow(0, 8, 24, 0, black.Alpha(0.20)).
-				Role(ui.RoleDialog).Label("选择空间图标")
+				Role(ui.RoleDialog).Label(i18n.T("选择空间图标"))
 			if f.id != "" {
 				panel.AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).Margin(0, 0, 10, 0)
 			}
@@ -170,11 +172,11 @@ func (a *App) pickerHeader(c *ui.Context, f *spaceForm) {
 	t := c.Theme()
 	ui.Row(c).Padding(0, 0, 0, 22).Gap(4).AlignItems(ui.Center).Children(func() {
 		ui.Row(c.Key("icon-tabs")).Gap(2).
-			Role(ui.RoleTabList).Label("图标类型").Children(func() {
+			Role(ui.RoleTabList).Label(i18n.T("图标类型")).Children(func() {
 			for _, tab := range []struct {
 				label   string
 				symbols bool
-			}{{"表情符号", false}, {"图标集", true}} {
+			}{{i18n.T("表情符号"), false}, {i18n.T("图标集"), true}} {
 				on := f.picker.symbols == tab.symbols
 				b := ui.Box(c.Key("tab-" + tab.label)).Height(26).PaddingX(8).Radius(6).Center().Cursor(ui.CursorPointer).
 					Focusable().Role(ui.RoleTab).Label(tab.label).Selected(on)
@@ -194,7 +196,7 @@ func (a *App) pickerHeader(c *ui.Context, f *spaceForm) {
 			}
 		})
 		ui.Spacer(c)
-		if iconButton(c, "remove-icon", lucideIcons["trash"], "移除图标", "移除图标", f.icon == "" && f.symbol == "").Size(28, 28).Clicked() {
+		if iconButton(c, "remove-icon", lucideIcons["trash"], i18n.T("移除图标"), i18n.T("移除图标"), f.icon == "" && f.symbol == "").Size(28, 28).Clicked() {
 			f.icon, f.symbol = "", ""
 			f.iconsOpen = false
 		}
@@ -207,7 +209,7 @@ func emojiGrid(c *ui.Context, f *spaceForm) {
 	t := c.Theme()
 	p := &f.picker
 	query := ui.TextInput(c.Key("emoji-query"), &p.query).Height(26).Margin(8, 0, 0, 0).Padding(2, 6).Radius(10).
-		Placeholder("搜索表情符号").Label("搜索表情").Tooltip("按英文名称搜索表情").AutoFocus().
+		Placeholder(i18n.T("搜索表情符号")).Label(i18n.T("搜索表情")).Tooltip(i18n.T("按英文名称搜索表情")).AutoFocus().
 		Background(t.Background.Alpha(0.3)).Border(1, t.Text.Alpha(0.14))
 	if query.Changed() {
 		p.selected = -1
@@ -219,7 +221,7 @@ func emojiGrid(c *ui.Context, f *spaceForm) {
 		n = len(items)
 	}
 	if searching && n == 0 {
-		ui.Text(c, "未能找到相关表情").FontSize(12).TextColor(t.TextMuted).Padding(24, 0).AlignSelf(ui.Center).Grow(1)
+		ui.Text(c, i18n.T("未能找到相关表情")).FontSize(12).TextColor(t.TextMuted).Padding(24, 0).AlignSelf(ui.Center).Grow(1)
 	} else {
 		at := func(i int) int {
 			if searching {
@@ -268,7 +270,7 @@ func emojiGrid(c *ui.Context, f *spaceForm) {
 	ui.Row(c.Key("emoji-categories")).Justify(ui.SpaceBetween).Children(func() {
 		for _, cat := range emojiCategories {
 			b := ui.Box(c.Key("cat-"+cat.id)).Size(28, 26).Center().Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label(cat.label).Tooltip(cat.label)
+				Focusable().Role(ui.RoleButton).Label(i18n.T(cat.label)).Tooltip(i18n.T(cat.label))
 			color := t.TextMuted
 			if b.Hovered() {
 				color = t.Text
@@ -286,11 +288,11 @@ func emojiGrid(c *ui.Context, f *spaceForm) {
 func symbolGrid(c *ui.Context, f *spaceForm) {
 	t := c.Theme()
 	ui.Scroll(c.Key("symbol-scroll")).Grow(1).MinHeight(0).Margin(8, 0, 0, 0).Children(func() {
-		ui.Grid(c.Key("symbols")).Columns(6).Gap(8).AlignSelf(ui.Center).Label("图标列表").FocusGroup(ui.Horizontal).Children(func() {
+		ui.Grid(c.Key("symbols")).Columns(6).Gap(8).AlignSelf(ui.Center).Label(i18n.T("图标列表")).FocusGroup(ui.Horizontal).Children(func() {
 			for _, name := range spaceSymbols {
 				on := name == f.symbol
 				b := ui.Box(c.Key("symbol:"+name)).Size(pickerCell, pickerCell).Center().Cursor(ui.CursorPointer).
-					Focusable().Role(ui.RoleButton).Label("图标 " + name).Tooltip(name).Checked(on)
+					Focusable().Role(ui.RoleButton).Label(i18n.T("图标 ") + name).Tooltip(name).Checked(on)
 				hovered := b.Hovered()
 				b.Draw(func(p *ui.Painter, r ui.Rect) {
 					tile := ui.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2}
@@ -309,4 +311,60 @@ func symbolGrid(c *ui.Context, f *spaceForm) {
 			}
 		})
 	})
+}
+
+// emojiAliases are GitHub's shortcodes for emoji people type most, beside
+// the names of the catalog.
+var emojiAliases = []editor.EmojiItem{
+	{Emoji: "😄", Name: "smile"}, {Emoji: "😂", Name: "joy"}, {Emoji: "😆", Name: "laughing"}, {Emoji: "😉", Name: "wink"},
+	{Emoji: "😢", Name: "cry"}, {Emoji: "😭", Name: "sob"}, {Emoji: "🤔", Name: "thinking"}, {Emoji: "👍", Name: "+1"},
+	{Emoji: "👎", Name: "-1"}, {Emoji: "👌", Name: "ok_hand"}, {Emoji: "👏", Name: "clap"}, {Emoji: "🙏", Name: "pray"},
+	{Emoji: "❤️", Name: "heart"}, {Emoji: "🎉", Name: "tada"}, {Emoji: "🔥", Name: "fire"}, {Emoji: "🚀", Name: "rocket"},
+	{Emoji: "👀", Name: "eyes"}, {Emoji: "⭐", Name: "star"}, {Emoji: "✅", Name: "white_check_mark"}, {Emoji: "❌", Name: "x"},
+	{Emoji: "⚠️", Name: "warning"}, {Emoji: "💡", Name: "bulb"}, {Emoji: "📌", Name: "pushpin"}, {Emoji: "📝", Name: "memo"},
+}
+
+// shortcode is the :shortcode: of a catalog name: lower case, words joined
+// by underscores, punctuation dropped.
+func shortcode(name string) string {
+	var out strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r == ' ' || r == '-':
+			out.WriteByte('_')
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_':
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+// suggestEmoji lists the emoji for a :shortcode: being typed: GitHub's
+// common ones and the catalog's names, those starting with what is typed
+// before those holding it, at most eight.
+func suggestEmoji(typed string) []editor.EmojiItem {
+	typed = strings.ToLower(typed)
+	var first, then []editor.EmojiItem
+	seen := map[string]bool{}
+	add := func(it editor.EmojiItem) {
+		if seen[it.Name] {
+			return
+		}
+		switch {
+		case strings.HasPrefix(it.Name, typed):
+			seen[it.Name] = true
+			first = append(first, it)
+		case strings.Contains(it.Name, typed):
+			seen[it.Name] = true
+			then = append(then, it)
+		}
+	}
+	for _, it := range emojiAliases {
+		add(it)
+	}
+	for _, e := range emojiAll {
+		add(editor.EmojiItem{Emoji: e.emoji, Name: shortcode(e.name)})
+	}
+	out := append(first, then...)
+	return out[:min(len(out), 8)]
 }

@@ -1,0 +1,47 @@
+Total: 2.90s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/editor.(*Editor).pairInput in /Users/cizai/agent/Prism/internal/editor/autopair.go
+         0      1.79s (flat, cum) 61.72% of Total
+         .          .     19:func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
+         .          .     20:	if e.noAutoPair || e.ReadOnly {
+         .          .     21:		e.pairs = nil
+         .          .     22:		return false
+         .          .     23:	}
+         .          .     24:	if e.pairRevision != e.Revision() {
+         .          .     25:		e.pairs = nil
+         .          .     26:	}
+         .          .     27:	target := e.Selection().Range
+         .          .     28:	if e.mark != nil {
+         .          .     29:		target = *e.mark
+         .          .     30:	}
+         .          .     31:	if r != nil {
+         .      690ms     32:		target = e.validRange(*r)
+         .          .     33:	}
+         .          .     34:	l := e.LeafAt(target.Start)
+         .          .     35:	if literalBlock(l.Block.Kind) || e.CurrentStyle().Code {
+         .          .     36:		e.pairs = nil
+         .          .     37:		return false
+         .          .     38:	}
+         .          .     39:	// An IME owns its preedit range. Pair only the final committed character,
+         .          .     40:	// never the provisional candidate or an arbitrary replacement range.
+         .          .     41:	if e.mark == nil && r == nil && target.Start == target.End {
+         .          .     42:		for i := len(e.pairs) - 1; i >= 0; i-- {
+         .          .     43:			p := e.pairs[i]
+         .          .     44:			if p.end == target.Start && p.close == text && e.slice(p.end, p.end+document.Len(text)) == text {
+         .          .     45:				e.SetSelection(p.end+document.Len(text), p.end+document.Len(text))
+         .          .     46:				e.pairs = append(e.pairs[:i], e.pairs[i+1:]...)
+         .          .     47:				return true
+         .          .     48:			}
+         .          .     49:		}
+         .          .     50:	}
+         .          .     51:	close, ok := bracketPairs[text]
+         .          .     52:	if utf8.RuneCountInString(text) != 1 {
+         .          .     53:		ok = false
+         .          .     54:	}
+         .          .     55:	if !ok {
+         .          .     56:		e.shiftPairs(target, document.Len(text))
+         .      1.10s     57:		e.Buffer.ReplaceText(r, text)
+         .          .     58:		e.pairRevision = e.Revision()
+         .          .     59:		return true
+         .          .     60:	}
+         .          .     61:	if target.Start > l.Start {
+         .          .     62:		before := e.slice(l.Start, target.Start)

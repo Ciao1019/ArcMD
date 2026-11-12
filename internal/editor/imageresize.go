@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -27,7 +28,7 @@ func (e *Editor) imageHandles(c *ui.Context, r row) {
 			x = rect.X + rect.W - 5
 		}
 		h := ui.Box(c.Key(fmt.Sprintf("resize-image:%s:%d", id, side))).Absolute().Left(x).Top(rect.Y+rect.H/2-18).Size(10, 36).
-			Focusable().Role(ui.RoleSlider).Label("调整图片宽度").Value(fmt.Sprintf("%.0f", rect.W)).Cursor(ui.CursorResizeEW).
+			Focusable().Role(ui.RoleSlider).Label(i18n.T("调整图片宽度")).Value(fmt.Sprintf("%.0f", rect.W)).Cursor(ui.CursorResizeEW).
 			Radius(5).Background(e.page.Popover).Border(1, c.Theme().Accent)
 		if h.FocusVisible() {
 			h.Border(2, c.Theme().Accent)
@@ -94,7 +95,7 @@ func (v *imageViewer) clampPan(w, h float32) {
 }
 func (e *Editor) imageCanvas(c *ui.Context, w, h float32) {
 	v := &e.imageViewer
-	canvas := ui.Box(c.Key("preview-canvas")).Size(w, h).Clip().Focusable().Role(ui.RoleImage).Label("图片预览画布：滚轮缩放，拖动平移").Cursor(ui.CursorGrab)
+	canvas := ui.Box(c.Key("preview-canvas")).Size(w, h).Clip().Focusable().Role(ui.RoleImage).Label(i18n.T("图片预览画布：滚轮缩放，拖动平移")).Cursor(ui.CursorGrab)
 	if dx, dy, held := canvas.Dragged(); held {
 		v.pan.X += dx
 		v.pan.Y += dy

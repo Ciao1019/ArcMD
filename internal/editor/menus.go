@@ -5,9 +5,11 @@ package editor
 // tall rows with an 18 icon, and a 40 tall bar of 24 buttons.
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -54,10 +56,14 @@ var insertions = []insertion{
 	{name: "分隔线", kind: "rule", search: "divider rule fengexian fgx line", icon: iconRule, grid: true, tint: "orange", md: "---"},
 	{name: "图片", kind: "image", search: "image picture tupian tp", icon: iconImage, group: 1, tint: "yellow"},
 	{name: "表格", kind: "table", search: "table biaoge bg", icon: iconTable, group: 1, tint: "teal"},
+	{name: "折叠块", kind: "toggle", search: "toggle details fold collapse zhediekuai zdk zhedie", icon: iconToggle, group: 1, tint: "indigo"},
 	{name: "分栏", kind: "columns", search: "columns grid fenlan fl shuanglan", icon: iconColumns, group: 1, tint: "indigo"},
 	{name: "公式", kind: "math", search: "math formula equation latex tex gongshi gs", icon: iconSigma, group: 1, tint: "teal"},
 	{name: "链接到文档", kind: "wiki", search: "wiki link backlink shuanglian sl lianjie wendang", icon: iconLink, group: 1, tint: "blue", md: "[["},
 }
+
+// label is the item's name in the language shown.
+func (it insertion) label() string { return i18n.T(it.name) }
 
 // slashEntry is a row or grid cell of the slash menu.
 type slashEntry struct {
@@ -89,7 +95,7 @@ func (e *Editor) slashEntries() []slashEntry {
 		if e.attach == nil && it.kind == "image" {
 			continue
 		}
-		words := strings.Fields(strings.ToLower(it.name + " " + it.search))
+		words := strings.Fields(strings.ToLower(it.label() + " " + it.search))
 		group := strings.Fields(strings.ToLower(slashGroups[it.group].search))
 		prefix := func(ws []string) bool {
 			for _, w := range ws {
@@ -169,11 +175,11 @@ func (e *Editor) groupTitle(c *ui.Context, title string) {
 
 // gridCell is a 24 icon button of the slash and block menus' grids.
 func (e *Editor) gridCell(c *ui.Context, key string, it insertion, on, active bool) ui.Element {
-	tip := it.name
+	tip := it.label()
 	if it.md != "" {
 		tip += "\nMarkdown：" + it.md
 	}
-	cell := ui.ButtonBase(c.Key(key)).Size(24, 24).Radius(4).Center().Label(it.name).Tooltip(tip).KeepFocus().Cursor(ui.CursorPointer)
+	cell := ui.ButtonBase(c.Key(key)).Size(24, 24).Radius(4).Center().Label(it.label()).Tooltip(tip).KeepFocus().Cursor(ui.CursorPointer)
 	switch {
 	case active:
 		cell.Background(e.page.TurnActive)
@@ -228,7 +234,7 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 				ui.Column(c).Padding(8).Children(func() {
 					if len(entries) == 0 {
 						ui.Row(c).Height(32).PaddingX(8).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, "未能找到相关结果").FontSize(14).TextColor(e.page.Caption)
+							ui.Text(c, i18n.T("未能找到相关结果")).FontSize(14).TextColor(e.page.Caption)
 						})
 						return
 					}
@@ -240,10 +246,10 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 						}
 					}
 					if len(grid) > 0 {
-						e.groupTitle(c, slashGroups[0].title)
+						e.groupTitle(c, i18n.T(slashGroups[0].title))
 						iconGrid(c, grid, func(_ int, i int) {
 							it := entries[i].item
-							if e.gridCell(c, "slash:"+it.name, it, i == e.slashIndex, false).Clicked() {
+							if e.gridCell(c, "slash:"+it.label(), it, i == e.slashIndex, false).Clicked() {
 								run(it)
 							}
 						})
@@ -255,10 +261,10 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 						}
 						if en.item.group != group && e.slashQuery == "" {
 							group = en.item.group
-							e.groupTitle(c, slashGroups[group].title)
+							e.groupTitle(c, i18n.T(slashGroups[group].title))
 						}
 						it := en.item
-						row := ui.ButtonBase(c.Key("slash-row:" + it.name)).Height(32).PaddingX(4).Radius(4).KeepFocus().Label(it.name).Cursor(ui.CursorPointer)
+						row := ui.ButtonBase(c.Key("slash-row:" + it.label())).Height(32).PaddingX(4).Radius(4).KeepFocus().Label(it.label()).Cursor(ui.CursorPointer)
 						if i == e.slashIndex || row.Hovered() {
 							row.Background(e.page.Hover)
 						}
@@ -267,7 +273,7 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 								ui.Box(c).Size(24, 24).Center().Children(func() {
 									ui.Icon(c, it.icon).FontSize(18).TextColor(e.tint(it.tint))
 								})
-								ui.Text(c, it.name).FontSize(14).TextColor(t.Text).Margin(0, 0, 0, 16).Grow(1)
+								ui.Text(c, it.label()).FontSize(14).TextColor(t.Text).Margin(0, 0, 0, 16).Grow(1)
 							})
 						})
 						if row.Clicked() {
@@ -348,6 +354,10 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 		e.menuOpen = false
 		return
 	}
+	if len(e.blocks.ids) > 1 && e.blockSelected(e.menuID) {
+		e.blocksMenu(c, surface, handle)
+		return
+	}
 	t := c.Theme()
 	bounds := surface.Bounds()
 	id := e.menuID
@@ -360,7 +370,7 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 		e.popover(c, menu).Children(func() {
 			if items := turnItems(b); len(items) > 0 {
 				iconGrid(c, items, func(_ int, it insertion) {
-					if e.gridCell(c, "turn:"+it.name, it, false, sameKind(b, it)).Clicked() {
+					if e.gridCell(c, "turn:"+it.label(), it, false, sameKind(b, it)).Clicked() {
 						e.Engine.FocusBlock(id)
 						e.sync()
 						e.insertItem(it)
@@ -375,9 +385,9 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 				}
 				return row
 			}
-			hover(e.menuRow(c, "bm-indent", iconIndent, e.page.CodeText, "缩进和对齐", "›", e.menuSub == "indent"), "indent")
+			hover(e.menuRow(c, "bm-indent", iconIndent, e.page.CodeText, i18n.T("缩进和对齐"), "›", e.menuSub == "indent"), "indent")
 			if b.Kind == "callout" {
-				hover(e.menuRow(c, "bm-color", iconPalette, e.page.CodeText, "颜色", "›", e.menuSub == "color"), "color")
+				hover(e.menuRow(c, "bm-color", iconPalette, e.page.CodeText, i18n.T("颜色"), "›", e.menuSub == "color"), "color")
 			}
 			menuSeparator(c)
 			for _, row := range []struct {
@@ -385,10 +395,10 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 				icon       *ui.SVG
 				run        func()
 			}{
-				{"bm-cut", "剪切", iconScissors, func() { e.copyBlockContent(id); e.Engine.DeleteBlock(id) }},
-				{"bm-copy", "复制", iconCopy, func() { e.copyBlockContent(id) }},
-				{"bm-duplicate", "创建副本", iconDuplicate, func() { e.Engine.Duplicate(id) }},
-				{"bm-delete", "删除", iconTrash, func() { e.Engine.DeleteBlock(id) }},
+				{"bm-cut", i18n.T("剪切"), iconScissors, func() { e.copyBlockContent(id); e.Engine.DeleteBlock(id) }},
+				{"bm-copy", i18n.T("复制"), iconCopy, func() { e.copyBlockContent(id) }},
+				{"bm-duplicate", i18n.T("创建副本"), iconDuplicate, func() { e.Engine.Duplicate(id) }},
+				{"bm-delete", i18n.T("删除"), iconTrash, func() { e.Engine.DeleteBlock(id) }},
 			} {
 				if hover(e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, "", false), "").Clicked() {
 					act(row.run)()
@@ -399,7 +409,7 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 				key, label string
 				icon       *ui.SVG
 				delta      int
-			}{{"bm-up", "上移", iconArrowUp, -1}, {"bm-down", "下移", iconArrowDown, 1}} {
+			}{{"bm-up", i18n.T("上移"), iconArrowUp, -1}, {"bm-down", i18n.T("下移"), iconArrowDown, 1}} {
 				if hover(e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, "", false), "").Clicked() {
 					act(func() { e.Engine.MoveBlock(id, handle.index+row.delta) })()
 				}
@@ -407,16 +417,16 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 			menuSeparator(c)
 			if e.bookmarks.toggle != nil {
 				_, marked := e.bookmarks.marks[id]
-				label := "添加书签"
+				label := i18n.T("添加书签")
 				if marked {
-					label = "移除书签"
+					label = i18n.T("移除书签")
 				}
 				if hover(e.menuRow(c, "bm-bookmark", iconBookmark, e.page.CodeText, label, e.bookmarks.key, false), "").Clicked() {
 					toggle := e.bookmarks.toggle
 					act(func() { toggle(id) })()
 				}
 			}
-			if hover(e.menuRow(c, "bm-add", iconSquarePlus, e.page.CodeText, "在下方添加", "", false), "").Clicked() {
+			if hover(e.menuRow(c, "bm-add", iconSquarePlus, e.page.CodeText, i18n.T("在下方添加"), "", false), "").Clicked() {
 				e.menuOpen, e.menuSub = false, ""
 				e.insertAfter(id)
 			}
@@ -436,7 +446,7 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 				switch e.menuSub {
 				case "indent":
 					if b.Kind != "code" && b.Kind != "callout" && b.Kind != "rule" && b.Kind != "table" && b.Kind != "columns" {
-						for _, a := range []struct{ key, label, value string }{{"al-l", "左对齐", "left"}, {"al-c", "居中对齐", "center"}, {"al-r", "右对齐", "right"}} {
+						for _, a := range []struct{ key, label, value string }{{"al-l", i18n.T("左对齐"), "left"}, {"al-c", i18n.T("居中对齐"), "center"}, {"al-r", i18n.T("右对齐"), "right"}} {
 							on := b.Align == a.value || a.value == "left" && b.Align == ""
 							icon := map[string]*ui.SVG{"left": iconAlignLeft, "center": iconAlignCenter, "right": iconAlignRight}[a.value]
 							if e.menuRow(c, a.key, icon, e.page.CodeText, a.label, "", on).Clicked() {
@@ -445,14 +455,14 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 						}
 						menuSeparator(c)
 					}
-					if e.menuRow(c, "in-inc", iconIndent, e.page.CodeText, "增加缩进", "Tab", false).Clicked() {
+					if e.menuRow(c, "in-inc", iconIndent, e.page.CodeText, i18n.T("增加缩进"), "Tab", false).Clicked() {
 						act(func() { e.Engine.FocusBlock(id); e.Engine.Indent(1) })()
 					}
-					if e.menuRow(c, "in-dec", iconOutdent, e.page.CodeText, "减少缩进", "Shift + Tab", false).Clicked() {
+					if e.menuRow(c, "in-dec", iconOutdent, e.page.CodeText, i18n.T("减少缩进"), "Shift + Tab", false).Clicked() {
 						act(func() { e.Engine.FocusBlock(id); e.Engine.Indent(-1) })()
 					}
 				case "color":
-					ui.Text(c, "高亮块颜色").FontSize(12).TextColor(t.Text).Margin(0, 0, 6, 0)
+					ui.Text(c, i18n.T("高亮块颜色")).FontSize(12).TextColor(t.Text).Margin(0, 0, 6, 0)
 					e.colorSwatches(c, id, done)
 				}
 			})
@@ -492,12 +502,12 @@ func (e *Editor) copyBlockContent(id string) {
 func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 	sel := e.Selection().Range
 	if !e.focused || sel.Start == sel.End || e.dragging || e.slashOpen || e.mark != nil || e.menuOpen || e.linkOpen {
-		e.colorPanel = false
+		e.annotatePanel = false
 		return
 	}
 	if _, _, across := e.cellRange(); across {
 		// Cells selected across get the cell toolbar instead.
-		e.colorPanel = false
+		e.annotatePanel = false
 		return
 	}
 	first, _, ok := e.BoundsForRange(ui.TextInputRange{Start: sel.Start, End: sel.Start})
@@ -506,12 +516,24 @@ func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 	}
 	last, _, _ := e.BoundsForRange(ui.TextInputRange{Start: sel.End, End: sel.End})
 	bounds := surface.Bounds()
-	width, height := float32(380), float32(42)
+	width, height := float32(390), float32(42)
 	windowW, _ := c.Size()
 	x := max(8, min(bounds.X+first.X-12, windowW-width-12))
+	if first.Y == last.Y {
+		// One line: centered over it, but not left of the text column,
+		// which would put it over the sidebar.
+		x = max(8, min(max(bounds.X+(first.X+last.X)/2-width/2, bounds.X+e.padding-12), windowW-width-12))
+	}
+	// Above the selection's first line while that stays in view, else below
+	// its last; a selection taller than the view keeps the bar at the
+	// view's top edge rather than off it, over the text it marks.
+	top, bottom := bounds.Y+e.Scroll.Y, bounds.Y+e.Scroll.Y+e.viewport
 	y := bounds.Y + first.Y - height - 5
-	if y < bounds.Y {
+	if y < top+4 {
 		y = bounds.Y + last.Y + last.H + 5
+		if y+height > bottom-4 {
+			y = top + 8
+		}
 	}
 	leaf := e.Engine.LeafAt(e.Caret)
 	style := e.Engine.CurrentStyle()
@@ -532,9 +554,9 @@ func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 				})
 			}
 			sep := func() { ui.Box(c).Size(1, 20).Background(c.Theme().Border) }
-			drop("float:turn", "转换为", kindIcon(leaf.Block), func(m *ui.Menu) {
+			drop("float:turn", i18n.T("转换为"), kindIcon(leaf.Block), func(m *ui.Menu) {
 				for _, it := range turnItems(leaf.Block) {
-					if m.Item(it.name).Checked(sameKind(leaf.Block, it)).Chosen() {
+					if m.Item(it.label()).Checked(sameKind(leaf.Block, it)).Chosen() {
 						e.insertItem(it)
 					}
 				}
@@ -544,8 +566,8 @@ func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 			if align == nil {
 				align = iconAlignLeft
 			}
-			drop("float:align", "对齐方式", align, func(m *ui.Menu) {
-				for _, a := range []struct{ name, value string }{{"左对齐", "left"}, {"居中对齐", "center"}, {"右对齐", "right"}} {
+			drop("float:align", i18n.T("对齐方式"), align, func(m *ui.Menu) {
+				for _, a := range []struct{ name, value string }{{i18n.T("左对齐"), "left"}, {i18n.T("居中对齐"), "center"}, {i18n.T("右对齐"), "right"}} {
 					if m.Item(a.name).Checked(leaf.Block.Align == a.value || a.value == "left" && leaf.Block.Align == "").Chosen() {
 						e.Engine.Align(a.value)
 						e.RequestFocus = true
@@ -559,19 +581,24 @@ func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 					e.RequestFocus = true
 				}
 			}
-			mark("float:**", iconBold, "加粗 (⌘B)\nMarkdown：**文本**", "**", style.Bold)
-			mark("float:~~", iconStrike, "删除线 (⇧⌘X)\nMarkdown：~~文本~~", "~~", style.Strike)
-			mark("float:*", iconItalic, "倾斜 (⌘I)\nMarkdown：*文本*", "*", style.Italic)
-			mark("float:_", iconUnderline, "下划线 (⌘U)", "_", style.Underline)
-			if markButton(c, e.page, "float:link", iconLink, "添加链接", style.Link != "").Clicked() {
+			mark("float:**", iconBold, i18n.T("加粗 (⌘B)\nMarkdown：**文本**"), "**", style.Bold)
+			mark("float:~~", iconStrike, i18n.T("删除线 (⇧⌘X)\nMarkdown：~~文本~~"), "~~", style.Strike)
+			mark("float:*", iconItalic, i18n.T("倾斜 (⌘I)\nMarkdown：*文本*"), "*", style.Italic)
+			mark("float:_", iconUnderline, i18n.T("下划线 (⌘U)"), "_", style.Underline)
+			if markButton(c, e.page, "float:link", iconLink, i18n.T("添加链接"), style.Link != "").Clicked() {
 				e.EditLink()
 			}
-			mark("float:`", iconCode, "行内代码 (⌘E)\nMarkdown：`代码`", "`", style.Code)
+			mark("float:`", iconCode, i18n.T("行内代码 (⌘E)\nMarkdown：`代码`"), "`", style.Code)
 			sep()
-			e.colorSplit(c)
+			e.annotateSplit(c)
 		})
-		if e.colorPanel {
-			e.textColorPanel(c, x+width-230-8, y+height+4)
+		if e.annotatePanel {
+			// Below the bar, or above it when the window ends first.
+			py := y + height + 4
+			if _, windowH := c.Size(); py+annotationPanelHeight > windowH-8 && y-annotationPanelHeight-4 > 8 {
+				py = y - annotationPanelHeight - 4
+			}
+			e.annotationPanel(c, x+width-annotationPanelWidth, py)
 		}
 	})
 }
@@ -587,150 +614,9 @@ var colorNames = map[string]string{
 // "深红" and so on.
 func ColorName(name string, highlight bool) string {
 	if highlight && !strings.HasPrefix(name, "light-") && name != "medium-gray" {
-		return "深" + strings.TrimSuffix(colorNames[name], "色")
+		return i18n.T("深") + strings.TrimSuffix(i18n.T(colorNames[name]), "色")
 	}
-	return colorNames[name]
-}
-
-// colorSplit is the selection bar's color button: "A"
-// applies the last color used, the arrow opens the color panel.
-func (e *Editor) colorSplit(c *ui.Context) {
-	pg := e.page
-	ui.Row(c.Key("float:color")).Height(24).Radius(4).Children(func() {
-		apply := ui.ButtonBase(c.Key("float:color-apply")).Size(24, 24).Radius(4).Center().Label("应用颜色").Tooltip("应用上次的颜色").KeepFocus().Cursor(ui.CursorPointer)
-		if apply.Hovered() {
-			apply.Background(pg.Hover)
-		}
-		apply.Children(func() {
-			swatch := ui.Box(c).Size(20, 20).Radius(2).Center()
-			if bg, ok := pg.Highlights[e.lastHighlight]; ok {
-				swatch.Background(bg)
-			}
-			swatch.Children(func() {
-				color := c.Theme().Text
-				if tc, ok := pg.TextColors[e.lastColor]; ok {
-					color = tc
-				}
-				ui.Text(c, "A").FontSize(16).TextColor(color)
-			})
-		})
-		if apply.Clicked() {
-			color, highlight := e.lastColor, e.lastHighlight
-			e.Engine.SetTextColor(&color, &highlight)
-			e.RequestFocus = true
-		}
-		open := ui.ButtonBase(c.Key("float:color-open")).Size(20, 24).Radius(4).Center().Label("文字颜色").Tooltip("文字颜色").KeepFocus().Cursor(ui.CursorPointer)
-		if open.Hovered() || e.colorPanel {
-			open.Background(pg.Hover)
-		}
-		open.Children(func() { ui.Icon(c, iconChevron).FontSize(12).TextColor(pg.Placeholder) })
-		if open.Clicked() {
-			e.colorPanel = !e.colorPanel
-			e.colorPanelOpened = true
-		}
-	})
-}
-
-// OpenTextColors opens the color panel of the selection bar.
-func (e *Editor) OpenTextColors() { e.colorPanel, e.colorPanelOpened = true, true }
-
-// textColorPanel picks a text color and a highlight:
-// eight font swatches, sixteen highlight swatches, and a reset.
-func (e *Editor) textColorPanel(c *ui.Context, x, y float32) {
-	pg := e.page
-	t := c.Theme()
-	style := e.Engine.CurrentStyle()
-	apply := func(color, highlight *string) {
-		if color != nil {
-			e.lastColor = *color
-		}
-		if highlight != nil {
-			e.lastHighlight = *highlight
-		}
-		e.Engine.SetTextColor(color, highlight)
-		e.RequestFocus = true
-	}
-	swatch := func(key, label string, on bool, inner func()) ui.Element {
-		s := ui.ButtonBase(c.Key(key)).Size(26, 26).Radius(4).Center().Label(label).Tooltip(label).KeepFocus().Cursor(ui.CursorPointer)
-		if on {
-			s.Border(2, pg.CodeHover)
-		} else if s.Hovered() {
-			s.Background(pg.Hover)
-		}
-		s.Children(inner)
-		return s
-	}
-	title := func(text string) {
-		ui.Text(c, text).FontSize(12).TextColor(t.Text).Margin(7, 0, 4, 0)
-	}
-	panel := ui.Column(c.Key("text-color-panel")).Absolute().Left(max(8, x)).Top(y).Width(230).Padding(4, 10, 12, 10)
-	e.popover(c, panel).Children(func() {
-		title("字体颜色")
-		ui.Row(c).Justify(ui.SpaceBetween).Children(func() {
-			for _, name := range append([]string{""}, document.TextColors...) {
-				label := "默认字体颜色"
-				color := t.Text
-				if name != "" {
-					label, color = "字体颜色："+ColorName(name, false), pg.TextColors[name]
-				}
-				if swatch("fc:"+name, label, style.Color == name, func() {
-					ui.Box(c).Size(22, 22).Radius(2).Border(1, pg.Hover).Center().Children(func() {
-						ui.Text(c, "A").FontSize(14).TextColor(color)
-					})
-				}).Clicked() {
-					value := name
-					if value != "" && style.Color == value {
-						value = ""
-					}
-					apply(&value, nil)
-				}
-			}
-		})
-		title("背景颜色")
-		names := append([]string{""}, document.TextHighlights...)
-		ui.Column(c).Gap(4).Children(func() {
-			for row := 0; row < len(names); row += 8 {
-				ui.Row(c.Key(row)).Justify(ui.SpaceBetween).Children(func() {
-					for _, name := range names[row:min(row+8, len(names))] {
-						label := "无背景颜色"
-						if name != "" {
-							label = "背景颜色：" + ColorName(name, true)
-						}
-						if swatch("bc:"+name, label, style.Highlight == name, func() {
-							box := ui.Box(c).Size(22, 22).Radius(2)
-							if name == "" {
-								box.Background(t.Background).Border(1, pg.Hover).Center().Children(func() {
-									ui.Icon(c, iconSlash).FontSize(20).TextColor(pg.Placeholder)
-								})
-							} else {
-								box.Background(pg.Highlights[name])
-							}
-						}).Clicked() {
-							value := name
-							if value != "" && style.Highlight == value {
-								value = ""
-							}
-							apply(nil, &value)
-						}
-					}
-				})
-			}
-		})
-		reset := ui.ButtonBase(c.Key("color-reset")).Height(24).Margin(12, 0, 0, 0).Radius(6).Border(1, t.Border).Center().Label("恢复默认").KeepFocus().Cursor(ui.CursorPointer)
-		if reset.Hovered() {
-			reset.Background(pg.Hover)
-		}
-		reset.Children(func() { ui.Text(c, "恢复默认").FontSize(12).TextColor(t.Text) })
-		if reset.Clicked() {
-			none := ""
-			e.Engine.SetTextColor(&none, &none)
-			e.RequestFocus = true
-		}
-	})
-	if panel.PressedOutside() && !e.colorPanelOpened {
-		e.colorPanel = false
-	}
-	e.colorPanelOpened = false
+	return i18n.T(colorNames[name])
 }
 
 // markButton is a 24 button of the selection bar; on marks a format the
@@ -759,4 +645,90 @@ func kindIcon(b *document.Block) *ui.SVG {
 		}
 	}
 	return iconParagraph
+}
+
+// blocksMenu is the block menu of several selected blocks: the types they
+// can all turn into, indent, then cut, copy, duplicate, delete and move,
+// each acting on every selected block at once.
+func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHandle) {
+	ids := e.BlockSelection()
+	bounds := surface.Bounds()
+	done := func() { e.menuOpen, e.menuSub = false, ""; e.RequestFocus = true; e.sync() }
+	x := bounds.X + handle.rect.X
+	y := bounds.Y + handle.rect.Y + handle.rect.H + 4
+	// The types every selected text block can take.
+	var items []insertion
+	for _, it := range insertions {
+		switch it.kind {
+		case "paragraph", "heading", "bullet", "numbered", "task", "quote", "toggle":
+			items = append(items, it)
+		}
+	}
+	ui.Overlay(c, func() {
+		menu := ui.Column(c.Key("blocks-menu")).Absolute().Left(x).Top(y).Width(menuWidth).Padding(8)
+		e.popover(c, menu).Children(func() {
+			ui.Row(c).Height(28).PaddingX(4).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, fmt.Sprintf(i18n.T("已选 %d 个内容块"), len(ids))).FontSize(12).TextColor(e.page.Caption)
+			})
+			iconGrid(c, items, func(_ int, it insertion) {
+				if e.gridCell(c, "turn-all:"+it.label(), it, false, false).Clicked() {
+					e.Engine.SetBlocksKind(ids, it.kind, it.level)
+					done()
+				}
+			})
+			menuSeparator(c)
+			for _, row := range []struct {
+				key, label, hint string
+				icon             *ui.SVG
+				run              func()
+			}{
+				{"bms-indent", i18n.T("增加缩进"), "Tab", iconIndent, func() { e.Engine.IndentBlocks(ids, 1) }},
+				{"bms-outdent", i18n.T("减少缩进"), "Shift + Tab", iconOutdent, func() { e.Engine.IndentBlocks(ids, -1) }},
+			} {
+				if e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false).Clicked() {
+					row.run()
+					done()
+				}
+			}
+			menuSeparator(c)
+			for _, row := range []struct {
+				key, label, hint string
+				icon             *ui.SVG
+				run              func()
+			}{
+				{"bms-cut", i18n.T("剪切"), "⌘X", iconScissors, func() {
+					e.copyBlocks(ids, e.services.WriteClipboard)
+					e.Engine.DeleteBlocks(ids)
+					e.clearBlocks()
+				}},
+				{"bms-copy", i18n.T("复制"), "⌘C", iconCopy, func() { e.copyBlocks(ids, e.services.WriteClipboard) }},
+				{"bms-duplicate", i18n.T("创建副本"), "", iconDuplicate, func() {
+					if copies := e.Engine.DuplicateBlocks(ids); len(copies) > 0 {
+						// The copies are selected once they are laid out.
+						e.blocks.pending = [2]string{copies[0], copies[len(copies)-1]}
+					}
+				}},
+				{"bms-delete", i18n.T("删除"), "⌫", iconTrash, func() { e.Engine.DeleteBlocks(ids); e.clearBlocks() }},
+			} {
+				if e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false).Clicked() {
+					row.run()
+					done()
+				}
+			}
+			menuSeparator(c)
+			for _, row := range []struct {
+				key, label, hint string
+				icon             *ui.SVG
+				delta            int
+			}{{"bms-up", i18n.T("上移"), "⇧⌘↑", iconArrowUp, -1}, {"bms-down", i18n.T("下移"), "⇧⌘↓", iconArrowDown, 1}} {
+				if e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false).Clicked() {
+					e.Engine.ShiftBlocks(ids, row.delta)
+					done()
+				}
+			}
+		})
+		if menu.PressedOutside() {
+			e.menuOpen, e.menuSub = false, ""
+		}
+	})
 }

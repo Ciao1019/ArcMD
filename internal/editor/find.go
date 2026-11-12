@@ -6,9 +6,13 @@ package editor
 
 import (
 	"fmt"
+	"github.com/Ciao1019/ArcMD/internal/document"
+	"slices"
+	"sort"
 	"strings"
 	"unicode"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -21,44 +25,62 @@ type finder struct {
 	matches []ui.TextInputRange
 	current int
 	// key is what matches were found for.
-	key string
+	key      string
+	queryKey string
+	revision uint64
+	doc      *document.Document
+	matcher  textMatcher
 	// focus asks the query field for the keyboard.
 	focus bool
 }
 
 // findIn finds query in text case-insensitively, without overlaps; the
 // ranges are UTF-16 offsets into text.
-func findIn(text, query string) [][2]int {
-	fold := func(r rune) rune { return unicode.ToLower(r) }
-	q := []rune(strings.Map(fold, query))
-	if len(q) == 0 {
+func findIn(text, query string) [][2]int { m := newTextMatcher(query); return m.find(text) }
+
+// KMP folds one rune at a time and keeps only a pattern-sized ring of UTF-16
+// starts. Repeated-prefix queries stay linear and do not allocate per text rune.
+type textMatcher struct {
+	pattern         []rune
+	failure, starts []int
+}
+
+func newTextMatcher(query string) textMatcher {
+	q := []rune(strings.Map(unicode.ToLower, query))
+	m := textMatcher{q, make([]int, len(q)), make([]int, len(q))}
+	for i, j := 1, 0; i < len(q); i++ {
+		for j > 0 && q[i] != q[j] {
+			j = m.failure[j-1]
+		}
+		if q[i] == q[j] {
+			j++
+		}
+		m.failure[i] = j
+	}
+	return m
+}
+func (m *textMatcher) find(text string) [][2]int {
+	q := m.pattern
+	if len(q) == 0 || len(text) < len(q) {
 		return nil
 	}
-	runes := []rune(text)
 	var out [][2]int
-	// offsets[i] is the UTF-16 offset of runes[i].
-	offsets := make([]int, len(runes)+1)
-	for i, r := range runes {
-		n := 1
-		if r > 0xffff {
-			n = 2
+	units, index, matched := 0, 0, 0
+	for _, r := range text {
+		m.starts[index%len(q)] = units
+		units += runeUnits(r)
+		r = unicode.ToLower(r)
+		for matched > 0 && r != q[matched] {
+			matched = m.failure[matched-1]
 		}
-		offsets[i+1] = offsets[i] + n
-	}
-	for i := 0; i+len(q) <= len(runes); {
-		ok := true
-		for j, r := range q {
-			if fold(runes[i+j]) != r {
-				ok = false
-				break
-			}
+		if r == q[matched] {
+			matched++
 		}
-		if ok {
-			out = append(out, [2]int{offsets[i], offsets[i+len(q)]})
-			i += len(q)
-			continue
+		if matched == len(q) {
+			out = append(out, [2]int{m.starts[(index-len(q)+1)%len(q)], units})
+			matched = 0 // the existing find contract excludes overlapping matches
 		}
-		i++
+		index++
 	}
 	return out
 }
@@ -108,13 +130,34 @@ func (e *Editor) refreshMatches() {
 	if key == f.key {
 		return
 	}
-	f.key = key
-	f.matches = f.matches[:0]
-	for _, leaf := range e.Doc.Leaves() {
-		for _, m := range findIn(leaf.Block.Text(), f.query) {
-			f.matches = append(f.matches, ui.TextInputRange{Start: leaf.Start + m[0], End: leaf.Start + m[1]})
+	sameQuery := f.queryKey == f.query
+	if !sameQuery {
+		f.matcher = newTextMatcher(f.query)
+	}
+	if change, ok := e.TextChangeSince(f.revision); ok && sameQuery && f.doc == e.Doc && f.key != "" {
+		first := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].Start >= change.Start })
+		last := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].Start > change.BeforeEnd })
+		delta := change.AfterEnd - change.BeforeEnd
+		for i := last; i < len(f.matches); i++ {
+			f.matches[i].Start += delta
+			f.matches[i].End += delta
+		}
+		var updated []ui.TextInputRange
+		for _, m := range f.matcher.find(change.After) {
+			updated = append(updated, ui.TextInputRange{Start: change.Start + m[0], End: change.Start + m[1]})
+		}
+		f.matches = slices.Replace(f.matches, first, last, updated...)
+	} else {
+		f.matches = f.matches[:0]
+		if f.query != "" {
+			for _, leaf := range e.Doc.Leaves() {
+				for _, m := range f.matcher.find(leaf.Block.Text()) {
+					f.matches = append(f.matches, ui.TextInputRange{Start: leaf.Start + m[0], End: leaf.Start + m[1]})
+				}
+			}
 		}
 	}
+	f.key, f.queryKey, f.revision, f.doc = key, f.query, e.Revision(), e.Doc
 	f.current = max(0, min(f.current, len(f.matches)-1))
 }
 
@@ -230,15 +273,15 @@ func (e *Editor) findBox(c *ui.Context) {
 		Background(pg.Popover).Border(1, t.Border).Radius(6).Shadow(0, 4, 16, 0, t.Text.Alpha(.12))
 	box.Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			if button("find-toggle", "切换替换 (⇧⌘H)", iconChevronRight, f.replace).Disabled(e.ReadOnly).Clicked() {
+			if button("find-toggle", i18n.T("切换替换 (⇧⌘H)"), iconChevronRight, f.replace).Disabled(e.ReadOnly).Clicked() {
 				f.replace = !f.replace
 			}
-			query := field("find-query", "查找", &f.query, f.focus)
+			query := field("find-query", i18n.T("查找"), &f.query, f.focus)
 			f.focus = false
 			if query.Submitted() {
 				e.stepMatch(1)
 			}
-			count := "无结果"
+			count := i18n.T("无结果")
 			if len(f.matches) > 0 {
 				count = fmt.Sprintf("%d/%d", f.current+1, len(f.matches))
 			}
@@ -246,13 +289,13 @@ func (e *Editor) findBox(c *ui.Context) {
 				count = ""
 			}
 			ui.Text(c, count).FontSize(12).TextColor(pg.Caption).NoWrap().MinWidth(44)
-			if button("find-prev", "上一个 (⇧Enter)", iconArrowUp, false).Clicked() {
+			if button("find-prev", i18n.T("上一个 (⇧Enter)"), iconArrowUp, false).Clicked() {
 				e.stepMatch(-1)
 			}
-			if button("find-next", "下一个 (Enter)", iconArrowDown, false).Clicked() {
+			if button("find-next", i18n.T("下一个 (Enter)"), iconArrowDown, false).Clicked() {
 				e.stepMatch(1)
 			}
-			if button("find-close", "关闭查找 (Esc)", iconClose, false).Clicked() {
+			if button("find-close", i18n.T("关闭查找 (Esc)"), iconClose, false).Clicked() {
 				e.closeFind()
 			}
 		})
@@ -260,14 +303,14 @@ func (e *Editor) findBox(c *ui.Context) {
 			return
 		}
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(0, 0, 0, 30).Children(func() {
-			with := field("find-with", "替换为", &f.with, false)
+			with := field("find-with", i18n.T("替换为"), &f.with, false)
 			if with.Submitted() {
 				e.replaceCurrent()
 			}
 			for _, b := range []struct {
 				label string
 				run   func()
-			}{{"替换", e.replaceCurrent}, {"全部替换", e.replaceAll}} {
+			}{{i18n.T("替换"), e.replaceCurrent}, {i18n.T("全部替换"), e.replaceAll}} {
 				el := ui.ButtonBase(c.Key("find:"+b.label)).Height(28).Width(80).Radius(6).Border(1, t.Border).Center().Label(b.label).KeepFocus().Cursor(ui.CursorPointer)
 				if len(f.matches) == 0 {
 					el.Disabled(true).Opacity(.4)
@@ -289,14 +332,14 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 	if !f.open || len(f.matches) == 0 {
 		return
 	}
-	for _, r := range e.rows {
+	for ri := range e.visibleRows(40) {
+		r := *e.indexedRow(ri)
 		if r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
 			continue
 		}
-		for i, m := range f.matches {
-			if m.End <= r.leaf.Start || m.Start >= r.leaf.End+1 {
-				continue
-			}
+		start := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].End > r.leaf.Start })
+		for i := start; i < len(f.matches) && f.matches[i].Start < r.leaf.End+1; i++ {
+			m := f.matches[i]
 			local := ui.TextInputRange{Start: max(0, m.Start-r.leaf.Start), End: min(r.leaf.End, m.End) - r.leaf.Start}
 			color := e.page.FindMatch
 			if i == f.current {

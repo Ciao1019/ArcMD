@@ -1,0 +1,58 @@
+File: review.test
+Type: cpu
+Time: 2026-11-13 05:45:47 CST
+Duration: 3.26s, Total samples = 2.90s (89.06%)
+Showing nodes accounting for 2.70s, 93.10% of 2.90s total
+Dropped 38 nodes (cum <= 0.01s)
+Showing top 50 nodes out of 91
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      2.68s 92.41%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+         0     0%     0%      2.68s 92.41%  github.com/egoist/mygo/ui.(*Tester).PerfOperation
+         0     0%     0%      2.68s 92.41%  testing.tRunner
+         0     0%     0%      2.61s 90.00%  github.com/egoist/mygo/ui.(*engine).event
+         0     0%     0%      2.44s 84.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).delete
+         0     0%     0%      2.44s 84.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).input
+         0     0%     0%      2.44s 84.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).key
+         0     0%     0%      2.44s 84.14%  github.com/Ciao1019/ArcMD/internal/editor.View.func1.1.1.1
+         0     0%     0%      2.44s 84.14%  github.com/egoist/mygo/ui.(*engine).deliver
+         0     0%     0%      2.44s 84.14%  github.com/egoist/mygo/ui.(*engine).keyDownPhysical
+         0     0%     0%      1.79s 61.72%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).ReplaceText
+         0     0%     0%      1.79s 61.72%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).pairInput
+         0     0%     0%      1.38s 47.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).clamp
+         0     0%     0%      1.38s 47.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).validRange
+     0.54s 18.62% 18.62%      1.25s 43.10%  github.com/egoist/mygo/internal/platform.UTF16ByteOffset
+         0     0% 18.62%      1.25s 43.10%  github.com/egoist/mygo/ui.UTF16ByteOffset (inline)
+     1.19s 41.03% 59.66%      1.19s 41.03%  runtime.decoderune
+         0     0% 59.66%      1.10s 37.93%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).ReplaceText
+     0.31s 10.69% 70.34%      0.93s 32.07%  github.com/egoist/mygo/internal/platform.UTF16Len (inline)
+         0     0% 70.34%      0.93s 32.07%  github.com/egoist/mygo/ui.UTF16Len (inline)
+         0     0% 70.34%      0.82s 28.28%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).boundary
+         0     0% 70.34%      0.41s 14.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).slice
+         0     0% 70.34%      0.41s 14.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).sync
+     0.01s  0.34% 70.69%      0.40s 13.79%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).lineRange
+     0.35s 12.07% 82.76%      0.36s 12.41%  unicode/utf16.RuneLen (inline)
+     0.12s  4.14% 86.90%      0.34s 11.72%  github.com/Ciao1019/ArcMD/internal/document.ByteOffset (inline)
+         0     0% 86.90%      0.17s  5.86%  github.com/egoist/mygo/ui.(*engine).editEvent
+         0     0% 86.90%      0.17s  5.86%  github.com/egoist/mygo/ui.(*textInputAdapter).ReplaceText
+         0     0% 86.90%      0.17s  5.86%  runtime.systemstack
+         0     0% 86.90%      0.09s  3.10%  runtime.(*mheap).alloc.func1
+         0     0% 86.90%      0.09s  3.10%  runtime.(*mheap).allocSpan
+         0     0% 86.90%      0.08s  2.76%  runtime.gcBgMarkWorker.func2
+         0     0% 86.90%      0.08s  2.76%  runtime.gcDrain
+         0     0% 86.90%      0.07s  2.41%  github.com/egoist/mygo/ui.(*Tester).PerfFrame
+         0     0% 86.90%      0.07s  2.41%  github.com/egoist/mygo/ui.(*engine).runFrame
+         0     0% 86.90%      0.07s  2.41%  runtime.concatstring3
+         0     0% 86.90%      0.07s  2.41%  runtime.concatstrings
+         0     0% 86.90%      0.07s  2.41%  runtime.gcBgMarkWorker
+     0.07s  2.41% 89.31%      0.07s  2.41%  runtime.memmove
+         0     0% 89.31%      0.05s  1.72%  runtime.(*mheap).grow
+         0     0% 89.31%      0.05s  1.72%  runtime.gcDrainMarkWorkerIdle (inline)
+     0.05s  1.72% 91.03%      0.05s  1.72%  runtime.mmap
+         0     0% 91.03%      0.05s  1.72%  runtime.notewakeup
+     0.05s  1.72% 92.76%      0.05s  1.72%  runtime.pthread_cond_signal
+     0.01s  0.34% 93.10%      0.05s  1.72%  runtime.scanObject
+         0     0% 93.10%      0.05s  1.72%  runtime.semawakeup
+         0     0% 93.10%      0.05s  1.72%  runtime.startm
+         0     0% 93.10%      0.05s  1.72%  runtime.sysMap
+         0     0% 93.10%      0.05s  1.72%  runtime.sysMapOS
+         0     0% 93.10%      0.05s  1.72%  runtime.wakep

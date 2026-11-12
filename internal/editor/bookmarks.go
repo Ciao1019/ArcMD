@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
@@ -79,21 +80,21 @@ func BlockExcerpt(b *document.Block) string {
 	switch b.Kind {
 	case "image":
 		if name := b.URL[strings.LastIndex(b.URL, "/")+1:]; name != "" {
-			return "图片 · " + name
+			return i18n.T("图片 · ") + name
 		}
-		return "图片"
+		return i18n.T("图片")
 	case "table":
-		return "表格"
+		return i18n.T("表格")
 	case "columns":
-		return "分栏"
+		return i18n.T("分栏")
 	case "rule":
-		return "分隔线"
+		return i18n.T("分隔线")
 	case "math":
-		return "公式"
+		return i18n.T("公式")
 	case "code":
-		return "代码块"
+		return i18n.T("代码块")
 	}
-	return "空白段落"
+	return i18n.T("空白段落")
 }
 
 // BookmarkTarget is the top-level block a bookmark at the caret marks.
@@ -220,10 +221,10 @@ func (e *Editor) bookmarkMarks(c *ui.Context) {
 			// first row.
 			top = h.top + 32
 		}
-		label, tip, icon := "移除书签", e.bookmarkTip("书签 · 点击移除"), iconBookmarkFilled
+		label, tip, icon := i18n.T("移除书签"), e.bookmarkTip(i18n.T("书签 · 点击移除")), iconBookmarkFilled
 		color := t.Accent.Alpha(.75)
 		if !marked {
-			label, tip, icon = "添加书签", e.bookmarkTip("添加书签"), iconBookmark
+			label, tip, icon = i18n.T("添加书签"), e.bookmarkTip(i18n.T("添加书签")), iconBookmark
 			color = t.Text.Alpha(.3)
 		}
 		mark := ui.ButtonBase(c.Key("bookmark-mark:"+id)).Absolute().Left(x).Top(top).Size(bookmarkMark, bookmarkMark).
@@ -270,7 +271,7 @@ func (e *Editor) bookmarkSection(c *ui.Context) {
 	}
 	t := c.Theme()
 	ui.Row(c.Key("outline-bookmarks")).Height(outlineRow).Padding(0, 8, 0, 8).Margin(12, 0, 0, 0).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "书签 · "+itoa(len(blocks))).FontSize(12).FontWeight(500).TextColor(t.Text.Alpha(.5))
+		ui.Text(c, i18n.T("书签 · ")+itoa(len(blocks))).FontSize(12).FontWeight(500).TextColor(t.Text.Alpha(.5))
 	})
 	for _, block := range blocks {
 		id := block.ID
@@ -291,7 +292,7 @@ func (e *Editor) bookmarkSection(c *ui.Context) {
 		}
 		if b.renaming == id {
 			input := ui.TextInput(c.Key("bookmark-name:"+id), &b.name).Placeholder(BlockExcerpt(block)).
-				Label("书签名称").FontSize(14).Padding(4, 8)
+				Label(i18n.T("书签名称")).FontSize(14).Padding(4, 8)
 			// The field asks for the focus until it has it; only then does
 			// leaving it keep the name.
 			if !b.focused {
@@ -316,16 +317,16 @@ func (e *Editor) bookmarkSection(c *ui.Context) {
 			continue
 		}
 		row := ui.ButtonBase(c.Key("outline-bookmark:"+id)).Height(height).Radius(6).Padding(0, 4, 0, 8).
-			Label("跳到书签 " + title).Tooltip(title).KeepFocus().Cursor(ui.CursorPointer)
+			Label(i18n.T("跳到书签 ") + title).Tooltip(title).KeepFocus().Cursor(ui.CursorPointer)
 		hovered := row.Hovered()
 		if hovered {
 			row.Background(t.Text.Alpha(.05))
 		}
 		row.ContextMenu(func(m *ui.Menu) {
-			if m.Item("重命名…").Chosen() {
+			if m.Item(i18n.T("重命名…")).Chosen() {
 				b.renaming, b.name, b.focused = id, b.marks[id], false
 			}
-			if m.Item("移除书签").Chosen() {
+			if m.Item(i18n.T("移除书签")).Chosen() {
 				b.toggle(id)
 			}
 		})
@@ -341,7 +342,7 @@ func (e *Editor) bookmarkSection(c *ui.Context) {
 				}
 				if hovered {
 					x := ui.ButtonBase(c.Key("outline-bookmark-remove:"+id)).Size(20, 20).Radius(4).Center().
-						Label("移除书签").Tooltip("移除书签").KeepFocus().Cursor(ui.CursorPointer)
+						Label(i18n.T("移除书签")).Tooltip(i18n.T("移除书签")).KeepFocus().Cursor(ui.CursorPointer)
 					color := t.Text.Alpha(.45)
 					if x.Hovered() {
 						x.Background(t.Text.Alpha(.08))

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -56,49 +57,51 @@ type tourStep struct {
 var tourSteps = []tourStep{
 	{id: "welcome", label: "新手教程", title: "欢迎来到 ArcMD",
 		body: func(*App) string {
-			return "用一分钟认识 ArcMD：空间、主题配色、左右滑动、书签、置顶和收藏。看完就可以开始写作。"
+			return i18n.T("用一分钟认识 ArcMD：空间、主题配色、左右滑动、书签、置顶和收藏。看完就可以开始写作。")
 		},
-		keys: func(*App) []string { return []string{"→ 下一步", "Esc 跳过"} }},
+		keys: func(*App) []string { return []string{i18n.T("→ 下一步"), i18n.T("Esc 跳过")} }},
 	{id: "spaces", label: "空间", title: "用空间分开不同的事",
 		body: func(*App) string {
-			return "每个空间是一个文件夹，有自己的文档、置顶和配色，比如「工作」和「生活」。点这里右侧的「+」新建空间，给它起名、选图标和存放位置。"
+			return i18n.T("每个空间是一个文件夹，有自己的文档、置顶和配色，比如「工作」和「生活」。点这里右侧的「+」新建空间，给它起名、选图标和存放位置。")
 		},
-		keys: func(a *App) []string { return []string{a.tourKey("palette") + " 新建空间…"} }},
+		keys: func(a *App) []string { return []string{a.tourKey("palette") + i18n.T(" 新建空间…")} }},
 	{id: "theme", label: "主题配色", title: "给每个空间一身颜色",
 		body: func(*App) string {
-			return "这就是主题画板：把指针移到空间名称上，点右侧的「•••」选择「编辑主题颜色…」打开它。拖动圆点选 1–3 种颜色，再调强度和颗粒，整个窗口像现在这样实时预览。"
+			return i18n.T("这就是主题画板：把指针移到空间名称上，点右侧的「•••」选择「编辑主题颜色…」打开它。拖动圆点选 1–3 种颜色，再调强度和颗粒，整个窗口像现在这样实时预览。")
 		},
-		keys: func(*App) []string { return []string{"跟随系统", "浅色", "深色", "− / + 颜色数"} }},
+		keys: func(*App) []string {
+			return []string{i18n.T("跟随系统"), i18n.T("浅色"), i18n.T("深色"), i18n.T("− / + 颜色数")}
+		}},
 	{id: "swipe", label: "左右滑动", title: "左右轻扫，切换空间",
 		body: func(*App) string {
-			return "在侧边栏上双指左右轻扫，像翻页一样换到相邻的空间，窗口的颜色跟着渐变。用键盘也可以。"
+			return i18n.T("在侧边栏上双指左右轻扫，像翻页一样换到相邻的空间，窗口的颜色跟着渐变。用键盘也可以。")
 		},
 		keys: func(a *App) []string {
 			return []string{a.tourKey("prev-space"), a.tourKey("next-space"), "⌃1 … ⌃9"}
 		}},
 	{id: "bookmarks", label: "书签", title: "用书签记住读到哪儿",
 		body: func(*App) string {
-			return "指针移到任意一段上，点正文右侧页边的书签图标，这一段就有了书签。目录底部列出本文档的书签，点一下跳回去；书签列表里是所有文档的书签。"
+			return i18n.T("指针移到任意一段上，点正文右侧页边的书签图标，这一段就有了书签。目录底部列出本文档的书签，点一下跳回去；书签列表里是所有文档的书签。")
 		},
 		keys: func(a *App) []string {
-			return []string{a.tourKey("bookmark") + " 添加书签", a.tourKey("bookmarks") + " 书签列表", a.tourKey("prev-bookmark") + " " + a.tourKey("next-bookmark") + " 跳转"}
+			return []string{a.tourKey("bookmark") + i18n.T(" 添加书签"), a.tourKey("bookmarks") + i18n.T(" 书签列表"), a.tourKey("prev-bookmark") + " " + a.tourKey("next-bookmark") + i18n.T(" 跳转")}
 		}},
 	{id: "pins", label: "置顶", title: "把常用的文档置顶",
 		body: func(*App) string {
-			return "右键文档或文件夹选择「置顶」，或者直接把它拖过分隔线。置顶的文档一直保持打开，再点回来时光标和滚动位置都还在。"
+			return i18n.T("右键文档或文件夹选择「置顶」，或者直接把它拖过分隔线。置顶的文档一直保持打开，再点回来时光标和滚动位置都还在。")
 		},
-		keys: func(*App) []string { return []string{"右键 › 置顶", "拖过分隔线"} }},
+		keys: func(*App) []string { return []string{i18n.T("右键 › 置顶"), i18n.T("拖过分隔线")} }},
 	{id: "favorites", label: "收藏", title: "收藏，在每个空间都看得到",
 		body: func(*App) string {
-			return "把文档拖到侧边栏顶部，或右键选择「添加到收藏」。收藏是全局的：无论在哪个空间，点一下磁贴就能打开它。"
+			return i18n.T("把文档拖到侧边栏顶部，或右键选择「添加到收藏」。收藏是全局的：无论在哪个空间，点一下磁贴就能打开它。")
 		},
-		keys: func(*App) []string { return []string{"右键 › 添加到收藏", "拖到顶部"} }},
+		keys: func(*App) []string { return []string{i18n.T("右键 › 添加到收藏"), i18n.T("拖到顶部")} }},
 	{id: "done", label: "完成", title: "准备好了，开始写吧",
 		body: func(*App) string {
-			return "所有功能都能在命令栏里找到。想再看一遍，在命令栏输入「新手教程」，或打开 设置 › 关于。"
+			return i18n.T("所有功能都能在命令栏里找到。想再看一遍，在命令栏输入「新手教程」，或打开 设置 › 关于。")
 		},
 		keys: func(a *App) []string {
-			return []string{a.tourKey("palette") + " 命令栏", a.tourKey("new-doc") + " 新建文档"}
+			return []string{a.tourKey("palette") + i18n.T(" 命令栏"), a.tourKey("new-doc") + i18n.T(" 新建文档")}
 		}},
 }
 
@@ -107,7 +110,7 @@ func (a *App) tourKey(id string) string {
 	if k := a.keyLabel(id); k != "" {
 		return strings.Split(k, " / ")[0]
 	}
-	return "命令栏"
+	return i18n.T("命令栏")
 }
 
 const (
@@ -301,7 +304,7 @@ func (a *App) tourView(c *ui.Context) {
 	}
 	ui.Overlay(c, func() {
 		scrim := ui.Box(c.Key("tour")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
-			Role(ui.RoleDialog).Label("新手教程")
+			Role(ui.RoleDialog).Label(i18n.T("新手教程"))
 		if first {
 			scrim.Jump("in", 0)
 		}
@@ -440,7 +443,7 @@ func (a *App) tourCard(c *ui.Context, step tourStep, target ui.Rect, has bool, t
 			pic.Draw(func(p *ui.Painter, r ui.Rect) { paintTourArt(p, r, id, tl, since, still) })
 			if t.step < last {
 				x := ui.Box(c.Key("tour-skip")).Absolute().Right(10).Top(10).Size(26, 26).Radius(13).Center().
-					Focusable().Role(ui.RoleButton).Label("跳过教程").Tooltip("跳过教程 (Esc)").Cursor(ui.CursorPointer)
+					Focusable().Role(ui.RoleButton).Label(i18n.T("跳过教程")).Tooltip(i18n.T("跳过教程 (Esc)")).Cursor(ui.CursorPointer)
 				fill := float32(0.1)
 				if x.Hovered() {
 					fill = 0.2
@@ -454,12 +457,12 @@ func (a *App) tourCard(c *ui.Context, step tourStep, target ui.Rect, has bool, t
 		text := ui.Column(c.Key("text-"+step.id)).Padding(18, 22, 0, 22).Gap(8)
 		enter(text, 18)
 		text.Children(func() {
-			label := step.label
+			label := i18n.T(step.label)
 			if t.step > 0 && t.step < last {
-				label = fmt.Sprintf("%s · %d / %d", step.label, t.step, last-1)
+				label = fmt.Sprintf("%s · %d / %d", i18n.T(step.label), t.step, last-1)
 			}
 			ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(th.Accent)
-			ui.Text(c, step.title).FontSize(20).FontWeight(650)
+			ui.Text(c, i18n.T(step.title)).FontSize(20).FontWeight(650)
 			ui.Text(c, step.body(a)).FontSize(13.5).LineHeight(1.65).TextColor(th.TextMuted)
 			if step.keys != nil {
 				ui.Row(c.Key("keys")).Gap(6).Padding(4, 0, 0, 0).Wrap().Children(func() {
@@ -476,8 +479,8 @@ func (a *App) tourCard(c *ui.Context, step tourStep, target ui.Rect, has bool, t
 			ui.Row(c.Key("dots")).Gap(5).AlignItems(ui.Center).Children(func() {
 				for i, s := range tourSteps {
 					on := i == t.step
-					dot := ui.Box(c.Key(i)).Height(6).Radius(3).Role(ui.RoleButton).Label("第 " + fmt.Sprint(i+1) + " 步：" + s.label).
-						Tooltip(s.label).Cursor(ui.CursorPointer)
+					dot := ui.Box(c.Key(i)).Height(6).Radius(3).Role(ui.RoleButton).Label(i18n.T("第 ") + fmt.Sprint(i+1) + i18n.T(" 步：") + i18n.T(s.label)).
+						Tooltip(i18n.T(s.label)).Cursor(ui.CursorPointer)
 					width, ink := float32(6), th.Text.Alpha(0.16)
 					if on {
 						width, ink = 18, th.Accent
@@ -491,18 +494,18 @@ func (a *App) tourCard(c *ui.Context, step tourStep, target ui.Rect, has bool, t
 			})
 			ui.Spacer(c)
 			if t.step == 0 {
-				if tourButton(c, "tour-back", "跳过", false).Clicked() {
+				if tourButton(c, "tour-back", i18n.T("跳过"), false).Clicked() {
 					a.endTour()
 				}
-			} else if tourButton(c, "tour-back", "上一步", false).Clicked() {
+			} else if tourButton(c, "tour-back", i18n.T("上一步"), false).Clicked() {
 				a.tourGo(-1)
 			}
-			next := "下一步"
+			next := i18n.T("下一步")
 			switch t.step {
 			case 0:
-				next = "开始导览"
+				next = i18n.T("开始导览")
 			case last:
-				next = "开始写作"
+				next = i18n.T("开始写作")
 			}
 			if tourButton(c, "tour-next", next, true).AutoFocus().Clicked() {
 				a.tourGo(1)

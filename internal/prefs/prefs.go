@@ -22,8 +22,23 @@ type Prefs struct {
 	FontSize   float32 `json:"fontSize,omitempty"`
 	LineHeight float32 `json:"lineHeight,omitempty"`
 	NoAutoPair bool    `json:"noAutoPair,omitempty"`
+	// AutoSpace puts a space between Chinese and Latin text as it is typed.
+	AutoSpace bool `json:"autoSpace,omitempty"`
+	// RecentCommands are the command bar's commands used last, latest
+	// first, which it lists first.
+	RecentCommands []string `json:"recentCommands,omitempty"`
+	// Language is the interface's language, "zh-Hans" or "en"; "" follows
+	// the system.
+	Language string `json:"language,omitempty"`
+	// Font is the body text's typeface, one of Fonts ("" the system's);
+	// Page the text column's width, one of Pages ("" the standard 820).
+	Font string `json:"font,omitempty"`
+	Page string `json:"page,omitempty"`
 	// Typewriter keeps the line being written in the middle of the page.
 	Typewriter bool `json:"typewriter,omitempty"`
+	// DrawAnnotations lets the hand-drawn marks in view draw themselves,
+	// one after another, when a document opens.
+	DrawAnnotations bool `json:"drawAnnotations,omitempty"`
 	// NoDim keeps the other paragraphs bright in focus mode, which fades
 	// them by default.
 	NoDim bool `json:"noDim,omitempty"`
@@ -95,7 +110,47 @@ func (p *Prefs) ReadingLine() float32 {
 	}
 	return 26.0 / 16
 }
+
+// Fonts are the typefaces body text may be set in, and Pages the widths
+// of the text column, by the names prefs.json keeps them under.
+var (
+	Fonts = []string{"", "serif", "kai", "mono"}
+	Pages = []string{"narrow", "", "wide"}
+)
+
+// fontFamilies are the family lists of Fonts: the first a system has sets
+// the text, Latin before CJK so each script gets a face of its kind.
+var fontFamilies = map[string]string{
+	"serif": "Georgia, Songti SC, STSong, Noto Serif CJK SC, Source Han Serif SC, SimSun, serif",
+	"kai":   "Kaiti SC, STKaiti, KaiTi, Noto Serif CJK SC, serif",
+	"mono":  "monospace",
+}
+
+// BodyFamily is the family list body text is set in, "" for the system's.
+func (p *Prefs) BodyFamily() string { return fontFamilies[p.Font] }
+
+// Column is the width of the text column: 680 narrow, 1040 wide, 0 for
+// the standard 820.
+func (p *Prefs) Column() float32 {
+	switch p.Page {
+	case "narrow":
+		return 680
+	case "wide":
+		return 1040
+	}
+	return 0
+}
+
 func (p *Prefs) normalizeReading() {
+	if p.Language != "zh-Hans" && p.Language != "en" {
+		p.Language = ""
+	}
+	if _, ok := fontFamilies[p.Font]; !ok {
+		p.Font = ""
+	}
+	if p.Page != "narrow" && p.Page != "wide" {
+		p.Page = ""
+	}
 	if !(p.FontSize >= 12 && p.FontSize <= 28) {
 		p.FontSize = 0
 	}

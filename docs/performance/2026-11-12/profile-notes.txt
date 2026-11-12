@@ -1,0 +1,37 @@
+Total: 5.35s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/editor.(*Editor).collectNotes in /Users/cizai/agent/Prism/internal/editor/inline.go
+      80ms      1.07s (flat, cum) 20.00% of Total
+         .          .    324:func (e *Editor) collectNotes() {
+         .          .    325:	if e.notesDoc == e.Doc && e.notesRevision == e.Revision() {
+         .          .    326:		return
+         .          .    327:	}
+         .          .    328:	e.notesDoc, e.notesRevision = e.Doc, e.Revision()
+         .          .    329:	defer func() { e.notesKey = e.buildNoteKey() }()
+         .          .    330:	e.notes = map[string]noteTarget{}
+         .      410ms    331:	leaves := e.Doc.Leaves()
+      10ms       10ms    332:	for _, l := range leaves {
+      30ms       30ms    333:		if l.Block.Kind == "footnote" {
+         .          .    334:			if _, exists := e.notes[l.Block.NoteLabel]; !exists {
+         .          .    335:				e.notes[l.Block.NoteLabel] = noteTarget{start: l.Start, id: l.Block.ID}
+         .          .    336:			}
+         .          .    337:		}
+         .          .    338:	}
+         .          .    339:	n := 0
+      10ms       10ms    340:	for _, l := range leaves {
+         .      140ms    341:		s := l.Block.Text()
+         .      440ms    342:		for _, t := range inlineTokens(s) {
+         .          .    343:			note, ok := e.notes[t.note]
+         .          .    344:			if ok && note.number == 0 && tokenAllowed(l.Block, document.Len(s[:t.start]), document.Len(s[:t.end])) {
+         .          .    345:				n++
+         .          .    346:				note.number = n
+         .          .    347:				e.notes[t.note] = note
+         .          .    348:			}
+         .          .    349:		}
+         .          .    350:	}
+         .          .    351:	for _, l := range leaves {
+      30ms       30ms    352:		if l.Block.Kind == "footnote" {
+         .          .    353:			note := e.notes[l.Block.NoteLabel]
+         .          .    354:			if note.number == 0 {
+         .          .    355:				n++
+         .          .    356:				note.number = n
+         .          .    357:				e.notes[l.Block.NoteLabel] = note

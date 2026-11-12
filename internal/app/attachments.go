@@ -12,6 +12,7 @@ import (
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/fsutil"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo"
 )
@@ -37,8 +38,8 @@ func (a *App) pickImages() {
 		return
 	}
 	win := a.win
-	opts := mygo.OpenDialogOptions{Parent: win, Title: "插入图片", Multiple: true,
-		Filters: []mygo.FileFilter{{Name: "图片", Extensions: imageExtensions}}}
+	opts := mygo.OpenDialogOptions{Parent: win, Title: i18n.T("插入图片"), Multiple: true,
+		Filters: []mygo.FileFilter{{Name: i18n.T("图片"), Extensions: imageExtensions}}}
 	go func() {
 		paths, err := mygo.Dialog.Open(opts)
 		if err == nil && len(paths) > 0 {
@@ -76,8 +77,8 @@ func (a *App) pickCover(done func(url string)) {
 		return
 	}
 	win := a.win
-	opts := mygo.OpenDialogOptions{Parent: win, Title: "选择封面图片",
-		Filters: []mygo.FileFilter{{Name: "图片", Extensions: imageExtensions}}}
+	opts := mygo.OpenDialogOptions{Parent: win, Title: i18n.T("选择封面图片"),
+		Filters: []mygo.FileFilter{{Name: i18n.T("图片"), Extensions: imageExtensions}}}
 	go func() {
 		paths, err := mygo.Dialog.Open(opts)
 		if err == nil && len(paths) > 0 {
@@ -135,12 +136,12 @@ func (a *App) pasteImage(png []byte) {
 	if d == nil || d.loadErr != nil || d.source {
 		return
 	}
-	rel, err := a.writeAsset(path.Dir(d.rel), "粘贴的图片.png", png)
+	rel, err := a.writeAsset(path.Dir(d.rel), i18n.T("粘贴的图片.png"), png)
 	if err != nil {
 		a.notify("粘贴图片失败。%v", err)
 		return
 	}
-	a.placeImages([]*model.Block{imageBlock("粘贴的图片", rel)}, -1)
+	a.placeImages([]*model.Block{imageBlock(i18n.T("粘贴的图片"), rel)}, -1)
 }
 
 func imageBlock(alt, rel string) *model.Block {

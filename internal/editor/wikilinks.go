@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/wiki"
 	"github.com/egoist/mygo/ui"
 )
@@ -171,7 +172,7 @@ func (e *Editor) watchWiki(suggest func(string) []WikiItem) {
 				exact = exact || wiki.Same(it.Name, t)
 			}
 			if !exact {
-				w.items = append(w.items, WikiItem{Name: t, Hint: "新建文档"})
+				w.items = append(w.items, WikiItem{Name: t, Hint: i18n.T("新建文档")})
 			}
 		}
 		w.index = 0
@@ -240,18 +241,18 @@ func (e *Editor) wikiMenu(c *ui.Context, surface ui.Element) {
 	ui.Overlay(c, func() {
 		menu := ui.Column(c.Key("wiki-menu")).Absolute().Left(max(8, x)).Top(y).Width(width).Padding(1)
 		e.popover(c, menu).Children(func() {
-			ui.Text(c, "链接到文档").FontSize(12).TextColor(e.page.Caption).Padding(8, 12, 2, 12).AlignSelf(ui.Start)
+			ui.Text(c, i18n.T("链接到文档")).FontSize(12).TextColor(e.page.Caption).Padding(8, 12, 2, 12).AlignSelf(ui.Start)
 			ui.Scroll(c.Key("wiki-scroll")).MaxHeight(8 * rowH).Children(func() {
 				ui.Column(c).Padding(4, 6, 6, 6).Children(func() {
 					for i, it := range w.items {
 						row := ui.ButtonBase(c.Key("wiki-row:" + it.Name + it.Hint)).Height(rowH).PaddingX(8).Gap(8).Radius(4).
-							KeepFocus().Label("链接到 " + it.Name).Cursor(ui.CursorPointer).AlignItems(ui.Center)
+							KeepFocus().Label(i18n.T("链接到 ") + it.Name).Cursor(ui.CursorPointer).AlignItems(ui.Center)
 						if i == w.index || row.Hovered() {
 							row.Background(e.page.Hover)
 						}
 						row.Children(func() {
 							icon := iconLink
-							if it.Hint == "新建文档" {
+							if it.Hint == i18n.T("新建文档") {
 								icon = iconPlus
 							}
 							ui.Icon(c, icon).FontSize(15).TextColor(e.page.Caption)

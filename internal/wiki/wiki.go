@@ -191,3 +191,42 @@ func Open(text string) (start int, typed string, ok bool) {
 	}
 	return at, typed, true
 }
+
+// RenameTag renames the tag from, ignoring case, to to in text, and the
+// tags under it with it: #工作/2026 follows #工作. A tag named to already
+// is where from merges.
+func RenameTag(text, from, to string) (string, bool) {
+	from = strings.TrimPrefix(from, "#")
+	to = strings.TrimPrefix(to, "#")
+	if from == "" || to == "" {
+		return text, false
+	}
+	var b strings.Builder
+	last, changed := 0, false
+	for _, t := range Tags(text) {
+		name := t.Name
+		rest := ""
+		switch {
+		case strings.EqualFold(name, from):
+		case len(name) > len(from) && strings.EqualFold(name[:len(from)], from) && name[len(from)] == '/':
+			rest = name[len(from):]
+		default:
+			continue
+		}
+		b.WriteString(text[last:t.Start])
+		b.WriteString("#" + to + rest)
+		last, changed = t.End, true
+	}
+	if !changed {
+		return text, false
+	}
+	b.WriteString(text[last:])
+	return b.String(), true
+}
+
+// ValidTag reports whether name can be a tag: what Tags reads as one whole.
+func ValidTag(name string) bool {
+	name = strings.TrimPrefix(name, "#")
+	tags := Tags("#" + name)
+	return len(tags) == 1 && tags[0].Name == name
+}

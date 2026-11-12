@@ -1,0 +1,20 @@
+File: after.test
+Type: cpu
+Time: 2026-11-13 06:01:49 CST
+Duration: 2.34s, Total samples = 2790ms (119.18%)
+Showing nodes accounting for 1560ms, 55.91% of 2790ms total
+Dropped 124 nodes (cum <= 13.95ms)
+Showing top 12 nodes out of 209
+      flat  flat%   sum%        cum   cum%
+     300ms 10.75% 10.75%      300ms 10.75%  runtime.cgocall
+     210ms  7.53% 18.28%      280ms 10.04%  runtime.tryDeferToSpanScan
+     150ms  5.38% 23.66%      210ms  7.53%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).shiftFollowing
+     130ms  4.66% 28.32%      130ms  4.66%  runtime.memmove
+     120ms  4.30% 32.62%      120ms  4.30%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paintTables
+     110ms  3.94% 36.56%      430ms 15.41%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paint
+     100ms  3.58% 40.14%      100ms  3.58%  runtime.pthread_kill
+      90ms  3.23% 43.37%      100ms  3.58%  github.com/Ciao1019/ArcMD/internal/document.siblingLists
+      90ms  3.23% 46.59%       90ms  3.23%  runtime.memclrNoHeapPointers
+      90ms  3.23% 49.82%       90ms  3.23%  runtime.memequal
+      90ms  3.23% 53.05%      300ms 10.75%  runtime.scanObject
+      80ms  2.87% 55.91%       80ms  2.87%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paintHoverControls

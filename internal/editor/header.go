@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -186,7 +187,7 @@ func (e *Editor) headerControls(c *ui.Context) {
 	h := &e.header
 	if h.iconRect.H > 0 {
 		b := ui.ButtonBase(c.Key("page-icon")).Absolute().Left(h.iconRect.X).Top(h.iconRect.Y).Size(h.iconRect.W, h.iconRect.H).
-			Radius(8).Label("更换图标").Tooltip("更换图标").KeepFocus().Cursor(ui.CursorPointer)
+			Radius(8).Label(i18n.T("更换图标")).Tooltip(i18n.T("更换图标")).KeepFocus().Cursor(ui.CursorPointer)
 		if b.Clicked() {
 			h.iconOpen, h.coverOpen = !h.iconOpen, false
 		}
@@ -200,13 +201,13 @@ func (e *Editor) headerControls(c *ui.Context) {
 	}
 	if h.coverRect.H > 0 && (e.hovered(h.coverRect, 0) || h.coverOpen) {
 		ui.Row(c.Key("cover-buttons")).Absolute().Right(e.padding).Top(h.coverRect.H - 40).Gap(6).Children(func() {
-			if h.coverMovable() && e.headerButton(c, "cover-move", iconMoveVertical, "调整位置", true).Clicked() {
+			if h.coverMovable() && e.headerButton(c, "cover-move", iconMoveVertical, i18n.T("调整位置"), true).Clicked() {
 				h.moving, h.movingY, h.coverOpen, h.iconOpen = true, e.Doc.CoverY, false, false
 			}
-			if e.headerButton(c, "cover-change", iconImage, "更换封面", true).Clicked() {
+			if e.headerButton(c, "cover-change", iconImage, i18n.T("更换封面"), true).Clicked() {
 				h.coverOpen, h.iconOpen = !h.coverOpen, false
 			}
-			if e.headerButton(c, "cover-remove", iconTrash, "移除封面", true).Clicked() {
+			if e.headerButton(c, "cover-remove", iconTrash, i18n.T("移除封面"), true).Clicked() {
 				e.Engine.SetCover("")
 				h.coverOpen = false
 			}
@@ -223,11 +224,11 @@ func (e *Editor) headerControls(c *ui.Context) {
 		top = h.iconRect.Y - 36
 	}
 	ui.Row(c.Key("header-add")).Absolute().Left(e.padding - 8).Top(max(4, top)).Gap(4).Children(func() {
-		if e.Doc.Icon == "" && e.headerButton(c, "icon-add", iconSmile, "添加图标", false).Clicked() {
+		if e.Doc.Icon == "" && e.headerButton(c, "icon-add", iconSmile, i18n.T("添加图标"), false).Clicked() {
 			e.Engine.SetPageIcon(pageEmoji[0])
 			h.iconOpen, h.coverOpen = true, false
 		}
-		if e.Doc.Cover == "" && e.headerButton(c, "cover-add", iconImage, "添加封面", false).Clicked() {
+		if e.Doc.Cover == "" && e.headerButton(c, "cover-add", iconImage, i18n.T("添加封面"), false).Clicked() {
 			e.Engine.SetCover("gradient:" + document.CoverGradients[0])
 			h.coverOpen, h.iconOpen = true, false
 		}
@@ -255,8 +256,8 @@ func (e *Editor) headerPopups(c *ui.Context, surface ui.Element) {
 			panel := ui.Column(c.Key("page-icons")).Absolute().Left(x).Top(y).Width(318).Padding(10).Gap(8)
 			e.popover(c, panel).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "页面图标").FontSize(12).TextColor(t.Text).Grow(1)
-					if e.headerButton(c, "icon-remove", iconTrash, "移除图标", false).Clicked() {
+					ui.Text(c, i18n.T("页面图标")).FontSize(12).TextColor(t.Text).Grow(1)
+					if e.headerButton(c, "icon-remove", iconTrash, i18n.T("移除图标"), false).Clicked() {
 						e.Engine.SetPageIcon("")
 						h.iconOpen = false
 					}
@@ -266,7 +267,7 @@ func (e *Editor) headerPopups(c *ui.Context, surface ui.Element) {
 						ui.Row(c.Key(row)).Gap(2).Children(func() {
 							for _, emoji := range pageEmoji[row:min(row+10, len(pageEmoji))] {
 								cell := ui.ButtonBase(c.Key("page-emoji:"+emoji)).Size(28, 28).Radius(4).Center().
-									Label("图标：" + emoji).KeepFocus().Cursor(ui.CursorPointer)
+									Label(i18n.T("图标：") + emoji).KeepFocus().Cursor(ui.CursorPointer)
 								if e.Doc.Icon == emoji {
 									cell.Background(e.page.TurnActive)
 								} else if cell.Hovered() {
@@ -288,12 +289,12 @@ func (e *Editor) headerPopups(c *ui.Context, surface ui.Element) {
 			y := bounds.Y + h.coverRect.H - e.Scroll.Y + 2
 			panel := ui.Column(c.Key("page-covers")).Absolute().Left(max(8, x)).Top(y).Width(300).Padding(10).Gap(10)
 			e.popover(c, panel).Children(func() {
-				ui.Text(c, "封面").FontSize(12).TextColor(t.Text)
+				ui.Text(c, i18n.T("封面")).FontSize(12).TextColor(t.Text)
 				ui.Row(c).Gap(8).Wrap().Children(func() {
 					for _, name := range document.CoverGradients {
 						colors := e.page.Covers[name]
 						value := "gradient:" + name
-						sw := ui.ButtonBase(c.Key("cover:"+name)).Size(82, 44).Radius(6).Label("封面：" + coverName(name)).
+						sw := ui.ButtonBase(c.Key("cover:"+name)).Size(82, 44).Radius(6).Label(i18n.T("封面：") + coverName(name)).
 							Tooltip(coverName(name)).KeepFocus().Cursor(ui.CursorPointer)
 						on := e.Doc.Cover == value
 						hovered := sw.Hovered()
@@ -310,7 +311,7 @@ func (e *Editor) headerPopups(c *ui.Context, surface ui.Element) {
 						}
 					}
 				})
-				if h.pickCover != nil && e.headerButton(c, "cover-upload", iconImage, "使用图片…", false).Clicked() {
+				if h.pickCover != nil && e.headerButton(c, "cover-upload", iconImage, i18n.T("使用图片…"), false).Clicked() {
 					h.coverOpen = false
 					e.header.pickCover(func(url string) {
 						if url != "" {
@@ -327,17 +328,17 @@ func (e *Editor) headerPopups(c *ui.Context, surface ui.Element) {
 func coverName(name string) string {
 	switch name {
 	case "dawn":
-		return "晨光"
+		return i18n.T("晨光")
 	case "sea":
-		return "海"
+		return i18n.T("海")
 	case "forest":
-		return "森林"
+		return i18n.T("森林")
 	case "dusk":
-		return "暮色"
+		return i18n.T("暮色")
 	case "sand":
-		return "沙"
+		return i18n.T("沙")
 	case "ink":
-		return "墨"
+		return i18n.T("墨")
 	}
 	return name
 }
@@ -356,7 +357,7 @@ func (e *Editor) coverMover(c *ui.Context) {
 	h := &e.header
 	r := h.coverRect
 	pad := ui.Box(c.Key("cover-mover")).Absolute().Left(r.X).Top(r.Y).Size(r.W, r.H).
-		Role(ui.RoleSlider).Label("封面位置").KeepFocus().Cursor(ui.CursorGrab)
+		Role(ui.RoleSlider).Label(i18n.T("封面位置")).KeepFocus().Cursor(ui.CursorGrab)
 	if _, dy, held := pad.Dragged(); held {
 		pad.Cursor(ui.CursorGrabbing)
 		if over := h.coverOverflow(); over > 0 {
@@ -368,15 +369,15 @@ func (e *Editor) coverMover(c *ui.Context) {
 	pad.Children(func() {
 		ui.Box(c.Key("cover-mover-hint")).Absolute().Left(r.W/2-90).Top(r.H/2-16).Size(180, 32).Radius(16).
 			Center().Background(e.page.Scrim).Children(func() {
-			ui.Text(c, "拖动图片以调整位置").FontSize(13).TextColor(e.page.OnScrim)
+			ui.Text(c, i18n.T("拖动图片以调整位置")).FontSize(13).TextColor(e.page.OnScrim)
 		})
 	})
 	ui.Row(c.Key("cover-buttons")).Absolute().Right(e.padding).Top(r.H - 40).Gap(6).Children(func() {
-		if e.headerButton(c, "cover-save", iconCheck, "保存位置", true).Clicked() {
+		if e.headerButton(c, "cover-save", iconCheck, i18n.T("保存位置"), true).Clicked() {
 			h.moving = false
 			e.Engine.SetCoverY(h.movingY)
 		}
-		if e.headerButton(c, "cover-cancel", iconClose, "取消", true).Clicked() {
+		if e.headerButton(c, "cover-cancel", iconClose, i18n.T("取消"), true).Clicked() {
 			h.moving = false
 		}
 	})

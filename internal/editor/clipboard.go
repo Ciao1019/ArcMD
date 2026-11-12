@@ -24,8 +24,16 @@ func (e *Editor) copySelection(write func(string)) {
 		return
 	}
 	if !literalBlock(e.LeafAt(r.Start).Block.Kind) {
-		text = strings.TrimSuffix(ExportMarkdown(fragment), "\n")
+		text = trimNewline(ExportMarkdown(fragment))
 	}
+	e.writeClipboard(fragment, data, text)
+}
+
+func trimNewline(s string) string { return strings.TrimSuffix(s, "\n") }
+
+// writeClipboard offers a fragment, encoded as data, with its text,
+// Markdown and HTML.
+func (e *Editor) writeClipboard(fragment *document.Document, data, text string) {
 	e.services.WriteClipboardData(transfer.New(transfer.NewItem(
 		transfer.Bytes(fragmentFormat, []byte(data)),
 		transfer.Bytes(transfer.Text, []byte(text)),
@@ -99,6 +107,13 @@ func (e *Editor) pasteSelection(read func() string) {
 		}
 	}
 	if !literalBlock(kind) && !e.CurrentStyle().Code && len(text) < 8<<20 {
+		// Rows copied from a spreadsheet, as tab-separated lines.
+		if doc := tabTable(text); doc != nil && kind != "cell" {
+			e.UnmarkText()
+			e.Engine.Paste(doc)
+			e.sync()
+			return
+		}
 		if doc := ImportMarkdown(text); rich(doc) {
 			e.UnmarkText()
 			e.Engine.Paste(doc)

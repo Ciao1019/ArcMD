@@ -91,3 +91,19 @@ func (e *Editor) MoveSectionAtCaret(delta int) {
 	}
 	e.Engine.MoveSection(id, before)
 }
+
+// InsertToggle turns the caret's empty paragraph, or a new one below, into
+// a toggle with a line of content under it.
+func (e *Editor) InsertToggle() {
+	for _, it := range insertions {
+		if it.kind == "toggle" {
+			leaf := e.Engine.LeafAt(e.Caret)
+			if leaf.Block.Kind != "paragraph" || leaf.Block.Text() != "" {
+				e.Engine.Insert(document.NewBlock("paragraph", ""))
+				e.sync()
+			}
+			e.insertItem(it)
+			return
+		}
+	}
+}

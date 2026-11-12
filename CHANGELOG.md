@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.0.11
+
+This release adds hand-drawn annotations, more ways to write and organize documents, and broad improvements to the editor's algorithms for long documents.
+
+### Writing and expression
+
+- Mark text with 12 hand-drawn styles, including circles, waves, highlights, arrows, brackets, and boxes. Choose colors, edit existing marks, and watch strokes draw themselves in.
+- Select multiple blocks with the keyboard or margin, then move, indent, duplicate, convert, or delete them together. Add toggle blocks to fold a section of notes.
+- Insert emoji with shortcodes such as `:smile:` and use `@` for dates and document links. Optional automatic spacing separates Chinese and Latin text.
+- Set a document word goal and see estimated reading time. Choose Chinese or English UI, font family, page width, text size, and line height.
+- Paste CSV or tab-separated content as tables and sort table rows by a column.
+
+### Documents and media
+
+- Create documents from Space templates, with date, time, weekday, and title placeholders. Open or create today's note with one command.
+- Find and replace across documents, rename or merge tags, and sort folders by name or modification time. The command bar remembers recent commands.
+- Move a document into its own native window while preserving its cursor, scroll position, and undo history.
+- Play animated GIFs and crop still images into a new asset while keeping the original. Export documents as standalone HTML pages alongside Markdown and PDF.
+- Undo document deletion and moves from the notification. Refine sidebar, Space, and document navigation behavior.
+
+### Editor performance
+
+- Index UTF-16 and UTF-8 positions with Fenwick trees, reuse stable block IDs, and read only the relevant text ranges for ordinary input and word navigation.
+- Update local layouts, footnote references, word counts, and search results incrementally. Cull offscreen rows and decorations, virtualize long outlines, and avoid full-document snapshots during repeated IME candidate updates.
+- On the million-character mixed fixture, CPU scene construction is **0.273 ms P50 / 0.291 ms P95** for typing and **0.271 ms / 0.306 ms** for backspace. Typing with search open takes **0.281 ms P50**, including event handling; repeated IME candidate updates take **0.264 ms P50**, excluding composition start and commit.
+- These measurements cover native event handling and CPU scene construction as specified in the [performance report](https://github.com/Ciao1019/ArcMD/blob/v0.0.11/docs/performance.md), not GPU presentation or end-to-end display latency. Existing editing interactions and full-layout fallbacks are retained.
+
+### Documentation
+
+- Refresh both READMEs with the current feature set and optimized performance results, without test dates.
+- Add smooth, looping Chinese and English annotation SVGs, original demo documents, and a Go artwork generator.
+
+### Data compatibility
+
+ArcMD 0.0.11 writes document format **8** and Space configuration format **8**, migrating older formats when saved. Documents gain annotations, toggle blocks, and word goals; Space configuration gains folder sorting. Older releases cannot open the upgraded formats. Keep a copy of documents and configuration if you need to return to an earlier version.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates. The plugin marketplace and plugin execution runtimes remain unavailable.
+
 ## 0.0.9
 
 This update fixes jumping while selecting text across screens and replaces the README demonstrations with smooth vector animations.

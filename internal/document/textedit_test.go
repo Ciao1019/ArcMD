@@ -50,6 +50,7 @@ func TestTextHistoryMatchesFullTransactions(t *testing.T) {
 				}
 			}
 		}
+		assertLeafOffsets(t, fast)
 	}
 	encoded, err := fast.Doc.Encode()
 	if err != nil {

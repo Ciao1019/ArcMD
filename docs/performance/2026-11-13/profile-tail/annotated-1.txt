@@ -1,0 +1,19 @@
+Total: 2.90s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).lineRange in /Users/cizai/agent/Prism/internal/editor/buffer.go
+      10ms      400ms (flat, cum) 13.79% of Total
+         .          .    178:func (b *Buffer) lineRange(at int) (int, int) {
+         .      120ms    179:	i := ui.UTF16ByteOffset(b.text, at)
+         .          .    180:	a := strings.LastIndexByte(b.text[:i], '\n') + 1
+         .          .    181:	z := len(b.text)
+         .          .    182:	if n := strings.IndexByte(b.text[i:], '\n'); n >= 0 {
+         .          .    183:		z = i + n
+         .          .    184:	}
+         .          .    185:	if z > a && b.text[z-1] == '\r' {
+         .          .    186:		z--
+         .          .    187:	}
+      10ms      280ms    188:	return ui.UTF16Len(b.text[:a]), ui.UTF16Len(b.text[:z])
+         .          .    189:}
+         .          .    190:
+         .          .    191:func (b *Buffer) boundary(at, direction int) int {
+         .          .    192:	a, z := b.lineRange(at)
+         .          .    193:	if direction < 0 && at <= a {

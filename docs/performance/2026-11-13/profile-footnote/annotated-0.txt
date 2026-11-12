@@ -1,0 +1,46 @@
+Total: 3.87s
+ROUTINE ======================== github.com/Ciao1019/ArcMD/internal/editor.(*Editor).collectNotes in /Users/cizai/agent/Prism/internal/editor/inline.go
+      70ms      1.74s (flat, cum) 44.96% of Total
+         .          .    324:func (e *Editor) collectNotes() {
+         .          .    325:	if e.notesDoc == e.Doc && e.notesRevision == e.Revision() {
+         .          .    326:		return
+         .          .    327:	}
+         .          .    328:	e.notesDoc, e.notesRevision = e.Doc, e.Revision()
+         .          .    329:	defer func() { e.notesKey = e.buildNoteKey() }()
+         .          .    330:	e.notes = map[string]noteTarget{}
+         .      120ms    331:	if !e.Doc.HasKind("footnote") {
+         .          .    332:		// Only references to a definition are numbered, so a page without
+         .          .    333:		// one has nothing to number: skip the pass over all its text,
+         .          .    334:		// which every keystroke on a long page would otherwise pay.
+         .          .    335:		return
+         .          .    336:	}
+         .      1.09s    337:	leaves := e.Doc.Leaves()
+         .          .    338:	for _, l := range leaves {
+      10ms       20ms    339:		if l.Block.Kind == "footnote" {
+         .          .    340:			if _, exists := e.notes[l.Block.NoteLabel]; !exists {
+         .          .    341:				e.notes[l.Block.NoteLabel] = noteTarget{start: l.Start, id: l.Block.ID}
+         .          .    342:			}
+         .          .    343:		}
+         .          .    344:	}
+         .          .    345:	n := 0
+      20ms       20ms    346:	for _, l := range leaves {
+         .      290ms    347:		s := l.Block.Text()
+         .      160ms    348:		if !strings.Contains(s, "[^") {
+         .          .    349:			continue
+         .          .    350:		}
+         .          .    351:		for _, t := range inlineTokens(s) {
+         .          .    352:			note, ok := e.notes[t.note]
+         .          .    353:			if ok && note.number == 0 && tokenAllowed(l.Block, document.Len(s[:t.start]), document.Len(s[:t.end])) {
+         .          .    354:				n++
+         .          .    355:				note.number = n
+         .          .    356:				e.notes[t.note] = note
+         .          .    357:			}
+         .          .    358:		}
+         .          .    359:	}
+      20ms       20ms    360:	for _, l := range leaves {
+      20ms       20ms    361:		if l.Block.Kind == "footnote" {
+         .          .    362:			note := e.notes[l.Block.NoteLabel]
+         .          .    363:			if note.number == 0 {
+         .          .    364:				n++
+         .          .    365:				note.number = n
+         .          .    366:				e.notes[l.Block.NoteLabel] = note

@@ -1,162 +1,122 @@
-# Editor performance — 2026-11-08
+# Editor performance
 
-ArcMD now has lower CPU-frame P50 and P95 than Quiet.md 0.1.7 in all nine measured
-cases: typing, backspace and scrolling at approximately 10k, 100k and 1m characters.
-This result covers the README-style workload below. It does not establish that
-Go is faster than Rust, or that every ArcMD feature is faster than its counterpart.
+ArcMD 0.0.11 uses indexed text positions, local layout, incremental search, and
+viewport culling to keep ordinary editing responsive in long documents. This
+report replaces the earlier README measurements with the latest optimized
+results. All times below are CPU measurements, not display latency.
 
-## Reproduced comparison
+## Million-character document
 
-Each case uses three fresh-process rounds, each with 100 insertions of `x` at the
-end of the first paragraph, 100 backspaces, then 100 downward 40-DIP scrolls.
-The table shows **the median of the three per-round quantiles**, in milliseconds;
-it is not a pooled P95. Smaller is better. The last column divides Quiet.md's P50
-by ArcMD's P50.
+The synthetic fixture contains approximately one million characters, 549
+chapters, 500 tables, and 9,912 table cells. Each operation runs 100 times per
+process in three fresh processes. Values are the median of the three per-run
+P50 or P95 values; samples are not pooled.
 
-| Characters | Operation | ArcMD P50 | Quiet.md P50 | ArcMD P95 | Quiet.md P95 | P50 ratio |
-|---|---|---:|---:|---:|---:|---:|
-| 10k | Typing | 0.160 | 3.110 | 0.185 | 3.690 | 19.5× |
-| 10k | Backspace | 0.152 | 3.030 | 0.174 | 3.650 | 19.9× |
-| 10k | Scrolling | 0.244 | 5.020 | 0.597 | 8.500 | 20.5× |
-| 100k | Typing | 0.191 | 3.670 | 0.211 | 4.620 | 19.3× |
-| 100k | Backspace | 0.188 | 3.720 | 0.211 | 4.550 | 19.7× |
-| 100k | Scrolling | 0.268 | 5.640 | 0.621 | 8.700 | 21.0× |
-| 1m | Typing | 0.589 | 5.390 | 1.105 | 6.140 | 9.1× |
-| 1m | Backspace | 0.572 | 5.000 | 1.002 | 6.420 | 8.7× |
-| 1m | Scrolling | 0.489 | 4.630 | 1.136 | 8.250 | 9.5× |
+| Operation | CPU scene P50 | CPU scene P95 | Event + scene P50 | Event + scene P95 |
+| --- | ---: | ---: | ---: | ---: |
+| Typing | 0.273 ms | 0.291 ms | 0.275 ms | 0.294 ms |
+| Backspace | 0.271 ms | 0.306 ms | 0.316 ms | 0.357 ms |
+| Scrolling | 0.548 ms | 1.132 ms | 0.551 ms | 1.135 ms |
 
-The million-character fixture contains 1,001,307 body characters plus a
-19-character title, 549 chapters, 16,935 top-level ArcMD blocks, 500 tables and
-9,912 table cells. Smaller fixtures end at complete XML blocks: 10,023 and
-100,006 characters. The converter asserts exact text preservation and retains
-supported inline marks, lists, code and tables. Orange callouts map to yellow.
+The scene timer excludes input dispatch; the combined timer includes it.
+Neither includes software rasterization, GPU presentation, or display latency.
+These figures do not establish end-to-end input latency or measured display FPS.
+The fixture has many blocks and does not represent one million-character paragraph.
 
-Event dispatch is timed separately, so a faster frame cannot hide work moved
-into event handling. For the million-character case:
+Allocation volume is approximately **0.067 MB per insertion**, **0.081 MB per
+backspace**, and **0.122 MB per scroll**, in decimal MB. This includes event
+handling, scene construction, and small harness overhead; it is not resident
+memory. Opening the full document takes about **857 ms** of measured CPU time
+and still requires whole-document work.
 
-| Operation | ArcMD event P50 | Quiet.md event P50 | ArcMD event + frame P95 |
-|---|---:|---:|---:|
-| Typing | 0.240 | 0.970 | 1.428 |
-| Backspace | 0.132 | 0.910 | 1.247 |
-| Scrolling | 0.001 | 0.010 | 1.137 |
+## Input with search and composition
 
-Quiet.md exposes event and frame quantiles but not individual samples, so its
-combined P95 cannot be reconstructed by adding those quantiles. ArcMD preserves
-all individual event/frame/combined samples.
+These additional workloads use the same million-character fixture and the
+same three-process, 100-operation sampling method. They include event handling
+and scene construction.
 
-## Improvement against ArcMD's baseline
+| Workload | CPU P50 | CPU P95 | Allocation per update |
+| --- | ---: | ---: | ---: |
+| Typing with find query `text` open | 0.281 ms | 0.322 ms | 0.066 MB |
+| Repeated IME candidate update | 0.264 ms | 0.307 ms | 0.059 MB |
 
-These are ArcMD CPU-frame P50 values on the same machine and fixture. The old
-million-character case used only **5 operations per round**, because frames took
-several seconds; its numbers are diagnostic medians, not reliable tail estimates.
-The old 10k/100k and all optimized cases use 100 operations per round.
+IME measurement begins after composition starts and alternates candidate
+strings through native `TextComposition` events. It verifies that committed
+text stays unchanged and the candidate text is displayed. Composition start
+and final commit are excluded and still retain full snapshots.
 
-| Characters | Operation | Before, ms | After, ms |
-|---|---|---:|---:|
-| 10k | Typing | 1.879 | 0.160 |
-| 10k | Backspace | 2.037 | 0.152 |
-| 10k | Scrolling | 1.053 | 0.244 |
-| 100k | Typing | 56.730 | 0.191 |
-| 100k | Backspace | 56.327 | 0.188 |
-| 100k | Scrolling | 40.527 | 0.268 |
-| 1m | Typing | 4133.358 | 0.589 |
-| 1m | Backspace | 4021.641 | 0.572 |
-| 1m | Scrolling | 3238.968 | 0.489 |
+## Scaling across document sizes
 
-Allocation volume per operation on the million-character case, in decimal MB
-(event plus frame and small harness bookkeeping; **not resident memory**):
+CPU scene construction P50, using matching fixtures and operations:
 
-| Operation | Before MB/op | After MB/op |
-|---|---:|---:|
-| Typing | 9,200.573 | 2.823 |
-| Backspace | 9,240.988 | 2.837 |
-| Scrolling | 8,836.899 | 0.059 |
+| Characters | Typing | Backspace | Scrolling | Open CPU time |
+| --- | ---: | ---: | ---: | ---: |
+| 10k | 0.227 ms | 0.220 ms | 0.307 ms | 31.09 ms |
+| 100k | 0.238 ms | 0.236 ms | 0.342 ms | 111.88 ms |
+| 1m | 0.273 ms | 0.271 ms | 0.548 ms | 856.68 ms |
 
-## Changes responsible for the improvement
+## Algorithms
 
-- `Engine.LeafAt` caches the leaf index per document revision and uses binary
-  search. Table controls no longer rebuild every document leaf for every table.
-  Queries inside structural transactions still see fresh intermediate state.
-- Offscreen table controls, decorations and cell rules are culled before expensive
-  work. Code line-number rendering no longer scans all rows for offscreen code.
-  Fold controls are collected once per layout instead of searching by each ID.
-- Text-only edits and their undo entries copy the affected runs. Structural edits
-  retain full snapshots, and the existing 200-step history policy is preserved.
-- A consecutive text-only edit reshapes its top-level text block and translates
-  subsequent geometry. Containers and headings, missed revisions, width changes
-  and theme changes use the complete layout path.
-- Plain text, UTF-16 positions, word count and the dirty indicator reuse revision
-  information. Dirty comparisons remain exact, including returning to the saved
-  content without undo. Saving still verifies the entire committed model.
+- Two Fenwick trees index UTF-16 and UTF-8 leaf lengths. Text updates and
+  prefix/containing-leaf lookups take O(log B), where B is the number of leaves.
+  Stable block-ID maps avoid repeated scans. Structural edits rebuild the index.
+- Native input ranges and word movement read the relevant leaves. Full text is
+  built on demand, and ordinary input no longer flattens the entire document.
+- Local edits reuse retained layout. Unchanged-height edits avoid translating
+  following rows. Spatial trees prune offscreen rows, decorations, and hit-test
+  candidates while preserving paint order and selection behavior.
+- Unicode KMP handles initial find; consecutive edits rescan the affected leaf
+  and shift later matches. Visible highlighting binary-searches relevant matches.
+- Repeated IME preedit updates publish local display revisions without committed
+  versions or undo entries. Dirty state distinguishes preedit from saved content.
+- Footnote references, word counts, folding, outline rows, and undo storage reuse
+  indexes and revisions. Long-document footer indexing waits for typing to settle.
 
-These changes retain the normal layout and input code. The timing adapter is
-confined to a temporary module copy; the shipping MyGo dependency is unchanged.
-No new production dependency is required.
+Height-changing edits still translate subsequent geometry in O(B). A changed
+paragraph is shaped in full, and a changed table rebuilds its own cells. Column
+and structural edits, composition start/commit, and structural undo retain
+full-layout or snapshot fallbacks. Export and full-document accessibility
+requests necessarily read more content. These results do not imply uniform
+improvements for every workload.
 
-## Environment and timing boundary
+## Environment and method
 
-- Apple M5, 24 GiB, macOS 26.5.1, arm64; 1280 × 800 DIP at 2× scale.
-- Go 1.27.3, `CGO_ENABLED=0`; MyGo v0.7.4.
-- Rust 1.99.0; Quiet.md **0.1.7**, upstream commit
-  [`b9bed5513a222292d92601c50bbd4e6850882dea`](https://github.com/s1dashu/quiet-md/commit/b9bed5513a222292d92601c50bbd4e6850882dea),
-  `cargo build --release --locked --features devtools,gpui/runtime_shaders`.
-  Runtime shader compilation happens before the measurements.
-- Quiet.md uses the README's Craft theme with light appearance and its release
-  notes dismissed; ArcMD uses its normal light page. Their fonts, layout and
-  application shells still differ.
-- ArcMD's baseline is commit `0d2ca5dcd4ffdbabc4d454d982db2c078f61cd0b`.
-  Optimized build inputs, including uncommitted Go files and tests, have manifest
-  SHA-256 `55b542156c011ad39cc519dd00501eedb9c7f893bd49015ec82a9c98ddeafdc8`.
-  Per-file and binary hashes are in the results JSON.
+Apple M5, 24 GiB, macOS 26.5.1, arm64; 1280 × 800 DIP at 2× scale; Go 1.27.3,
+MyGo v0.7.4, `CGO_ENABLED=0`.
 
-Quiet.md times `window.draw()` (CPU scene construction), separately from GPU
-presentation. The MyGo test adapter dispatches a real input event and invokes the
-normal runtime's `runFrame()` once, skipping software rasterization and test-only
-label collection. Screenshots are rasterized outside the timers. Native GPUI and
-a headless MyGo host are not identical environments; these results are CPU scene
-measurements, **not key-to-photon latency or measured display FPS**.
+The headless MyGo timing adapter dispatches real input events and calls the
+normal runtime frame pipeline, excluding software rasterization and test-only
+label collection. Screenshots are generated outside timed runs. The adapter
+lives in a temporary module copy; shipping dependencies are unchanged.
 
-Both applications run serially, with GC enabled and no simultaneous build or
-benchmark. MyGo's virtual clock advances 10 ms per operation; Quiet.md's harness
-waits 10 ms. Normal desktop background activity remains. Individual round logs
-and outliers are retained, rather than discarding slow samples.
+Runs are serial and alternate the before/after binaries, reversing their order
+in the second round. Compilation, tests, profiling, and screenshot generation
+are outside the measurements. Desktop background activity is uncontrolled, so
+small differences should not be treated as statistically established gains.
+Every ordinary typing/backspace run checks exact text restoration; scrolling
+checks a 4,000-DIP displacement.
 
-Quiet.md's published README numbers (5.06/4.99/2.08 ms P50) were recorded on an
-M5 Pro with 48 GiB at an earlier commit. They are context, not the denominator
-for this comparison. Preliminary local baseline runs used Quiet.md 0.1.4
-(`33b9ae6`) in system dark appearance; those old competitor values remain only in
-`baseline.json`. The final comparison above rebuilds current upstream 0.1.7.
-A separate three-round system-dark run also has lower ArcMD P50/P95 for all three
-million-character operations; it is preserved in `system-appearance.json`.
-
-Cold startup, native GPU submission, RSS, file saving, IME performance, complex
-structural edits and editing every document position were not compared. Container
-and heading edits still take the full layout path. Correctness tests cover those
-fallback paths; this report does not claim performance leadership for them.
+The archived source manifests match the shipping implementation before the
+release-only version and documentation changes. The latest comparison is
+between ArcMD builds; the earlier Quiet.md comparison has not been rerun for
+this release and is not presented as current evidence.
 
 ## Validation and reproduction
 
-- Full `CGO_ENABLED=0 go test ./...` and `go vet ./...` pass; `gofmt -l .` is empty.
-- `CGO_ENABLED=0 GOOS=linux go build ./...` and the Windows equivalent pass.
-- A 600-step randomized comparison checks the text fast path against complete
-  transactions, including Unicode, selection, undo/redo, model validity and save
-  round trips. Existing random structural-edit tests also pass.
-- UI tests compare incremental and complete layout pixels and geometry for
-  paragraphs, lists, quotes, callouts and code, plus heading/cell fallbacks,
-  wrapping, merged tables, columns, undo/redo and IME composition.
-- Dirty-state tests cover several edited blocks, exact restoration, mixed
-  structural edits and saving committed content during composition.
-- All 58 before/after application snapshots were compared: 56 are pixel-identical;
-  the other two differ only in the blinking caret. Relevant screenshots were
-  visually inspected. Bounds and hashes are in `validation.json`.
-- ArcMD asserts exact insertion, deletion restoration and scroll displacement in
-  every measured run. Quiet.md's final saved text was also checked against each
-  input after ignoring only structural XML pretty-print whitespace.
+Formatting, vet, the full Go test suite, and Linux/Windows cross-builds pass with
+cgo disabled. Differential tests cover UTF-16 boundaries, text navigation,
+Unicode find, local layout, hit testing, selection, undo, and IME save state.
+The algorithm comparison checked 27 screenshot pairs: 21 are pixel-identical,
+and the other six differ only in the blinking caret.
 
-See [the harness instructions](../tools/perf/README.md) to reproduce all sizes.
-Evidence retained in the repository:
+See the [benchmark harness](../tools/perf/README.md) for fixture generation and
+normal scene measurements. The archived algorithm report contains the extra
+find/IME harness and exact commands. Raw records retain their original metadata
+for reproducibility.
 
-- [Optimized runs and current Quiet.md comparison](performance/2026-11-08/optimized.json)
-- [Original ArcMD baseline and preliminary Quiet.md 0.1.4 runs](performance/2026-11-08/baseline.json)
-- [Supplementary system-appearance run](performance/2026-11-08/system-appearance.json)
-- [Text restoration and snapshot verification](performance/2026-11-08/validation.json)
+- [Latest comparison, source hashes, and fixture hashes](performance/2026-11-13-algorithms/comparison.json)
+- [Standard per-operation samples and logs](performance/2026-11-13-algorithms/samples.json)
+- [Find and IME samples and logs](performance/2026-11-13-algorithms/algorithm-samples.json)
+- [Detailed algorithm comparison and reproduction](performance/2026-11-13-algorithms/report.md)
+- [Pixel comparison](performance/2026-11-13-algorithms/pixel-comparison.json)
+- [Diagnostic CPU profile summary](performance/2026-11-13-algorithms/profile-control/cpu-top.txt)

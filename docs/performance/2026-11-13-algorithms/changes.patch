@@ -1,0 +1,2299 @@
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -91,19 +91,44 @@
+ windows stack columns vertically. Toolbars, slash commands and block gestures
+ invoke the same engine operations as the command palette.
+ 
+-The engine's cached leaf index carries both UTF-16 and UTF-8 byte offsets;
+-input range conversion scans only the containing leaf. Consecutive text-only
+-revisions update those offsets and reshape the affected top-level block. A
+-heading also updates its outline label; a table rebuilds its own geometry with
+-the shared merged-cell layouter. Following geometry is translated without
+-reshaping unrelated blocks. Columns, structural edits and missed revisions use
+-the complete-layout fallback. Footnote references are cached by block ID and
+-reparsed only for the edited leaf; reference changes recompute numbering,
+-while formatting and structural changes rebuild the index. These caches do
+-not alter the saved format or the committed-text contract.
+-
+-IME preedit edits a temporary model. The save path reads the committed snapshot
+-until the composition commits as one transaction. Clipboard data includes a
++The engine indexes leaf IDs and keeps UTF-16 and UTF-8 lengths in two Fenwick
++trees. Text edits update lengths in logarithmic time; absolute positions are
++resolved on demand instead of rewriting every following leaf. Input range
++conversion and word navigation read only intersecting leaves. A flattened
++display string is materialized only for consumers that need the whole value.
++The writing surface supplies its accessibility value through MyGo's lazy
++`Access` callback, retaining the full display text, including preedit. MyGo
++0.7.4 keeps that callback's node type internal; a small generic bridge infers
++the type and sets its exported `Value` field through reflection, without unsafe
++access or a toolkit fork.
++
++Consecutive text-only revisions reshape the affected top-level block and
++resolve retained rows' text positions lazily. A heading also updates its
++outline label; a table rebuilds its own geometry with the shared merged-cell
++layouter. Height changes translate following geometry without reshaping
++unrelated blocks. This translation remains linear in the following geometry;
++unchanged-height edits skip it. Columns, structural edits and missed revisions
++use the complete-layout fallback. Spatial bounding trees select visible rows
++and decorations in paint order and prune caret hit-test candidates, including
++columns and merged cells. Height changes refit the actual translated float32
++rectangles so hit tests retain the previous tie and rounding behavior. Long
++outlines remain virtualized during dragging while retaining the keyed source
++row outside the viewport.
++
++Find uses a Unicode-aware KMP matcher with the existing case-folding and
++nonoverlapping-match rules. Text-only edits rescan one leaf and adjust later
++matches; query or structural changes rebuild matches. Footnote references
++are cached by block ID and reparsed only for the edited leaf; reference changes
++recompute numbering, while formatting and structural changes rebuild the
++index. Text-only undo owns affected runs; bounded history evicts old entries
++without shifting the entire history slice. These caches do not alter the saved
++format or the committed-text contract.
++
++IME preedit edits a temporary model. Candidate updates within a leaf use the
++same local text and layout path, without creating history or advancing the
++committed version. Composition start and commit still retain full snapshots.
++The save path and dirty-state cache read the committed snapshot until the
++composition commits as one transaction. Clipboard data includes a
+ validated native fragment plus Markdown, semantic HTML and a Markdown text
+ alternative (verbatim selections keep their source). Whole selected tables and
+ columns retain their structure. Markdown pastes recognize headings, lists,
+--- a/internal/app/document.go
++++ b/internal/app/document.go
+@@ -38,6 +38,7 @@
+ 	baseline      string
+ 	// dirtyRev, dirtyKnown and dirtyNow remember dirty for a revision.
+ 	dirtyRev       uint64
++	dirtyVersion   uint64
+ 	dirtyKnown     bool
+ 	dirtyNow       bool
+ 	textDirtyKnown bool
+@@ -103,7 +104,15 @@
+ 		return false
+ 	}
+ 	if rev := d.ed.Revision(); !d.dirtyKnown || rev != d.dirtyRev {
+-		if change, ok := d.ed.TextChangeSince(d.dirtyRev); ok && d.dirtyKnown && d.textDirtyKnown {
++		// Preedit revisions update display indexes but leave committed content
++		// unchanged. In particular, saving during composition establishes a
++		// clean baseline that subsequent candidate updates must preserve.
++		composing := d.ed.Committed() != d.ed.Doc
++		if composing && d.dirtyKnown && d.dirtyVersion == d.ed.Version() {
++			d.dirtyRev = rev
++			return d.dirtyNow
++		}
++		if change, ok := d.ed.TextChangeSince(d.dirtyRev); ok && !composing && d.dirtyKnown && d.textDirtyKnown {
+ 			current := d.ed.Engine.LeafAt(change.Start).Block
+ 			if saved, exists := d.baselineRuns[change.ID]; exists && slices.Equal(saved, current.Runs) {
+ 				delete(d.textDirty, change.ID)
+@@ -117,6 +126,7 @@
+ 			clear(d.textDirty)
+ 		}
+ 		d.dirtyRev, d.dirtyKnown = rev, true
++		d.dirtyVersion = d.ed.Version()
+ 	}
+ 	return d.dirtyNow
+ }
+@@ -131,6 +141,7 @@
+ 	d.textDirty = make(map[string]bool)
+ 	d.textDirtyKnown = true
+ 	d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.ed.Revision(), true, false
++	d.dirtyVersion = d.ed.Version()
+ }
+ 
+ // changed encodes the document and compares it with the saved baseline.
+--- a/internal/app/search.go
++++ b/internal/app/search.go
+@@ -105,7 +105,7 @@
+ // revision.
+ func (d *document) plainText() string {
+ 	if rev := d.ed.Revision(); !d.plainKnown || rev != d.plainRev {
+-		d.plain, d.plainRev, d.plainKnown = d.ed.Committed().PlainText(), rev, true
++		d.plain, d.plainRev, d.plainKnown = d.ed.Text(), rev, true
+ 	}
+ 	return d.plain
+ }
+--- a/internal/document/engine.go
++++ b/internal/document/engine.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"reflect"
+-	"sort"
+ 	"strings"
+ )
+ 
+@@ -16,18 +15,23 @@
+ // Engine applies structural changes atomically and owns one history for every
+ // paragraph, table cell and column. Snapshots never alias mutable documents.
+ type Engine struct {
+-	ReadOnly          bool // Session reading lock; does not change the stored document.
+-	depth             int
+-	Doc               *Document
+-	Anchor, Caret     int
+-	Typing            Style
+-	Explicit          bool
+-	version, revision uint64
+-	undo, redo        []historyEntry
+-	indexDoc          *Document
+-	indexRevision     uint64
+-	leaves            []Leaf
+-	textChange        TextChange
++	ReadOnly             bool // Session reading lock; does not change the stored document.
++	depth                int
++	Doc                  *Document
++	Anchor, Caret        int
++	Typing               Style
++	Explicit             bool
++	version, revision    uint64
++	undo, redo           []historyEntry
++	indexDoc             *Document
++	indexRevision        uint64
++	leaves               []Leaf
++	leafIDs              map[string]int
++	unitIndex, byteIndex offsetIndex
++	hiddenDoc            *Document
++	hiddenRevision       uint64
++	hidden               map[string]string
++	textChange           TextChange
+ }
+ 
+ func NewEngine(doc *Document) *Engine   { return &Engine{Doc: doc.Clone()} }
+@@ -162,34 +166,6 @@
+ 	e.version++
+ }
+ 
+-func (e *Engine) LeafAt(at int) Leaf {
+-	leaves := e.indexedLeaves()
+-	i := sort.Search(len(leaves), func(i int) bool { return at <= leaves[i].End })
+-	return leaves[min(i, len(leaves)-1)]
+-}
+-
+-// LeafAtByte finds a UTF-8 byte offset in PlainText, including the separators
+-// between leaves. Like LeafAt, offsets past the end select the last leaf.
+-func (e *Engine) LeafAtByte(at int) Leaf {
+-	leaves := e.indexedLeaves()
+-	i := sort.Search(len(leaves), func(i int) bool { return at <= leaves[i].ByteEnd })
+-	return leaves[min(i, len(leaves)-1)]
+-}
+-
+-func (e *Engine) indexedLeaves() []Leaf {
+-	// A transaction may query intermediate mutations before its revision is
+-	// published. Only the committed state can retain an index across queries.
+-	leaves := e.leaves
+-	if e.depth > 0 {
+-		leaves = e.Doc.Leaves()
+-	} else if e.indexDoc != e.Doc || e.indexRevision != e.revision {
+-		e.leaves = e.Doc.Leaves()
+-		e.indexDoc, e.indexRevision = e.Doc, e.revision
+-		leaves = e.leaves
+-	}
+-	return leaves
+-}
+-
+ func (e *Engine) CurrentStyle() Style {
+ 	if e.Explicit {
+ 		return e.Typing
+@@ -221,21 +197,26 @@
+ 	if e.ReadOnly {
+ 		return
+ 	}
++	if e.replaceTextMode(a, z, text, false) {
++		return
++	}
+ 	e.replace(a, z, text)
+ 	e.revision++
+ }
+ 
+ func (e *Engine) replace(a, z int, text string) {
+-	plain := e.Doc.PlainText()
+-	a, z = Len(plain[:ByteOffset(plain, max(0, min(a, z)))]), Len(plain[:ByteOffset(plain, max(a, z))])
++	a, z = max(0, min(a, z)), max(0, max(a, z))
+ 	first, last := e.LeafAt(a), e.LeafAt(z)
++	left, right := first.Block.Text(), last.Block.Text()
++	a = first.Start + Len(left[:ByteOffset(left, a-first.Start)])
++	z = last.Start + Len(right[:ByteOffset(right, z-last.Start)])
+ 	style := e.CurrentStyle()
+ 	style.NoMath = false
+ 	before := SliceRuns(first.Block.Runs, 0, a-first.Start)
+ 	after := SliceRuns(last.Block.Runs, z-last.Start, last.End-last.Start)
+ 	runs := Compact(append(append(before, Run{Text: strings.ReplaceAll(text, "\r\n", "\n"), Style: style}), after...))
+ 	if first.Parent != last.Parent || first.Block != last.Block && first.Block.Kind == "cell" {
+-		if a == 0 && z == Len(plain) {
++		if a == 0 && z == e.TextLength() {
+ 			e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
+ 			first = e.Doc.Leaves()[0]
+ 			first.Block.Runs = runs
+--- a/internal/document/fold.go
++++ b/internal/document/fold.go
+@@ -57,7 +57,7 @@
+ 			case b.Kind == "heading" || b.Kind == "toggle":
+ 				return true
+ 			case isListKind(b.Kind):
+-				return b.Folded || foldReach(list, i) > 0
++				return b.Folded || i+1 < len(list) && list[i+1].Kind != "heading" && list[i+1].Indent > b.Indent
+ 			}
+ 			return false
+ 		}
+@@ -71,7 +71,7 @@
+ 	out := make(map[string]bool)
+ 	for _, list := range siblingLists(d) {
+ 		for i, b := range list {
+-			if b.Kind == "heading" || b.Kind == "toggle" || isListKind(b.Kind) && (b.Folded || foldReach(list, i) > 0) {
++			if b.Kind == "heading" || b.Kind == "toggle" || isListKind(b.Kind) && (b.Folded || i+1 < len(list) && list[i+1].Kind != "heading" && list[i+1].Indent > b.Indent) {
+ 				out[b.ID] = true
+ 			}
+ 		}
+@@ -123,7 +123,7 @@
+ func (e *Engine) Reveal(id string) bool {
+ 	changed := false
+ 	for {
+-		by, ok := e.Doc.HiddenBlocks()[id]
++		by, ok := e.hiddenBlocks()[id]
+ 		if !ok {
+ 			return changed
+ 		}
+@@ -165,3 +165,16 @@
+ 	}
+ 	walk(e.Doc.Blocks)
+ }
++
++// Text edits cannot change section visibility. Reuse the folded-block lookup
++// while the caret moves or text changes; structural/fold revisions rebuild it.
++func (e *Engine) hiddenBlocks() map[string]string {
++	if e.depth > 0 {
++		return e.Doc.HiddenBlocks()
++	}
++	if e.hiddenDoc != e.Doc || e.hiddenRevision != e.revision {
++		e.hidden = e.Doc.HiddenBlocks()
++		e.hiddenDoc, e.hiddenRevision = e.Doc, e.revision
++	}
++	return e.hidden
++}
+--- /dev/null
++++ b/internal/document/index.go
+@@ -0,0 +1,111 @@
++package document
++
++import "strings"
++
++// offsetIndex is a Fenwick tree of leaf lengths, each including its following
++// newline. Point edits and prefix lookups are logarithmic; structural edits
++// rebuild in linear time. The final synthetic newline is excluded from totals.
++type offsetIndex []int
++
++func (x offsetIndex) add(i, delta int) {
++	for i++; i < len(x); i += i & -i {
++		x[i] += delta
++	}
++}
++func (x offsetIndex) prefix(n int) int {
++	sum := 0
++	for ; n > 0; n -= n & -n {
++		sum += x[n]
++	}
++	return sum
++}
++func (x offsetIndex) containing(at int) int {
++	i, sum, bit := 0, 0, 1
++	for bit < len(x) {
++		bit <<= 1
++	}
++	for bit >>= 1; bit > 0; bit >>= 1 {
++		if next := i + bit; next < len(x) && sum+x[next] <= at {
++			i, sum = next, sum+x[next]
++		}
++	}
++	return min(i, len(x)-2)
++}
++func (e *Engine) ensureIndex() {
++	// Transactions can query intermediate mutations before publishing a revision.
++	if e.depth == 0 && e.indexDoc == e.Doc && e.indexRevision == e.revision {
++		return
++	}
++	e.leaves = e.Doc.Leaves()
++	e.leafIDs = make(map[string]int, len(e.leaves))
++	e.unitIndex, e.byteIndex = make(offsetIndex, len(e.leaves)+1), make(offsetIndex, len(e.leaves)+1)
++	for i, l := range e.leaves {
++		e.leafIDs[l.Block.ID] = i
++		e.unitIndex[i+1] += l.End - l.Start + 1
++		e.byteIndex[i+1] += l.ByteEnd - l.ByteStart + 1
++		if parent := i + 1 + ((i + 1) & -(i + 1)); parent < len(e.unitIndex) {
++			e.unitIndex[parent] += e.unitIndex[i+1]
++			e.byteIndex[parent] += e.byteIndex[i+1]
++		}
++	}
++	e.indexDoc, e.indexRevision = e.Doc, e.revision
++}
++func (e *Engine) leafAtIndex(i int) Leaf {
++	l := e.leaves[i]
++	start, byteStart := e.unitIndex.prefix(i), e.byteIndex.prefix(i)
++	l.Start, l.End = start, start+l.End-l.Start
++	l.ByteStart, l.ByteEnd = byteStart, byteStart+l.ByteEnd-l.ByteStart
++	return l
++}
++
++func (e *Engine) LeafAt(at int) Leaf {
++	e.ensureIndex()
++	return e.leafAtIndex(e.unitIndex.containing(max(0, at)))
++}
++
++// LeafAtByte finds the leaf containing a byte offset in PlainText. Separator
++// offsets select the preceding leaf; offsets past the end select the last.
++func (e *Engine) LeafAtByte(at int) Leaf {
++	e.ensureIndex()
++	return e.leafAtIndex(e.byteIndex.containing(max(0, at)))
++}
++
++// LeafByID resolves a stable leaf identity without walking unrelated blocks.
++func (e *Engine) LeafByID(id string) (Leaf, bool) {
++	e.ensureIndex()
++	i, ok := e.leafIDs[id]
++	if !ok {
++		return Leaf{}, false
++	}
++	return e.leafAtIndex(i), true
++}
++
++// TextLength is the flattened document's UTF-16 length, including separators.
++func (e *Engine) TextLength() int {
++	e.ensureIndex()
++	return max(0, e.unitIndex.prefix(len(e.leaves))-1)
++}
++
++// TextRange reads only the intersected leaves. Native offsets inside surrogate
++// pairs round down, matching ByteOffset and the system text input protocol.
++func (e *Engine) TextRange(a, z int) string {
++	a, z = max(0, min(a, z)), max(0, max(a, z))
++	e.ensureIndex()
++	i, j := e.unitIndex.containing(max(0, a)), e.unitIndex.containing(max(0, z))
++	first, last := e.leafAtIndex(i), e.leafAtIndex(j)
++	left, right := first.Block.Text(), last.Block.Text()
++	lo, hi := ByteOffset(left, max(0, a-first.Start)), ByteOffset(right, max(0, z-last.Start))
++	if i == j {
++		return left[lo:max(lo, hi)]
++	}
++	var out strings.Builder
++	out.Grow(last.ByteStart + hi - first.ByteStart - lo)
++	out.WriteString(left[lo:])
++	for k := i + 1; k < j; k++ {
++		out.WriteByte('\n')
++		out.WriteString(e.leaves[k].Block.Text())
++	}
++	out.WriteByte('\n')
++	out.WriteString(right[:hi])
++	return out.String()
++}
+--- a/internal/document/index_test.go
++++ b/internal/document/index_test.go
+@@ -42,3 +42,56 @@
+ 	e.Redo()
+ 	assertLeafOffsets(t, e)
+ }
++
++func TestIndexedTextRangesAndHistory(t *testing.T) {
++	e := textEngine("中文😀")
++	e.Insert(Table(2, 2))
++	e.Insert(Columns())
++	e.Insert(NewBlock("code", "line\n👨‍👩‍👧‍👦"))
++	check := func() {
++		t.Helper()
++		text := e.Doc.PlainText()
++		n := Len(text)
++		if e.TextLength() != n {
++			t.Fatal("indexed length changed")
++		}
++		for a := -1; a <= n+1; a++ {
++			for z := a; z <= n+1; z++ {
++				want := text[ByteOffset(text, max(0, a)):ByteOffset(text, max(0, z))]
++				if got := e.TextRange(a, z); got != want {
++					t.Fatalf("range %d:%d: %q / %q", a, z, got, want)
++				}
++			}
++		}
++		for _, leaf := range e.Doc.Leaves() {
++			got, ok := e.LeafByID(leaf.Block.ID)
++			if !ok || got.Start != leaf.Start || got.ByteStart != leaf.ByteStart {
++				t.Fatal("ID index changed position")
++			}
++		}
++	}
++	check()
++	for range 260 {
++		e.Replace(1, 1, "x")
++	}
++	// The bounded undo queue must retain the newest 200 edits in order.
++	for range 200 {
++		e.Undo()
++	}
++	if e.CanUndo() {
++		t.Fatal("history exceeded its bound")
++	}
++	check()
++	e.Redo()
++	check()
++	before := e.Doc.PlainText()
++	revision, version := e.Revision(), e.Version()
++	e.PreviewReplace(0, 1, "候选😀")
++	if _, ok := e.TextChangeSince(revision); !ok || e.Version() != version {
++		t.Fatal("preedit did not publish an uncommitted text change")
++	}
++	if before == e.Doc.PlainText() {
++		t.Fatal("preedit missing")
++	}
++	check()
++}
+--- a/internal/document/textedit.go
++++ b/internal/document/textedit.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"slices"
+-	"sort"
+ 	"strings"
+ )
+ 
+@@ -31,15 +30,16 @@
+ func (e *Engine) recordUndo(entry historyEntry) {
+ 	e.undo = append(e.undo, entry)
+ 	if len(e.undo) > 200 {
+-		e.undo = append([]historyEntry(nil), e.undo[len(e.undo)-200:]...)
++		e.undo[0] = historyEntry{}
++		e.undo = e.undo[1:]
+ 	}
+ 	e.redo = nil
+ }
+ 
+ func (e *Engine) captureHistory(id string) historyEntry {
+ 	if id != "" {
+-		if parent, i := e.find(id); parent != nil {
+-			return historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone((*parent)[i].Runs)}
++		if leaf, ok := e.LeafByID(id); ok {
++			return historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(leaf.Block.Runs)}
+ 		}
+ 	}
+ 	return historyEntry{state: e.Capture()}
+@@ -53,12 +53,12 @@
+ 		return
+ 	}
+ 	// Undoing later structural entries has already restored this block.
+-	e.LeafAt(0)
+-	i := slices.IndexFunc(e.leaves, func(l Leaf) bool { return l.Block.ID == entry.blockID })
+-	if i < 0 {
++	e.ensureIndex()
++	i, ok := e.leafIDs[entry.blockID]
++	if !ok {
+ 		panic("document: text history lost its block")
+ 	}
+-	leaf := e.leaves[i]
++	leaf := e.leafAtIndex(i)
+ 	before := leaf.Block.Text()
+ 	leaf.Block.Runs = slices.Clone(entry.runs)
+ 	e.publishTextChange(i, before, leaf.Block.Text())
+@@ -67,7 +67,9 @@
+ 
+ // replaceText handles changes entirely inside one leaf, preserving the existing
+ // transaction/selection semantics without copying unrelated blocks for undo.
+-func (e *Engine) replaceText(a, z int, text string) bool {
++func (e *Engine) replaceText(a, z int, text string) bool { return e.replaceTextMode(a, z, text, true) }
++
++func (e *Engine) replaceTextMode(a, z int, text string, committed bool) bool {
+ 	if e.depth != 0 || strings.ContainsAny(text, "\r\n") {
+ 		return false
+ 	}
+@@ -90,33 +92,37 @@
+ 	if text == " " && b.Kind == "paragraph" && first.End-first.Start-(z-a)+1 <= 7 {
+ 		return false
+ 	}
+-	entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, b.ID, slices.Clone(b.Runs)}
++	var entry historyEntry
++	if committed {
++		entry = historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, b.ID, slices.Clone(b.Runs)}
++	}
+ 	e.Anchor, e.Caret = a+Len(text), a+Len(text)
+ 	e.Typing, e.Explicit = style, true
+ 	if slices.Equal(b.Runs, runs) {
+ 		return true
+ 	}
+-	i := sort.Search(len(e.leaves), func(i int) bool { return first.Start <= e.leaves[i].Start })
++	i := e.leafIDs[first.Block.ID]
+ 	b.Runs = runs
+-	e.recordUndo(entry)
++	if committed {
++		e.recordUndo(entry)
++		e.version++
++	}
+ 	e.publishTextChange(i, before, b.Text())
+-	e.version++
+ 	return true
+ }
+ 
+ func (e *Engine) publishTextChange(index int, before, after string) {
+-	leaf := e.leaves[index]
++	leaf := e.leafAtIndex(index)
+ 	delta := Len(after) - (leaf.End - leaf.Start)
+ 	byteDelta := len(after) - len(before)
++	if e.hiddenDoc == e.Doc && e.hiddenRevision == e.revision {
++		e.hiddenRevision++
++	}
+ 	e.revision++
+ 	e.textChange = TextChange{leaf.Block.ID, before, after, leaf.Start, leaf.End, leaf.End + delta, e.revision}
+ 	e.leaves[index].End += delta
+ 	e.leaves[index].ByteEnd += byteDelta
+-	for i := index + 1; i < len(e.leaves); i++ {
+-		e.leaves[i].Start += delta
+-		e.leaves[i].End += delta
+-		e.leaves[i].ByteStart += byteDelta
+-		e.leaves[i].ByteEnd += byteDelta
+-	}
++	e.unitIndex.add(index, delta)
++	e.byteIndex.add(index, byteDelta)
+ 	e.indexDoc, e.indexRevision = e.Doc, e.revision
+ }
+--- /dev/null
++++ b/internal/editor/access.go
+@@ -0,0 +1,14 @@
++package editor
++
++import (
++	"github.com/egoist/mygo/ui"
++	"reflect"
++)
++
++// MyGo 0.7.4 exposes a lazy Access callback but keeps its node type internal.
++// Infer that callback's type and set only its exported Value field. This keeps
++// screen readers' full text current without building it on every visual frame;
++// no unsafe access, private fields or changes to MyGo's module are involved.
++func accessTextValue[T any](access func(func(T)) ui.Element, text func() string) {
++	access(func(node T) { reflect.ValueOf(node).Elem().FieldByName("Value").SetString(text()) })
++}
+--- a/internal/editor/blockselect.go
++++ b/internal/editor/blockselect.go
+@@ -59,10 +59,8 @@
+ 
+ // handleIndex is the position of id among the visible top-level blocks.
+ func (e *Editor) handleIndex(id string) int {
+-	for i, h := range e.handles {
+-		if h.id == id {
+-			return i
+-		}
++	if i, ok := e.handleIDs[id]; ok {
++		return i
+ 	}
+ 	return -1
+ }
+--- a/internal/editor/buffer.go
++++ b/internal/editor/buffer.go
+@@ -15,6 +15,7 @@
+ 	textDoc     *document.Document
+ 	textVersion uint64
+ 	textLength  int
++	textKnown   bool
+ 	mark        *ui.TextInputRange
+ 	composition *document.Snapshot
+ 	// refused is set when typing reached a read-only document, so the page
+@@ -31,23 +32,25 @@
+ 	if b.textDoc == b.Doc && b.textVersion == b.Revision() {
+ 		return
+ 	}
+-	if change, ok := b.TextChangeSince(b.textVersion); ok && b.textDoc == b.Doc {
+-		// The leaf's start is unchanged by an edit inside it. Its byte
+-		// offset avoids scanning the entire prefix of a long document.
+-		start := b.Engine.LeafAt(change.Start).ByteStart
+-		b.text = b.text[:start] + change.After + b.text[start+len(change.Before):]
+-		b.textLength += change.AfterEnd - change.BeforeEnd
+-	} else {
+-		b.text = b.Doc.PlainText()
+-		b.textLength = document.Len(b.text)
+-	}
++	b.textLength = b.Engine.TextLength()
++	b.text, b.textKnown = "", false
+ 	b.textDoc, b.textVersion = b.Doc, b.Revision()
+ }
+ func (b *Buffer) Text() string {
+ 	if b.composition != nil {
+ 		return b.composition.Doc.PlainText()
+ 	}
+-	b.sync()
++	return b.displayText()
++}
++
++// displayText materializes only when a consumer needs the complete value.
++// Native input ranges and navigation read the engine's leaves directly.
++func (b *Buffer) displayText() string {
++	b.sync()
++	if !b.textKnown {
++		b.text = b.Engine.TextRange(0, b.textLength)
++		b.textKnown = true
++	}
+ 	return b.text
+ }
+ func (b *Buffer) Committed() *document.Document {
+@@ -77,17 +80,17 @@
+ func (b *Buffer) byteOffset(at int) int {
+ 	b.sync()
+ 	l := b.Engine.LeafAt(at)
+-	return l.ByteStart + ui.UTF16ByteOffset(b.text[l.ByteStart:l.ByteEnd], at-l.Start)
++	return l.ByteStart + ui.UTF16ByteOffset(l.Block.Text(), at-l.Start)
+ }
+ func (b *Buffer) textOffset(at int) int {
+ 	b.sync()
+ 	l := b.Engine.LeafAtByte(at)
+-	return l.Start + ui.UTF16Len(b.text[l.ByteStart:max(l.ByteStart, min(at, l.ByteEnd))])
++	return l.Start + ui.UTF16Len(l.Block.Text()[:max(0, min(at-l.ByteStart, l.ByteEnd-l.ByteStart))])
+ }
+ func (b *Buffer) clamp(at int) int {
+ 	b.sync()
+ 	l := b.Engine.LeafAt(at)
+-	text := b.text[l.ByteStart:l.ByteEnd]
++	text := l.Block.Text()
+ 	return l.Start + ui.UTF16Len(text[:ui.UTF16ByteOffset(text, at-l.Start)])
+ }
+ func (b *Buffer) validRange(r ui.TextInputRange) ui.TextInputRange {
+@@ -95,7 +98,7 @@
+ }
+ func (b *Buffer) slice(a, z int) string {
+ 	b.sync()
+-	return b.text[b.byteOffset(a):b.byteOffset(z)]
++	return b.Engine.TextRange(a, z)
+ }
+ func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
+ 	if b.ReadOnly {
+@@ -197,16 +200,18 @@
+ func (b *Buffer) newline() { b.UnmarkText(); b.Engine.Enter(false); b.sync() }
+ 
+ func (b *Buffer) lineRange(at int) (int, int) {
+-	i := b.byteOffset(at)
+-	a := strings.LastIndexByte(b.text[:i], '\n') + 1
+-	z := len(b.text)
+-	if n := strings.IndexByte(b.text[i:], '\n'); n >= 0 {
++	l := b.Engine.LeafAt(at)
++	text := l.Block.Text()
++	i := ui.UTF16ByteOffset(text, at-l.Start)
++	a := strings.LastIndexByte(text[:i], '\n') + 1
++	z := len(text)
++	if n := strings.IndexByte(text[i:], '\n'); n >= 0 {
+ 		z = i + n
+ 	}
+-	if z > a && b.text[z-1] == '\r' {
++	if z > a && text[z-1] == '\r' {
+ 		z--
+ 	}
+-	return b.textOffset(a), b.textOffset(z)
++	return l.Start + ui.UTF16Len(text[:a]), l.Start + ui.UTF16Len(text[:z])
+ }
+ 
+ func (b *Buffer) boundary(at, direction int) int {
+@@ -231,37 +236,51 @@
+ }
+ 
+ func (b *Buffer) wordBoundary(at, direction int) int {
+-	pos := b.byteOffset(at)
+-	if direction < 0 {
+-		for pos > 0 {
+-			r, n := utf8.DecodeLastRuneInString(b.text[:pos])
+-			if !unicode.IsSpace(r) {
+-				break
+-			}
+-			pos -= n
+-		}
+-		for pos > 0 {
+-			r, n := utf8.DecodeLastRuneInString(b.text[:pos])
+-			if unicode.IsSpace(r) {
+-				break
+-			}
+-			pos -= n
+-		}
+-	} else {
+-		for pos < len(b.text) {
+-			r, n := utf8.DecodeRuneInString(b.text[pos:])
+-			if unicode.IsSpace(r) {
+-				break
+-			}
+-			pos += n
+-		}
+-		for pos < len(b.text) {
+-			r, n := utf8.DecodeRuneInString(b.text[pos:])
+-			if !unicode.IsSpace(r) {
+-				break
+-			}
+-			pos += n
+-		}
+-	}
+-	return b.textOffset(pos)
+-}
++	at = b.clamp(at)
++	spaces := direction < 0
++	for {
++		l := b.Engine.LeafAt(at)
++		text := l.Block.Text()
++		i := ui.UTF16ByteOffset(text, at-l.Start)
++		if direction < 0 {
++			for i > 0 {
++				r, n := utf8.DecodeLastRuneInString(text[:i])
++				if unicode.IsSpace(r) {
++					if !spaces {
++						return at
++					}
++				} else {
++					spaces = false
++				}
++				i -= n
++				at -= runeUnits(r)
++			}
++			if at == 0 || !spaces {
++				return at
++			}
++			at-- // the separator belongs to the preceding leaf
++		} else {
++			for i < len(text) {
++				r, n := utf8.DecodeRuneInString(text[i:])
++				if unicode.IsSpace(r) {
++					spaces = true
++				} else if spaces {
++					return at
++				}
++				i += n
++				at += runeUnits(r)
++			}
++			if at == b.Len() {
++				return at
++			}
++			spaces = true
++			at++
++		}
++	}
++}
++func runeUnits(r rune) int {
++	if r > 0xffff {
++		return 2
++	}
++	return 1
++}
+--- a/internal/editor/columns.go
++++ b/internal/editor/columns.go
+@@ -110,7 +110,8 @@
+ 		}
+ 	}
+ 	collect(column)
+-	for _, r := range e.rows {
++	for i := range e.rows {
++		r := e.indexedRow(i)
+ 		if ids[r.leaf.Block.ID] {
+ 			e.SetSelection(r.leaf.Start, r.leaf.Start)
+ 			e.reveal, e.vertical = true, false
+--- a/internal/editor/find.go
++++ b/internal/editor/find.go
+@@ -6,6 +6,9 @@
+ 
+ import (
+ 	"fmt"
++	"github.com/Ciao1019/ArcMD/internal/document"
++	"slices"
++	"sort"
+ 	"strings"
+ 	"unicode"
+ 
+@@ -22,44 +25,62 @@
+ 	matches []ui.TextInputRange
+ 	current int
+ 	// key is what matches were found for.
+-	key string
++	key      string
++	queryKey string
++	revision uint64
++	doc      *document.Document
++	matcher  textMatcher
+ 	// focus asks the query field for the keyboard.
+ 	focus bool
+ }
+ 
+ // findIn finds query in text case-insensitively, without overlaps; the
+ // ranges are UTF-16 offsets into text.
+-func findIn(text, query string) [][2]int {
+-	fold := func(r rune) rune { return unicode.ToLower(r) }
+-	q := []rune(strings.Map(fold, query))
+-	if len(q) == 0 {
++func findIn(text, query string) [][2]int { m := newTextMatcher(query); return m.find(text) }
++
++// KMP folds one rune at a time and keeps only a pattern-sized ring of UTF-16
++// starts. Repeated-prefix queries stay linear and do not allocate per text rune.
++type textMatcher struct {
++	pattern         []rune
++	failure, starts []int
++}
++
++func newTextMatcher(query string) textMatcher {
++	q := []rune(strings.Map(unicode.ToLower, query))
++	m := textMatcher{q, make([]int, len(q)), make([]int, len(q))}
++	for i, j := 1, 0; i < len(q); i++ {
++		for j > 0 && q[i] != q[j] {
++			j = m.failure[j-1]
++		}
++		if q[i] == q[j] {
++			j++
++		}
++		m.failure[i] = j
++	}
++	return m
++}
++func (m *textMatcher) find(text string) [][2]int {
++	q := m.pattern
++	if len(q) == 0 || len(text) < len(q) {
+ 		return nil
+ 	}
+-	runes := []rune(text)
+ 	var out [][2]int
+-	// offsets[i] is the UTF-16 offset of runes[i].
+-	offsets := make([]int, len(runes)+1)
+-	for i, r := range runes {
+-		n := 1
+-		if r > 0xffff {
+-			n = 2
+-		}
+-		offsets[i+1] = offsets[i] + n
+-	}
+-	for i := 0; i+len(q) <= len(runes); {
+-		ok := true
+-		for j, r := range q {
+-			if fold(runes[i+j]) != r {
+-				ok = false
+-				break
+-			}
+-		}
+-		if ok {
+-			out = append(out, [2]int{offsets[i], offsets[i+len(q)]})
+-			i += len(q)
+-			continue
+-		}
+-		i++
++	units, index, matched := 0, 0, 0
++	for _, r := range text {
++		m.starts[index%len(q)] = units
++		units += runeUnits(r)
++		r = unicode.ToLower(r)
++		for matched > 0 && r != q[matched] {
++			matched = m.failure[matched-1]
++		}
++		if r == q[matched] {
++			matched++
++		}
++		if matched == len(q) {
++			out = append(out, [2]int{m.starts[(index-len(q)+1)%len(q)], units})
++			matched = 0 // the existing find contract excludes overlapping matches
++		}
++		index++
+ 	}
+ 	return out
+ }
+@@ -110,13 +131,34 @@
+ 	if key == f.key {
+ 		return
+ 	}
+-	f.key = key
+-	f.matches = f.matches[:0]
+-	for _, leaf := range e.Doc.Leaves() {
+-		for _, m := range findIn(leaf.Block.Text(), f.query) {
+-			f.matches = append(f.matches, ui.TextInputRange{Start: leaf.Start + m[0], End: leaf.Start + m[1]})
+-		}
+-	}
++	sameQuery := f.queryKey == f.query
++	if !sameQuery {
++		f.matcher = newTextMatcher(f.query)
++	}
++	if change, ok := e.TextChangeSince(f.revision); ok && sameQuery && f.doc == e.Doc && f.key != "" {
++		first := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].Start >= change.Start })
++		last := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].Start > change.BeforeEnd })
++		delta := change.AfterEnd - change.BeforeEnd
++		for i := last; i < len(f.matches); i++ {
++			f.matches[i].Start += delta
++			f.matches[i].End += delta
++		}
++		var updated []ui.TextInputRange
++		for _, m := range f.matcher.find(change.After) {
++			updated = append(updated, ui.TextInputRange{Start: change.Start + m[0], End: change.Start + m[1]})
++		}
++		f.matches = slices.Replace(f.matches, first, last, updated...)
++	} else {
++		f.matches = f.matches[:0]
++		if f.query != "" {
++			for _, leaf := range e.Doc.Leaves() {
++				for _, m := range f.matcher.find(leaf.Block.Text()) {
++					f.matches = append(f.matches, ui.TextInputRange{Start: leaf.Start + m[0], End: leaf.Start + m[1]})
++				}
++			}
++		}
++	}
++	f.key, f.queryKey, f.revision, f.doc = key, f.query, e.Revision(), e.Doc
+ 	f.current = max(0, min(f.current, len(f.matches)-1))
+ }
+ 
+@@ -291,14 +333,14 @@
+ 	if !f.open || len(f.matches) == 0 {
+ 		return
+ 	}
+-	for _, r := range e.rows {
++	for ri := range e.visibleRows(40) {
++		r := *e.indexedRow(ri)
+ 		if r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
+ 			continue
+ 		}
+-		for i, m := range f.matches {
+-			if m.End <= r.leaf.Start || m.Start >= r.leaf.End+1 {
+-				continue
+-			}
++		start := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].End > r.leaf.Start })
++		for i := start; i < len(f.matches) && f.matches[i].Start < r.leaf.End+1; i++ {
++			m := f.matches[i]
+ 			local := ui.TextInputRange{Start: max(0, m.Start-r.leaf.Start), End: min(r.leaf.End, m.End) - r.leaf.Start}
+ 			color := e.page.FindMatch
+ 			if i == f.current {
+--- /dev/null
++++ b/internal/editor/find_index_test.go
+@@ -0,0 +1,103 @@
++package editor
++
++import (
++	"fmt"
++	"github.com/egoist/mygo/ui"
++	"math/rand"
++	"reflect"
++	"strings"
++	"testing"
++	"unicode"
++)
++
++func referenceFindIn(text, query string) [][2]int {
++	fold := func(r rune) rune { return unicode.ToLower(r) }
++	q := []rune(strings.Map(fold, query))
++	if len(q) == 0 {
++		return nil
++	}
++	runes := []rune(text)
++	var out [][2]int
++	// offsets[i] is the UTF-16 offset of runes[i].
++	offsets := make([]int, len(runes)+1)
++	for i, r := range runes {
++		n := 1
++		if r > 0xffff {
++			n = 2
++		}
++		offsets[i+1] = offsets[i] + n
++	}
++	for i := 0; i+len(q) <= len(runes); {
++		ok := true
++		for j, r := range q {
++			if fold(runes[i+j]) != r {
++				ok = false
++				break
++			}
++		}
++		if ok {
++			out = append(out, [2]int{offsets[i], offsets[i+len(q)]})
++			i += len(q)
++			continue
++		}
++		i++
++	}
++	return out
++}
++
++func TestLinearFindMatchesReference(t *testing.T) {
++	rng := rand.New(rand.NewSource(141))
++	alphabet := []rune("aAbB中😀KkİıΣσς\ufffd")
++	for range 800 {
++		text := make([]rune, rng.Intn(150))
++		for i := range text {
++			text[i] = alphabet[rng.Intn(len(alphabet))]
++		}
++		query := make([]rune, rng.Intn(8))
++		for i := range query {
++			query[i] = alphabet[rng.Intn(len(alphabet))]
++		}
++		a, b := findIn(string(text), string(query)), referenceFindIn(string(text), string(query))
++		if !reflect.DeepEqual(a, b) {
++			t.Fatalf("%q / %q: %v vs %v", text, query, a, b)
++		}
++	}
++	text := strings.Repeat("a", 100000) + "b"
++	if got := findIn(text, strings.Repeat("a", 10000)+"b"); fmt.Sprint(got) != "[[90000 100001]]" {
++		t.Fatal(got)
++	}
++}
++func TestIncrementalFindMatchesReference(t *testing.T) {
++	e := New("aAa😀aa\n\naba aa\n\n|aa|A|\n|---|---|\n|a|AA|")
++	e.FindText("aa")
++	rng := rand.New(rand.NewSource(142))
++	check := func() {
++		t.Helper()
++		e.refreshMatches()
++		var want []ui.TextInputRange
++		for _, leaf := range e.Doc.Leaves() {
++			for _, m := range referenceFindIn(leaf.Block.Text(), e.find.query) {
++				want = append(want, ui.TextInputRange{Start: leaf.Start + m[0], End: leaf.Start + m[1]})
++			}
++		}
++		if fmt.Sprint(e.find.matches) != fmt.Sprint(want) {
++			t.Fatalf("find %q: %v / %v", e.find.query, e.find.matches, want)
++		}
++	}
++	for range 250 {
++		leaves := e.Doc.Leaves()
++		leaf := leaves[rng.Intn(len(leaves))]
++		switch rng.Intn(7) {
++		case 0:
++			e.Undo()
++		case 1:
++			e.Redo()
++		case 2:
++			e.find.query = []string{"aa", "a", "中", "😀", ""}[rng.Intn(5)]
++		default:
++			a, z := leaf.Start+rng.Intn(leaf.End-leaf.Start+1), leaf.Start+rng.Intn(leaf.End-leaf.Start+1)
++			e.Engine.Replace(a, z, []string{"aaa", "中文😀", "x\ny", ""}[rng.Intn(4)])
++		}
++		check()
++	}
++}
+--- a/internal/editor/images.go
++++ b/internal/editor/images.go
+@@ -278,14 +278,14 @@
+ 	if e.printing {
+ 		return
+ 	}
+-	for i := range e.rows {
++	for i := range e.visibleRows(0) {
+ 		// The row is copied only once it is a picture in view: the copy
+ 		// escapes into the controls' callbacks, and copying every row of a
+ 		// long page made each frame allocate megabytes.
+ 		if r := &e.rows[i]; r.picture == nil || r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport {
+ 			continue
+ 		}
+-		row := e.rows[i]
++		row := *e.indexedRow(i)
+ 		f := row.picture
+ 		id, src := row.leaf.Block.ID, row.leaf.Block.URL
+ 		key := c.Key("image:" + id)
+--- a/internal/editor/incremental.go
++++ b/internal/editor/incremental.go
+@@ -18,11 +18,11 @@
+ 	if !ok {
+ 		return false
+ 	}
+-	i := sort.Search(len(e.rows), func(i int) bool { return change.Start <= e.rows[i].leaf.End })
+-	if i == len(e.rows) {
++	i, found := e.rowIDs[change.ID]
++	if !found {
+ 		return false
+ 	}
+-	old := e.rows[i]
++	old := *e.indexedRow(i)
+ 	leaf := e.Engine.LeafAt(change.Start)
+ 	b := leaf.Block
+ 	if b.ID != change.ID || old.leaf.Block.ID != change.ID {
+@@ -39,14 +39,13 @@
+ 	e.rows, e.decorations = rows, decorations
+ 	updated.number = old.number
+ 	e.rows[i] = updated
++	e.rowSpace.update(i, updated.rect)
+ 	dy := updated.rect.H - old.rect.H
+ 	decStart, decEnd := -1, -1
+-	for j := range e.decorations {
+-		if e.decorations[j].id == b.ID {
+-			e.decorations[j] = decorated[0]
+-			decStart, decEnd = j, j+1
+-			break
+-		}
++	if j, ok := e.decorationIDs[b.ID]; ok {
++		e.decorations[j] = decorated[0]
++		e.decorationSpace.update(j, decorated[0].rect)
++		decStart, decEnd = j, j+1
+ 	}
+ 	if b.Kind == "heading" {
+ 		// The heading's identity and level did not change; only its label
+@@ -64,17 +63,14 @@
+ 		}
+ 	}
+ 	handleShift := float32(0)
+-	for j := range e.handles {
++	if j, ok := e.handleIDs[b.ID]; ok {
+ 		h := &e.handles[j]
+-		if h.id == b.ID {
+-			caret := updated.layout.Caret(0)
+-			previous := h.rect.Y
+-			h.rect.Y = updated.y + caret.Y + max(caret.H, 20)/2 - 12
+-			handleShift = h.rect.Y - previous
+-			break
+-		}
++		caret := updated.layout.Caret(0)
++		previous := h.rect.Y
++		h.rect.Y = updated.y + caret.Y + max(caret.H, 20)/2 - 12
++		handleShift = h.rect.Y - previous
+ 	}
+-	e.shiftFollowing(change, i+1, old.rect.Y+old.rect.H, dy, decStart, decEnd, b.ID, handleShift)
++	e.shiftFollowing(i+1, old.rect.Y+old.rect.H, dy, decStart, decEnd, b.ID, handleShift)
+ 	return true
+ }
+ 
+@@ -84,17 +80,15 @@
+ func (e *Editor) relayoutTable(o Options, change document.TextChange, rowIndex int) bool {
+ 	owner := e.rows[rowIndex].leaf.Owner
+ 	var table *document.Block
+-	for _, handle := range e.handles {
+-		if handle.id == owner {
+-			table = e.Doc.Blocks[handle.index]
+-			break
+-		}
++	if j, ok := e.handleIDs[owner]; ok {
++		table = e.Doc.Blocks[e.handles[j].index]
+ 	}
+ 	if table == nil || table.Kind != "table" || e.resizePending || o.Resizing {
+ 		return false
+ 	}
+-	decEnd := slices.IndexFunc(e.decorations, func(d decoration) bool { return d.kind == "table" && d.id == owner }) + 1
+-	if decEnd == 0 {
++	di, found := e.decorationIDs[owner]
++	decEnd := di + 1
++	if !found || e.decorations[di].kind != "table" {
+ 		return false
+ 	}
+ 	oldTable := e.decorations[decEnd-1]
+@@ -106,13 +100,11 @@
+ 		to++
+ 	}
+ 	leaves := make(map[string]document.Leaf, to-from)
+-	units := change.AfterEnd - change.BeforeEnd
+ 	for _, row := range e.rows[from:to] {
+-		at := row.leaf.Start
+-		if at > change.Start {
+-			at += units
++		leaf, ok := e.Engine.LeafByID(row.leaf.Block.ID)
++		if !ok {
++			return false
+ 		}
+-		leaf := e.Engine.LeafAt(at)
+ 		leaves[leaf.Block.ID] = leaf
+ 	}
+ 	rows, decorations, resizers := e.rows, e.decorations, e.resizers
+@@ -124,8 +116,14 @@
+ 	e.rows, e.decorations, e.resizers = rows, decorations, resizers
+ 	// Text-only edits preserve cells, decorations and resize handles.
+ 	copy(e.rows[from:to], updated)
++	for j := from; j < to; j++ {
++		e.rowSpace.update(j, e.rows[j].rect)
++	}
+ 	decStart := decEnd - len(decorated)
+ 	copy(e.decorations[decStart:decEnd], decorated)
++	for j := decStart; j < decEnd; j++ {
++		e.decorationSpace.update(j, e.decorations[j].rect)
++	}
+ 	next := 0
+ 	for j := range e.resizers {
+ 		if e.resizers[j].id == owner {
+@@ -134,18 +132,16 @@
+ 		}
+ 	}
+ 	oldHeight := oldTable.rect.H + 44
+-	e.shiftFollowing(change, to, start+oldHeight, height-oldHeight, decStart, decEnd, owner, 0)
++	e.shiftFollowing(to, start+oldHeight, height-oldHeight, decStart, decEnd, owner, 0)
+ 	return true
+ }
+ 
+-func (e *Editor) shiftFollowing(change document.TextChange, after int, bottom, dy float32, decStart, decEnd int, owner string, handleShift float32) {
+-	units, bytes := change.AfterEnd-change.BeforeEnd, len(change.After)-len(change.Before)
++func (e *Editor) shiftFollowing(after int, bottom, dy float32, decStart, decEnd int, owner string, handleShift float32) {
++	if dy == 0 && handleShift == 0 {
++		return
++	}
+ 	for j := after; j < len(e.rows); j++ {
+ 		r := &e.rows[j]
+-		r.leaf.Start += units
+-		r.leaf.End += units
+-		r.leaf.ByteStart += bytes
+-		r.leaf.ByteEnd += bytes
+ 		r.rect.Y += dy
+ 		r.y += dy
+ 		if f := r.picture; f != nil {
+@@ -155,12 +151,15 @@
+ 			}
+ 		}
+ 	}
++	e.rowSpace.refitSuffix(after)
++	firstDecoration := len(e.decorations)
+ 	for j := range e.decorations {
+ 		d := &e.decorations[j]
+ 		if j >= decStart && j < decEnd {
+ 			continue
+ 		}
+ 		if d.rect.Y >= bottom {
++			firstDecoration = min(firstDecoration, j)
+ 			d.rect.Y += dy
+ 			if d.table.H > 0 {
+ 				d.table.Y += dy
+@@ -170,6 +169,7 @@
+ 			}
+ 		}
+ 	}
++	e.decorationSpace.refitSuffix(firstDecoration)
+ 	for j := range e.handles {
+ 		h := &e.handles[j]
+ 		if h.id != owner && h.top >= bottom {
+--- a/internal/editor/incremental_test.go
++++ b/internal/editor/incremental_test.go
+@@ -38,6 +38,9 @@
+ 			check := func() {
+ 				t.Helper()
+ 				pixels := slices.Clone(tt.Image().Pix)
++				for i := range e.rows {
++					e.indexedRow(i)
++				}
+ 				rows := slices.Clone(e.rows)
+ 				height := e.height
+ 				decorations := slices.Clone(e.decorations)
+@@ -162,7 +165,8 @@
+ 	}
+ 	capture := func() geometry {
+ 		g := geometry{decorations: slices.Clone(e.decorations), handles: slices.Clone(e.handles), folds: slices.Clone(e.foldButtons), outline: slices.Clone(e.outline), resizers: slices.Clone(e.resizers), height: e.height, end: e.contentEnd}
+-		for _, r := range e.rows {
++		for i := range e.rows {
++			r := e.indexedRow(i)
+ 			w, h := r.layout.Size()
+ 			g.rows = append(g.rows, geometryRow{r.leaf.Block.ID, r.leaf.Start, r.leaf.End, r.leaf.ByteStart, r.leaf.ByteEnd, r.rect, r.x, r.y, w, h})
+ 		}
+--- a/internal/editor/input.go
++++ b/internal/editor/input.go
+@@ -92,7 +92,7 @@
+ 		e.dragging = false
+ 		return true
+ 	case ui.InputSelect:
+-		runes := []rune(e.text)
++		runes := []rune(e.displayText())
+ 		a, z := min(ev.Start, len(runes)), min(ev.End, len(runes))
+ 		e.SetSelection(ui.UTF16Len(string(runes[:max(0, a)])), ui.UTF16Len(string(runes[:max(0, z)])))
+ 		e.reveal = true
+@@ -407,23 +407,30 @@
+ }
+ 
+ func (e *Editor) selectWord(at int) {
++	at = e.clamp(at)
+ 	a, z := e.lineRange(at)
+-	pos := e.byteOffset(at)
+-	start, end := pos, pos
+-	left, right := e.byteOffset(a), e.byteOffset(z)
+-	for start > left {
+-		r, n := utf8.DecodeLastRuneInString(e.text[:start])
++	// lineRange excludes a trailing CR. A click between CR and LF keeps
++	// that position, just as selection in the flattened text did.
++	if at > z {
++		e.SetSelection(at, at)
++		return
++	}
++	text := e.slice(a, z)
++	start := ui.UTF16ByteOffset(text, at-a)
++	end := start
++	for start > 0 {
++		r, n := utf8.DecodeLastRuneInString(text[:start])
+ 		if strings.ContainsRune(" \t\r\n", r) {
+ 			break
+ 		}
+ 		start -= n
+ 	}
+-	for end < right {
+-		r, n := utf8.DecodeRuneInString(e.text[end:])
++	for end < len(text) {
++		r, n := utf8.DecodeRuneInString(text[end:])
+ 		if strings.ContainsRune(" \t\r\n", r) {
+ 			break
+ 		}
+ 		end += n
+ 	}
+-	e.SetSelection(e.textOffset(start), e.textOffset(end))
+-}
++	e.SetSelection(a+ui.UTF16Len(text[:start]), a+ui.UTF16Len(text[:end]))
++}
+--- a/internal/editor/linkpopover.go
++++ b/internal/editor/linkpopover.go
+@@ -226,7 +226,10 @@
+ }
+ 
+ func (e *Editor) inlineClick(x, y float32) bool {
+-	for _, r := range e.rows {
++	// A footnote's return target stays 26 DIP high even with small fonts;
++	// include its overhang before applying the original exact hit tests.
++	for i := range e.rowSpace.between(y-26, y+26) {
++		r := e.indexedRow(i)
+ 		if r.leaf.Block.Kind == "footnote" && x >= r.rect.X && x < r.x && y >= r.y && y < r.y+26 {
+ 			return e.ReturnFootnote()
+ 		}
+--- /dev/null
++++ b/internal/editor/navigation_index_test.go
+@@ -0,0 +1,237 @@
++package editor
++
++import (
++	"fmt"
++	"reflect"
++	"strings"
++	"testing"
++	"unicode"
++	"unicode/utf8"
++
++	"github.com/Ciao1019/ArcMD/internal/document"
++	"github.com/egoist/mygo/ui"
++)
++
++// These references use the previous flattened-string behavior to check chunk
++// boundaries, including positions between a CR and LF and surrogate halves.
++func referenceLineRange(text string, at int) (int, int) {
++	i := ui.UTF16ByteOffset(text, at)
++	a := strings.LastIndexByte(text[:i], '\n') + 1
++	z := len(text)
++	if n := strings.IndexByte(text[i:], '\n'); n >= 0 {
++		z = i + n
++	}
++	if z > a && text[z-1] == '\r' {
++		z--
++	}
++	return ui.UTF16Len(text[:a]), ui.UTF16Len(text[:z])
++}
++func referenceWordBoundary(text string, at, direction int) int {
++	pos := ui.UTF16ByteOffset(text, at)
++	if direction < 0 {
++		for pos > 0 {
++			r, n := utf8.DecodeLastRuneInString(text[:pos])
++			if !unicode.IsSpace(r) {
++				break
++			}
++			pos -= n
++		}
++		for pos > 0 {
++			r, n := utf8.DecodeLastRuneInString(text[:pos])
++			if unicode.IsSpace(r) {
++				break
++			}
++			pos -= n
++		}
++	} else {
++		for pos < len(text) {
++			r, n := utf8.DecodeRuneInString(text[pos:])
++			if unicode.IsSpace(r) {
++				break
++			}
++			pos += n
++		}
++		for pos < len(text) {
++			r, n := utf8.DecodeRuneInString(text[pos:])
++			if !unicode.IsSpace(r) {
++				break
++			}
++			pos += n
++		}
++	}
++	return ui.UTF16Len(text[:pos])
++}
++func referenceSelectWord(text string, at int) (int, int) {
++	a, z := referenceLineRange(text, at)
++	start, end := ui.UTF16ByteOffset(text, at), ui.UTF16ByteOffset(text, at)
++	left, right := ui.UTF16ByteOffset(text, a), ui.UTF16ByteOffset(text, z)
++	for start > left {
++		r, n := utf8.DecodeLastRuneInString(text[:start])
++		if strings.ContainsRune(" \t\r\n", r) {
++			break
++		}
++		start -= n
++	}
++	for end < right {
++		r, n := utf8.DecodeRuneInString(text[end:])
++		if strings.ContainsRune(" \t\r\n", r) {
++			break
++		}
++		end += n
++	}
++	return ui.UTF16Len(text[:start]), ui.UTF16Len(text[:end])
++}
++func TestChunkedNavigationMatchesFlattenedText(t *testing.T) {
++	d := document.New()
++	d.Blocks = []*document.Block{document.NewBlock("paragraph", "前😀 e\u0301\t word\u2003next"), document.NewBlock("paragraph", ""), document.Table(2, 2), document.NewBlock("code", "first\r\n👨‍👩‍👧‍👦\n\r\nend\r"), document.NewBlock("paragraph", "  \u00a0  "), document.NewBlock("paragraph", "last😀")}
++	e := FromDocument(d)
++	check := func() {
++		t.Helper()
++		text := e.Doc.PlainText()
++		for at := -2; at <= ui.UTF16Len(text)+2; at++ {
++			a, z := referenceLineRange(text, at)
++			if x, y := e.lineRange(at); x != a || y != z {
++				t.Fatalf("line at %d: %d:%d, want %d:%d", at, x, y, a, z)
++			}
++			for _, direction := range []int{-1, 1} {
++				if got, want := e.wordBoundary(at, direction), referenceWordBoundary(text, at, direction); got != want {
++					t.Fatalf("word at %d direction %d: %d, want %d", at, direction, got, want)
++				}
++			}
++			a, z = referenceSelectWord(text, at)
++			e.selectWord(at)
++			if e.Anchor != a || e.Caret != z {
++				t.Fatalf("select at %d: %d:%d, want %d:%d", at, e.Anchor, e.Caret, a, z)
++			}
++		}
++	}
++	check()
++	e.Engine.Replace(1, 1, "new😀 ")
++	check()
++	e.Undo()
++	check()
++	e.Redo()
++	check()
++}
++
++func TestVirtualOutlineDragAcrossOffscreenRows(t *testing.T) {
++	for _, cancel := range []bool{false, true} {
++		t.Run(fmt.Sprint("cancel=", cancel), func(t *testing.T) {
++			var md strings.Builder
++			md.WriteString("# Title\n\n")
++			for i := 1; i <= 300; i++ {
++				fmt.Fprintf(&md, "## Heading %d\n\nbody %d\n\n", i, i)
++			}
++			e := New(md.String())
++			tt := ui.NewTester(func(c *ui.Context) {
++				w, _ := c.Size()
++				View(c, e, Options{Width: w, Theme: c.Theme(), Outline: true, SetOutline: func(bool) {}})
++			}, 1400, 650)
++			tt.Frame()
++			before := e.Doc.Clone()
++			from, ok := tt.Find("跳到 Heading 1")
++			if !ok {
++				t.Fatal("missing source")
++			}
++			x, y := from.X+from.W/2, from.Y+from.H/2
++			source := e.outline[1].id
++			tt.Press(x, y)
++			tt.Move(x, y+12)
++			if e.outlineState.dragging != source {
++				t.Fatal("drag did not start")
++			}
++			tt.Scroll(x, 400, 0, 7000)
++			tt.Frame()
++			if e.outlineState.dragging != source {
++				t.Fatal("offscreen drag source was removed")
++			}
++			if tt.HasText("跳到 Heading 100") {
++				t.Fatal("drag materialized unrelated offscreen rows")
++			}
++			var target string
++			for i := 270; i > 230; i-- {
++				name := fmt.Sprintf("跳到 Heading %d", i)
++				if r, ok := tt.Find(name); ok && r.Y > 120 && r.Y+r.H < 600 {
++					target = name
++					x, y = r.X+r.W/2, r.Y+r.H/2
++					break
++				}
++			}
++			if target == "" {
++				t.Fatal("missing drop target")
++			}
++			targetID := ""
++			for _, item := range e.outline {
++				if "跳到 "+item.text == target {
++					targetID = item.id
++				}
++			}
++			if cancel {
++				tt.Key(0, ui.KeyEscape)
++			}
++			tt.Move(x, y)
++			tt.Release(x, y)
++			tt.Frame()
++			if e.outlineState.dragging != "" {
++				t.Fatal("drag did not end")
++			}
++			if cancel {
++				if !reflect.DeepEqual(e.Doc, before) {
++					t.Fatal("cancel moved section")
++				}
++				return
++			}
++			moved, at := -1, -1
++			for i, b := range e.Doc.Blocks {
++				if b.ID == source {
++					moved = i
++				}
++				if b.ID == targetID {
++					at = i
++				}
++			}
++			if moved < 0 || at != moved+2 || e.Doc.Blocks[moved+1].Text() != "body 1" {
++				t.Fatalf("section drop lost source/body: %d %d", moved, at)
++			}
++			e.Undo()
++			tt.Frame()
++			if !reflect.DeepEqual(e.Doc, before) {
++				t.Fatal("undo did not restore section order")
++			}
++		})
++	}
++}
++
++func TestSmallFontFootnoteReturnHitArea(t *testing.T) {
++	e := New("Text[^proof].\n\n[^proof]: A note.")
++	tt := ui.NewTester(func(c *ui.Context) {
++		w, _ := c.Size()
++		View(c, e, Options{Width: w, Theme: c.Theme(), FontSize: 12, LineHeight: 1.2})
++	}, 900, 650)
++	tt.Frame()
++	e.SetSelection(4, 4)
++	if !e.FollowFootnote() {
++		t.Fatal("missing footnote")
++	}
++	tt.Frame()
++	var note *row
++	for i := range e.rows {
++		if e.rows[i].leaf.Block.Kind == "footnote" {
++			note = &e.rows[i]
++			break
++		}
++	}
++	if note == nil {
++		t.Fatal("missing note row")
++	}
++	surface, ok := tt.Find("文档")
++	if !ok {
++		t.Fatal("missing surface")
++	}
++	// The existing return target is always 26 DIP high, even when the font
++	// and line height make the row shorter than that target.
++	tt.ClickAt(surface.X+note.rect.X+4, surface.Y+note.y+25-e.Scroll.Y)
++	if e.Caret != 4 {
++		t.Fatalf("return target changed with small font: caret %d", e.Caret)
++	}
++}
+--- a/internal/editor/outline.go
++++ b/internal/editor/outline.go
+@@ -1,6 +1,8 @@
+ package editor
+ 
+ import (
++	"sort"
++	"strconv"
+ 	"time"
+ 
+ 	"github.com/Ciao1019/ArcMD/internal/i18n"
+@@ -284,12 +286,7 @@
+ 	if len(e.Doc.Blocks) > 0 {
+ 		title = e.Doc.Blocks[0].ID
+ 	}
+-	active := 0
+-	for i, item := range e.outline {
+-		if item.y <= e.Scroll.Y+96 {
+-			active = i
+-		}
+-	}
++	active := max(0, sort.Search(len(e.outline), func(i int) bool { return e.outline[i].y > e.Scroll.Y+96 })-1)
+ 	if e.outlineState.jump.id != "" {
+ 		// A jump marks where it goes at once, not each heading it passes.
+ 		for i, item := range e.outline {
+@@ -307,60 +304,85 @@
+ 	// a frame. Spacers keep the rows out of view taking their room.
+ 	s := &e.outlineState
+ 	from, to := 0, len(e.outline)
+-	if s.dragging == "" && len(e.outline) > outlineAll {
++	if len(e.outline) > outlineAll {
+ 		// Y may be set past the end (the container clamps it as it lays
+ 		// out); MaxY is how far the last frame let it go.
+ 		y := max(0, min(s.list.Y, s.list.MaxY))
+ 		from = min(len(e.outline), max(0, int(y/outlineRow)-outlineSpare))
+ 		to = min(len(e.outline), from+int(e.viewport/outlineRow)+2*outlineSpare)
+ 	}
++	dragAt := -1
++	if s.dragging != "" {
++		for i, item := range e.outline {
++			if item.id == s.dragging {
++				dragAt = i
++				break
++			}
++		}
++	}
+ 	dragging := ""
+ 	ui.Scroll(c.Key("outline-scroll")).Grow(1).MinHeight(0).TrackScroll(&s.list).Children(func() {
+-		if from > 0 {
+-			ui.Box(c.Key("outline-above")).Height(float32(from) * outlineRow)
+-		}
+-		for i := from; i < to; i++ {
+-			item := e.outline[i]
+-			on := i == active
+-			row := ui.ButtonBase(c.Key("outline:"+item.id)).Height(outlineRow).Radius(6).
+-				Padding(0, 8, 0, 8+float32(min(item.level-top, 4))*outlineIndent).
+-				Label(i18n.T("跳到 ") + item.text).Tooltip(item.text).KeepFocus().Cursor(ui.CursorPointer)
+-			if item.id != title {
+-				row.Drag(outlineDrag{item.id})
++		// Keep the offscreen drag source at its original keyed position, with
++		// spacers for everything between it and the visible rows.
++		cursor := 0
++		rows := func(a, z int) {
++			if a >= z {
++				return
+ 			}
+-			if row.Hovered() {
+-				row.Background(t.Text.Alpha(.05))
++			if a > cursor {
++				ui.Box(c.Key("outline-gap:" + strconv.Itoa(cursor))).Height(float32(a-cursor) * outlineRow)
+ 			}
+-			// A section dragged onto a heading goes before it.
+-			dragged, over := ui.DragOver[outlineDrag](row)
+-			over = over && dragged.id != item.id && item.id != title
+-			if d, ok := ui.Drop[outlineDrag](row); ok && d.id != item.id && item.id != title {
+-				e.Engine.MoveSection(d.id, item.id)
++			for i := a; i < z; i++ {
++				item := e.outline[i]
++				on := i == active
++				row := ui.ButtonBase(c.Key("outline:"+item.id)).Height(outlineRow).Radius(6).
++					Padding(0, 8, 0, 8+float32(min(item.level-top, 4))*outlineIndent).
++					Label(i18n.T("跳到 ") + item.text).Tooltip(item.text).KeepFocus().Cursor(ui.CursorPointer)
++				if item.id != title {
++					row.Drag(outlineDrag{item.id})
++				}
++				if row.Hovered() {
++					row.Background(t.Text.Alpha(.05))
++				}
++				// A section dragged onto a heading goes before it.
++				dragged, over := ui.DragOver[outlineDrag](row)
++				over = over && dragged.id != item.id && item.id != title
++				if d, ok := ui.Drop[outlineDrag](row); ok && d.id != item.id && item.id != title {
++					e.Engine.MoveSection(d.id, item.id)
++				}
++				if row.Dragging() {
++					row.Opacity(.4)
++					dragging = item.id
++				}
++				if over {
++					row.Draw(func(p *ui.Painter, r ui.Rect) {
++						p.Fill(ui.Rect{X: r.X, Y: r.Y - 1, W: r.W, H: 2}, t.Accent, 1)
++					})
++				}
++				color, weight := t.Text.Alpha(.72), 400
++				if on {
++					color, weight = t.Accent, 500
++				}
++				row.Children(func() {
++					ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
++						ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
++					})
++				})
++				if row.Clicked() {
++					e.jumpTo(c, item.id, item.y)
++				}
+ 			}
+-			if row.Dragging() {
+-				row.Opacity(.4)
+-				dragging = item.id
+-			}
+-			if over {
+-				row.Draw(func(p *ui.Painter, r ui.Rect) {
+-					p.Fill(ui.Rect{X: r.X, Y: r.Y - 1, W: r.W, H: 2}, t.Accent, 1)
+-				})
+-			}
+-			color, weight := t.Text.Alpha(.72), 400
+-			if on {
+-				color, weight = t.Accent, 500
+-			}
+-			row.Children(func() {
+-				ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+-					ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
+-				})
+-			})
+-			if row.Clicked() {
+-				e.jumpTo(c, item.id, item.y)
+-			}
+-		}
+-		if to < len(e.outline) {
+-			ui.Box(c.Key("outline-below")).Height(float32(len(e.outline)-to) * outlineRow)
++			cursor = z
++		}
++		if dragAt >= 0 && dragAt < from {
++			rows(dragAt, dragAt+1)
++		}
++		rows(from, to)
++		if dragAt >= to {
++			rows(dragAt, dragAt+1)
++		}
++		if cursor < len(e.outline) {
++			ui.Box(c.Key("outline-gap:" + strconv.Itoa(cursor))).Height(float32(len(e.outline)-cursor) * outlineRow)
+ 		}
+ 		// Below the last heading: the end of the document.
+ 		end := ui.Box(c.Key("outline-end")).Height(16)
+--- /dev/null
++++ b/internal/editor/spatial.go
+@@ -0,0 +1,161 @@
++package editor
++
++import (
++	"iter"
++	"math"
++
++	"github.com/egoist/mygo/ui"
++)
++
++// spatialIndex preserves document/paint order while bounding groups of rows or
++// decorations. Unlike a Y-sorted list it also handles side-by-side columns and
++// overlapping merged cells. Point/range queries prune groups outside their
++// search area. Height changes refit the translated float32 rectangles, which
++// preserves exact caret hit testing even after many fractional translations.
++type spatialIndex struct {
++	n      int
++	bounds []spatialBounds
++	rect   func(int) ui.Rect
++}
++type spatialBounds struct{ left, top, right, bottom float32 }
++
++func rectBounds(r ui.Rect) spatialBounds { return spatialBounds{r.X, r.Y, r.X + r.W, r.Y + r.H} }
++func (b spatialBounds) union(c spatialBounds) spatialBounds {
++	return spatialBounds{min(b.left, c.left), min(b.top, c.top), max(b.right, c.right), max(b.bottom, c.bottom)}
++}
++func (s *spatialIndex) reset(n int, rect func(int) ui.Rect) {
++	s.n, s.rect = n, rect
++	if cap(s.bounds) < 4*n {
++		s.bounds = make([]spatialBounds, 4*n)
++	} else {
++		s.bounds = s.bounds[:4*n]
++	}
++	var build func(int, int, int)
++	build = func(node, a, z int) {
++		if z-a == 1 {
++			s.bounds[node] = rectBounds(rect(a))
++			return
++		}
++		m := (a + z) / 2
++		build(node*2, a, m)
++		build(node*2+1, m, z)
++		s.bounds[node] = s.bounds[node*2].union(s.bounds[node*2+1])
++	}
++	if n > 0 {
++		build(1, 0, n)
++	}
++}
++
++// refitSuffix follows the existing geometry translation, visiting each affected
++// leaf once. Lazy sums would round differently from the displayed rectangles.
++func (s *spatialIndex) refitSuffix(first int) {
++	if first >= s.n || s.n == 0 {
++		return
++	}
++	var change func(int, int, int)
++	change = func(node, a, z int) {
++		if first >= z {
++			return
++		}
++		if z-a == 1 {
++			s.bounds[node] = rectBounds(s.rect(a))
++			return
++		}
++		m := (a + z) / 2
++		change(node*2, a, m)
++		change(node*2+1, m, z)
++		s.bounds[node] = s.bounds[node*2].union(s.bounds[node*2+1])
++	}
++	change(1, 0, s.n)
++}
++func (s *spatialIndex) update(at int, r ui.Rect) {
++	if s.n == 0 {
++		return
++	}
++	var change func(int, int, int)
++	change = func(node, a, z int) {
++		if z-a == 1 {
++			s.bounds[node] = rectBounds(r)
++			return
++		}
++		m := (a + z) / 2
++		if at < m {
++			change(node*2, a, m)
++		} else {
++			change(node*2+1, m, z)
++		}
++		s.bounds[node] = s.bounds[node*2].union(s.bounds[node*2+1])
++	}
++	change(1, 0, s.n)
++}
++func (s *spatialIndex) between(top, bottom float32) iter.Seq[int] {
++	return func(yield func(int) bool) {
++		var visit func(int, int, int) bool
++		visit = func(node, a, z int) bool {
++			b := s.bounds[node]
++			if b.bottom < top || b.top > bottom {
++				return true
++			}
++			if z-a == 1 {
++				return yield(a)
++			}
++			m := (a + z) / 2
++			return visit(node*2, a, m) && visit(node*2+1, m, z)
++		}
++		if s.n > 0 {
++			visit(1, 0, s.n)
++		}
++	}
++}
++func (s *spatialIndex) nearest(p ui.Point) int {
++	if s.n == 0 {
++		return -1
++	}
++	best, distance := 0, float32(math.MaxFloat32)
++	dist := func(b spatialBounds) float32 {
++		// At large document coordinates, cancellation near an edge can make
++		// the summed bound differ from (point-origin)-size. Widen only the
++		// pruning bounds by a few coordinate ULPs; leaves use exact geometry.
++		scale := max(math.Abs(float64(p.X)), math.Abs(float64(p.Y)), math.Abs(float64(b.left)), math.Abs(float64(b.top)), math.Abs(float64(b.right)), math.Abs(float64(b.bottom)))
++		margin := float32(scale * 1e-6)
++		x := max(b.left-p.X-margin, p.X-b.right-margin, 0)
++		y := max(b.top-p.Y-margin, p.Y-b.bottom-margin, 0)
++		return x*x + y*y
++	}
++	var visit func(int, int, int)
++	visit = func(node, a, z int) {
++		d := dist(s.bounds[node])
++		// Bounds can round a few ULPs differently from the original rectangle
++		// distance expression. Keep near ties and compare exact leaf distances.
++		if d > distance+max(1, distance)*1e-6 {
++			return
++		}
++		if z-a == 1 {
++			r := s.rect(a)
++			dx := max(r.X-p.X, p.X-r.X-r.W, 0)
++			dy := max(r.Y-p.Y, p.Y-r.Y-r.H, 0)
++			d = dx*dx + dy*dy
++			if d < distance || d == distance && a < best {
++				best, distance = a, d
++			}
++			return
++		}
++		m := (a + z) / 2
++		if dist(s.bounds[node*2]) <= dist(s.bounds[node*2+1]) {
++			visit(node*2, a, m)
++			visit(node*2+1, m, z)
++		} else {
++			visit(node*2+1, m, z)
++			visit(node*2, a, m)
++		}
++	}
++	visit(1, 0, s.n)
++	return best
++}
++
++func (e *Editor) visibleRows(margin float32) iter.Seq[int] {
++	return e.rowSpace.between(e.Scroll.Y-margin, e.Scroll.Y+e.viewport+margin)
++}
++func (e *Editor) visibleDecorations(margin float32) iter.Seq[int] {
++	return e.decorationSpace.between(e.Scroll.Y-margin, e.Scroll.Y+e.viewport+margin)
++}
+--- /dev/null
++++ b/internal/editor/spatial_test.go
+@@ -0,0 +1,166 @@
++package editor
++
++import (
++	"github.com/Ciao1019/ArcMD/internal/document"
++	"github.com/egoist/mygo/ui"
++	"math"
++	"math/rand"
++	"reflect"
++	"slices"
++	"strings"
++	"testing"
++)
++
++func TestSpatialQueriesMatchExhaustiveScan(t *testing.T) {
++	rng := rand.New(rand.NewSource(104))
++	rects := make([]ui.Rect, 257)
++	for i := range rects {
++		rects[i] = ui.Rect{X: float32(i%3) * 200, Y: float32(i/3) * 32, W: 180, H: float32(25 + rng.Intn(140))}
++	}
++	var index spatialIndex
++	index.reset(len(rects), func(i int) ui.Rect { return rects[i] })
++	for step := 0; step < 300; step++ {
++		at := rng.Intn(len(rects))
++		if step%2 == 0 {
++			dy := float32(rng.Intn(100) - 50)
++			for i := at; i < len(rects); i++ {
++				rects[i].Y += dy
++			}
++			index.refitSuffix(at)
++		} else {
++			rects[at].H = float32(rng.Intn(180) + 1)
++			index.update(at, rects[at])
++		}
++		y := float32(rng.Intn(3200) - 200)
++		var want []int
++		for i, r := range rects {
++			if r.Y+r.H >= y && r.Y <= y+50 {
++				want = append(want, i)
++			}
++		}
++		if got := slices.Collect(index.between(y, y+50)); !slices.Equal(got, want) {
++			t.Fatalf("range %d: %v / %v", step, got, want)
++		}
++		p := ui.Point{X: float32(rng.Intn(900) - 100), Y: y}
++		best, distance := 0, float32(math.MaxFloat32)
++		for i, r := range rects {
++			dx := max(r.X-p.X, p.X-r.X-r.W, 0)
++			dy := max(r.Y-p.Y, p.Y-r.Y-r.H, 0)
++			d := dx*dx + dy*dy
++			if d < distance {
++				best, distance = i, d
++			}
++		}
++		if got := index.nearest(p); got != best {
++			t.Fatalf("nearest %d: %d / %d", step, got, best)
++		}
++	}
++}
++
++// Exercise the actual MyGo callback type, which is intentionally internal to
++// MyGo, without importing it or relying on unsafe access to the tester.
++func checkAccessValue[T any](t *testing.T, access func(func(T)) ui.Element, read func() string) {
++	t.Helper()
++	var callback func(T)
++	accessTextValue(func(fn func(T)) ui.Element { callback = fn; return access(fn) }, read)
++	node := reflect.New(reflect.TypeFor[T]().Elem()).Interface().(T)
++	callback(node)
++	if got := reflect.ValueOf(node).Elem().FieldByName("Value").String(); got != read() {
++		t.Fatal("accessibility text differs", got)
++	}
++}
++
++func TestLazyTextAndAccessibilityPreservePreedit(t *testing.T) {
++	e, tt := newTester("# Title\n\n中文😀 body\n\nend")
++	focus(e, tt)
++	e.SetSelection(e.Len(), e.Len())
++	tt.Type(" added")
++	if e.textKnown {
++		t.Fatal("ordinary typing materialized the entire document")
++	}
++	original := e.Text()
++	tt.Compose("候选😀", 4)
++	if e.Text() != original {
++		t.Fatal("preedit leaked into committed text")
++	}
++	ui.NewTester(func(c *ui.Context) {
++		checkAccessValue(t, ui.Box(c).Access, e.displayText)
++	}, 100, 100).Frame()
++	if e.displayText() != e.Doc.PlainText() || e.displayText() == original {
++		t.Fatal("screen reader did not receive current preedit")
++	}
++	tt.Key(0, ui.KeyEscape)
++	if e.Text() != original {
++		t.Fatal("cancel changed committed text")
++	}
++}
++
++func TestSpatialHitTestingMatchesRowsAfterEdits(t *testing.T) {
++	e, tt := newTester("# Title\n\n" + strings.Repeat("first paragraph wraps 中文😀 and text\n\n", 60) + "| A | B | C |\n|---|---|---|\n| a | b | c |\n| d | e | f |\n\n## Last\n\nend")
++	for _, b := range e.Doc.Blocks {
++		if b.Kind == "table" {
++			e.Engine.MergeCells(b.ID, document.CellRange{Row0: 0, Col0: 0, Row1: 1, Col1: 1})
++			e.Engine.SetWidths(b.ID, []float32{1, 2, 3})
++		}
++	}
++	e.Engine.Insert(document.Columns())
++	tt.SetSize(917, 651)
++	focus(e, tt)
++	rng := rand.New(rand.NewSource(147))
++	for step := 0; step < 75; step++ {
++		leaves := e.Doc.Leaves()
++		l := leaves[1+step%min(12, len(leaves)-1)]
++		e.SetSelection(l.Start, l.End)
++		tt.Type(strings.Repeat("中文😀 wrap ", rng.Intn(28)+1))
++		// Include exact row edges and gap midpoints, where tied rectangles must
++		// still choose the first row in document order.
++		for j := 0; j < 100; j++ {
++			r := e.rows[rng.Intn(len(e.rows))].rect
++			p := ui.Point{X: r.X + r.W*float32(rng.Float64()*1.2), Y: r.Y + r.H*float32(rng.Float64()*1.2)}
++			if j%4 == 0 {
++				p = ui.Point{X: r.X + r.W, Y: r.Y + r.H}
++			}
++			best, distance := 0, float32(math.MaxFloat32)
++			for i, row := range e.rows {
++				dx := max(row.rect.X-p.X, p.X-row.rect.X-row.rect.W, 0)
++				dy := max(row.rect.Y-p.Y, p.Y-row.rect.Y-row.rect.H, 0)
++				if d := dx*dx + dy*dy; d < distance {
++					best, distance = i, d
++				}
++			}
++			if got := e.rowSpace.nearest(p); got != best {
++				t.Fatalf("step %d point %v: indexed row %d, exhaustive %d", step, p, got, best)
++			}
++			row := e.indexedRow(best)
++			want := row.leaf.Start + row.layout.IndexAt(ui.Point{X: p.X - row.x, Y: p.Y - row.y})
++			if got, ok := e.IndexForPoint(p); !ok || got != want {
++				t.Fatalf("point %v: got %d, want %d", p, got, want)
++			}
++		}
++	}
++}
++
++func TestSpatialNearestAtLargeFractionalCoordinates(t *testing.T) {
++	rng := rand.New(rand.NewSource(411))
++	rects := make([]ui.Rect, 129)
++	for i := range rects {
++		rects[i] = ui.Rect{X: 173.37, Y: 1e6 + float32(i)*31.17, W: 236.37, H: 31.16}
++	}
++	var index spatialIndex
++	index.reset(len(rects), func(i int) ui.Rect { return rects[i] })
++	for step := 0; step < 10000; step++ {
++		r := rects[rng.Intn(len(rects))]
++		p := ui.Point{X: r.X + r.W, Y: r.Y + r.H + float32(rng.Intn(3)-1)/32}
++		best, distance := 0, float32(math.MaxFloat32)
++		for i, r := range rects {
++			dx := max(r.X-p.X, p.X-r.X-r.W, 0)
++			dy := max(r.Y-p.Y, p.Y-r.Y-r.H, 0)
++			if d := dx*dx + dy*dy; d < distance {
++				best, distance = i, d
++			}
++		}
++		if got := index.nearest(p); got != best {
++			t.Fatalf("point %v: got %d, want %d", p, got, best)
++		}
++	}
++}
+--- a/internal/editor/table.go
++++ b/internal/editor/table.go
+@@ -97,7 +97,8 @@
+ func (e *Editor) paintTables(p *ui.Painter, bounds ui.Rect) {
+ 	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
+ 	pg := e.page
+-	for _, d := range e.decorations {
++	for i := range e.visibleDecorations(24) {
++		d := e.decorations[i]
+ 		// Include the bars and insertion pins above and beside the table.
+ 		if d.kind != "table" || d.rect.Y+d.rect.H+24 < e.Scroll.Y || d.rect.Y-24 > e.Scroll.Y+e.viewport || len(d.cols) < 2 || !e.barsShown(d) {
+ 			continue
+--- a/internal/editor/tools.go
++++ b/internal/editor/tools.go
+@@ -288,7 +288,7 @@
+ 		e.words += countWords(change.After) - countWords(change.Before)
+ 	} else {
+ 		e.sync()
+-		e.words = countWords(e.text)
++		e.words = countWords(e.displayText())
+ 	}
+ 	e.wordsRevision, e.wordsReady = e.Revision(), true
+ 	return e.words
+@@ -506,7 +506,7 @@
+ 	})
+ 	b.Menu(func(m *ui.Menu) {
+ 		e.sync()
+-		m.Item(fmt.Sprintf(i18n.T("约 %d 分钟读完"), readingMinutes(e.text))).Disabled(true)
++		m.Item(fmt.Sprintf(i18n.T("约 %d 分钟读完"), readingMinutes(e.displayText()))).Disabled(true)
+ 		if goal > 0 {
+ 			left := goal - words
+ 			if left > 0 {
+--- a/internal/editor/view.go
++++ b/internal/editor/view.go
+@@ -32,6 +32,9 @@
+ 	*Buffer
+ 	Scroll                           ui.ScrollState
+ 	RequestFocus                     bool
++	handleIDs, decorationIDs         map[string]int
++	rowIDs                           map[string]int
++	rowSpace, decorationSpace        spatialIndex
+ 	rows                             []row
+ 	decorations                      []decoration
+ 	handles                          []blockHandle
+@@ -160,11 +163,12 @@
+ }
+ 
+ type row struct {
+-	leaf    document.Leaf
+-	layout  *textLayout
+-	rect    ui.Rect
+-	x, y    float32
+-	picture *imageFigure
++	leafRevision uint64
++	leaf         document.Leaf
++	layout       *textLayout
++	rect         ui.Rect
++	x, y         float32
++	picture      *imageFigure
+ 	// number is the position of a numbered item in its list, from 1.
+ 	number int
+ 	// size is the font size, which sizes the row's hand-drawn marks.
+@@ -588,7 +592,8 @@
+ 			content := ui.Box(c.Key("page-content")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).MarginStart(reserve)
+ 			content.Children(func() {
+ 				surface = ui.Box(c.Key("writing-surface")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).
+-					HandleTextInput(e).Role(ui.RoleTextField).Label(i18n.T("文档")).Value(e.text).FocusRing(false)
++					HandleTextInput(e).Role(ui.RoleTextField).Label(i18n.T("文档")).FocusRing(false)
++				accessTextValue(surface.Access, e.displayText)
+ 				if e.RequestFocus {
+ 					surface.Focus()
+ 					e.lastInput = c.Now()
+@@ -615,10 +620,8 @@
+ 				}
+ 				e.hoverID = ""
+ 				if inside {
+-					for _, h := range e.handles {
+-						if py >= h.top-4 {
+-							e.hoverID = h.id
+-						}
++					if i := sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top > py+4 }) - 1; i >= 0 {
++						e.hoverID = e.handles[i].id
+ 					}
+ 				}
+ 				services := c.Services()
+@@ -772,6 +775,20 @@
+ 			delete(e.cache, id)
+ 		}
+ 	}
++	e.handleIDs = make(map[string]int, len(e.handles))
++	for i, h := range e.handles {
++		e.handleIDs[h.id] = i
++	}
++	e.decorationIDs = make(map[string]int, len(e.decorations))
++	for i, d := range e.decorations {
++		e.decorationIDs[d.id] = i
++	}
++	e.rowIDs = make(map[string]int, len(e.rows))
++	for i, r := range e.rows {
++		e.rowIDs[r.leaf.Block.ID] = i
++	}
++	e.rowSpace.reset(len(e.rows), func(i int) ui.Rect { return e.rows[i].rect })
++	e.decorationSpace.reset(len(e.decorations), func(i int) ui.Rect { return e.decorations[i].rect })
+ 	if finishResize {
+ 		e.restoreResizeAnchor(anchor)
+ 	}
+@@ -1065,7 +1082,7 @@
+ 		_, h := cached.layout.Size()
+ 		h = max(h, font.Size*font.LineHeight)
+ 		total := top + h + bottom
+-		row := row{leaf: leaves[b.ID], layout: cached.layout, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size}
++		row := row{leafRevision: e.Revision(), leaf: leaves[b.ID], layout: cached.layout, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size}
+ 		if b.Kind == "image" {
+ 			total = e.layoutImage(&row, o)
+ 		}
+@@ -1093,13 +1110,31 @@
+ 	return blockLayout
+ }
+ 
++// indexedRow resolves absolute text offsets only when a row is used. Geometry
++// and shaping stay cached, so text edits need not rewrite every later row.
++func (e *Editor) indexedRow(i int) *row {
++	r := &e.rows[i]
++	if r.leafRevision != e.Revision() {
++		if leaf, ok := e.Engine.LeafByID(r.leaf.Block.ID); ok {
++			r.leaf = leaf
++		}
++		r.leafRevision = e.Revision()
++	}
++	return r
++}
+ func (e *Editor) rowAt(at int) *row {
+-	if len(e.rows) > 0 {
+-		i := sort.Search(len(e.rows), func(i int) bool { return at <= e.rows[i].leaf.End })
+-		return &e.rows[min(i, len(e.rows)-1)]
+-	}
+-	return nil
+-}
++	if len(e.rows) == 0 {
++		return nil
++	}
++	leaf := e.Engine.LeafAt(at)
++	if i, ok := e.rowIDs[leaf.Block.ID]; ok {
++		return e.indexedRow(i)
++	}
++	// A folded leaf has no row: retain the previous next-visible-row behavior.
++	i := sort.Search(len(e.rows), func(i int) bool { return at <= e.indexedRow(i).leaf.End })
++	return e.indexedRow(min(i, len(e.rows)-1))
++}
++
+ func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange, bool) {
+ 	row := e.rowAt(r.Start)
+ 	if row == nil {
+@@ -1121,17 +1156,7 @@
+ 	if len(e.rows) == 0 {
+ 		return 0, false
+ 	}
+-	best := &e.rows[0]
+-	distance := float32(math.MaxFloat32)
+-	for i := range e.rows {
+-		r := &e.rows[i]
+-		dx := max(r.rect.X-point.X, point.X-r.rect.X-r.rect.W, 0)
+-		dy := max(r.rect.Y-point.Y, point.Y-r.rect.Y-r.rect.H, 0)
+-		d := dy*dy + dx*dx
+-		if d < distance {
+-			best, distance = r, d
+-		}
+-	}
++	best := e.indexedRow(e.rowSpace.nearest(point))
+ 	if best.picture != nil && e.imageCaptionID != best.leaf.Block.ID {
+ 		return best.leaf.Start, true
+ 	}
+@@ -1144,7 +1169,7 @@
+ 	// The loops below test each entry in place and copy only those in
+ 	// view: a long page has tens of thousands, and copying them all was a
+ 	// good part of each frame.
+-	for i := range e.decorations {
++	for i := range e.visibleDecorations(1) {
+ 		if d := &e.decorations[i]; d.rect.Y+d.rect.H < e.Scroll.Y-1 || d.rect.Y > e.Scroll.Y+e.viewport+1 {
+ 			continue
+ 		}
+@@ -1202,7 +1227,7 @@
+ 	}
+ 	// Cell rules go over every fill, so a filled cell never hides the rule
+ 	// of the merged cell beside it.
+-	for i := range e.decorations {
++	for i := range e.visibleDecorations(1) {
+ 		if d := &e.decorations[i]; d.kind != "cell" || d.rect.Y+d.rect.H < e.Scroll.Y-1 || d.rect.Y > e.Scroll.Y+e.viewport+1 {
+ 			continue
+ 		}
+@@ -1225,11 +1250,11 @@
+ 	}
+ 	e.openReveal.order = nil
+ 	selection := e.Selection().Range
+-	for i := range e.rows {
++	for i := range e.visibleRows(40) {
+ 		if r := &e.rows[i]; r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
+ 			continue
+ 		}
+-		r := e.rows[i]
++		r := *e.indexedRow(i)
+ 		if r.picture != nil {
+ 			e.paintImage(p, bounds, r, t)
+ 			if e.imageCaptionID != r.leaf.Block.ID || e.printing {
+@@ -1271,7 +1296,8 @@
+ 		return
+ 	}
+ 	e.paintReadOnlyNotice(p, bounds, t)
+-	for _, f := range e.foldButtons {
++	for i := sort.Search(len(e.foldButtons), func(i int) bool { return e.foldButtons[i].rect.Y+16 >= e.Scroll.Y }); i < len(e.foldButtons) && e.foldButtons[i].rect.Y <= e.Scroll.Y+e.viewport; i++ {
++		f := e.foldButtons[i]
+ 		if !f.folded && !f.always && f.id != e.hoverID {
+ 			continue
+ 		}
+@@ -1285,7 +1311,8 @@
+ 		}
+ 		p.Icon(icon, offset(f.rect), color)
+ 	}
+-	for _, h := range e.handles {
++	for i := max(0, sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top > e.Scroll.Y })-1); i < len(e.handles) && e.handles[i].top <= e.Scroll.Y+e.viewport; i++ {
++		h := e.handles[i]
+ 		if e.ReadOnly {
+ 			break
+ 		}
+@@ -1313,7 +1340,7 @@
+ 		y := bounds.Y + e.fileOver - 4
+ 		p.Fill(ui.Rect{X: bounds.X + e.padding, Y: y - 1, W: e.width - 2*e.padding, H: 2}, t.Accent, 1)
+ 	}
+-	if len(e.Doc.Blocks) == 1 && e.Doc.Blocks[0].Kind == "paragraph" && e.text == "" && !e.focused {
++	if len(e.Doc.Blocks) == 1 && e.Doc.Blocks[0].Kind == "paragraph" && e.Len() == 0 && !e.focused {
+ 		// The starter below says the rest.
+ 		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, i18n.T("开始写作"), 16, t.TextMuted.Alpha(.8))
+ 	}
+@@ -1330,7 +1357,12 @@
+ // a code block's copy button. Tables draw their bars in paintTables.
+ func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
+ 	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
+-	for _, d := range e.decorations {
++	// The copied indicator expires even if its code block was scrolled away.
++	if i, ok := e.decorationIDs[e.copiedID]; ok && e.decorations[i].kind == "code" && p.Now().Sub(e.copiedAt) < 1500*time.Millisecond {
++		p.After(1500*time.Millisecond - p.Now().Sub(e.copiedAt))
++	}
++	for i := range e.visibleDecorations(1) {
++		d := e.decorations[i]
+ 		switch {
+ 		case d.kind == "code" && d.id != "":
+ 			copied := d.id == e.copiedID && p.Now().Sub(e.copiedAt) < 1500*time.Millisecond

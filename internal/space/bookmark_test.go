@@ -60,7 +60,7 @@ func TestStoreKeepsBookmarks(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := store.Load()
-	if err != nil || again.Version != 7 || len(again.Bookmarks) != 1 || again.Bookmarks[0] != st.Bookmarks[0] {
+	if err != nil || again.Version != CurrentVersion || len(again.Bookmarks) != 1 || again.Bookmarks[0] != st.Bookmarks[0] {
 		t.Fatalf("saved state = %+v, %v", again, err)
 	}
 }

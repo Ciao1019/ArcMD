@@ -91,8 +91,44 @@ input and undo path. Their column widths are stored in the model. Narrow
 windows stack columns vertically. Toolbars, slash commands and block gestures
 invoke the same engine operations as the command palette.
 
-IME preedit edits a temporary model. The save path reads the committed snapshot
-until the composition commits as one transaction. Clipboard data includes a
+The engine indexes leaf IDs and keeps UTF-16 and UTF-8 lengths in two Fenwick
+trees. Text edits update lengths in logarithmic time; absolute positions are
+resolved on demand instead of rewriting every following leaf. Input range
+conversion and word navigation read only intersecting leaves. A flattened
+display string is materialized only for consumers that need the whole value.
+The writing surface supplies its accessibility value through MyGo's lazy
+`Access` callback, retaining the full display text, including preedit. MyGo
+0.7.4 keeps that callback's node type internal; a small generic bridge infers
+the type and sets its exported `Value` field through reflection, without unsafe
+access or a toolkit fork.
+
+Consecutive text-only revisions reshape the affected top-level block and
+resolve retained rows' text positions lazily. A heading also updates its
+outline label; a table rebuilds its own geometry with the shared merged-cell
+layouter. Height changes translate following geometry without reshaping
+unrelated blocks. This translation remains linear in the following geometry;
+unchanged-height edits skip it. Columns, structural edits and missed revisions
+use the complete-layout fallback. Spatial bounding trees select visible rows
+and decorations in paint order and prune caret hit-test candidates, including
+columns and merged cells. Height changes refit the actual translated float32
+rectangles so hit tests retain the previous tie and rounding behavior. Long
+outlines remain virtualized during dragging while retaining the keyed source
+row outside the viewport.
+
+Find uses a Unicode-aware KMP matcher with the existing case-folding and
+nonoverlapping-match rules. Text-only edits rescan one leaf and adjust later
+matches; query or structural changes rebuild matches. Footnote references
+are cached by block ID and reparsed only for the edited leaf; reference changes
+recompute numbering, while formatting and structural changes rebuild the
+index. Text-only undo owns affected runs; bounded history evicts old entries
+without shifting the entire history slice. These caches do not alter the saved
+format or the committed-text contract.
+
+IME preedit edits a temporary model. Candidate updates within a leaf use the
+same local text and layout path, without creating history or advancing the
+committed version. Composition start and commit still retain full snapshots.
+The save path and dirty-state cache read the committed snapshot until the
+composition commits as one transaction. Clipboard data includes a
 validated native fragment plus Markdown, semantic HTML and a Markdown text
 alternative (verbatim selections keep their source). Whole selected tables and
 columns retain their structure. Markdown pastes recognize headings, lists,

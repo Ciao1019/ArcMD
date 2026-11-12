@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -116,6 +117,7 @@ func (c Combo) Label() string {
 		return c.String()
 	}
 	if s, ok := keySymbols[c.Key]; ok {
+		s = i18n.T(s)
 		key = s
 	}
 	var b strings.Builder

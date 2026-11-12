@@ -12,6 +12,9 @@ import (
 func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string), open func(string)) bool {
 	e.lastInput = ev.Time
 	e.sync()
+	if e.blockPointer(ev) {
+		return true
+	}
 	if e.structuralPointer(ev) {
 		return true
 	}
@@ -21,6 +24,7 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			return false
 		}
 		e.UnmarkText()
+		e.clearBlocks()
 		at, ok := e.IndexForPoint(ui.Point{X: ev.X, Y: ev.Y})
 		if !ok {
 			return false
@@ -49,6 +53,10 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		}
 		if e.toggleTask(at, ev.X) {
 			return true
+		}
+		e.markPop = markPopover{}
+		if ev.Mods == 0 && ev.Clicks < 2 {
+			e.openMarkPopover(at)
 		}
 		e.dragging, e.reveal = true, false
 		e.selectionDrag = selectionDrag{scrollY: e.Scroll.Y, at: ev.Time}
@@ -84,7 +92,7 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		e.dragging = false
 		return true
 	case ui.InputSelect:
-		runes := []rune(e.text)
+		runes := []rune(e.displayText())
 		a, z := min(ev.Start, len(runes)), min(ev.End, len(runes))
 		e.SetSelection(ui.UTF16Len(string(runes[:max(0, a)])), ui.UTF16Len(string(runes[:max(0, z)])))
 		e.reveal = true
@@ -101,7 +109,20 @@ func (e *Editor) command(command string, read func() string, write func(string))
 	// Copy leaves the page where the reader scrolled, even when the
 	// selected text is now offscreen.
 	if command == "copy" {
+		if len(e.blocks.ids) > 0 {
+			e.copyBlocks(e.BlockSelection(), write)
+			return true
+		}
 		e.copySelection(write)
+		return true
+	}
+	if command == "cut" && len(e.blocks.ids) > 0 {
+		e.copyBlocks(e.BlockSelection(), write)
+		if !e.ReadOnly {
+			e.Engine.DeleteBlocks(e.BlockSelection())
+			e.clearBlocks()
+			e.sync()
+		}
 		return true
 	}
 	e.reveal, e.vertical = true, false
@@ -142,7 +163,10 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 			return false
 		}
 	}
-	if e.slashKeys(ev) || e.wikiKeys(ev) {
+	if e.slashKeys(ev) || e.wikiKeys(ev) || e.completeKeys(ev) {
+		return true
+	}
+	if e.blockKeys(ev, write) {
 		return true
 	}
 	if key == ui.KeyEscape && e.closeHeader() {
@@ -161,8 +185,8 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		}
 		e.tableSel = tableSelection{}
 	}
-	if e.colorPanel && key == ui.KeyEscape {
-		e.colorPanel = false
+	if (e.annotatePanel || e.markPop.open) && key == ui.KeyEscape {
+		e.annotatePanel, e.markPop.open = false, false
 		return true
 	}
 	if e.menuOpen && key == ui.KeyEscape {
@@ -175,6 +199,10 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		if key == ui.KeyEscape {
 			return true
 		}
+	}
+	if _, composing := e.MarkedRange(); !composing && key == ui.KeyEscape && mods == 0 && e.focused && e.SelectCaretBlock() {
+		// Escape with nothing open selects the caret's block, as Notion's.
+		return true
 	}
 	if _, composing := e.MarkedRange(); composing {
 		if key == ui.KeyEscape {
@@ -304,6 +332,7 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		return true
 	case ui.KeyEnter:
 		e.UnmarkText()
+		e.refused = e.refused || e.ReadOnly
 		e.Engine.Enter(shift)
 		e.sync()
 		e.reveal, e.vertical = true, false
@@ -339,6 +368,7 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 
 func (e *Editor) delete(direction int, word, line bool) {
 	if e.ReadOnly {
+		e.refused = true
 		return
 	}
 	if direction < 0 && !word && !line && e.deletePair() {
@@ -377,22 +407,30 @@ func (e *Editor) indent(remove bool) {
 }
 
 func (e *Editor) selectWord(at int) {
+	at = e.clamp(at)
 	a, z := e.lineRange(at)
-	pos := ui.UTF16ByteOffset(e.text, at)
-	start, end := pos, pos
-	for start > ui.UTF16ByteOffset(e.text, a) {
-		r, n := utf8.DecodeLastRuneInString(e.text[:start])
+	// lineRange excludes a trailing CR. A click between CR and LF keeps
+	// that position, just as selection in the flattened text did.
+	if at > z {
+		e.SetSelection(at, at)
+		return
+	}
+	text := e.slice(a, z)
+	start := ui.UTF16ByteOffset(text, at-a)
+	end := start
+	for start > 0 {
+		r, n := utf8.DecodeLastRuneInString(text[:start])
 		if strings.ContainsRune(" \t\r\n", r) {
 			break
 		}
 		start -= n
 	}
-	for end < ui.UTF16ByteOffset(e.text, z) {
-		r, n := utf8.DecodeRuneInString(e.text[end:])
+	for end < len(text) {
+		r, n := utf8.DecodeRuneInString(text[end:])
 		if strings.ContainsRune(" \t\r\n", r) {
 			break
 		}
 		end += n
 	}
-	e.SetSelection(ui.UTF16Len(e.text[:start]), ui.UTF16Len(e.text[:end]))
+	e.SetSelection(a+ui.UTF16Len(text[:start]), a+ui.UTF16Len(text[:end]))
 }

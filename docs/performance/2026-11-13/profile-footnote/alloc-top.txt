@@ -1,0 +1,22 @@
+File: review.test
+Type: alloc_space
+Time: 2026-11-13 05:45:51 CST
+Showing nodes accounting for 8855.22MB, 99.13% of 8933.01MB total
+Dropped 112 nodes (cum <= 44.67MB)
+Showing top 15 nodes out of 35
+      flat  flat%   sum%        cum   cum%
+ 4383.33MB 49.07% 49.07%  5838.35MB 65.36%  github.com/Ciao1019/ArcMD/internal/document.(*Document).Leaves.func1
+ 2889.03MB 32.34% 81.41%  2889.03MB 32.34%  strings.(*Builder).WriteString (inline)
+ 1579.20MB 17.68% 99.09%  1579.20MB 17.68%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).sync
+    2.65MB  0.03% 99.12%  8932.47MB   100%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+    0.50MB 0.0056% 99.12%  7271.86MB 81.40%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).collectNotes
+    0.50MB 0.0056% 99.13%  7320.54MB 81.95%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+         0     0% 99.13%  7319.54MB 81.94%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0% 99.13%  7319.04MB 81.93%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0% 99.13%  7319.04MB 81.93%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3
+         0     0% 99.13%  7319.54MB 81.94%  github.com/Ciao1019/ArcMD/internal/app.(*App).main
+         0     0% 99.13%  7319.54MB 81.94%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1
+         0     0% 99.13%  7319.04MB 81.93%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1.1
+         0     0% 99.13%  2888.03MB 32.33%  github.com/Ciao1019/ArcMD/internal/document.(*Block).Text (inline)
+         0     0% 99.13%  5838.35MB 65.36%  github.com/Ciao1019/ArcMD/internal/document.(*Document).Leaves
+         0     0% 99.13%  1595.84MB 17.86%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).ReplaceText

@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo"
@@ -242,11 +243,11 @@ func (a *App) conflictBarFor(c *ui.Context, d *document) {
 		return
 	}
 	t := c.Theme()
-	msg := "「" + d.title() + "」已在其他地方修改，这里还有未保存的修改。"
-	mine, theirs := "保留我的修改", "使用磁盘上的版本"
+	msg := "「" + d.title() + i18n.T("」已在其他地方修改，这里还有未保存的修改。")
+	mine, theirs := i18n.T("保留我的修改"), i18n.T("使用磁盘上的版本")
 	if d.missing {
-		msg = "「" + d.title() + "」的文件已被移动或删除，这里还有未保存的修改。"
-		mine, theirs = "重新保存到原位置", "放弃修改并关闭"
+		msg = "「" + d.title() + i18n.T("」的文件已被移动或删除，这里还有未保存的修改。")
+		mine, theirs = i18n.T("重新保存到原位置"), i18n.T("放弃修改并关闭")
 	}
 	ui.Row(c.Key("conflict")).Padding(10, 16).Gap(10).AlignItems(ui.Center).
 		Background(t.Warning.Alpha(0.14)).Role(ui.RoleStatus).Children(func() {

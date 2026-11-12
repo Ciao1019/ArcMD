@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,7 +59,8 @@ func TestMoveToSpaceMenu(t *testing.T) {
 	if exists(home, "Journal/Ideas.arcmd") || !exists(work, "Ideas.arcmd") {
 		t.Fatal("the document did not move to Work")
 	}
-	if a.state.ActiveSpace() != home || tt.HasText("Ideas") {
+	// The undo toast names the document; the list must not.
+	if a.state.ActiveSpace() != home || vault.Find(a.tree, "Journal/Ideas.arcmd") != nil || !tt.HasText("已移到空间「Work」") {
 		t.Fatal("moving a closed document switched spaces or kept its row")
 	}
 }

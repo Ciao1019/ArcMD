@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -20,7 +21,7 @@ func (a *App) splitView(c *ui.Context) {
 	bar := c.TitleBar()
 	if a.folded() {
 		ui.Row(c.Key("split-window-bar")).Height(max(36, bar.Height)).Padding(0, bar.Right, 0, bar.Left+4).AlignItems(ui.Center).DragWindow().Children(func() {
-			if iconButton(c, "sidebar", iconSidebar, "展开侧边栏", a.withKey("展开侧边栏", "sidebar"), false).Clicked() {
+			if iconButton(c, "sidebar", iconSidebar, i18n.T("展开侧边栏"), a.withKey(i18n.T("展开侧边栏"), "sidebar"), false).Clicked() {
 				a.toggleSidebar()
 			}
 			ui.Spacer(c)
@@ -86,7 +87,7 @@ func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index
 	t := c.Theme()
 	d := pane.doc
 	card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinWidth(0).MinHeight(0).Radius(10).Clip().
-		Shadow(0, 1, 4, 0, cardShadow(t)).Label(fmt.Sprintf("分屏 %d", index+1))
+		Shadow(0, 1, 4, 0, cardShadow(t)).Label(fmt.Sprintf(i18n.T("分屏 %d"), index+1))
 	if d == nil {
 		card.Background(splitEmpty(t))
 	}
@@ -97,8 +98,8 @@ func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index
 			ui.Box(c).Height(1).Background(c.Theme().Border.Alpha(0.4))
 			ui.Column(c).Grow(1).MinHeight(0).Center().Padding(16).Gap(12).Children(func() {
 				ui.Icon(c, iconSplit).FontSize(28).TextColor(c.Theme().TextMuted)
-				ui.Text(c, "打开另一篇文档").FontSize(15).TextColor(c.Theme().TextMuted)
-				if ui.Button(c, "选择文档").Clicked() {
+				ui.Text(c, i18n.T("打开另一篇文档")).FontSize(15).TextColor(c.Theme().TextMuted)
+				if ui.Button(c, i18n.T("选择文档")).Clicked() {
 					a.focusPane(index, false)
 					a.openPalette()
 					a.palette.pane = pane
@@ -128,25 +129,25 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 	full := s.active == index || bar.Hovered()
 	bar.Children(func() {
 		if d != nil && width >= 260 {
-			if iconButton(c, "back", iconBack, fmt.Sprintf("分屏 %d 后退", index+1), "后退", pane.at <= 0).Size(26, 26).Clicked() {
+			if iconButton(c, "back", iconBack, fmt.Sprintf(i18n.T("分屏 %d 后退"), index+1), i18n.T("后退"), pane.at <= 0).Size(26, 26).Clicked() {
 				run(func() { a.goHistory(-1) })
 			}
-			if iconButton(c, "forward", iconForward, fmt.Sprintf("分屏 %d 前进", index+1), "前进", pane.at+1 >= len(pane.history)).Size(26, 26).Clicked() {
+			if iconButton(c, "forward", iconForward, fmt.Sprintf(i18n.T("分屏 %d 前进"), index+1), i18n.T("前进"), pane.at+1 >= len(pane.history)).Size(26, 26).Clicked() {
 				run(func() { a.goHistory(1) })
 			}
 			if full && width >= 380 {
-				if iconButton(c, "reload", iconReload, fmt.Sprintf("分屏 %d 重新载入", index+1), "重新载入", false).Size(26, 26).Clicked() {
+				if iconButton(c, "reload", iconReload, fmt.Sprintf(i18n.T("分屏 %d 重新载入"), index+1), i18n.T("重新载入"), false).Size(26, 26).Clicked() {
 					run(a.reload)
 				}
 			}
 		}
 		address := ui.Row(c.Key("pane-address")).Grow(1).MinWidth(0).Height(28).PaddingX(6).Gap(6).Radius(6).AlignItems(ui.Center).
-			Focusable().Role(ui.RoleButton).Label(fmt.Sprintf("分屏 %d 文档路径", index+1)).Cursor(ui.CursorPointer)
+			Focusable().Role(ui.RoleButton).Label(fmt.Sprintf(i18n.T("分屏 %d 文档路径"), index+1)).Cursor(ui.CursorPointer)
 		if address.Hovered() {
 			address.Background(t.Text.Alpha(0.05))
 		}
 		address.Children(func() {
-			name := "搜索或打开文档…"
+			name := i18n.T("搜索或打开文档…")
 			if d != nil {
 				name = d.title()
 				if width >= 325 {
@@ -155,12 +156,12 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 			}
 			ui.Text(c, name).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(t.TextMuted)
 			if d != nil && (d.dirty() || d.saveErr != nil || d.conflict || d.missing) {
-				label := "已修改"
+				label := i18n.T("已修改")
 				if d.saveErr != nil {
-					label = "保存失败"
+					label = i18n.T("保存失败")
 				}
 				if d.conflict || d.missing {
-					label = "文件冲突"
+					label = i18n.T("文件冲突")
 				}
 				ui.Text(c, label).FontSize(10).TextColor(t.Danger).NoWrap()
 			}
@@ -172,10 +173,10 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 			d.ed.Corner(c)
 		}
 		if full {
-			options := iconButton(c, "options", iconSplit, fmt.Sprintf("分屏 %d 选项", index+1), "分屏选项", false).Size(26, 26)
+			options := iconButton(c, "options", iconSplit, fmt.Sprintf(i18n.T("分屏 %d 选项"), index+1), i18n.T("分屏选项"), false).Size(26, 26)
 			options.PopoverMenuButton(func(m *ui.Menu) { a.splitMenu(m, index) })
 		}
-		if iconButton(c, "close", iconX, fmt.Sprintf("关闭分屏 %d", index+1), a.withKey("关闭此分屏", "split-close"), false).Size(26, 26).Clicked() {
+		if iconButton(c, "close", iconX, fmt.Sprintf(i18n.T("关闭分屏 %d"), index+1), a.withKey(i18n.T("关闭此分屏"), "split-close"), false).Size(26, 26).Clicked() {
 			a.closePane(index)
 		}
 	})
@@ -186,32 +187,32 @@ func (a *App) splitMenu(m *ui.Menu, index int) {
 	if s == nil {
 		return
 	}
-	if a.menuKey(m.Item("添加分屏"), "split-add").Disabled(len(s.panes) >= splitLimit).Chosen() {
+	if a.menuKey(m.Item(i18n.T("添加分屏")), "split-add").Disabled(len(s.panes) >= splitLimit).Chosen() {
 		a.focusPane(index, false)
 		a.addSplitPane()
 	}
-	if m.Item("从分屏中分离").Chosen() {
+	if m.Item(i18n.T("从分屏中分离")).Chosen() {
 		a.focusPane(index, false)
 		a.separateSplit()
 	}
-	label := "切换为上下分屏"
+	label := i18n.T("切换为上下分屏")
 	if s.vertical {
-		label = "切换为左右分屏"
+		label = i18n.T("切换为左右分屏")
 	}
 	if m.Item(label).Chosen() {
 		s.vertical = !s.vertical
 	}
-	if m.Item("均分所有分屏").Chosen() {
+	if m.Item(i18n.T("均分所有分屏")).Chosen() {
 		a.equalSplit()
 	}
-	if m.Item("向前移动此分屏").Disabled(index == 0).Chosen() {
+	if m.Item(i18n.T("向前移动此分屏")).Disabled(index == 0).Chosen() {
 		a.movePane(index, index-1)
 	}
-	if m.Item("向后移动此分屏").Disabled(index == len(s.panes)-1).Chosen() {
+	if m.Item(i18n.T("向后移动此分屏")).Disabled(index == len(s.panes)-1).Chosen() {
 		a.movePane(index, index+1)
 	}
 	m.Separator()
-	if a.menuKey(m.Item("关闭此分屏"), "split-close").Chosen() {
+	if a.menuKey(m.Item(i18n.T("关闭此分屏")), "split-close").Chosen() {
 		a.closePane(index)
 	}
 }
@@ -234,7 +235,7 @@ func (a *App) movePane(from, to int) {
 func (a *App) splitDivider(c *ui.Context, s *splitGroup, index int, offset float32, b ui.Rect, lengths []float32) {
 	t := c.Theme()
 	handle := ui.Box(c.Key(fmt.Sprintf("divider-%d", index))).Absolute().Focusable().Role(ui.RoleSplitter).
-		Label(fmt.Sprintf("调整分屏 %d 大小", index+1)).Tooltip("拖动调整大小；双击均分；方向键微调")
+		Label(fmt.Sprintf(i18n.T("调整分屏 %d 大小"), index+1)).Tooltip(i18n.T("拖动调整大小；双击均分；方向键微调"))
 	if s.vertical {
 		handle.Left(0).Top(offset-4).Size(b.W, splitGap+8).Cursor(ui.CursorResizeNS)
 	} else {
@@ -373,12 +374,12 @@ func (a *App) splitSidebarRow(c *ui.Context, sp *space.Space) {
 			if i > 0 {
 				ui.Box(c).Width(1).Height(18).AlignSelf(ui.Center).Background(separator(c.Theme()))
 			}
-			name := "新分屏"
+			name := i18n.T("新分屏")
 			if p.doc != nil {
 				name = p.doc.title()
 			}
 			cell := ui.Row(c.Key(fmt.Sprintf("pane:%p", p))).Grow(1).Basis(0).MinWidth(0).PaddingX(4).Gap(4).Radius(6).AlignItems(ui.Center).
-				Focusable().Role(ui.RoleButton).Label(fmt.Sprintf("打开分屏 %d：%s", i+1, name)).Tooltip(name).Cursor(ui.CursorPointer)
+				Focusable().Role(ui.RoleButton).Label(fmt.Sprintf(i18n.T("打开分屏 %d：%s"), i+1, name)).Tooltip(name).Cursor(ui.CursorPointer)
 			if a.split == s && s.active == i {
 				cell.Background(hoverFill(c.Theme()))
 			}
@@ -393,7 +394,7 @@ func (a *App) splitSidebarRow(c *ui.Context, sp *space.Space) {
 			cell.ContextMenu(func(m *ui.Menu) {
 				if a.split == s {
 					a.splitMenu(m, i)
-				} else if m.Item("打开分屏组").Chosen() {
+				} else if m.Item(i18n.T("打开分屏组")).Chosen() {
 					a.restoreSplit(s, i)
 				}
 			})

@@ -8,6 +8,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fuzzy"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -210,7 +211,7 @@ func (a *App) firstKey(id string) string {
 	if k := a.keyLabel(id); k != "" {
 		return strings.Split(k, " / ")[0]
 	}
-	return "命令栏「添加书签」"
+	return i18n.T("命令栏「添加书签」")
 }
 
 // reservedKeys are the keys of the bookmark commands, which the page must
@@ -303,7 +304,7 @@ func (a *App) bookmarkResults(q string) []action {
 			}
 		}
 		if lost {
-			hint = strings.TrimPrefix(hint+" · 位置已失效", " · ")
+			hint = strings.TrimPrefix(hint+i18n.T(" · 位置已失效"), " · ")
 		}
 		bm := b
 		out = append(out, action{kind: kind, title: title, hint: hint, bookmark: &bm, faded: lost,
@@ -319,13 +320,13 @@ func (a *App) bookmarkResults(q string) []action {
 			}
 			for _, b := range mine {
 				if b.Block == blk.ID {
-					add(b, "本文档", "", false)
+					add(b, i18n.T("本文档"), "", false)
 				}
 			}
 		}
 		for _, b := range mine {
 			if _, ok := marks[b.Block]; !ok {
-				add(b, "本文档", "", true)
+				add(b, i18n.T("本文档"), "", true)
 			}
 		}
 	}
@@ -346,7 +347,7 @@ func (a *App) bookmarkResults(q string) []action {
 			_, found := a.marksOf(d)[b.Block]
 			lost = !found
 		}
-		add(b, "书签", hint, lost)
+		add(b, i18n.T("书签"), hint, lost)
 	}
 	return out
 }
@@ -357,10 +358,10 @@ func (a *App) bookmarkRow(c *ui.Context, row ui.Element, act action) bool {
 	p := &a.palette
 	b := *act.bookmark
 	row.ContextMenu(func(m *ui.Menu) {
-		if m.Item("重命名…").Chosen() {
+		if m.Item(i18n.T("重命名…")).Chosen() {
 			p.renaming, p.renameOn, p.newLabel, p.renameFocused = b, true, b.Label, false
 		}
-		if m.Item("移除书签").Chosen() {
+		if m.Item(i18n.T("移除书签")).Chosen() {
 			a.removeBookmark(b)
 		}
 	})
@@ -369,7 +370,7 @@ func (a *App) bookmarkRow(c *ui.Context, row ui.Element, act action) bool {
 	}
 	row.Children(func() {
 		ui.Text(c, act.kind).FontSize(11).TextColor(c.Theme().TextMuted).Width(64).NoWrap()
-		input := ui.TextInput(c.Key("bookmark-label"), &p.newLabel).Placeholder(b.Excerpt).Label("书签名称").Grow(1).Padding(4, 8)
+		input := ui.TextInput(c.Key("bookmark-label"), &p.newLabel).Placeholder(b.Excerpt).Label(i18n.T("书签名称")).Grow(1).Padding(4, 8)
 		// The field asks for the focus until it has it; only then does
 		// leaving it keep the name.
 		if !p.renameFocused {

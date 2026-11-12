@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -45,9 +46,9 @@ func (a *App) sidebar(c *ui.Context, floating bool) {
 		}
 		top.Children(func() {
 			ui.Spacer(c)
-			label := "收起侧边栏"
+			label := i18n.T("收起侧边栏")
 			if floating {
-				label = "固定侧边栏"
+				label = i18n.T("固定侧边栏")
 			}
 			if iconButton(c, "toggle-sidebar", iconSidebar, label, label+" (⌘\\)", false).Clicked() {
 				a.toggleSidebar()
@@ -127,7 +128,7 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 			}
 			tree.Children(func() {
 				if err != nil {
-					ui.Text(c, "读取文件夹失败。"+err.Error()).TextColor(t.Danger).FontSize(12).Padding(4, 10)
+					ui.Text(c, i18n.T("读取文件夹失败。")+err.Error()).TextColor(t.Danger).FontSize(12).Padding(4, 10)
 				}
 				pins := pinnedNodes(sp, nodes)
 				// Cra's sections: 3 DIPs on top, the pinned rows (with the
@@ -233,7 +234,7 @@ func (a *App) pinPlaceholder(c *ui.Context, active bool) {
 	})
 	row.Children(func() {
 		ui.Icon(c, iconPin).FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, "拖到此处置顶").FontSize(12).FontWeight(500).TextColor(t.TextMuted).NoWrap()
+		ui.Text(c, i18n.T("拖到此处置顶")).FontSize(12).FontWeight(500).TextColor(t.TextMuted).NoWrap()
 	})
 }
 
@@ -257,12 +258,12 @@ func monogram(title string) string {
 // semibold in the secondary ink. Under the pointer it fills, a chevron
 // takes the icon's place (down, or right while the pinned section is
 // folded, turning a quarter over 0.12 s) and ••• opens the space's menu. A
-// click on the icon folds the pins; clicking the name edits it in place.
+// click on the icon folds the pins; renaming is an explicit menu action.
 // Files dropped on the header move to the root.
 func (a *App) spaceHeader(c *ui.Context, sp *space.Space, live bool) {
 	t := c.Theme()
 	h := ui.Row(c.Key("space-header")).Height(36).PaddingEnd(5).Radius(12).AlignItems(ui.Center).
-		Label("空间标题")
+		Label(i18n.T("空间标题"))
 	if live {
 		a.tourMark("theme", h)
 	}
@@ -284,7 +285,7 @@ func (a *App) spaceHeader(c *ui.Context, sp *space.Space, live bool) {
 	h.Children(func() {
 		icon := ui.Box(c.Key("header-icon")).Size(26, 26).Margin(0, 0, 0, 5).Center()
 		if live {
-			icon.Focusable().Cursor(ui.CursorPointer).Role(ui.RoleButton).Label("折叠或展开置顶").Expanded(!collapsed).Tooltip("折叠或展开置顶")
+			icon.Focusable().Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(i18n.T("折叠或展开置顶")).Expanded(!collapsed).Tooltip(i18n.T("折叠或展开置顶"))
 		}
 		icon.Children(func() {
 			hasIcon := sp.Icon != "" || sp.Symbol != ""
@@ -310,16 +311,13 @@ func (a *App) spaceHeader(c *ui.Context, sp *space.Space, live bool) {
 		} else {
 			name := ui.Box(c.Key("space-title")).Grow(1).MinWidth(0).Height(30).Justify(ui.Center).Margin(0, 0, 0, 5)
 			if live {
-				name.Focusable().Role(ui.RoleButton).Label(sp.Name).Cursor(ui.CursorText).Tooltip("重命名空间")
+				name.Label(sp.Name)
 			}
 			name.Children(func() {
 				ui.Text(c, sp.Name).FontSize(13).FontWeight(600).TextColor(ink).SingleLine().MinWidth(0)
 			})
-			if live && name.Clicked() {
-				a.editSpaceProperty(sp, "name")
-			}
 		}
-		more := iconButton(c, "space-more", iconEllipsis, "空间菜单", "空间菜单", false).Size(24, 24)
+		more := iconButton(c, "space-more", iconEllipsis, i18n.T("空间菜单"), i18n.T("空间菜单"), false).Size(24, 24)
 		if !lit {
 			more.Opacity(0)
 		}
@@ -416,7 +414,7 @@ func (a *App) columnLook(sp *space.Space) spaceLook {
 // folderBody is an open folder's rows, or a line saying it is empty.
 func (a *App) folderBody(c *ui.Context, sp *space.Space, n *vault.Node, depth int, live bool) {
 	if !a.showsAny(sp, n.Children) {
-		ui.Text(c.Key("empty:"+n.Path), "空文件夹").FontSize(12).TextColor(c.Theme().TextMuted).
+		ui.Text(c.Key("empty:"+n.Path), i18n.T("空文件夹")).FontSize(12).TextColor(c.Theme().TextMuted).
 			PaddingStart(float32(10 + depth*rowIndent + 27)).Height(28).
 			Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: &ui.Motion{Y: -6}, Exit: &ui.Motion{}})
 		return
@@ -569,7 +567,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		case minus:
 			// The button takes the dot's place while hovered, as Arc's.
 			b := ui.Box(c.Key("close-open")).Size(24, 24).Radius(6).Shrink(0).Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label("关闭并保持置顶").Tooltip("关闭并保持置顶")
+				Focusable().Role(ui.RoleButton).Label(i18n.T("关闭并保持置顶")).Tooltip(i18n.T("关闭并保持置顶"))
 			if b.Hovered() {
 				b.Background(hoverFill(t))
 				a.overClose = place{sp.ID, n.Path}
@@ -581,7 +579,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				closed = true
 			}
 		case chosen && a.doc.dirty():
-			ui.Box(c).Size(6, 6).Radius(3).Background(t.Accent).Tooltip("已修改")
+			ui.Box(c).Size(6, 6).Radius(3).Background(t.Accent).Tooltip(i18n.T("已修改"))
 		}
 		if into {
 			intoBadge(c)
@@ -606,7 +604,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 // it keeps the name, Escape gives up.
 func (a *App) renameField(c *ui.Context) {
 	in := ui.TextInput(c.Key("rename"), &a.newName).Grow(1).MinWidth(0).Height(26).Padding(2, 6).
-		AutoFocus().Label("名称")
+		AutoFocus().Label(i18n.T("名称"))
 	switch {
 	case c.Shortcut(0, ui.KeyEscape):
 		a.renaming = ""
@@ -621,29 +619,34 @@ func (a *App) renameField(c *ui.Context) {
 // nodeMenu is the context menu of a folder's or document's row, as Cra's
 // tab and folder menus.
 func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
-	pin := "置顶"
+	pin := i18n.T("置顶")
 	if sp.IsPinned(n.Path) {
-		pin = "取消置顶"
+		pin = i18n.T("取消置顶")
 	}
 	if n.Dir {
-		if m.Item("重命名…").Chosen() {
+		if m.Item(i18n.T("重命名…")).Chosen() {
 			a.renameIn(sp, n.Path)
 		}
-		if m.Item("新建文档").Chosen() {
+		if m.Item(i18n.T("新建文档")).Chosen() {
 			a.newDoc(n.Path)
 		}
-		if m.Item("在其中新建文件夹").Chosen() {
+		a.templateMenu(m, n.Path)
+		if m.Item(i18n.T("在其中新建文件夹")).Chosen() {
 			a.newFolder(n.Path)
 		}
 		if m.Item(pin).Chosen() {
 			a.togglePin(sp, n.Path)
 		}
+		a.sortMenu(m, sp, n.Path)
 	} else {
-		if m.Item("在分屏中打开").Disabled(a.doc == nil && a.split == nil).Chosen() {
+		if m.Item(i18n.T("在分屏中打开")).Disabled(a.doc == nil && a.split == nil).Chosen() {
 			a.openSplit(sp, n.Path, false, false)
 		}
+		if m.Item(i18n.T("在新窗口中打开")).Chosen() {
+			a.openInWindow(sp, n.Path)
+		}
 		if inPins(sp, n.Path) && a.isOpen(sp, n.Path) {
-			if m.Item("关闭并保持置顶").Chosen() {
+			if m.Item(i18n.T("关闭并保持置顶")).Chosen() {
 				a.closeOpen(sp, n.Path)
 			}
 			m.Separator()
@@ -651,15 +654,15 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		if m.Item(pin).Chosen() {
 			a.togglePin(sp, n.Path)
 		}
-		fav := "添加到收藏"
+		fav := i18n.T("添加到收藏")
 		if a.state.IsFavorite(sp.ID, n.Path) {
-			fav = "从收藏中移除"
+			fav = i18n.T("从收藏中移除")
 		}
 		if m.Item(fav).Chosen() {
 			a.toggleFavorite(sp, n.Path)
 		}
 		m.Separator()
-		if m.Item("重命名…").Chosen() {
+		if m.Item(i18n.T("重命名…")).Chosen() {
 			a.renameIn(sp, n.Path)
 		}
 		m.Separator()
@@ -670,7 +673,7 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 			}
 		}
 		if len(folders) > 0 {
-			m.Submenu("移到文件夹", func(sub *ui.Menu) {
+			m.Submenu(i18n.T("移到文件夹"), func(sub *ui.Menu) {
 				for _, f := range folders {
 					if sub.Item(f.Name).Disabled(parentDir(n.Path) == f.Path).Chosen() {
 						a.placeEntry(n.Path, f.Path, len(a.childrenOf(f.Path)))
@@ -678,16 +681,16 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 				}
 			})
 		}
-		if m.Item("新建包含此文档的文件夹").Chosen() {
+		if m.Item(i18n.T("新建包含此文档的文件夹")).Chosen() {
 			a.newFolderWith(n.Path)
 		}
 	}
 	a.spacesMenu(m, sp, n.Path)
 	m.Separator()
-	if m.Item("在访达中显示").Chosen() {
+	if m.Item(i18n.T("在访达中显示")).Chosen() {
 		a.revealInFinder(n.Path)
 	}
-	if m.Item("移到废纸篓").Chosen() {
+	if m.Item(i18n.T("移到废纸篓")).Chosen() {
 		a.trash(n.Path)
 	}
 }
@@ -697,17 +700,22 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 	a.spaceEditMenu(m, sp)
 	m.Separator()
-	if m.Item("新建文档").Shortcut(ui.Cmd, ui.KeyN).Chosen() {
+	if m.Item(i18n.T("新建文档")).Shortcut(ui.Cmd, ui.KeyN).Chosen() {
 		a.newDoc("")
 	}
-	if m.Item("新建文件夹").Shortcut(ui.Cmd|ui.Shift, ui.KeyN).Chosen() {
+	a.templateMenu(m, "")
+	a.sortMenu(m, sp, "")
+	if m.Item(i18n.T("今日笔记")).Shortcut(ui.Cmd|ui.Alt, ui.KeyT).Chosen() {
+		a.openDaily()
+	}
+	if m.Item(i18n.T("新建文件夹")).Shortcut(ui.Cmd|ui.Shift, ui.KeyN).Chosen() {
 		a.newFolder("")
 	}
 	m.Separator()
-	if m.Item("在访达中显示").Chosen() {
+	if m.Item(i18n.T("在访达中显示")).Chosen() {
 		revealDir(sp.Root)
 	}
-	if m.Item("最近删除…").Chosen() {
+	if m.Item(i18n.T("最近删除…")).Chosen() {
 		a.openTrash()
 	}
 }
@@ -715,13 +723,13 @@ func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 // spaceEditMenu keeps the three independent editors available from both
 // the header and the space switcher's context menus.
 func (a *App) spaceEditMenu(m *ui.Menu, sp *space.Space) {
-	if m.Item("更改空间图标…").Chosen() {
+	if m.Item(i18n.T("更改空间图标…")).Chosen() {
 		a.editSpaceProperty(sp, "icon")
 	}
-	if m.Item("重命名空间…").Chosen() {
+	if m.Item(i18n.T("重命名空间…")).Chosen() {
 		a.editSpaceProperty(sp, "name")
 	}
-	if m.Item("编辑主题颜色…").Chosen() {
+	if m.Item(i18n.T("编辑主题颜色…")).Chosen() {
 		a.editSpace(sp)
 	}
 }
@@ -755,11 +763,11 @@ func (a *App) spaceBar(c *ui.Context) {
 						tip = fmt.Sprintf("%s (⌘%d)", s.Name, i+1)
 					}
 					b := ui.Box(c.Key("space-"+s.ID)).Size(30, 30).Shrink(0).Radius(8).Center().Cursor(ui.CursorPointer).
-						Focusable().Role(ui.RoleButton).Label("切换到 " + s.Name).Tooltip(tip)
+						Focusable().Role(ui.RoleButton).Label(i18n.T("切换到 ") + s.Name).Tooltip(tip)
 					on := active != nil && s.ID == active.ID && !draft
 					b.Checked(on)
 					if on {
-						b.Tooltip("更改空间图标").Expanded(a.spaceForm.open && a.spaceForm.id == s.ID && a.spaceForm.edit == "icon")
+						b.Tooltip(i18n.T("更改空间图标")).Expanded(a.spaceForm.open && a.spaceForm.id == s.ID && a.spaceForm.edit == "icon")
 					}
 					if on && changed && list.FocusWithin() {
 						b.Focus()
@@ -775,11 +783,11 @@ func (a *App) spaceBar(c *ui.Context) {
 					b.ContextMenu(func(m *ui.Menu) {
 						a.spaceEditMenu(m, s)
 						m.Separator()
-						if m.Item("在访达中显示").Chosen() {
+						if m.Item(i18n.T("在访达中显示")).Chosen() {
 							revealDir(s.Root)
 						}
 						m.Separator()
-						if m.Item("从 ArcMD 移除").Disabled(len(a.state.Spaces) < 2).Chosen() {
+						if m.Item(i18n.T("从 ArcMD 移除")).Disabled(len(a.state.Spaces) < 2).Chosen() {
 							a.removeSpace(s.ID)
 						}
 					})
@@ -800,7 +808,7 @@ func (a *App) spaceBar(c *ui.Context) {
 				}
 				if f := &a.spaceForm; draft {
 					// The draft takes its place at the end, chosen.
-					d := ui.Box(c.Key("space-draft")).Size(30, 30).Shrink(0).Center().Label("新空间")
+					d := ui.Box(c.Key("space-draft")).Size(30, 30).Shrink(0).Center().Label(i18n.T("新空间"))
 					if changed || a.spaceBarFor != "draft" {
 						d.ScrollIntoView()
 					}
@@ -811,7 +819,7 @@ func (a *App) spaceBar(c *ui.Context) {
 		if draft {
 			a.spaceBarFor = "draft"
 		}
-		if iconButton(c, "add-space", iconPlus, "新建空间", "新建空间", false).Shrink(0).Clicked() {
+		if iconButton(c, "add-space", iconPlus, i18n.T("新建空间"), i18n.T("新建空间"), false).Shrink(0).Clicked() {
 			a.newSpaceForm()
 		}
 	})
@@ -840,7 +848,7 @@ func (a *App) spaceBarGlyph(c *ui.Context, emoji, symbol, name string, on, hover
 func (a *App) newDocRow(c *ui.Context) {
 	t := c.Theme()
 	row := ui.Row(c.Key("new-doc-row")).Height(rowHeight).PaddingX(10).Gap(10).Radius(10).AlignItems(ui.Center).
-		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label("新建文档").Tooltip("新建文档 (⌘N)")
+		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("新建文档")).Tooltip(i18n.T("新建文档 (⌘N)"))
 	alpha := float32(0.45)
 	if row.Hovered() {
 		row.Background(hoverFill(t))
@@ -848,9 +856,32 @@ func (a *App) newDocRow(c *ui.Context) {
 	}
 	row.Children(func() {
 		ui.Icon(c, iconPlus).FontSize(16).TextColor(t.Text.Alpha(alpha))
-		ui.Text(c, "新建文档").TextColor(t.Text.Alpha(alpha))
+		ui.Text(c, i18n.T("新建文档")).TextColor(t.Text.Alpha(alpha))
 	})
 	if row.Clicked() {
 		a.newDoc("")
 	}
+}
+
+// sortNames name the ways a folder sorts, as its menu offers them.
+var sortNames = map[string]string{"": "手动排序", "name": "按名称", "modified": "按修改时间（新→旧）"}
+
+// sortMenu adds 排序方式 ▸ to a folder's menu: its own order, which
+// dragging leaves, by name, or newest first.
+func (a *App) sortMenu(m *ui.Menu, sp *space.Space, dir string) {
+	m.Submenu(i18n.T("排序方式"), func(sub *ui.Menu) {
+		for _, mode := range space.Sorts {
+			if sub.Item(i18n.T(sortNames[mode])).Checked(sp.SortOf(dir) == mode).Chosen() {
+				a.setSort(sp, dir, mode)
+			}
+		}
+	})
+}
+
+// setSort sorts the folder dir of sp so and keeps it.
+func (a *App) setSort(sp *space.Space, dir, mode string) {
+	sp.SetSort(dir, mode)
+	a.saveState()
+	delete(a.pageTrees, sp.ID)
+	a.refreshTree()
 }

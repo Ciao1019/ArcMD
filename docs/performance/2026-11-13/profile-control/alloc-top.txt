@@ -1,0 +1,22 @@
+File: review.test
+Type: alloc_space
+Time: 2026-11-13 05:45:55 CST
+Showing nodes accounting for 5527.88MB, 97.82% of 5650.79MB total
+Dropped 143 nodes (cum <= 28.25MB)
+Showing top 15 nodes out of 46
+      flat  flat%   sum%        cum   cum%
+ 5268.44MB 93.23% 93.23%  5268.44MB 93.23%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).sync
+  112.36MB  1.99% 95.22%   118.45MB  2.10%  github.com/egoist/mygo/internal/text.(*System).paragraph
+   68.09MB  1.20% 96.43%    68.09MB  1.20%  github.com/Ciao1019/ArcMD/internal/document.(*Engine).recordUndo (inline)
+   44.22MB  0.78% 97.21%    56.25MB     1%  github.com/egoist/mygo/internal/text.(*Boundaries).Reset
+   13.08MB  0.23% 97.44%   213.90MB  3.79%  github.com/egoist/mygo/ui.shapeTextAligned
+   11.03MB   0.2% 97.64%   129.98MB  2.30%  github.com/egoist/mygo/internal/text.(*System).layout
+       4MB 0.071% 97.71%   153.36MB  2.71%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).blockLayouter.func1
+    2.65MB 0.047% 97.75%  5648.91MB   100%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+    1.50MB 0.027% 97.78%   175.39MB  3.10%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).layout
+    1.50MB 0.027% 97.81%   221.91MB  3.93%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+    0.50MB 0.0089% 97.82%   205.91MB  3.64%  github.com/Ciao1019/ArcMD/internal/editor.View
+    0.50MB 0.0089% 97.82%    69.09MB  1.22%  github.com/Ciao1019/ArcMD/internal/document.(*Engine).replaceText
+         0     0% 97.82%   217.41MB  3.85%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0% 97.82%   212.41MB  3.76%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0% 97.82%   212.41MB  3.76%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -382,7 +383,7 @@ func (a *App) folderPreview(c *ui.Context) {
 		ui.Icon(c, iconSearch).FontSize(13).TextColor(p.col.muted)
 		ui.Box(c).Width(previewTextX - previewIconCenter - 7)
 		in := ui.TextInput(c.Key("preview-query"), &p.query).Grow(1).MinWidth(0).Height(24).Padding(0).
-			Placeholder("搜索 "+path.Base(t.rel)+"…").Label("搜索文件夹").TextColor(p.col.title).
+			Placeholder(i18n.T("搜索 ")+path.Base(t.rel)+"…").Label(i18n.T("搜索文件夹")).TextColor(p.col.title).
 			Background(ui.Transparent).Border(0, ui.Transparent).FontSize(13)
 		if !p.closing {
 			in.AutoFocus()
@@ -404,7 +405,7 @@ func (a *App) folderPreview(c *ui.Context) {
 	})
 	ui.Box(c).Height(1).Background(p.col.hairline)
 	if len(shown) == 0 {
-		ui.Text(c, "没有符合搜索的文档 🤔").FontSize(13).TextColor(p.col.muted).MaxWidth(192).
+		ui.Text(c, i18n.T("没有符合搜索的文档 🤔")).FontSize(13).TextColor(p.col.muted).MaxWidth(192).
 			TextAlign(ui.Center).AlignSelf(ui.Center).Margin(24, 0, 0, 0)
 		return
 	}
@@ -427,7 +428,7 @@ func (a *App) folderPreview(c *ui.Context) {
 					ui.Box(c).Width(previewTextX - previewIconCenter - 8)
 					ui.Column(c).Grow(1).MinWidth(0).PaddingEnd(10).Children(func() {
 						ui.Text(c, docName(it.title)).FontSize(13).TextColor(p.col.title).SingleLine()
-						ui.Text(c, "修改于"+ago(it.changed, now)).FontSize(11).TextColor(p.col.muted).NoWrap()
+						ui.Text(c, i18n.T("修改于")+ago(it.changed, now)).FontSize(11).TextColor(p.col.muted).NoWrap()
 					})
 				})
 			})
@@ -436,10 +437,10 @@ func (a *App) folderPreview(c *ui.Context) {
 			}
 			row.ContextMenu(func(m *ui.Menu) {
 				p.extended = true
-				if m.Item("打开").Chosen() {
+				if m.Item(i18n.T("打开")).Chosen() {
 					a.pickPreview(c, it.rel)
 				}
-				if m.Item("在访达中显示").Chosen() {
+				if m.Item(i18n.T("在访达中显示")).Chosen() {
 					a.revealIn(t.space, it.rel)
 				}
 			})
@@ -507,7 +508,7 @@ func (a *App) docPreview(c *ui.Context) {
 			}
 			if full, err := vault.Resolve(t.space.Root, t.rel); err == nil {
 				if info, err := os.Stat(full); err == nil {
-					where += " · 修改于" + ago(info.ModTime(), time.Now())
+					where += i18n.T(" · 修改于") + ago(info.ModTime(), time.Now())
 				}
 			}
 			ui.Text(c, where).FontSize(11).TextColor(p.col.muted).SingleLine()
@@ -518,22 +519,22 @@ func (a *App) docPreview(c *ui.Context) {
 // ago is how long ago t was, as Arc words it: "刚刚", "3 小时前".
 func ago(t, now time.Time) string {
 	if t.IsZero() {
-		return "未知时间"
+		return i18n.T("未知时间")
 	}
 	d := now.Sub(t)
 	switch {
 	case d < time.Minute:
-		return "刚刚"
+		return i18n.T("刚刚")
 	case d < time.Hour:
-		return fmt.Sprintf(" %d 分钟前", int(d.Minutes()))
+		return fmt.Sprintf(i18n.T(" %d 分钟前"), int(d.Minutes()))
 	case d < 24*time.Hour:
-		return fmt.Sprintf(" %d 小时前", int(d.Hours()))
+		return fmt.Sprintf(i18n.T(" %d 小时前"), int(d.Hours()))
 	case d < 7*24*time.Hour:
-		return fmt.Sprintf(" %d 天前", int(d.Hours()/24))
+		return fmt.Sprintf(i18n.T(" %d 天前"), int(d.Hours()/24))
 	case d < 30*24*time.Hour:
-		return fmt.Sprintf(" %d 周前", int(d.Hours()/24/7))
+		return fmt.Sprintf(i18n.T(" %d 周前"), int(d.Hours()/24/7))
 	case d < 365*24*time.Hour:
-		return fmt.Sprintf(" %d 个月前", int(d.Hours()/24/30))
+		return fmt.Sprintf(i18n.T(" %d 个月前"), int(d.Hours()/24/30))
 	}
-	return fmt.Sprintf(" %d 年前", int(d.Hours()/24/365))
+	return fmt.Sprintf(i18n.T(" %d 年前"), int(d.Hours()/24/365))
 }

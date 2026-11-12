@@ -1,0 +1,1877 @@
+{
+  "metadata": {
+    "date": "2026-11-13",
+    "environment": {
+      "timezone": "Asia/Shanghai",
+      "arcmd_commit": "753a99bc92faef314e59eceee1df3ab138179864",
+      "cpu": "Apple M5",
+      "memory_bytes": 25769803776,
+      "platform": "macOS-26.5.1-arm64",
+      "go": "go version go1.27.3 darwin/arm64",
+      "cgo_enabled": 0
+    },
+    "source_before": {
+      "internal/prefs/prefs.go": "779499a19e50ebf6fd70a0a32972eb36be21ab884c57a9608b676e7905813c00",
+      "internal/prefs/prefs_test.go": "5c23c16c5d5374059a3d045d11ae3342fbe98e5234192adcfd9ca224b189c703",
+      "internal/fsutil/fsutil_test.go": "68d1634f7f7564f7925267d284be8cc7542e16baad1205b386660de04196402d",
+      "internal/fsutil/fsutil.go": "f8cced7486e94b73c72d0e65d1c19a00c03258f76725a21852179852f6f13ddc",
+      "internal/tex/tex.go": "277a9ccb5e48e10165182b34c67381d591003b7c3eb31b0f22305e0f7ee5714f",
+      "internal/tex/tex_test.go": "465f4ae14ba2858bb184259025ae1afa4f38917ca1537b50616a61656bb4671e",
+      "internal/tex/layout.go": "d5659ed8b261eafe40e10ab97d5e2bfbfbe2cf9e39251f9eeac8472773b412df",
+      "internal/tex/symbols.go": "d279324d730a452092c394af55b8b4467b4631c10b4558c2ef3582db3738184e",
+      "internal/app/space_snapshot_test.go": "9a22a1ca7b9eb036f6eff99ac8ff359cb812785679575cf868afce3551f740d4",
+      "internal/app/theme.go": "b140a550f80f02f701981636bff354647570d04b52d389d7504873bcdcf3e5ae",
+      "internal/app/folderglyph.go": "1ed4605f3e9682145a2e32e1f0f545c04aa94d65eddd7ce3cbe1aefd74aed24d",
+      "internal/app/app_test.go": "9e4f5273217b505f234e0871b6d609b80ea952f937d1c8421bdea04e6381013e",
+      "internal/app/opendocs_snapshot_test.go": "365eee341c52c9f6e5a40656e2d1407c35121c3213a1f74073dfaff5a975b766",
+      "internal/app/replace_test.go": "a8c0c25291462a0f47252c6594c7ec12882a555a28422f569e8a6326706f5956",
+      "internal/app/improvements_snapshot_test.go": "4e833200e2fa80808892f999aa99935bbc6f8f29dda650d82f7a192c549e7204",
+      "internal/app/readme_art_test.go": "899b9e3a2f6f540941d024570aba9ee052fe7917804101372f7e595ffc39039f",
+      "internal/app/library.go": "b346b13e28f6d46892080ea8251161dca8a6c2cc0f2a565ec21b46a845649a5f",
+      "internal/app/treedrag_test.go": "17739135d7510182e56cb74748eb0b92f5f4c23ad41e3208eca68dece4f5bcaf",
+      "internal/app/bookmarks_snapshot_test.go": "408f005f4eda2f485dd7e6417b060456b9bbc500c9b20b0b538be9e02cde099a",
+      "internal/app/reading_test.go": "79791ec0e8fb8dbaa1c08bfe0aa12cfeae38772ebf3cc6d581defc78ce8b237d",
+      "internal/app/space_flicker_test.go": "97006ecd193c1e7cc4fa957740a6f24a1ff0fa2bb2801dca0f22d680f9145c01",
+      "internal/app/gif_test.go": "e5dee75a0c48b5695557b078b7a2759081dfe056a177f78f8120b3ee719c5cda",
+      "internal/app/crop_test.go": "80b82ac937b08f45bb81e7b8d524a9af192dc2ffb8d7469e3c3e197df4827bf7",
+      "internal/app/tags.go": "0e1a193cacde7e08c077e124e60e2d66ab6b0b44831281b25d0d22233834e0f0",
+      "internal/app/sidebar.go": "9e591ceb33c281f1e874d745dedc5b2d707aed39e5c845381dc9bd9fe3d87d28",
+      "internal/app/preview.go": "ae927f20452d9ee17f319c1f799a11c87595868e60b0b25303898c563ca4c217",
+      "internal/app/reading_snapshot_test.go": "a1da432ad8f89dbc0f5ae6c3f7e0532debec65072d55f2229565dda28793f5de",
+      "internal/app/images_test.go": "48f0d25f2c6979eac21fc42c8bbab6caf2b9e583a3c466352cfcb4cc8952049d",
+      "internal/app/relocate_test.go": "27a5b4c355a3e298a36e5834971a7e0c3a0c4c933b755eeb3425c361d322305a",
+      "internal/app/spaceswitch.go": "1d67f2f2da0d61e4c9d855c884eb08dc382556953ab2123f1dd3235b9c282c97",
+      "internal/app/update.go": "ff44f961388f3dd44de00cb33b23870572146e94f413d3de9c2b6d00a121377f",
+      "internal/app/palette.go": "b745b9763d409dea82890a7797709f261bf38f145911b9fcce314ca5d2474d9a",
+      "internal/app/imageactions_test.go": "ff0b313452e5da7d0ebd98516dff2e1105f3d85057ed5fb0379af724e52df6cf",
+      "internal/app/opendocs.go": "bd2b6b4fe7f47b90e6fd0884891de7f996bf45befd63596dbe269f9c9bfaa357",
+      "internal/app/export.go": "e649504b68b6f916ce7c0252d7f27a4af51f4292f9ef9ad65f5b00aefe8d1a32",
+      "internal/app/keymap.go": "29734f5930a3d2d4b1b4e2c92e7740c125673b8d3c684fae373a1d2267195d9a",
+      "internal/app/drop_test.go": "6f7d991082c1cd2c0ffb3cfe22ebc14cee638cd1173da84bb828cb4cb94fca64",
+      "internal/app/splitview.go": "c8ab6e4ba730bb2e064eab293c2372743fa055aeebd37c40da7cf20c262f1ce2",
+      "internal/app/editor_test.go": "b339fba51ec233309d5a78ec1f9ac23d2e38c3492f621f44080cab623680791f",
+      "internal/app/crossspace_test.go": "abaf3838162f15f42c56e5f4d5e4b20276595b3c14425a62a4e9464141ea41ba",
+      "internal/app/links.go": "3cca721a4fd7c3f353f87950b94b0a901e576575860736cc85aefceb32be9d12",
+      "internal/app/pdfexport_test.go": "14721be0f1e22be4ef6583c8acd5b4553d99cd4307d18652f68ad8264a26f52d",
+      "internal/app/split_test.go": "5034abeffce18b139a0797c4afa2edd876e539decff605fdf89e2950b2c8d4f2",
+      "internal/app/tags_test.go": "fdb654cff32668ca4b0a7ac71f93808e9d41951fb14b266866950d4a129f56ed",
+      "internal/app/gif.go": "db96ebeb23e25db8caa2d7224bde1a529049f20d1faeb311ffefa65c52691162",
+      "internal/app/templates_test.go": "2a9ff6b28efd293985fe1d71fd5e1ad24f01b27396d4df5054436e20a542dc62",
+      "internal/app/spaceicons.go": "1085d51b6f580a6b2b05488c831b9523fd31facdfbebfc5bc309bdc71c37dea5",
+      "internal/app/settings_test.go": "b3b4f91ac6fcfc03bd8a2bba4a204551b3a7beeb1a2f238a20336d82d11bbbc4",
+      "internal/app/icons.go": "62d009cd80bac3f1f9a0e1b951aae405615613462538e7a725278c26e0bbe503",
+      "internal/app/sort_test.go": "c6bb24670fa1a3f523c37c9eadaecbf7532931ddb6fbd17b1eed4edad79d3b8d",
+      "internal/app/openfile_test.go": "0a3b32421b87c80b2b564332da49817b24f9a649b83ab214ad9e9fd1ee39dc65",
+      "internal/app/appearance_test.go": "bb3a68bf97b11ba05e1e3f195c07dcc102cccf1b1d7d4d0c59fb5829a9c248ed",
+      "internal/app/search.go": "72ede394b1e09d93fd17b94a4b7bc07b4e9c3481fd742598b62fa0bb33699168",
+      "internal/app/titlebar_test.go": "2fa8700ea3413684412ce303cfaad8e8baf54d961d1c1dc092163cc4c05231ef",
+      "internal/app/pdfexport.go": "c354263de89fabd6ae77299abf3b2572a6a1c939254954faff27972c58ddfa50",
+      "internal/app/footer_test.go": "22da546d85b288527e9e4d8fe91fdb4a387089a6d22a83a0528824f59c7dfa62",
+      "internal/app/snapshot_test.go": "0bfc11d0cccf47cc2d89ef6706e651bd3b1707c11648f5d0afea787b44e32924",
+      "internal/app/search_test.go": "fcd0248222b6d3a4910c21e407ab3eac5c02fa25a351d829dfc506bff0e167a3",
+      "internal/app/undo.go": "d220076398f28c67b66d6e67f934bbda3614989a3f08c1817a67adc8791a279f",
+      "internal/app/windows_test.go": "b764333c949d55eca7c7be796d9921d44bae5c2480f996cb70d64806cada0b18",
+      "internal/app/opendocs_test.go": "9ed554008ceb7ea779c7e8fe1d9d8673d49cbd360f6c91e0ae0f4ae3a339d8fd",
+      "internal/app/spacesymbols.go": "51f64e08ef1cb7bdadfdaca4581b3ca1ec87c8f88345f7cecf817111fff162c7",
+      "internal/app/spaceeditor.go": "bb227042ad9413d23d373abeb60e18c818f4257de8551c7a05dda4b654a2db1f",
+      "internal/app/gaps_snapshot_test.go": "5dd717101315d134d80fb4f79e3f8da2e9a724ee7d84fb28ae5843f06b857c40",
+      "internal/app/settings.go": "4f7b285100b268dc3a0e0f7110c87ac6e9b22d6ea6aea8327cd6d353468d454a",
+      "internal/app/app.go": "07434fc5d2ab94367dc1b6906a5c3baa1ad0518b33c9f2402f86524ae108db77",
+      "internal/app/favorites.go": "ab544edb1f1e9882790db2665a643a2b8db36f858166a6d73d0b710751aec332",
+      "internal/app/update_test.go": "c872aa1eea044a71f25a9405388fb47393a26f438875801280231cfe45634752",
+      "internal/app/document.go": "780659c9f89504e729b74fcfdf11bb51dbfa0fed75ab549dd7e7d3b56619d4f0",
+      "internal/app/language_test.go": "5e57ef8404b295c6231b246515380f60769f09298eb9cccaef1616b7984a7ba0",
+      "internal/app/features_test.go": "f55ffccb1a09536394bbfe4c215380aea744e63a3c57ab8063067218f2563882",
+      "internal/app/imageactions.go": "22dc86f0b2b42161fc4f435d4106f890ca05806a414d8cda18e511a67ccdef94",
+      "internal/app/crossspace.go": "f0219a60b9a3ac70e97eb686c6ec7fc57ed95bb3dd56426b6cc4670f75d4dfac",
+      "internal/app/split_performance_test.go": "fe0bf9aa85d878b5a2d3b774cc0f34cb5a8fdbe56ab89949cc6dc04eaa5b9fab",
+      "internal/app/performance_test.go": "94b14878d2f4f888073f1505c1ee16d5b33aa2199f046e1d88cd8557e30085e6",
+      "internal/app/split.go": "b3644723c6286b9ac5f5e0c8cef35cc8034db8a8b69d29eb335d50e77725150b",
+      "internal/app/library_test.go": "69aba1a0053e93cb18237bb3240794d08c574106ff4aa3caf1901e678244eb8a",
+      "internal/app/space_edit_test.go": "57d19c3664ff0dad1c4c6dce005e7a5f0efe661e0677c718d6b3929fc4a7e88c",
+      "internal/app/watch_test.go": "5769c0ca7ebcec5ad2b64e8bd059ebf3c9724f682659d0758a90bcb16b274f2d",
+      "internal/app/pins_test.go": "8257052e616a0920d31993d31514c929e88743ce396a8be1f363e479b01a55d6",
+      "internal/app/view.go": "0dfaa9e5e5a23967dcf506e55d4ee9b23d1bfbf3afccf0e7ee0ae6c8cbc60475",
+      "internal/app/preview_test.go": "63a0b568ecc8346d8b1fa2a3556f5350c32463760589be41dfeb099431436d6f",
+      "internal/app/openfile.go": "ae2944e1fcfdb236555c957dc520c309e11a2d1053d37917fa31b8e59baa6c20",
+      "internal/app/templates.go": "bbe802e3f0aea857a93d28ad55aa63a0ca2893ed45f1632706fe50070450555e",
+      "internal/app/trash.go": "fba30216042c403d9853dced0bbc04149b894e53b11febf861363aa0396978ba",
+      "internal/app/attachments.go": "084cf46a63cc5ecc805c455965f667a0de4d42811356b4daa747ccf735dca267",
+      "internal/app/spaceswitch_test.go": "cd62a15cfd151cf4ce74ec93a4e6234dc13c44901208516a157f629b0852b563",
+      "internal/app/focus.go": "503242692f3156980ce04b339bb95c8c9daffa626ae6f64cea40033c65b00355",
+      "internal/app/carddrag.go": "6432c53d46366ba2d7af7521a681d3ece8bd408a83d8edbf102017aaee271986",
+      "internal/app/replace.go": "f53d4275c069404be3871904831a29c4957d1dcf0ed981161da5ae23d62da331",
+      "internal/app/tour_test.go": "f5d6854a224793ec6bed24ef84161ebe598cc742b92080206115e3d2c4e6d522",
+      "internal/app/docicon_test.go": "9f75cff92ed62c617b91dd2d4a8ab8c0f5752d8fc5e3a5403cf7f714d3ea7b02",
+      "internal/app/cover_test.go": "c9761d232308683f3e910e7214758971563b751ae15bb3cbf240f5d395557d84",
+      "internal/app/spacedraft.go": "872d1b9468ac588d9f3798e8f2d69c6696da264ca214e601129885c41a9cce27",
+      "internal/app/selection_scroll_snapshot_test.go": "0b4f9159f057774f0037187304a2345731f38a220d53e03774be15c35552801b",
+      "internal/app/updateview.go": "8105f0b44abcff4bf184bd91eb6f2654106c20eb3cab991b2b489524dc43d691",
+      "internal/app/math_snapshot_test.go": "87655fb93ac9b18ed0f73783e3905cda81cf8893a1315091ee90c161ede037e4",
+      "internal/app/save_security_test.go": "6a56e6be46af756e1cc1e4aa5950e3d87ddf6c745a80102480330d250a4314de",
+      "internal/app/bookmarks_test.go": "39be46b901346176c18031fefad32edbfd687e82ed0717b99ff15162cf30eb88",
+      "internal/app/emojidata.go": "1c5ea63bc4d71cfa792f26343677e813cd8b32f07d03bedb7b9bdcd4b26ba2a9",
+      "internal/app/favorites_test.go": "3f6ffb65615360437d8d6484225673a1f178bb0460ed0913eb5361b398259ee2",
+      "internal/app/tour.go": "eabeb2f4a2abd56c6574db9858653447eb4a1bb726f8b76c6db3805e54df3fbb",
+      "internal/app/theme_test.go": "47efc3facca075d47282390c664608b6ffb8c9a9b6f93abebf35833a86ccba09",
+      "internal/app/relocate.go": "4b706077ef1eaca7b83af83414437721c22750f5b6fa6839f9aa3c22b7c7237a",
+      "internal/app/dialogs.go": "c0757dcb44aa0d40a9e32e3643158ac70717f7add6e6a4c1d5cb53edf412d07a",
+      "internal/app/treedrag.go": "eb35038dc14a6197469a7a9fdc0667cf051cbf2b84f0aa4bc4bf03e29d6c5adb",
+      "internal/app/columns_snapshot_test.go": "4ce1c74d097efde54337038aa57012249ba14870e789ec8ac924dabd18b2cb5b",
+      "internal/app/features_snapshot_test.go": "5c8c65bb48f94dcc02b491b257ec84e4645eb93ec70025bfe49db887c574f502",
+      "internal/app/tourart.go": "612bb5e8a2a016c7eb670b997e35f638cb49ab485c227bfaa40d35857c14673a",
+      "internal/app/docicon.go": "528da48fb4dec59e6042cfab9a4539139d6e3c14ba029df09b6dae08578f8fe7",
+      "internal/app/sidebar_test.go": "2fbe7b82117620e6089cf75901bc160f8ea542c7685f9fa6bb1df117c0bba48e",
+      "internal/app/undo_test.go": "61a9ed57a146ca0696d7eedf1368fb73b94acceaf10a75d00a59e70be8b3631a",
+      "internal/app/splitstore.go": "0924d6bce8a84187eb1cefa600821c74716a69c3df773f9e2dcd137f17f59170",
+      "internal/app/versions.go": "9a578a82f913b42d8f75fa5a52aa493d6d2b65bbe626ec94adf591070c82f72c",
+      "internal/app/bookmarks.go": "7332c0b893d22e281317241f4ec66277783f790648cf4d6d1f27a366b40e9393",
+      "internal/app/document_cache_test.go": "ca338c3e232abe4eb510affa8eacb9330b4c3b94e09a3386b4c25d6a4d68a3f4",
+      "internal/app/watch.go": "0ba26091033c3373ef85116726b793867343e31ec6e0414fb551d2081a314c1b",
+      "internal/app/spaceeditor_test.go": "46d6dab17d7d23b35b6261a7fe3e25a7214ecdfa41e2ba13c6a800a84e8b5c70",
+      "internal/app/blank_test.go": "eeaad6dc809af238f032e74125ade87918b3c603657a090b77578084482635b6",
+      "internal/app/windows.go": "4aefebe291d9be0dd145b77d0169a744c95c566d6594d0180da648ef1bf39d55",
+      "internal/update/update.go": "d4f9abd8daed47bff1cd4eb4fed5f6771280b4d450f18df51f97d58377cfda8a",
+      "internal/update/update_test.go": "6037bf98177c1bb9cbea6660467f3966620bed433e4717ab2798f60ed0e1ddc9",
+      "internal/fuzzy/fuzzy.go": "853cd7d39d2fd7911e29fab649f5f61a4d9746c6f61e3492e0d12aa279265340",
+      "internal/fuzzy/fuzzy_test.go": "ac0f17360025a80d63a9a78b7b509e21653328af5459d81345615ffd4a798bd2",
+      "internal/plugin/manifest.go": "d4c7a65226eb38e6b098ea1bc0494a88c5f8d4ef4aa0d80befffd55bf4f76ab0",
+      "internal/plugin/registry.go": "63dd722d8362cd4a589d1458560e3a7a58fd55d5f6bff8c52474e506c8f2e6bf",
+      "internal/plugin/host.go": "bc41298dfc965400e4c17b7789b2c0faf389d71edb9ec3066ff1426aecb1d619",
+      "internal/plugin/plugin_test.go": "6af54470a568bbd2833a6297560206f2b8a611757f4c4b6e2197bfece9c8c557",
+      "internal/plugin/transport_test.go": "f18f7fd47f612ce6a79c5d1837082d6798bee23478ee74e383d3ba3294166f36",
+      "internal/plugin/manager.go": "e38ebf6c55148f1662c10dc9b39a5f0afcdb02568ffbcb9d6bfbaedb0619a132",
+      "internal/pdf/pdf.go": "97d19a7c0e278be6889b716c7eeb6789883c61090a02b78bf8ccf23291ffdfd9",
+      "internal/pdf/pdf_test.go": "3a1361de6a4f029401de965b6680b10f39071c9a2fe8a1b5ca74896d1d105442",
+      "internal/wiki/wiki_test.go": "118249f68e0ff54d77f1e64259c0bc1a901bd791851aa72030a28128c2e26bd8",
+      "internal/wiki/wiki.go": "25ee3bd651d39809325b825c17625b0bf9926801a5d325f3f096c79a9a1c5e19",
+      "internal/document/decode_test.go": "322b500f8d99fba9918db9d62241e4cbe63501fb3581a24d16f2da5dfcf5c52c",
+      "internal/document/annotation_test.go": "a307616c82b0cf8644be09ad0edca5ec9676a9f4fbfd2402157b0370dbdc1cf6",
+      "internal/document/reading_test.go": "453b3f43104891d3804bb977599d381b0698b12748f68c8ad56ae51689cc9e02",
+      "internal/document/images_test.go": "e589533d50045146aae27032c24163a3f92990e3fa0b1f09ee7fab2b0a36816a",
+      "internal/document/index_test.go": "717bec3ecdfcf430d3cbebf67f896f18ef4d62a3e5c92fa26a0fb48dc18924af",
+      "internal/document/blocks_test.go": "2fb5728ca546cd1037af8b0cdb9f4ab2e38058a911dcfea0307a9639dccd6c9f",
+      "internal/document/page.go": "f42fdceff4f3ab3bb49db71e94fa008394b716d6f9cf667956f46ca0b2b0f4b7",
+      "internal/document/engine_test.go": "9277cfe44f7856a381fffe63d0b237afd5584c065f74d6fa39ff7b9f31274b90",
+      "internal/document/reading.go": "faa33248b453a393ddf7a557acceecb39acceabbee927bf57ab8ce34d3515438",
+      "internal/document/sort.go": "5512c461ee29e9948cbb40d3a578492ff593250a784dbf355d59e0a1e0e1437c",
+      "internal/document/sort_test.go": "ce800e9496f15d401e63afc787c3b644d33f0bf0d6b910846983e05e5dccafea",
+      "internal/document/paste_test.go": "a971ec58bd88e00a7e5ee333d41c92fb21facbd97ef717d4089b78cbef2b64d5",
+      "internal/document/mathinput_test.go": "99d6b4c675bf33e2f0150cb36ba7788b1044bcc908e20f5ddf21b936fe7cba6e",
+      "internal/document/structure.go": "ac74b656ed151a6c840b840d0065e6acbd1900a6082d44daa2296206cb55fd70",
+      "internal/document/images.go": "37db228a36ddb2b10724335820ad19056f347e344a72b191fa5294b562912397",
+      "internal/document/textedit_test.go": "c5d27e2cfc3cb275d52feaecc723824904bf8aa5ee84795b3d05b5023e1be8cd",
+      "internal/document/engine.go": "821f247b3458d8c8965d0449188db35fbb6f45932b0e280c8374db7d29b7a3ee",
+      "internal/document/page_test.go": "d2bd22d3e1fe8572a232c134182fc57b5f581b49c768cabaa9a491e16ac814bf",
+      "internal/document/textedit.go": "ccd9d15b704e6db931c1fb888c66c976ba796c270d9ce16d9f892b096f6e0b62",
+      "internal/document/model.go": "fca4811e186aa26eb7adb0ad02036954b4963cd8bd6a6883cd4dc5bae6d5acdb",
+      "internal/document/fold.go": "af1bf2c844a55a03b6465e828cd612117fb8f73298ab734f6ccc0efbdc5dc9fc",
+      "internal/document/mathinput.go": "9a815e93e4496c24f1bd406b0ecfd1f278257dc868a76def067c2aff72ed8057",
+      "internal/document/cells.go": "bc27b5aa63e8b446089ab515e81e3c9a2b8de5a90be175160cff44695d92f973",
+      "internal/document/plaintext_test.go": "8174c00db431ebfb6316491dd65ac95a615a9483b7a59752a433192639cf1244",
+      "internal/document/blocks.go": "7f2bf2f0fdd15c9ba53446c33f083eef96c0db5318e5b4837738c7e71a8a868e",
+      "internal/search/search.go": "45d153d306b444f8ce20a608620414ddfa506e26975b72ff9fa77118bcd97abf",
+      "internal/search/search_test.go": "53ecebdfa75eba652a94d7eb0878754baca42dcb845e7a0181265d441b7b0cfa",
+      "internal/history/transfer_test.go": "cf48e65dbcf2c556a115fb5a36a93abd12130df5eeecfdf01b0873b3316c8adb",
+      "internal/history/history_test.go": "d32c982495c4c2929652a69dd6921453365e7dfc5557d3074a0778b8ef994ce8",
+      "internal/history/transfer.go": "8ae6c8ecda30331cbc73e515f84fcce2b87b927e522a2f4f24f43314e69c5f7e",
+      "internal/history/history.go": "5e0fc010dedb022e1925b8afcb0fddaa2bad6eccd38855d4ec94b539054b1ce9",
+      "internal/templates/templates_test.go": "cf0ad30327c519c369ebe9a528f509fd00cc6f870c491cf1d6bceee8d80fb3d8",
+      "internal/templates/templates.go": "06fd1b354ae3966e1fca2bdde3c9b6e301af14573288625c6aa83c3b9e6c1e08",
+      "internal/trashbin/trashbin_test.go": "362c86748ce5a456c045d6d46ee128dbd0a710359afca1c82608e58a978d770e",
+      "internal/trashbin/trashbin.go": "7db163d8543bbd83097613d6def75eec65312ed9be6a29c293829a4eaaf732ba",
+      "internal/space/theme.go": "965daf2e788a8df51c22f28c034f9cfd285bafcb0f9e31570e47abd2d2dcad39",
+      "internal/space/store.go": "9d0ffe16302204b35dc65b78eb8d29d4671921457049008b1b9d20975c313a80",
+      "internal/space/space_test.go": "acdff1d65d5c4a245d3e11cc83225936e783aa8fa2f96c129584c33f358c2520",
+      "internal/space/bookmark_test.go": "370bc9ede655d1487b5b97ce69ecb8bbc050ded14d74bcffcf550406966b5779",
+      "internal/space/bookmark.go": "070493246455411dccd00f7f79319f46d24c3deb1aba1ecd85c19c45e7b9c86c",
+      "internal/space/theme_test.go": "ca61ac710dea93afabbee887c1f523c5c3e3bc1b545ad3099c68c4d4b5ff2afc",
+      "internal/space/space.go": "ffb73955548b2356f5899f66432403aef01141f5cc1907a08bbf5101476ca5ea",
+      "internal/i18n/i18n.go": "b701e823dc673d91d11f58be014d292cd66ce067ee2739b16c5add876ebdc4a5",
+      "internal/i18n/en.go": "bf9aee757b042bf5d11f1e03ac3a0e9bcb892801bbc1c27f143490ff34571a99",
+      "internal/editor/complete_test.go": "2badc267b11c6ef593fc093c96bb09bd2707f0aa2e379580d722ecc43918a81e",
+      "internal/editor/style.go": "2cedae51a6dd9e2962836f4e713bc7fd4a5abd1c58df5cdc0bc816a7463da8e2",
+      "internal/editor/header.go": "3cab53029989a465cd8b8d629da3ba4326bced3bdc5903d4e071a90ed53a120a",
+      "internal/editor/columns_test.go": "7431bf7fcb1004b2a7769ede799185f699f3c5f529ab10032049468731dbdc58",
+      "internal/editor/reading_features_test.go": "12cd3404e421e7b9b3d2d0b4176af27e8e136a64726ee7c6ee295aa2da5ae1d5",
+      "internal/editor/incremental_test.go": "fac9e193c1a4499af0f26b2d9e043160362b46d7359ebb9e6a6e26ec54f5dd8e",
+      "internal/editor/annotate_test.go": "f616bf87317fa1da25b119b754fbf517bdfe89143f7c190ace9a45bf8c375cd6",
+      "internal/editor/toggle_test.go": "b7fece5ff68efb14c13e8e943c9038070040eff42a1baab992949408fcb4c5b8",
+      "internal/editor/linkpopover.go": "0193df01c1ab72be4045b1da4c601fe767ac813a9369a3f7c2e3c08a4cdf0a79",
+      "internal/editor/crop_test.go": "bc591c022c77e48d62d8d39091c8b9c143077a41a92e65200571a98aa60d3cc8",
+      "internal/editor/images_test.go": "b1e0e236fe28acb470fafc3a854cb388920d71e3b013af58582004727c7ebbc7",
+      "internal/editor/relocate_test.go": "88424d3208825877869b323cf1b14cac85b71ad421dd54624de364ad22de8d63",
+      "internal/editor/annotate.go": "ef973edbd06e36c0313e94b771683356b7e9ada48690c119306be21bc94d65a4",
+      "internal/editor/wikilinks.go": "1bf770a8ce03158a7b2bd9caaf40e9b86e4f9fc445f4ef3c6bbc34a421f3157c",
+      "internal/editor/selection_scroll_test.go": "bd1a5908b43115e3ca7fd4800ca6d407f18c47d297fe86756cc4037d386b6702",
+      "internal/editor/imageresize.go": "f9e31c3f38269b9e82c2805a1473b61086d6532c9366bfb56a5a19063262803d",
+      "internal/editor/resize_test.go": "fd2e29855735d41a9865be513f8a884d29481862b2cfca88f8c0dfc4056c9988",
+      "internal/editor/editor_test.go": "8bdb2edbec3dd8fe82301321710c02f31ec1d229828800a9ac5ee09c026bb03b",
+      "internal/editor/keys.go": "15ebb76cdb2c3c62ced815ea506c1dcbe71c5702938b0d4bd062ee4c4aa03102",
+      "internal/editor/reading.go": "3241bd8ae44138a07c3cf9ecbdd4fffa07d18ae5dbd2486be15a3109458f9917",
+      "internal/editor/blockselect.go": "e6c1962ff1098309487292f7e9e5ab766790c42366ca80beb33e7159386b8c2f",
+      "internal/editor/html.go": "d38f56b3963ea2261855e1b5d1c22f7d5244939a5113e7f24f609e7b9cdf0008",
+      "internal/editor/tools.go": "d7ab0bcee4a6d942e23d18cceb5b1325270bf1c5ac53d0a10cf48c3a67878077",
+      "internal/editor/html_test.go": "982c5d63229c1537247c435ed1c104240305666ac018d5d0f92ca8bfcb0a7723",
+      "internal/editor/icons.go": "7040aed132f25688baac6de3ada8350ba40e3f0ef215b6cb2647e691a34289ae",
+      "internal/editor/clipboard_test.go": "1593e031892a249b6d05dcb3efcfdb93343c58cb62aaef7fb0a11e79554d55c4",
+      "internal/editor/find.go": "f54d3e7ea4360e2e57bf96b05c92de784f2a6f3764f67b5128c886e6b3d5e500",
+      "internal/editor/notes_index_test.go": "a205273933db7bdf68310edbf42f004715a686203cd7c1362be35c0eaa870760",
+      "internal/editor/complete.go": "114167608d6228805ca18cd8a5a846d18115de9485ed329e444c101ce27fd2dd",
+      "internal/editor/mathfonts.go": "12a943d64d7ff6265b3c76ff05d0ff90b7585b028e1e36cccd0320034588f7c1",
+      "internal/editor/input.go": "09d6f0d02e711e2e88d0ac6d26857e313c3571509480264df86fdd8eeb2899af",
+      "internal/editor/buffer_test.go": "a26f4fc062df3561393ab48c904a264178891349e18f6cca3265c85429d61f52",
+      "internal/editor/images.go": "5c385f42f74b4d0196dbed534b260d61bc3aa442e210f2759152f3d86f39ef19",
+      "internal/editor/autopair.go": "9fa6cc303aa4bb4ee99f0493433b8acc6252d7c5f92d7ec67f86d244c8f080d6",
+      "internal/editor/buffer.go": "f25739fd7574516996788ed30e97de3822cec19a879a1e9d580fc1322a81bc93",
+      "internal/editor/markdown.go": "854826458f7416f3d040f12d7cc16a305304c720cba2a7373ead7d24b79c509d",
+      "internal/editor/print.go": "f065d220762576b2074c624381931cfcf4073b6ba951c6a5173350f7196315d5",
+      "internal/editor/resize.go": "00bd840776367b9f32beeab71677dbb78b8cbba32084049be730d2ba39d6f467",
+      "internal/editor/view.go": "6fb9e725fe27e4831bade214ed333cb3363b3c047e1bd3f6a129a924f5ea38b2",
+      "internal/editor/outline.go": "5fc821eb565c9dd2d4e4f37c9fafe0e5eea87376d008cfcd5072e534408ae0b9",
+      "internal/editor/columns.go": "d412768ef49cebfab8ea8261e6d9f379d6eaba6bc1289bd24c57eb336bb31c10",
+      "internal/editor/crop.go": "6058496dec30b34326afe73766212715f3c62a164eee57b38db59d0e2b28d769",
+      "internal/editor/incremental.go": "f327c62ddd9636fd0fd10cbe960d3931b61939e9ba76eccf396094579afb6a86",
+      "internal/editor/focus.go": "e2ca679130180d69c18226e968b9e12e10333442d01d31f089285baf1074f79d",
+      "internal/editor/inline.go": "07455537301d70ca2dc92ed8a49f2a55e1da3a6f582f48d5b176f9a33c1d4dbc",
+      "internal/editor/selection_scroll.go": "8d520e05ae7816cdd40ae28ba1a48b96f210036fdd625d826250019fee5d656e",
+      "internal/editor/csvpaste.go": "499aa4266010567a9f98374fe2ccceb25219d4df40d37dbc25c3ba5814e6eb65",
+      "internal/editor/math_test.go": "a53e0ef4e0f82934c0ab90926e081a2cfcb18c771e0f4e4aaeca8afde2be5a19",
+      "internal/editor/commands.go": "9c3e6f1d6063bfec78053c8801f209ee186e35bec90e4eff3d291ed5dcd7df4c",
+      "internal/editor/starter.go": "139a1f6cf04af6f8f37b9bf1273854a045695f07309a2b907b1292c6c21af6c4",
+      "internal/editor/htmlexport.go": "e78995873d179c0957d0b27f64a197541e65c0cae932027331b3fb13ec7e1b15",
+      "internal/editor/autospace.go": "650f9c522dc129891ac93e5571793c049ee9046db575349eca315ea22c6119a9",
+      "internal/editor/blockselect_test.go": "da821143e2d59541a675c259fc62fbeb52aa311a669de2ff3d2fa8909abd375f",
+      "internal/editor/clipboard.go": "7653c0a9f93edca0530b1a676466459bfbde4222f10895d0e1cf32a91a0c7e3a",
+      "internal/editor/relocate.go": "c4b2cdcd0c30211763aa4838e1e42f90a58241fa34f459e1f00505df75378f47",
+      "internal/editor/menus.go": "36ae6053a0f1a72fa86d19c1154d3c1f5ee4f3fc2edfbd17ad9ecadf547f4de6",
+      "internal/editor/gaps.go": "2982df1993c6e6a29d7771eb0fee1a8a7a9fd6341d3932fe7349047c704eefdb",
+      "internal/editor/highlight.go": "af85f12cc742845601e5041c00a86b8b39ead32eb55c87d686ac3ef11e5b9d5d",
+      "internal/editor/bookmarks.go": "a955970bfc13f8945cf91b7ec075dfb601bc8c7be993762609167d6165cec843",
+      "internal/editor/table.go": "d71e299e645f72e7703f7c91e4a77ad7722c5075c78ba66ee928dc3021697415",
+      "internal/editor/math.go": "bdcbe071d25e7aa94fe45bae351e224f5dac188de374a1d39800ed4d21752e52",
+      "internal/vault/security_test.go": "6bddec95725cf6d1044af5b772e7a220f5163fb36482f5a2119db54f6ac1bd83",
+      "internal/vault/across_windows.go": "ce753327a9fd8ba0173615411b03e2d084aeaba95dbafcd42a4bc4b0829e9054",
+      "internal/vault/tree.go": "16bec373185e7de6d0ab6d3472cdafb4be8e40b90498091af9d8f49c1de5e9c1",
+      "internal/vault/across_test.go": "9f1b548fc955a05b0d536b9eafee2f52f3e46c091e23db2c6cc33fde46ee459f",
+      "internal/vault/across_unix.go": "4b22599a38640a4960b8e35990a4984770e29b38576687d2a78b5845b9d789f6",
+      "internal/vault/vault_test.go": "cc7784cae742574cd5ccf81a3804efaece2dc37678a054108a03f81bfb5d831b",
+      "internal/vault/vault.go": "937e59775901279b6c1ea449e72bb55f926e4a276417e4033b8d2006054b8150",
+      "internal/vault/across.go": "7d018f0b6743c07cea2fb9cc402151d2efde1a9b3a1ef45bbce20c7f102612a5",
+      "cmd/arcmd/main.go": "02d4bf2e64576331feb5a88f1e96b5d860030bbfbd7761bbc38c376451a65950",
+      "tools/ci/main.go": "3b9acc9bcacf366112c2efe50d5a66003d2be3890c048f9d40112bc7d75f85cb",
+      "tools/ci/main_test.go": "91215edd0b5f3715b0aae6bb62b5ccccd0b08b418807ef490c83a46aa20933bd",
+      "tools/internal/toolutil/toolutil_test.go": "46bd7971c1ab86b78b46e0203b60877f83b848dd8493d54d239676ce5165730e",
+      "tools/internal/toolutil/toolutil.go": "7e808da7e3e1ba568583c13fad195b0a53799958c68eacaa98fa246eab04f4dc",
+      "tools/perf/benchmark.go": "9d731bb0aa18c434ed9741281561ffecce8f4632a5c2004de234e35605665cb2",
+      "tools/perf/overlay.go": "c5d846043f766f929a99a07e33bdf22aec7d83f0896cff0533fb9fb92f1d23f3",
+      "tools/perf/summarize.go": "0a58f5d956727679e65ddfe79c3a583769eb8ed2c8ef20ce308f129fa08047b2",
+      "tools/perf/convert.go": "fb9241405775672506d766841312f89a00ab6260e9144496d80d6024f14944a4",
+      "tools/perf/perf_test.go": "c738b4e34f101ae50abbbc92cc29a18034b43cfeab5ccb5aecbf36414a2e16e2",
+      "tools/perf/main.go": "39080263eba283240811be6e4f2d4bed623a7b4a9a8b11ddd7d4fc92b3e965b1",
+      "docs/architecture.md": "27f79f3babd4ceff4324c12a136ffb3bf4967422c2ebd849bb64bb06d0f33a78",
+      "go.mod": "9bdc47a9ef5f5a1745708bc209aec59f25f02542c7de5ed10eb93ebcec80d179",
+      "go.sum": "5882d3880a0dd2facfecd93b53c5fa56082d1f8369d9475eab87d47d5824d911",
+      "AGENTS.md": "7152b3ec255e2bb5d786b60adea267e7fb961322d7a785d062e93d17f5fe1587"
+    },
+    "source_after": {
+      "internal/prefs/prefs.go": "779499a19e50ebf6fd70a0a32972eb36be21ab884c57a9608b676e7905813c00",
+      "internal/prefs/prefs_test.go": "5c23c16c5d5374059a3d045d11ae3342fbe98e5234192adcfd9ca224b189c703",
+      "internal/fsutil/fsutil_test.go": "68d1634f7f7564f7925267d284be8cc7542e16baad1205b386660de04196402d",
+      "internal/fsutil/fsutil.go": "f8cced7486e94b73c72d0e65d1c19a00c03258f76725a21852179852f6f13ddc",
+      "internal/tex/tex.go": "277a9ccb5e48e10165182b34c67381d591003b7c3eb31b0f22305e0f7ee5714f",
+      "internal/tex/tex_test.go": "465f4ae14ba2858bb184259025ae1afa4f38917ca1537b50616a61656bb4671e",
+      "internal/tex/layout.go": "d5659ed8b261eafe40e10ab97d5e2bfbfbe2cf9e39251f9eeac8472773b412df",
+      "internal/tex/symbols.go": "d279324d730a452092c394af55b8b4467b4631c10b4558c2ef3582db3738184e",
+      "internal/app/space_snapshot_test.go": "9a22a1ca7b9eb036f6eff99ac8ff359cb812785679575cf868afce3551f740d4",
+      "internal/app/theme.go": "b140a550f80f02f701981636bff354647570d04b52d389d7504873bcdcf3e5ae",
+      "internal/app/folderglyph.go": "1ed4605f3e9682145a2e32e1f0f545c04aa94d65eddd7ce3cbe1aefd74aed24d",
+      "internal/app/app_test.go": "9e4f5273217b505f234e0871b6d609b80ea952f937d1c8421bdea04e6381013e",
+      "internal/app/opendocs_snapshot_test.go": "365eee341c52c9f6e5a40656e2d1407c35121c3213a1f74073dfaff5a975b766",
+      "internal/app/replace_test.go": "a8c0c25291462a0f47252c6594c7ec12882a555a28422f569e8a6326706f5956",
+      "internal/app/improvements_snapshot_test.go": "4e833200e2fa80808892f999aa99935bbc6f8f29dda650d82f7a192c549e7204",
+      "internal/app/readme_art_test.go": "899b9e3a2f6f540941d024570aba9ee052fe7917804101372f7e595ffc39039f",
+      "internal/app/library.go": "b346b13e28f6d46892080ea8251161dca8a6c2cc0f2a565ec21b46a845649a5f",
+      "internal/app/treedrag_test.go": "17739135d7510182e56cb74748eb0b92f5f4c23ad41e3208eca68dece4f5bcaf",
+      "internal/app/bookmarks_snapshot_test.go": "408f005f4eda2f485dd7e6417b060456b9bbc500c9b20b0b538be9e02cde099a",
+      "internal/app/reading_test.go": "79791ec0e8fb8dbaa1c08bfe0aa12cfeae38772ebf3cc6d581defc78ce8b237d",
+      "internal/app/space_flicker_test.go": "97006ecd193c1e7cc4fa957740a6f24a1ff0fa2bb2801dca0f22d680f9145c01",
+      "internal/app/gif_test.go": "e5dee75a0c48b5695557b078b7a2759081dfe056a177f78f8120b3ee719c5cda",
+      "internal/app/crop_test.go": "80b82ac937b08f45bb81e7b8d524a9af192dc2ffb8d7469e3c3e197df4827bf7",
+      "internal/app/tags.go": "0e1a193cacde7e08c077e124e60e2d66ab6b0b44831281b25d0d22233834e0f0",
+      "internal/app/sidebar.go": "9e591ceb33c281f1e874d745dedc5b2d707aed39e5c845381dc9bd9fe3d87d28",
+      "internal/app/preview.go": "ae927f20452d9ee17f319c1f799a11c87595868e60b0b25303898c563ca4c217",
+      "internal/app/reading_snapshot_test.go": "a1da432ad8f89dbc0f5ae6c3f7e0532debec65072d55f2229565dda28793f5de",
+      "internal/app/images_test.go": "48f0d25f2c6979eac21fc42c8bbab6caf2b9e583a3c466352cfcb4cc8952049d",
+      "internal/app/relocate_test.go": "27a5b4c355a3e298a36e5834971a7e0c3a0c4c933b755eeb3425c361d322305a",
+      "internal/app/spaceswitch.go": "1d67f2f2da0d61e4c9d855c884eb08dc382556953ab2123f1dd3235b9c282c97",
+      "internal/app/update.go": "ff44f961388f3dd44de00cb33b23870572146e94f413d3de9c2b6d00a121377f",
+      "internal/app/palette.go": "b745b9763d409dea82890a7797709f261bf38f145911b9fcce314ca5d2474d9a",
+      "internal/app/imageactions_test.go": "ff0b313452e5da7d0ebd98516dff2e1105f3d85057ed5fb0379af724e52df6cf",
+      "internal/app/opendocs.go": "bd2b6b4fe7f47b90e6fd0884891de7f996bf45befd63596dbe269f9c9bfaa357",
+      "internal/app/export.go": "e649504b68b6f916ce7c0252d7f27a4af51f4292f9ef9ad65f5b00aefe8d1a32",
+      "internal/app/keymap.go": "29734f5930a3d2d4b1b4e2c92e7740c125673b8d3c684fae373a1d2267195d9a",
+      "internal/app/drop_test.go": "6f7d991082c1cd2c0ffb3cfe22ebc14cee638cd1173da84bb828cb4cb94fca64",
+      "internal/app/splitview.go": "c8ab6e4ba730bb2e064eab293c2372743fa055aeebd37c40da7cf20c262f1ce2",
+      "internal/app/editor_test.go": "b339fba51ec233309d5a78ec1f9ac23d2e38c3492f621f44080cab623680791f",
+      "internal/app/crossspace_test.go": "abaf3838162f15f42c56e5f4d5e4b20276595b3c14425a62a4e9464141ea41ba",
+      "internal/app/links.go": "3cca721a4fd7c3f353f87950b94b0a901e576575860736cc85aefceb32be9d12",
+      "internal/app/pdfexport_test.go": "14721be0f1e22be4ef6583c8acd5b4553d99cd4307d18652f68ad8264a26f52d",
+      "internal/app/split_test.go": "5034abeffce18b139a0797c4afa2edd876e539decff605fdf89e2950b2c8d4f2",
+      "internal/app/tags_test.go": "fdb654cff32668ca4b0a7ac71f93808e9d41951fb14b266866950d4a129f56ed",
+      "internal/app/gif.go": "db96ebeb23e25db8caa2d7224bde1a529049f20d1faeb311ffefa65c52691162",
+      "internal/app/templates_test.go": "2a9ff6b28efd293985fe1d71fd5e1ad24f01b27396d4df5054436e20a542dc62",
+      "internal/app/spaceicons.go": "1085d51b6f580a6b2b05488c831b9523fd31facdfbebfc5bc309bdc71c37dea5",
+      "internal/app/settings_test.go": "b3b4f91ac6fcfc03bd8a2bba4a204551b3a7beeb1a2f238a20336d82d11bbbc4",
+      "internal/app/icons.go": "62d009cd80bac3f1f9a0e1b951aae405615613462538e7a725278c26e0bbe503",
+      "internal/app/sort_test.go": "c6bb24670fa1a3f523c37c9eadaecbf7532931ddb6fbd17b1eed4edad79d3b8d",
+      "internal/app/openfile_test.go": "0a3b32421b87c80b2b564332da49817b24f9a649b83ab214ad9e9fd1ee39dc65",
+      "internal/app/appearance_test.go": "bb3a68bf97b11ba05e1e3f195c07dcc102cccf1b1d7d4d0c59fb5829a9c248ed",
+      "internal/app/search.go": "2f45b33be5f9f5e6071334a66b3dc553a1a7b1c32ab8a182bb46d8aee5d3ff9d",
+      "internal/app/titlebar_test.go": "2fa8700ea3413684412ce303cfaad8e8baf54d961d1c1dc092163cc4c05231ef",
+      "internal/app/pdfexport.go": "c354263de89fabd6ae77299abf3b2572a6a1c939254954faff27972c58ddfa50",
+      "internal/app/footer_test.go": "22da546d85b288527e9e4d8fe91fdb4a387089a6d22a83a0528824f59c7dfa62",
+      "internal/app/snapshot_test.go": "0bfc11d0cccf47cc2d89ef6706e651bd3b1707c11648f5d0afea787b44e32924",
+      "internal/app/search_test.go": "fcd0248222b6d3a4910c21e407ab3eac5c02fa25a351d829dfc506bff0e167a3",
+      "internal/app/undo.go": "d220076398f28c67b66d6e67f934bbda3614989a3f08c1817a67adc8791a279f",
+      "internal/app/windows_test.go": "b764333c949d55eca7c7be796d9921d44bae5c2480f996cb70d64806cada0b18",
+      "internal/app/opendocs_test.go": "9ed554008ceb7ea779c7e8fe1d9d8673d49cbd360f6c91e0ae0f4ae3a339d8fd",
+      "internal/app/spacesymbols.go": "51f64e08ef1cb7bdadfdaca4581b3ca1ec87c8f88345f7cecf817111fff162c7",
+      "internal/app/spaceeditor.go": "bb227042ad9413d23d373abeb60e18c818f4257de8551c7a05dda4b654a2db1f",
+      "internal/app/gaps_snapshot_test.go": "5dd717101315d134d80fb4f79e3f8da2e9a724ee7d84fb28ae5843f06b857c40",
+      "internal/app/settings.go": "4f7b285100b268dc3a0e0f7110c87ac6e9b22d6ea6aea8327cd6d353468d454a",
+      "internal/app/app.go": "07434fc5d2ab94367dc1b6906a5c3baa1ad0518b33c9f2402f86524ae108db77",
+      "internal/app/favorites.go": "ab544edb1f1e9882790db2665a643a2b8db36f858166a6d73d0b710751aec332",
+      "internal/app/update_test.go": "c872aa1eea044a71f25a9405388fb47393a26f438875801280231cfe45634752",
+      "internal/app/document.go": "3905cd7a5b1760a353b11fec0556bc108c36016984e74f04f3930324ad033f1d",
+      "internal/app/language_test.go": "5e57ef8404b295c6231b246515380f60769f09298eb9cccaef1616b7984a7ba0",
+      "internal/app/features_test.go": "f55ffccb1a09536394bbfe4c215380aea744e63a3c57ab8063067218f2563882",
+      "internal/app/imageactions.go": "22dc86f0b2b42161fc4f435d4106f890ca05806a414d8cda18e511a67ccdef94",
+      "internal/app/crossspace.go": "f0219a60b9a3ac70e97eb686c6ec7fc57ed95bb3dd56426b6cc4670f75d4dfac",
+      "internal/app/split_performance_test.go": "fe0bf9aa85d878b5a2d3b774cc0f34cb5a8fdbe56ab89949cc6dc04eaa5b9fab",
+      "internal/app/performance_test.go": "94b14878d2f4f888073f1505c1ee16d5b33aa2199f046e1d88cd8557e30085e6",
+      "internal/app/split.go": "b3644723c6286b9ac5f5e0c8cef35cc8034db8a8b69d29eb335d50e77725150b",
+      "internal/app/library_test.go": "69aba1a0053e93cb18237bb3240794d08c574106ff4aa3caf1901e678244eb8a",
+      "internal/app/space_edit_test.go": "57d19c3664ff0dad1c4c6dce005e7a5f0efe661e0677c718d6b3929fc4a7e88c",
+      "internal/app/watch_test.go": "5769c0ca7ebcec5ad2b64e8bd059ebf3c9724f682659d0758a90bcb16b274f2d",
+      "internal/app/pins_test.go": "8257052e616a0920d31993d31514c929e88743ce396a8be1f363e479b01a55d6",
+      "internal/app/view.go": "0dfaa9e5e5a23967dcf506e55d4ee9b23d1bfbf3afccf0e7ee0ae6c8cbc60475",
+      "internal/app/preview_test.go": "63a0b568ecc8346d8b1fa2a3556f5350c32463760589be41dfeb099431436d6f",
+      "internal/app/openfile.go": "ae2944e1fcfdb236555c957dc520c309e11a2d1053d37917fa31b8e59baa6c20",
+      "internal/app/templates.go": "bbe802e3f0aea857a93d28ad55aa63a0ca2893ed45f1632706fe50070450555e",
+      "internal/app/trash.go": "fba30216042c403d9853dced0bbc04149b894e53b11febf861363aa0396978ba",
+      "internal/app/attachments.go": "084cf46a63cc5ecc805c455965f667a0de4d42811356b4daa747ccf735dca267",
+      "internal/app/spaceswitch_test.go": "cd62a15cfd151cf4ce74ec93a4e6234dc13c44901208516a157f629b0852b563",
+      "internal/app/focus.go": "503242692f3156980ce04b339bb95c8c9daffa626ae6f64cea40033c65b00355",
+      "internal/app/carddrag.go": "6432c53d46366ba2d7af7521a681d3ece8bd408a83d8edbf102017aaee271986",
+      "internal/app/replace.go": "f53d4275c069404be3871904831a29c4957d1dcf0ed981161da5ae23d62da331",
+      "internal/app/tour_test.go": "f5d6854a224793ec6bed24ef84161ebe598cc742b92080206115e3d2c4e6d522",
+      "internal/app/docicon_test.go": "9f75cff92ed62c617b91dd2d4a8ab8c0f5752d8fc5e3a5403cf7f714d3ea7b02",
+      "internal/app/cover_test.go": "c9761d232308683f3e910e7214758971563b751ae15bb3cbf240f5d395557d84",
+      "internal/app/spacedraft.go": "872d1b9468ac588d9f3798e8f2d69c6696da264ca214e601129885c41a9cce27",
+      "internal/app/selection_scroll_snapshot_test.go": "0b4f9159f057774f0037187304a2345731f38a220d53e03774be15c35552801b",
+      "internal/app/updateview.go": "8105f0b44abcff4bf184bd91eb6f2654106c20eb3cab991b2b489524dc43d691",
+      "internal/app/math_snapshot_test.go": "87655fb93ac9b18ed0f73783e3905cda81cf8893a1315091ee90c161ede037e4",
+      "internal/app/save_security_test.go": "6a56e6be46af756e1cc1e4aa5950e3d87ddf6c745a80102480330d250a4314de",
+      "internal/app/bookmarks_test.go": "39be46b901346176c18031fefad32edbfd687e82ed0717b99ff15162cf30eb88",
+      "internal/app/emojidata.go": "1c5ea63bc4d71cfa792f26343677e813cd8b32f07d03bedb7b9bdcd4b26ba2a9",
+      "internal/app/favorites_test.go": "3f6ffb65615360437d8d6484225673a1f178bb0460ed0913eb5361b398259ee2",
+      "internal/app/tour.go": "eabeb2f4a2abd56c6574db9858653447eb4a1bb726f8b76c6db3805e54df3fbb",
+      "internal/app/theme_test.go": "47efc3facca075d47282390c664608b6ffb8c9a9b6f93abebf35833a86ccba09",
+      "internal/app/relocate.go": "4b706077ef1eaca7b83af83414437721c22750f5b6fa6839f9aa3c22b7c7237a",
+      "internal/app/dialogs.go": "c0757dcb44aa0d40a9e32e3643158ac70717f7add6e6a4c1d5cb53edf412d07a",
+      "internal/app/treedrag.go": "eb35038dc14a6197469a7a9fdc0667cf051cbf2b84f0aa4bc4bf03e29d6c5adb",
+      "internal/app/columns_snapshot_test.go": "4ce1c74d097efde54337038aa57012249ba14870e789ec8ac924dabd18b2cb5b",
+      "internal/app/features_snapshot_test.go": "5c8c65bb48f94dcc02b491b257ec84e4645eb93ec70025bfe49db887c574f502",
+      "internal/app/tourart.go": "612bb5e8a2a016c7eb670b997e35f638cb49ab485c227bfaa40d35857c14673a",
+      "internal/app/docicon.go": "528da48fb4dec59e6042cfab9a4539139d6e3c14ba029df09b6dae08578f8fe7",
+      "internal/app/sidebar_test.go": "2fbe7b82117620e6089cf75901bc160f8ea542c7685f9fa6bb1df117c0bba48e",
+      "internal/app/undo_test.go": "61a9ed57a146ca0696d7eedf1368fb73b94acceaf10a75d00a59e70be8b3631a",
+      "internal/app/splitstore.go": "0924d6bce8a84187eb1cefa600821c74716a69c3df773f9e2dcd137f17f59170",
+      "internal/app/versions.go": "9a578a82f913b42d8f75fa5a52aa493d6d2b65bbe626ec94adf591070c82f72c",
+      "internal/app/bookmarks.go": "7332c0b893d22e281317241f4ec66277783f790648cf4d6d1f27a366b40e9393",
+      "internal/app/document_cache_test.go": "ca338c3e232abe4eb510affa8eacb9330b4c3b94e09a3386b4c25d6a4d68a3f4",
+      "internal/app/watch.go": "0ba26091033c3373ef85116726b793867343e31ec6e0414fb551d2081a314c1b",
+      "internal/app/spaceeditor_test.go": "46d6dab17d7d23b35b6261a7fe3e25a7214ecdfa41e2ba13c6a800a84e8b5c70",
+      "internal/app/blank_test.go": "eeaad6dc809af238f032e74125ade87918b3c603657a090b77578084482635b6",
+      "internal/app/windows.go": "4aefebe291d9be0dd145b77d0169a744c95c566d6594d0180da648ef1bf39d55",
+      "internal/update/update.go": "d4f9abd8daed47bff1cd4eb4fed5f6771280b4d450f18df51f97d58377cfda8a",
+      "internal/update/update_test.go": "6037bf98177c1bb9cbea6660467f3966620bed433e4717ab2798f60ed0e1ddc9",
+      "internal/fuzzy/fuzzy.go": "853cd7d39d2fd7911e29fab649f5f61a4d9746c6f61e3492e0d12aa279265340",
+      "internal/fuzzy/fuzzy_test.go": "ac0f17360025a80d63a9a78b7b509e21653328af5459d81345615ffd4a798bd2",
+      "internal/plugin/manifest.go": "d4c7a65226eb38e6b098ea1bc0494a88c5f8d4ef4aa0d80befffd55bf4f76ab0",
+      "internal/plugin/registry.go": "63dd722d8362cd4a589d1458560e3a7a58fd55d5f6bff8c52474e506c8f2e6bf",
+      "internal/plugin/host.go": "bc41298dfc965400e4c17b7789b2c0faf389d71edb9ec3066ff1426aecb1d619",
+      "internal/plugin/plugin_test.go": "6af54470a568bbd2833a6297560206f2b8a611757f4c4b6e2197bfece9c8c557",
+      "internal/plugin/transport_test.go": "f18f7fd47f612ce6a79c5d1837082d6798bee23478ee74e383d3ba3294166f36",
+      "internal/plugin/manager.go": "e38ebf6c55148f1662c10dc9b39a5f0afcdb02568ffbcb9d6bfbaedb0619a132",
+      "internal/pdf/pdf.go": "97d19a7c0e278be6889b716c7eeb6789883c61090a02b78bf8ccf23291ffdfd9",
+      "internal/pdf/pdf_test.go": "3a1361de6a4f029401de965b6680b10f39071c9a2fe8a1b5ca74896d1d105442",
+      "internal/wiki/wiki_test.go": "118249f68e0ff54d77f1e64259c0bc1a901bd791851aa72030a28128c2e26bd8",
+      "internal/wiki/wiki.go": "25ee3bd651d39809325b825c17625b0bf9926801a5d325f3f096c79a9a1c5e19",
+      "internal/document/index.go": "72cda7a230334de681344605f87dd4217f7d325e138c5d070329f221a9aa246d",
+      "internal/document/decode_test.go": "322b500f8d99fba9918db9d62241e4cbe63501fb3581a24d16f2da5dfcf5c52c",
+      "internal/document/annotation_test.go": "a307616c82b0cf8644be09ad0edca5ec9676a9f4fbfd2402157b0370dbdc1cf6",
+      "internal/document/reading_test.go": "453b3f43104891d3804bb977599d381b0698b12748f68c8ad56ae51689cc9e02",
+      "internal/document/images_test.go": "e589533d50045146aae27032c24163a3f92990e3fa0b1f09ee7fab2b0a36816a",
+      "internal/document/index_test.go": "f35cb0e48257398ae2d782a060512096fef9864d3f055c85170e0b6742c51986",
+      "internal/document/blocks_test.go": "2fb5728ca546cd1037af8b0cdb9f4ab2e38058a911dcfea0307a9639dccd6c9f",
+      "internal/document/page.go": "f42fdceff4f3ab3bb49db71e94fa008394b716d6f9cf667956f46ca0b2b0f4b7",
+      "internal/document/engine_test.go": "9277cfe44f7856a381fffe63d0b237afd5584c065f74d6fa39ff7b9f31274b90",
+      "internal/document/reading.go": "faa33248b453a393ddf7a557acceecb39acceabbee927bf57ab8ce34d3515438",
+      "internal/document/sort.go": "5512c461ee29e9948cbb40d3a578492ff593250a784dbf355d59e0a1e0e1437c",
+      "internal/document/sort_test.go": "ce800e9496f15d401e63afc787c3b644d33f0bf0d6b910846983e05e5dccafea",
+      "internal/document/paste_test.go": "a971ec58bd88e00a7e5ee333d41c92fb21facbd97ef717d4089b78cbef2b64d5",
+      "internal/document/mathinput_test.go": "99d6b4c675bf33e2f0150cb36ba7788b1044bcc908e20f5ddf21b936fe7cba6e",
+      "internal/document/structure.go": "ac74b656ed151a6c840b840d0065e6acbd1900a6082d44daa2296206cb55fd70",
+      "internal/document/images.go": "37db228a36ddb2b10724335820ad19056f347e344a72b191fa5294b562912397",
+      "internal/document/textedit_test.go": "c5d27e2cfc3cb275d52feaecc723824904bf8aa5ee84795b3d05b5023e1be8cd",
+      "internal/document/engine.go": "0c75fd391d24587ad48cc24c2ee73e4db8c9daf2e0bbb4d57d6db5c94c84f18b",
+      "internal/document/page_test.go": "d2bd22d3e1fe8572a232c134182fc57b5f581b49c768cabaa9a491e16ac814bf",
+      "internal/document/textedit.go": "b53fa114169f8d0cc04e19d7d17ad87157b4c696ad0b526eb05dcd32ae4a8007",
+      "internal/document/model.go": "fca4811e186aa26eb7adb0ad02036954b4963cd8bd6a6883cd4dc5bae6d5acdb",
+      "internal/document/fold.go": "3f8a6067c3296705a1666c125542c870d604046e165a3758b65049c57cd76a37",
+      "internal/document/mathinput.go": "9a815e93e4496c24f1bd406b0ecfd1f278257dc868a76def067c2aff72ed8057",
+      "internal/document/cells.go": "bc27b5aa63e8b446089ab515e81e3c9a2b8de5a90be175160cff44695d92f973",
+      "internal/document/plaintext_test.go": "8174c00db431ebfb6316491dd65ac95a615a9483b7a59752a433192639cf1244",
+      "internal/document/blocks.go": "7f2bf2f0fdd15c9ba53446c33f083eef96c0db5318e5b4837738c7e71a8a868e",
+      "internal/search/search.go": "45d153d306b444f8ce20a608620414ddfa506e26975b72ff9fa77118bcd97abf",
+      "internal/search/search_test.go": "53ecebdfa75eba652a94d7eb0878754baca42dcb845e7a0181265d441b7b0cfa",
+      "internal/history/transfer_test.go": "cf48e65dbcf2c556a115fb5a36a93abd12130df5eeecfdf01b0873b3316c8adb",
+      "internal/history/history_test.go": "d32c982495c4c2929652a69dd6921453365e7dfc5557d3074a0778b8ef994ce8",
+      "internal/history/transfer.go": "8ae6c8ecda30331cbc73e515f84fcce2b87b927e522a2f4f24f43314e69c5f7e",
+      "internal/history/history.go": "5e0fc010dedb022e1925b8afcb0fddaa2bad6eccd38855d4ec94b539054b1ce9",
+      "internal/templates/templates_test.go": "cf0ad30327c519c369ebe9a528f509fd00cc6f870c491cf1d6bceee8d80fb3d8",
+      "internal/templates/templates.go": "06fd1b354ae3966e1fca2bdde3c9b6e301af14573288625c6aa83c3b9e6c1e08",
+      "internal/trashbin/trashbin_test.go": "362c86748ce5a456c045d6d46ee128dbd0a710359afca1c82608e58a978d770e",
+      "internal/trashbin/trashbin.go": "7db163d8543bbd83097613d6def75eec65312ed9be6a29c293829a4eaaf732ba",
+      "internal/space/theme.go": "965daf2e788a8df51c22f28c034f9cfd285bafcb0f9e31570e47abd2d2dcad39",
+      "internal/space/store.go": "9d0ffe16302204b35dc65b78eb8d29d4671921457049008b1b9d20975c313a80",
+      "internal/space/space_test.go": "acdff1d65d5c4a245d3e11cc83225936e783aa8fa2f96c129584c33f358c2520",
+      "internal/space/bookmark_test.go": "370bc9ede655d1487b5b97ce69ecb8bbc050ded14d74bcffcf550406966b5779",
+      "internal/space/bookmark.go": "070493246455411dccd00f7f79319f46d24c3deb1aba1ecd85c19c45e7b9c86c",
+      "internal/space/theme_test.go": "ca61ac710dea93afabbee887c1f523c5c3e3bc1b545ad3099c68c4d4b5ff2afc",
+      "internal/space/space.go": "ffb73955548b2356f5899f66432403aef01141f5cc1907a08bbf5101476ca5ea",
+      "internal/i18n/i18n.go": "b701e823dc673d91d11f58be014d292cd66ce067ee2739b16c5add876ebdc4a5",
+      "internal/i18n/en.go": "bf9aee757b042bf5d11f1e03ac3a0e9bcb892801bbc1c27f143490ff34571a99",
+      "internal/editor/complete_test.go": "2badc267b11c6ef593fc093c96bb09bd2707f0aa2e379580d722ecc43918a81e",
+      "internal/editor/style.go": "2cedae51a6dd9e2962836f4e713bc7fd4a5abd1c58df5cdc0bc816a7463da8e2",
+      "internal/editor/header.go": "3cab53029989a465cd8b8d629da3ba4326bced3bdc5903d4e071a90ed53a120a",
+      "internal/editor/columns_test.go": "7431bf7fcb1004b2a7769ede799185f699f3c5f529ab10032049468731dbdc58",
+      "internal/editor/reading_features_test.go": "12cd3404e421e7b9b3d2d0b4176af27e8e136a64726ee7c6ee295aa2da5ae1d5",
+      "internal/editor/incremental_test.go": "5c9edb502743c41a167774de940824ef3a11d82e84f6a1c77a7e291432baf104",
+      "internal/editor/annotate_test.go": "f616bf87317fa1da25b119b754fbf517bdfe89143f7c190ace9a45bf8c375cd6",
+      "internal/editor/toggle_test.go": "b7fece5ff68efb14c13e8e943c9038070040eff42a1baab992949408fcb4c5b8",
+      "internal/editor/linkpopover.go": "7528ae63d9145cf2a70ed35c4ef601b4c9279e81035ef6a96f45f6e2e5b839f0",
+      "internal/editor/crop_test.go": "bc591c022c77e48d62d8d39091c8b9c143077a41a92e65200571a98aa60d3cc8",
+      "internal/editor/images_test.go": "b1e0e236fe28acb470fafc3a854cb388920d71e3b013af58582004727c7ebbc7",
+      "internal/editor/relocate_test.go": "88424d3208825877869b323cf1b14cac85b71ad421dd54624de364ad22de8d63",
+      "internal/editor/spatial.go": "bdb95806e5c63794681489af000f7c63a1f49001254f2784f0c1b0d5ef5e75af",
+      "internal/editor/annotate.go": "ef973edbd06e36c0313e94b771683356b7e9ada48690c119306be21bc94d65a4",
+      "internal/editor/wikilinks.go": "1bf770a8ce03158a7b2bd9caaf40e9b86e4f9fc445f4ef3c6bbc34a421f3157c",
+      "internal/editor/selection_scroll_test.go": "bd1a5908b43115e3ca7fd4800ca6d407f18c47d297fe86756cc4037d386b6702",
+      "internal/editor/imageresize.go": "f9e31c3f38269b9e82c2805a1473b61086d6532c9366bfb56a5a19063262803d",
+      "internal/editor/resize_test.go": "fd2e29855735d41a9865be513f8a884d29481862b2cfca88f8c0dfc4056c9988",
+      "internal/editor/editor_test.go": "8bdb2edbec3dd8fe82301321710c02f31ec1d229828800a9ac5ee09c026bb03b",
+      "internal/editor/keys.go": "15ebb76cdb2c3c62ced815ea506c1dcbe71c5702938b0d4bd062ee4c4aa03102",
+      "internal/editor/access.go": "a68fbf7401735fa64e448e04775843fe3f4bf65e2bd0fe20e5f5acc2046f46b8",
+      "internal/editor/reading.go": "3241bd8ae44138a07c3cf9ecbdd4fffa07d18ae5dbd2486be15a3109458f9917",
+      "internal/editor/blockselect.go": "848f5ac53918be34bf4866c0c2a1ac318327e24c11ccfc9dc0c6724d24b9e28a",
+      "internal/editor/html.go": "d38f56b3963ea2261855e1b5d1c22f7d5244939a5113e7f24f609e7b9cdf0008",
+      "internal/editor/tools.go": "9179788b7c8d119cbb9b63e6e8b9563d39cdca83669b2357082c70cceee623c4",
+      "internal/editor/html_test.go": "982c5d63229c1537247c435ed1c104240305666ac018d5d0f92ca8bfcb0a7723",
+      "internal/editor/icons.go": "7040aed132f25688baac6de3ada8350ba40e3f0ef215b6cb2647e691a34289ae",
+      "internal/editor/clipboard_test.go": "1593e031892a249b6d05dcb3efcfdb93343c58cb62aaef7fb0a11e79554d55c4",
+      "internal/editor/find.go": "e70580da40db8dbfd1df02532a65063a3c715f0e48a0beaac1ef1715c52fa94b",
+      "internal/editor/notes_index_test.go": "a205273933db7bdf68310edbf42f004715a686203cd7c1362be35c0eaa870760",
+      "internal/editor/complete.go": "114167608d6228805ca18cd8a5a846d18115de9485ed329e444c101ce27fd2dd",
+      "internal/editor/mathfonts.go": "12a943d64d7ff6265b3c76ff05d0ff90b7585b028e1e36cccd0320034588f7c1",
+      "internal/editor/input.go": "61e8a97c5486bb688d812f35c9d18b3d143f2ef8bd1b0ebe6cd44d6daf1f9ee2",
+      "internal/editor/buffer_test.go": "a26f4fc062df3561393ab48c904a264178891349e18f6cca3265c85429d61f52",
+      "internal/editor/images.go": "c976000453921f8316e1e9c7ae7930595df393f05173e76311d523dc00dc92eb",
+      "internal/editor/autopair.go": "9fa6cc303aa4bb4ee99f0493433b8acc6252d7c5f92d7ec67f86d244c8f080d6",
+      "internal/editor/buffer.go": "b7681ae8f684b269ea075b75398a73972e07dc43a591fe1d7a8b1481e3fba062",
+      "internal/editor/markdown.go": "854826458f7416f3d040f12d7cc16a305304c720cba2a7373ead7d24b79c509d",
+      "internal/editor/print.go": "f065d220762576b2074c624381931cfcf4073b6ba951c6a5173350f7196315d5",
+      "internal/editor/resize.go": "00bd840776367b9f32beeab71677dbb78b8cbba32084049be730d2ba39d6f467",
+      "internal/editor/view.go": "2dcccb3c494093391d5f5773e78db962a5cf4d40da2ff0ee488172673e244512",
+      "internal/editor/outline.go": "1c871f63468ab3a6af560166a1afd7ff6e4efbf80ee261baf1a8393b773bab93",
+      "internal/editor/columns.go": "3577b9e21a6321fade468d6de15d120ad08f7cdfe9dd2e0d72ab7a4600d9dac3",
+      "internal/editor/crop.go": "6058496dec30b34326afe73766212715f3c62a164eee57b38db59d0e2b28d769",
+      "internal/editor/incremental.go": "c0eb968a247a5a91c16e3d524767ae5a465a029c071a046829e6b8fb50fadcab",
+      "internal/editor/focus.go": "e2ca679130180d69c18226e968b9e12e10333442d01d31f089285baf1074f79d",
+      "internal/editor/inline.go": "07455537301d70ca2dc92ed8a49f2a55e1da3a6f582f48d5b176f9a33c1d4dbc",
+      "internal/editor/find_index_test.go": "3e8fa1d257515636687af97145dce13168244ab7ba7552850da0d6c1921e7535",
+      "internal/editor/selection_scroll.go": "8d520e05ae7816cdd40ae28ba1a48b96f210036fdd625d826250019fee5d656e",
+      "internal/editor/csvpaste.go": "499aa4266010567a9f98374fe2ccceb25219d4df40d37dbc25c3ba5814e6eb65",
+      "internal/editor/math_test.go": "a53e0ef4e0f82934c0ab90926e081a2cfcb18c771e0f4e4aaeca8afde2be5a19",
+      "internal/editor/commands.go": "9c3e6f1d6063bfec78053c8801f209ee186e35bec90e4eff3d291ed5dcd7df4c",
+      "internal/editor/starter.go": "139a1f6cf04af6f8f37b9bf1273854a045695f07309a2b907b1292c6c21af6c4",
+      "internal/editor/htmlexport.go": "e78995873d179c0957d0b27f64a197541e65c0cae932027331b3fb13ec7e1b15",
+      "internal/editor/navigation_index_test.go": "8a298a1411dca6cbb37299738293cfb1abc97fae48efc3d47e2315ed12a233f8",
+      "internal/editor/autospace.go": "650f9c522dc129891ac93e5571793c049ee9046db575349eca315ea22c6119a9",
+      "internal/editor/spatial_test.go": "e165aec60768ab7b0b74ebcfe344c39072475ca2a377dc40841717152c8fbd06",
+      "internal/editor/blockselect_test.go": "da821143e2d59541a675c259fc62fbeb52aa311a669de2ff3d2fa8909abd375f",
+      "internal/editor/clipboard.go": "7653c0a9f93edca0530b1a676466459bfbde4222f10895d0e1cf32a91a0c7e3a",
+      "internal/editor/relocate.go": "c4b2cdcd0c30211763aa4838e1e42f90a58241fa34f459e1f00505df75378f47",
+      "internal/editor/menus.go": "36ae6053a0f1a72fa86d19c1154d3c1f5ee4f3fc2edfbd17ad9ecadf547f4de6",
+      "internal/editor/gaps.go": "2982df1993c6e6a29d7771eb0fee1a8a7a9fd6341d3932fe7349047c704eefdb",
+      "internal/editor/highlight.go": "af85f12cc742845601e5041c00a86b8b39ead32eb55c87d686ac3ef11e5b9d5d",
+      "internal/editor/bookmarks.go": "a955970bfc13f8945cf91b7ec075dfb601bc8c7be993762609167d6165cec843",
+      "internal/editor/table.go": "43ef9063efe1201412fe191b0552e9ce00076183b621a81806a7a6571b53b51d",
+      "internal/editor/math.go": "bdcbe071d25e7aa94fe45bae351e224f5dac188de374a1d39800ed4d21752e52",
+      "internal/vault/security_test.go": "6bddec95725cf6d1044af5b772e7a220f5163fb36482f5a2119db54f6ac1bd83",
+      "internal/vault/across_windows.go": "ce753327a9fd8ba0173615411b03e2d084aeaba95dbafcd42a4bc4b0829e9054",
+      "internal/vault/tree.go": "16bec373185e7de6d0ab6d3472cdafb4be8e40b90498091af9d8f49c1de5e9c1",
+      "internal/vault/across_test.go": "9f1b548fc955a05b0d536b9eafee2f52f3e46c091e23db2c6cc33fde46ee459f",
+      "internal/vault/across_unix.go": "4b22599a38640a4960b8e35990a4984770e29b38576687d2a78b5845b9d789f6",
+      "internal/vault/vault_test.go": "cc7784cae742574cd5ccf81a3804efaece2dc37678a054108a03f81bfb5d831b",
+      "internal/vault/vault.go": "937e59775901279b6c1ea449e72bb55f926e4a276417e4033b8d2006054b8150",
+      "internal/vault/across.go": "7d018f0b6743c07cea2fb9cc402151d2efde1a9b3a1ef45bbce20c7f102612a5",
+      "cmd/arcmd/main.go": "02d4bf2e64576331feb5a88f1e96b5d860030bbfbd7761bbc38c376451a65950",
+      "tools/ci/main.go": "3b9acc9bcacf366112c2efe50d5a66003d2be3890c048f9d40112bc7d75f85cb",
+      "tools/ci/main_test.go": "91215edd0b5f3715b0aae6bb62b5ccccd0b08b418807ef490c83a46aa20933bd",
+      "tools/internal/toolutil/toolutil_test.go": "46bd7971c1ab86b78b46e0203b60877f83b848dd8493d54d239676ce5165730e",
+      "tools/internal/toolutil/toolutil.go": "7e808da7e3e1ba568583c13fad195b0a53799958c68eacaa98fa246eab04f4dc",
+      "tools/perf/benchmark.go": "9d731bb0aa18c434ed9741281561ffecce8f4632a5c2004de234e35605665cb2",
+      "tools/perf/overlay.go": "c5d846043f766f929a99a07e33bdf22aec7d83f0896cff0533fb9fb92f1d23f3",
+      "tools/perf/summarize.go": "0a58f5d956727679e65ddfe79c3a583769eb8ed2c8ef20ce308f129fa08047b2",
+      "tools/perf/convert.go": "fb9241405775672506d766841312f89a00ab6260e9144496d80d6024f14944a4",
+      "tools/perf/perf_test.go": "c738b4e34f101ae50abbbc92cc29a18034b43cfeab5ccb5aecbf36414a2e16e2",
+      "tools/perf/main.go": "39080263eba283240811be6e4f2d4bed623a7b4a9a8b11ddd7d4fc92b3e965b1",
+      "go.mod": "9bdc47a9ef5f5a1745708bc209aec59f25f02542c7de5ed10eb93ebcec80d179",
+      "go.sum": "5882d3880a0dd2facfecd93b53c5fa56082d1f8369d9475eab87d47d5824d911"
+    },
+    "binaries": {
+      "before": "3bcbc91573036c4816518077d106b1af9ec748d807b4d912e1078c98d8903105",
+      "after": "0b4393f4328c498a7e54c4ef9a7df672623b0301de58b0916a90ac97d89bcb39"
+    },
+    "sampling": "Three fresh processes per version per case; 100 operations per action; serial alternating before/after order, reversed in round 2. Median of per-round quantiles (round((n-1)*q)). CPU event and scene only; no rasterization or GPU presentation.",
+    "fixture_sha256": {
+      "100k": "8d5dd7e7c5ca291dc5ec9add180ddc659e616b85cd267a785c3c071211cbef49",
+      "1m": "26d5e89f1855787e1ef15a401e7e65057741749c6aa15748f25699948024038b",
+      "10k": "ab93b722d66911004216e1e2504e61109dcb5923e23b509aa09fe75d47e6c2f1"
+    },
+    "algorithm_binaries": {
+      "before": "af18ab9b6667b37e9000aa599960ad3bffe5038a6cce73c05a65d4a7e42f6f4b",
+      "after": "a73ee262a086026ab0c59b59a90253e0917f91b59d1e9370888af6f2e7aa4680"
+    },
+    "algorithm_method": "Same 1m fixture, 3 fresh processes per version, 100 events per batch, two batches. Find: query text stays open while typing/backspacing in first paragraph. IME: begin composition before timing, alternate two candidate strings through native TextComposition events; type/backspace keys label the two candidate-update batches only. Committed text and marked display assertions run outside timing.",
+    "measured_source_after": {
+      "internal/prefs/prefs.go": "779499a19e50ebf6fd70a0a32972eb36be21ab884c57a9608b676e7905813c00",
+      "internal/prefs/prefs_test.go": "5c23c16c5d5374059a3d045d11ae3342fbe98e5234192adcfd9ca224b189c703",
+      "internal/fsutil/fsutil_test.go": "68d1634f7f7564f7925267d284be8cc7542e16baad1205b386660de04196402d",
+      "internal/fsutil/fsutil.go": "f8cced7486e94b73c72d0e65d1c19a00c03258f76725a21852179852f6f13ddc",
+      "internal/tex/tex.go": "277a9ccb5e48e10165182b34c67381d591003b7c3eb31b0f22305e0f7ee5714f",
+      "internal/tex/tex_test.go": "465f4ae14ba2858bb184259025ae1afa4f38917ca1537b50616a61656bb4671e",
+      "internal/tex/layout.go": "d5659ed8b261eafe40e10ab97d5e2bfbfbe2cf9e39251f9eeac8472773b412df",
+      "internal/tex/symbols.go": "d279324d730a452092c394af55b8b4467b4631c10b4558c2ef3582db3738184e",
+      "internal/app/space_snapshot_test.go": "9a22a1ca7b9eb036f6eff99ac8ff359cb812785679575cf868afce3551f740d4",
+      "internal/app/theme.go": "b140a550f80f02f701981636bff354647570d04b52d389d7504873bcdcf3e5ae",
+      "internal/app/folderglyph.go": "1ed4605f3e9682145a2e32e1f0f545c04aa94d65eddd7ce3cbe1aefd74aed24d",
+      "internal/app/app_test.go": "9e4f5273217b505f234e0871b6d609b80ea952f937d1c8421bdea04e6381013e",
+      "internal/app/opendocs_snapshot_test.go": "365eee341c52c9f6e5a40656e2d1407c35121c3213a1f74073dfaff5a975b766",
+      "internal/app/replace_test.go": "a8c0c25291462a0f47252c6594c7ec12882a555a28422f569e8a6326706f5956",
+      "internal/app/improvements_snapshot_test.go": "4e833200e2fa80808892f999aa99935bbc6f8f29dda650d82f7a192c549e7204",
+      "internal/app/readme_art_test.go": "899b9e3a2f6f540941d024570aba9ee052fe7917804101372f7e595ffc39039f",
+      "internal/app/library.go": "b346b13e28f6d46892080ea8251161dca8a6c2cc0f2a565ec21b46a845649a5f",
+      "internal/app/treedrag_test.go": "17739135d7510182e56cb74748eb0b92f5f4c23ad41e3208eca68dece4f5bcaf",
+      "internal/app/bookmarks_snapshot_test.go": "408f005f4eda2f485dd7e6417b060456b9bbc500c9b20b0b538be9e02cde099a",
+      "internal/app/reading_test.go": "79791ec0e8fb8dbaa1c08bfe0aa12cfeae38772ebf3cc6d581defc78ce8b237d",
+      "internal/app/space_flicker_test.go": "97006ecd193c1e7cc4fa957740a6f24a1ff0fa2bb2801dca0f22d680f9145c01",
+      "internal/app/gif_test.go": "e5dee75a0c48b5695557b078b7a2759081dfe056a177f78f8120b3ee719c5cda",
+      "internal/app/crop_test.go": "80b82ac937b08f45bb81e7b8d524a9af192dc2ffb8d7469e3c3e197df4827bf7",
+      "internal/app/tags.go": "0e1a193cacde7e08c077e124e60e2d66ab6b0b44831281b25d0d22233834e0f0",
+      "internal/app/sidebar.go": "9e591ceb33c281f1e874d745dedc5b2d707aed39e5c845381dc9bd9fe3d87d28",
+      "internal/app/preview.go": "ae927f20452d9ee17f319c1f799a11c87595868e60b0b25303898c563ca4c217",
+      "internal/app/reading_snapshot_test.go": "a1da432ad8f89dbc0f5ae6c3f7e0532debec65072d55f2229565dda28793f5de",
+      "internal/app/images_test.go": "48f0d25f2c6979eac21fc42c8bbab6caf2b9e583a3c466352cfcb4cc8952049d",
+      "internal/app/relocate_test.go": "27a5b4c355a3e298a36e5834971a7e0c3a0c4c933b755eeb3425c361d322305a",
+      "internal/app/spaceswitch.go": "1d67f2f2da0d61e4c9d855c884eb08dc382556953ab2123f1dd3235b9c282c97",
+      "internal/app/update.go": "ff44f961388f3dd44de00cb33b23870572146e94f413d3de9c2b6d00a121377f",
+      "internal/app/palette.go": "b745b9763d409dea82890a7797709f261bf38f145911b9fcce314ca5d2474d9a",
+      "internal/app/imageactions_test.go": "ff0b313452e5da7d0ebd98516dff2e1105f3d85057ed5fb0379af724e52df6cf",
+      "internal/app/opendocs.go": "bd2b6b4fe7f47b90e6fd0884891de7f996bf45befd63596dbe269f9c9bfaa357",
+      "internal/app/export.go": "e649504b68b6f916ce7c0252d7f27a4af51f4292f9ef9ad65f5b00aefe8d1a32",
+      "internal/app/keymap.go": "29734f5930a3d2d4b1b4e2c92e7740c125673b8d3c684fae373a1d2267195d9a",
+      "internal/app/drop_test.go": "6f7d991082c1cd2c0ffb3cfe22ebc14cee638cd1173da84bb828cb4cb94fca64",
+      "internal/app/splitview.go": "c8ab6e4ba730bb2e064eab293c2372743fa055aeebd37c40da7cf20c262f1ce2",
+      "internal/app/editor_test.go": "b339fba51ec233309d5a78ec1f9ac23d2e38c3492f621f44080cab623680791f",
+      "internal/app/crossspace_test.go": "abaf3838162f15f42c56e5f4d5e4b20276595b3c14425a62a4e9464141ea41ba",
+      "internal/app/links.go": "3cca721a4fd7c3f353f87950b94b0a901e576575860736cc85aefceb32be9d12",
+      "internal/app/pdfexport_test.go": "14721be0f1e22be4ef6583c8acd5b4553d99cd4307d18652f68ad8264a26f52d",
+      "internal/app/split_test.go": "5034abeffce18b139a0797c4afa2edd876e539decff605fdf89e2950b2c8d4f2",
+      "internal/app/tags_test.go": "fdb654cff32668ca4b0a7ac71f93808e9d41951fb14b266866950d4a129f56ed",
+      "internal/app/gif.go": "db96ebeb23e25db8caa2d7224bde1a529049f20d1faeb311ffefa65c52691162",
+      "internal/app/templates_test.go": "2a9ff6b28efd293985fe1d71fd5e1ad24f01b27396d4df5054436e20a542dc62",
+      "internal/app/spaceicons.go": "1085d51b6f580a6b2b05488c831b9523fd31facdfbebfc5bc309bdc71c37dea5",
+      "internal/app/settings_test.go": "b3b4f91ac6fcfc03bd8a2bba4a204551b3a7beeb1a2f238a20336d82d11bbbc4",
+      "internal/app/icons.go": "62d009cd80bac3f1f9a0e1b951aae405615613462538e7a725278c26e0bbe503",
+      "internal/app/sort_test.go": "c6bb24670fa1a3f523c37c9eadaecbf7532931ddb6fbd17b1eed4edad79d3b8d",
+      "internal/app/openfile_test.go": "0a3b32421b87c80b2b564332da49817b24f9a649b83ab214ad9e9fd1ee39dc65",
+      "internal/app/appearance_test.go": "bb3a68bf97b11ba05e1e3f195c07dcc102cccf1b1d7d4d0c59fb5829a9c248ed",
+      "internal/app/search.go": "2f45b33be5f9f5e6071334a66b3dc553a1a7b1c32ab8a182bb46d8aee5d3ff9d",
+      "internal/app/titlebar_test.go": "2fa8700ea3413684412ce303cfaad8e8baf54d961d1c1dc092163cc4c05231ef",
+      "internal/app/pdfexport.go": "c354263de89fabd6ae77299abf3b2572a6a1c939254954faff27972c58ddfa50",
+      "internal/app/footer_test.go": "22da546d85b288527e9e4d8fe91fdb4a387089a6d22a83a0528824f59c7dfa62",
+      "internal/app/snapshot_test.go": "0bfc11d0cccf47cc2d89ef6706e651bd3b1707c11648f5d0afea787b44e32924",
+      "internal/app/search_test.go": "fcd0248222b6d3a4910c21e407ab3eac5c02fa25a351d829dfc506bff0e167a3",
+      "internal/app/undo.go": "d220076398f28c67b66d6e67f934bbda3614989a3f08c1817a67adc8791a279f",
+      "internal/app/windows_test.go": "b764333c949d55eca7c7be796d9921d44bae5c2480f996cb70d64806cada0b18",
+      "internal/app/opendocs_test.go": "9ed554008ceb7ea779c7e8fe1d9d8673d49cbd360f6c91e0ae0f4ae3a339d8fd",
+      "internal/app/spacesymbols.go": "51f64e08ef1cb7bdadfdaca4581b3ca1ec87c8f88345f7cecf817111fff162c7",
+      "internal/app/spaceeditor.go": "bb227042ad9413d23d373abeb60e18c818f4257de8551c7a05dda4b654a2db1f",
+      "internal/app/gaps_snapshot_test.go": "5dd717101315d134d80fb4f79e3f8da2e9a724ee7d84fb28ae5843f06b857c40",
+      "internal/app/settings.go": "4f7b285100b268dc3a0e0f7110c87ac6e9b22d6ea6aea8327cd6d353468d454a",
+      "internal/app/app.go": "07434fc5d2ab94367dc1b6906a5c3baa1ad0518b33c9f2402f86524ae108db77",
+      "internal/app/favorites.go": "ab544edb1f1e9882790db2665a643a2b8db36f858166a6d73d0b710751aec332",
+      "internal/app/update_test.go": "c872aa1eea044a71f25a9405388fb47393a26f438875801280231cfe45634752",
+      "internal/app/document.go": "3905cd7a5b1760a353b11fec0556bc108c36016984e74f04f3930324ad033f1d",
+      "internal/app/language_test.go": "5e57ef8404b295c6231b246515380f60769f09298eb9cccaef1616b7984a7ba0",
+      "internal/app/features_test.go": "f55ffccb1a09536394bbfe4c215380aea744e63a3c57ab8063067218f2563882",
+      "internal/app/imageactions.go": "22dc86f0b2b42161fc4f435d4106f890ca05806a414d8cda18e511a67ccdef94",
+      "internal/app/crossspace.go": "f0219a60b9a3ac70e97eb686c6ec7fc57ed95bb3dd56426b6cc4670f75d4dfac",
+      "internal/app/split_performance_test.go": "fe0bf9aa85d878b5a2d3b774cc0f34cb5a8fdbe56ab89949cc6dc04eaa5b9fab",
+      "internal/app/performance_test.go": "94b14878d2f4f888073f1505c1ee16d5b33aa2199f046e1d88cd8557e30085e6",
+      "internal/app/split.go": "b3644723c6286b9ac5f5e0c8cef35cc8034db8a8b69d29eb335d50e77725150b",
+      "internal/app/library_test.go": "69aba1a0053e93cb18237bb3240794d08c574106ff4aa3caf1901e678244eb8a",
+      "internal/app/space_edit_test.go": "57d19c3664ff0dad1c4c6dce005e7a5f0efe661e0677c718d6b3929fc4a7e88c",
+      "internal/app/watch_test.go": "5769c0ca7ebcec5ad2b64e8bd059ebf3c9724f682659d0758a90bcb16b274f2d",
+      "internal/app/pins_test.go": "8257052e616a0920d31993d31514c929e88743ce396a8be1f363e479b01a55d6",
+      "internal/app/view.go": "0dfaa9e5e5a23967dcf506e55d4ee9b23d1bfbf3afccf0e7ee0ae6c8cbc60475",
+      "internal/app/preview_test.go": "63a0b568ecc8346d8b1fa2a3556f5350c32463760589be41dfeb099431436d6f",
+      "internal/app/openfile.go": "ae2944e1fcfdb236555c957dc520c309e11a2d1053d37917fa31b8e59baa6c20",
+      "internal/app/templates.go": "bbe802e3f0aea857a93d28ad55aa63a0ca2893ed45f1632706fe50070450555e",
+      "internal/app/trash.go": "fba30216042c403d9853dced0bbc04149b894e53b11febf861363aa0396978ba",
+      "internal/app/attachments.go": "084cf46a63cc5ecc805c455965f667a0de4d42811356b4daa747ccf735dca267",
+      "internal/app/spaceswitch_test.go": "cd62a15cfd151cf4ce74ec93a4e6234dc13c44901208516a157f629b0852b563",
+      "internal/app/focus.go": "503242692f3156980ce04b339bb95c8c9daffa626ae6f64cea40033c65b00355",
+      "internal/app/carddrag.go": "6432c53d46366ba2d7af7521a681d3ece8bd408a83d8edbf102017aaee271986",
+      "internal/app/replace.go": "f53d4275c069404be3871904831a29c4957d1dcf0ed981161da5ae23d62da331",
+      "internal/app/tour_test.go": "f5d6854a224793ec6bed24ef84161ebe598cc742b92080206115e3d2c4e6d522",
+      "internal/app/docicon_test.go": "9f75cff92ed62c617b91dd2d4a8ab8c0f5752d8fc5e3a5403cf7f714d3ea7b02",
+      "internal/app/cover_test.go": "c9761d232308683f3e910e7214758971563b751ae15bb3cbf240f5d395557d84",
+      "internal/app/spacedraft.go": "872d1b9468ac588d9f3798e8f2d69c6696da264ca214e601129885c41a9cce27",
+      "internal/app/selection_scroll_snapshot_test.go": "0b4f9159f057774f0037187304a2345731f38a220d53e03774be15c35552801b",
+      "internal/app/updateview.go": "8105f0b44abcff4bf184bd91eb6f2654106c20eb3cab991b2b489524dc43d691",
+      "internal/app/math_snapshot_test.go": "87655fb93ac9b18ed0f73783e3905cda81cf8893a1315091ee90c161ede037e4",
+      "internal/app/save_security_test.go": "6a56e6be46af756e1cc1e4aa5950e3d87ddf6c745a80102480330d250a4314de",
+      "internal/app/bookmarks_test.go": "39be46b901346176c18031fefad32edbfd687e82ed0717b99ff15162cf30eb88",
+      "internal/app/emojidata.go": "1c5ea63bc4d71cfa792f26343677e813cd8b32f07d03bedb7b9bdcd4b26ba2a9",
+      "internal/app/favorites_test.go": "3f6ffb65615360437d8d6484225673a1f178bb0460ed0913eb5361b398259ee2",
+      "internal/app/tour.go": "eabeb2f4a2abd56c6574db9858653447eb4a1bb726f8b76c6db3805e54df3fbb",
+      "internal/app/theme_test.go": "47efc3facca075d47282390c664608b6ffb8c9a9b6f93abebf35833a86ccba09",
+      "internal/app/relocate.go": "4b706077ef1eaca7b83af83414437721c22750f5b6fa6839f9aa3c22b7c7237a",
+      "internal/app/dialogs.go": "c0757dcb44aa0d40a9e32e3643158ac70717f7add6e6a4c1d5cb53edf412d07a",
+      "internal/app/treedrag.go": "eb35038dc14a6197469a7a9fdc0667cf051cbf2b84f0aa4bc4bf03e29d6c5adb",
+      "internal/app/columns_snapshot_test.go": "4ce1c74d097efde54337038aa57012249ba14870e789ec8ac924dabd18b2cb5b",
+      "internal/app/features_snapshot_test.go": "5c8c65bb48f94dcc02b491b257ec84e4645eb93ec70025bfe49db887c574f502",
+      "internal/app/tourart.go": "612bb5e8a2a016c7eb670b997e35f638cb49ab485c227bfaa40d35857c14673a",
+      "internal/app/docicon.go": "528da48fb4dec59e6042cfab9a4539139d6e3c14ba029df09b6dae08578f8fe7",
+      "internal/app/sidebar_test.go": "2fbe7b82117620e6089cf75901bc160f8ea542c7685f9fa6bb1df117c0bba48e",
+      "internal/app/undo_test.go": "61a9ed57a146ca0696d7eedf1368fb73b94acceaf10a75d00a59e70be8b3631a",
+      "internal/app/splitstore.go": "0924d6bce8a84187eb1cefa600821c74716a69c3df773f9e2dcd137f17f59170",
+      "internal/app/versions.go": "9a578a82f913b42d8f75fa5a52aa493d6d2b65bbe626ec94adf591070c82f72c",
+      "internal/app/bookmarks.go": "7332c0b893d22e281317241f4ec66277783f790648cf4d6d1f27a366b40e9393",
+      "internal/app/document_cache_test.go": "ca338c3e232abe4eb510affa8eacb9330b4c3b94e09a3386b4c25d6a4d68a3f4",
+      "internal/app/watch.go": "0ba26091033c3373ef85116726b793867343e31ec6e0414fb551d2081a314c1b",
+      "internal/app/spaceeditor_test.go": "46d6dab17d7d23b35b6261a7fe3e25a7214ecdfa41e2ba13c6a800a84e8b5c70",
+      "internal/app/blank_test.go": "eeaad6dc809af238f032e74125ade87918b3c603657a090b77578084482635b6",
+      "internal/app/windows.go": "4aefebe291d9be0dd145b77d0169a744c95c566d6594d0180da648ef1bf39d55",
+      "internal/update/update.go": "d4f9abd8daed47bff1cd4eb4fed5f6771280b4d450f18df51f97d58377cfda8a",
+      "internal/update/update_test.go": "6037bf98177c1bb9cbea6660467f3966620bed433e4717ab2798f60ed0e1ddc9",
+      "internal/fuzzy/fuzzy.go": "853cd7d39d2fd7911e29fab649f5f61a4d9746c6f61e3492e0d12aa279265340",
+      "internal/fuzzy/fuzzy_test.go": "ac0f17360025a80d63a9a78b7b509e21653328af5459d81345615ffd4a798bd2",
+      "internal/plugin/manifest.go": "d4c7a65226eb38e6b098ea1bc0494a88c5f8d4ef4aa0d80befffd55bf4f76ab0",
+      "internal/plugin/registry.go": "63dd722d8362cd4a589d1458560e3a7a58fd55d5f6bff8c52474e506c8f2e6bf",
+      "internal/plugin/host.go": "bc41298dfc965400e4c17b7789b2c0faf389d71edb9ec3066ff1426aecb1d619",
+      "internal/plugin/plugin_test.go": "6af54470a568bbd2833a6297560206f2b8a611757f4c4b6e2197bfece9c8c557",
+      "internal/plugin/transport_test.go": "f18f7fd47f612ce6a79c5d1837082d6798bee23478ee74e383d3ba3294166f36",
+      "internal/plugin/manager.go": "e38ebf6c55148f1662c10dc9b39a5f0afcdb02568ffbcb9d6bfbaedb0619a132",
+      "internal/pdf/pdf.go": "97d19a7c0e278be6889b716c7eeb6789883c61090a02b78bf8ccf23291ffdfd9",
+      "internal/pdf/pdf_test.go": "3a1361de6a4f029401de965b6680b10f39071c9a2fe8a1b5ca74896d1d105442",
+      "internal/wiki/wiki_test.go": "118249f68e0ff54d77f1e64259c0bc1a901bd791851aa72030a28128c2e26bd8",
+      "internal/wiki/wiki.go": "25ee3bd651d39809325b825c17625b0bf9926801a5d325f3f096c79a9a1c5e19",
+      "internal/document/index.go": "72cda7a230334de681344605f87dd4217f7d325e138c5d070329f221a9aa246d",
+      "internal/document/decode_test.go": "322b500f8d99fba9918db9d62241e4cbe63501fb3581a24d16f2da5dfcf5c52c",
+      "internal/document/annotation_test.go": "a307616c82b0cf8644be09ad0edca5ec9676a9f4fbfd2402157b0370dbdc1cf6",
+      "internal/document/reading_test.go": "453b3f43104891d3804bb977599d381b0698b12748f68c8ad56ae51689cc9e02",
+      "internal/document/images_test.go": "e589533d50045146aae27032c24163a3f92990e3fa0b1f09ee7fab2b0a36816a",
+      "internal/document/index_test.go": "f35cb0e48257398ae2d782a060512096fef9864d3f055c85170e0b6742c51986",
+      "internal/document/blocks_test.go": "2fb5728ca546cd1037af8b0cdb9f4ab2e38058a911dcfea0307a9639dccd6c9f",
+      "internal/document/page.go": "f42fdceff4f3ab3bb49db71e94fa008394b716d6f9cf667956f46ca0b2b0f4b7",
+      "internal/document/engine_test.go": "9277cfe44f7856a381fffe63d0b237afd5584c065f74d6fa39ff7b9f31274b90",
+      "internal/document/reading.go": "faa33248b453a393ddf7a557acceecb39acceabbee927bf57ab8ce34d3515438",
+      "internal/document/sort.go": "5512c461ee29e9948cbb40d3a578492ff593250a784dbf355d59e0a1e0e1437c",
+      "internal/document/sort_test.go": "ce800e9496f15d401e63afc787c3b644d33f0bf0d6b910846983e05e5dccafea",
+      "internal/document/paste_test.go": "a971ec58bd88e00a7e5ee333d41c92fb21facbd97ef717d4089b78cbef2b64d5",
+      "internal/document/mathinput_test.go": "99d6b4c675bf33e2f0150cb36ba7788b1044bcc908e20f5ddf21b936fe7cba6e",
+      "internal/document/structure.go": "ac74b656ed151a6c840b840d0065e6acbd1900a6082d44daa2296206cb55fd70",
+      "internal/document/images.go": "37db228a36ddb2b10724335820ad19056f347e344a72b191fa5294b562912397",
+      "internal/document/textedit_test.go": "c5d27e2cfc3cb275d52feaecc723824904bf8aa5ee84795b3d05b5023e1be8cd",
+      "internal/document/engine.go": "0c75fd391d24587ad48cc24c2ee73e4db8c9daf2e0bbb4d57d6db5c94c84f18b",
+      "internal/document/page_test.go": "d2bd22d3e1fe8572a232c134182fc57b5f581b49c768cabaa9a491e16ac814bf",
+      "internal/document/textedit.go": "b53fa114169f8d0cc04e19d7d17ad87157b4c696ad0b526eb05dcd32ae4a8007",
+      "internal/document/model.go": "fca4811e186aa26eb7adb0ad02036954b4963cd8bd6a6883cd4dc5bae6d5acdb",
+      "internal/document/fold.go": "3f8a6067c3296705a1666c125542c870d604046e165a3758b65049c57cd76a37",
+      "internal/document/mathinput.go": "9a815e93e4496c24f1bd406b0ecfd1f278257dc868a76def067c2aff72ed8057",
+      "internal/document/cells.go": "bc27b5aa63e8b446089ab515e81e3c9a2b8de5a90be175160cff44695d92f973",
+      "internal/document/plaintext_test.go": "8174c00db431ebfb6316491dd65ac95a615a9483b7a59752a433192639cf1244",
+      "internal/document/blocks.go": "7f2bf2f0fdd15c9ba53446c33f083eef96c0db5318e5b4837738c7e71a8a868e",
+      "internal/search/search.go": "45d153d306b444f8ce20a608620414ddfa506e26975b72ff9fa77118bcd97abf",
+      "internal/search/search_test.go": "53ecebdfa75eba652a94d7eb0878754baca42dcb845e7a0181265d441b7b0cfa",
+      "internal/history/transfer_test.go": "cf48e65dbcf2c556a115fb5a36a93abd12130df5eeecfdf01b0873b3316c8adb",
+      "internal/history/history_test.go": "d32c982495c4c2929652a69dd6921453365e7dfc5557d3074a0778b8ef994ce8",
+      "internal/history/transfer.go": "8ae6c8ecda30331cbc73e515f84fcce2b87b927e522a2f4f24f43314e69c5f7e",
+      "internal/history/history.go": "5e0fc010dedb022e1925b8afcb0fddaa2bad6eccd38855d4ec94b539054b1ce9",
+      "internal/templates/templates_test.go": "cf0ad30327c519c369ebe9a528f509fd00cc6f870c491cf1d6bceee8d80fb3d8",
+      "internal/templates/templates.go": "06fd1b354ae3966e1fca2bdde3c9b6e301af14573288625c6aa83c3b9e6c1e08",
+      "internal/trashbin/trashbin_test.go": "362c86748ce5a456c045d6d46ee128dbd0a710359afca1c82608e58a978d770e",
+      "internal/trashbin/trashbin.go": "7db163d8543bbd83097613d6def75eec65312ed9be6a29c293829a4eaaf732ba",
+      "internal/space/theme.go": "965daf2e788a8df51c22f28c034f9cfd285bafcb0f9e31570e47abd2d2dcad39",
+      "internal/space/store.go": "9d0ffe16302204b35dc65b78eb8d29d4671921457049008b1b9d20975c313a80",
+      "internal/space/space_test.go": "acdff1d65d5c4a245d3e11cc83225936e783aa8fa2f96c129584c33f358c2520",
+      "internal/space/bookmark_test.go": "370bc9ede655d1487b5b97ce69ecb8bbc050ded14d74bcffcf550406966b5779",
+      "internal/space/bookmark.go": "070493246455411dccd00f7f79319f46d24c3deb1aba1ecd85c19c45e7b9c86c",
+      "internal/space/theme_test.go": "ca61ac710dea93afabbee887c1f523c5c3e3bc1b545ad3099c68c4d4b5ff2afc",
+      "internal/space/space.go": "ffb73955548b2356f5899f66432403aef01141f5cc1907a08bbf5101476ca5ea",
+      "internal/i18n/i18n.go": "b701e823dc673d91d11f58be014d292cd66ce067ee2739b16c5add876ebdc4a5",
+      "internal/i18n/en.go": "bf9aee757b042bf5d11f1e03ac3a0e9bcb892801bbc1c27f143490ff34571a99",
+      "internal/editor/complete_test.go": "2badc267b11c6ef593fc093c96bb09bd2707f0aa2e379580d722ecc43918a81e",
+      "internal/editor/style.go": "2cedae51a6dd9e2962836f4e713bc7fd4a5abd1c58df5cdc0bc816a7463da8e2",
+      "internal/editor/header.go": "3cab53029989a465cd8b8d629da3ba4326bced3bdc5903d4e071a90ed53a120a",
+      "internal/editor/columns_test.go": "7431bf7fcb1004b2a7769ede799185f699f3c5f529ab10032049468731dbdc58",
+      "internal/editor/reading_features_test.go": "12cd3404e421e7b9b3d2d0b4176af27e8e136a64726ee7c6ee295aa2da5ae1d5",
+      "internal/editor/incremental_test.go": "5c9edb502743c41a167774de940824ef3a11d82e84f6a1c77a7e291432baf104",
+      "internal/editor/annotate_test.go": "f616bf87317fa1da25b119b754fbf517bdfe89143f7c190ace9a45bf8c375cd6",
+      "internal/editor/toggle_test.go": "b7fece5ff68efb14c13e8e943c9038070040eff42a1baab992949408fcb4c5b8",
+      "internal/editor/linkpopover.go": "7528ae63d9145cf2a70ed35c4ef601b4c9279e81035ef6a96f45f6e2e5b839f0",
+      "internal/editor/crop_test.go": "bc591c022c77e48d62d8d39091c8b9c143077a41a92e65200571a98aa60d3cc8",
+      "internal/editor/images_test.go": "b1e0e236fe28acb470fafc3a854cb388920d71e3b013af58582004727c7ebbc7",
+      "internal/editor/relocate_test.go": "88424d3208825877869b323cf1b14cac85b71ad421dd54624de364ad22de8d63",
+      "internal/editor/spatial.go": "bdb95806e5c63794681489af000f7c63a1f49001254f2784f0c1b0d5ef5e75af",
+      "internal/editor/annotate.go": "ef973edbd06e36c0313e94b771683356b7e9ada48690c119306be21bc94d65a4",
+      "internal/editor/wikilinks.go": "1bf770a8ce03158a7b2bd9caaf40e9b86e4f9fc445f4ef3c6bbc34a421f3157c",
+      "internal/editor/selection_scroll_test.go": "bd1a5908b43115e3ca7fd4800ca6d407f18c47d297fe86756cc4037d386b6702",
+      "internal/editor/imageresize.go": "f9e31c3f38269b9e82c2805a1473b61086d6532c9366bfb56a5a19063262803d",
+      "internal/editor/resize_test.go": "fd2e29855735d41a9865be513f8a884d29481862b2cfca88f8c0dfc4056c9988",
+      "internal/editor/editor_test.go": "8bdb2edbec3dd8fe82301321710c02f31ec1d229828800a9ac5ee09c026bb03b",
+      "internal/editor/keys.go": "15ebb76cdb2c3c62ced815ea506c1dcbe71c5702938b0d4bd062ee4c4aa03102",
+      "internal/editor/access.go": "a68fbf7401735fa64e448e04775843fe3f4bf65e2bd0fe20e5f5acc2046f46b8",
+      "internal/editor/reading.go": "3241bd8ae44138a07c3cf9ecbdd4fffa07d18ae5dbd2486be15a3109458f9917",
+      "internal/editor/blockselect.go": "848f5ac53918be34bf4866c0c2a1ac318327e24c11ccfc9dc0c6724d24b9e28a",
+      "internal/editor/html.go": "d38f56b3963ea2261855e1b5d1c22f7d5244939a5113e7f24f609e7b9cdf0008",
+      "internal/editor/tools.go": "9179788b7c8d119cbb9b63e6e8b9563d39cdca83669b2357082c70cceee623c4",
+      "internal/editor/html_test.go": "982c5d63229c1537247c435ed1c104240305666ac018d5d0f92ca8bfcb0a7723",
+      "internal/editor/icons.go": "7040aed132f25688baac6de3ada8350ba40e3f0ef215b6cb2647e691a34289ae",
+      "internal/editor/clipboard_test.go": "1593e031892a249b6d05dcb3efcfdb93343c58cb62aaef7fb0a11e79554d55c4",
+      "internal/editor/find.go": "e70580da40db8dbfd1df02532a65063a3c715f0e48a0beaac1ef1715c52fa94b",
+      "internal/editor/notes_index_test.go": "a205273933db7bdf68310edbf42f004715a686203cd7c1362be35c0eaa870760",
+      "internal/editor/complete.go": "114167608d6228805ca18cd8a5a846d18115de9485ed329e444c101ce27fd2dd",
+      "internal/editor/mathfonts.go": "12a943d64d7ff6265b3c76ff05d0ff90b7585b028e1e36cccd0320034588f7c1",
+      "internal/editor/input.go": "61e8a97c5486bb688d812f35c9d18b3d143f2ef8bd1b0ebe6cd44d6daf1f9ee2",
+      "internal/editor/buffer_test.go": "a26f4fc062df3561393ab48c904a264178891349e18f6cca3265c85429d61f52",
+      "internal/editor/images.go": "c976000453921f8316e1e9c7ae7930595df393f05173e76311d523dc00dc92eb",
+      "internal/editor/autopair.go": "9fa6cc303aa4bb4ee99f0493433b8acc6252d7c5f92d7ec67f86d244c8f080d6",
+      "internal/editor/buffer.go": "b7681ae8f684b269ea075b75398a73972e07dc43a591fe1d7a8b1481e3fba062",
+      "internal/editor/markdown.go": "854826458f7416f3d040f12d7cc16a305304c720cba2a7373ead7d24b79c509d",
+      "internal/editor/print.go": "f065d220762576b2074c624381931cfcf4073b6ba951c6a5173350f7196315d5",
+      "internal/editor/resize.go": "00bd840776367b9f32beeab71677dbb78b8cbba32084049be730d2ba39d6f467",
+      "internal/editor/view.go": "2dcccb3c494093391d5f5773e78db962a5cf4d40da2ff0ee488172673e244512",
+      "internal/editor/outline.go": "1c871f63468ab3a6af560166a1afd7ff6e4efbf80ee261baf1a8393b773bab93",
+      "internal/editor/columns.go": "3577b9e21a6321fade468d6de15d120ad08f7cdfe9dd2e0d72ab7a4600d9dac3",
+      "internal/editor/crop.go": "6058496dec30b34326afe73766212715f3c62a164eee57b38db59d0e2b28d769",
+      "internal/editor/incremental.go": "c0eb968a247a5a91c16e3d524767ae5a465a029c071a046829e6b8fb50fadcab",
+      "internal/editor/focus.go": "e2ca679130180d69c18226e968b9e12e10333442d01d31f089285baf1074f79d",
+      "internal/editor/inline.go": "07455537301d70ca2dc92ed8a49f2a55e1da3a6f582f48d5b176f9a33c1d4dbc",
+      "internal/editor/find_index_test.go": "3e8fa1d257515636687af97145dce13168244ab7ba7552850da0d6c1921e7535",
+      "internal/editor/selection_scroll.go": "8d520e05ae7816cdd40ae28ba1a48b96f210036fdd625d826250019fee5d656e",
+      "internal/editor/csvpaste.go": "499aa4266010567a9f98374fe2ccceb25219d4df40d37dbc25c3ba5814e6eb65",
+      "internal/editor/math_test.go": "a53e0ef4e0f82934c0ab90926e081a2cfcb18c771e0f4e4aaeca8afde2be5a19",
+      "internal/editor/commands.go": "9c3e6f1d6063bfec78053c8801f209ee186e35bec90e4eff3d291ed5dcd7df4c",
+      "internal/editor/starter.go": "139a1f6cf04af6f8f37b9bf1273854a045695f07309a2b907b1292c6c21af6c4",
+      "internal/editor/htmlexport.go": "e78995873d179c0957d0b27f64a197541e65c0cae932027331b3fb13ec7e1b15",
+      "internal/editor/navigation_index_test.go": "8a298a1411dca6cbb37299738293cfb1abc97fae48efc3d47e2315ed12a233f8",
+      "internal/editor/autospace.go": "650f9c522dc129891ac93e5571793c049ee9046db575349eca315ea22c6119a9",
+      "internal/editor/spatial_test.go": "e165aec60768ab7b0b74ebcfe344c39072475ca2a377dc40841717152c8fbd06",
+      "internal/editor/blockselect_test.go": "da821143e2d59541a675c259fc62fbeb52aa311a669de2ff3d2fa8909abd375f",
+      "internal/editor/clipboard.go": "7653c0a9f93edca0530b1a676466459bfbde4222f10895d0e1cf32a91a0c7e3a",
+      "internal/editor/relocate.go": "c4b2cdcd0c30211763aa4838e1e42f90a58241fa34f459e1f00505df75378f47",
+      "internal/editor/menus.go": "36ae6053a0f1a72fa86d19c1154d3c1f5ee4f3fc2edfbd17ad9ecadf547f4de6",
+      "internal/editor/gaps.go": "2982df1993c6e6a29d7771eb0fee1a8a7a9fd6341d3932fe7349047c704eefdb",
+      "internal/editor/highlight.go": "af85f12cc742845601e5041c00a86b8b39ead32eb55c87d686ac3ef11e5b9d5d",
+      "internal/editor/bookmarks.go": "a955970bfc13f8945cf91b7ec075dfb601bc8c7be993762609167d6165cec843",
+      "internal/editor/table.go": "43ef9063efe1201412fe191b0552e9ce00076183b621a81806a7a6571b53b51d",
+      "internal/editor/math.go": "bdcbe071d25e7aa94fe45bae351e224f5dac188de374a1d39800ed4d21752e52",
+      "internal/vault/security_test.go": "6bddec95725cf6d1044af5b772e7a220f5163fb36482f5a2119db54f6ac1bd83",
+      "internal/vault/across_windows.go": "ce753327a9fd8ba0173615411b03e2d084aeaba95dbafcd42a4bc4b0829e9054",
+      "internal/vault/tree.go": "16bec373185e7de6d0ab6d3472cdafb4be8e40b90498091af9d8f49c1de5e9c1",
+      "internal/vault/across_test.go": "9f1b548fc955a05b0d536b9eafee2f52f3e46c091e23db2c6cc33fde46ee459f",
+      "internal/vault/across_unix.go": "4b22599a38640a4960b8e35990a4984770e29b38576687d2a78b5845b9d789f6",
+      "internal/vault/vault_test.go": "cc7784cae742574cd5ccf81a3804efaece2dc37678a054108a03f81bfb5d831b",
+      "internal/vault/vault.go": "937e59775901279b6c1ea449e72bb55f926e4a276417e4033b8d2006054b8150",
+      "internal/vault/across.go": "7d018f0b6743c07cea2fb9cc402151d2efde1a9b3a1ef45bbce20c7f102612a5",
+      "cmd/arcmd/main.go": "02d4bf2e64576331feb5a88f1e96b5d860030bbfbd7761bbc38c376451a65950",
+      "tools/ci/main.go": "3b9acc9bcacf366112c2efe50d5a66003d2be3890c048f9d40112bc7d75f85cb",
+      "tools/ci/main_test.go": "91215edd0b5f3715b0aae6bb62b5ccccd0b08b418807ef490c83a46aa20933bd",
+      "tools/internal/toolutil/toolutil_test.go": "46bd7971c1ab86b78b46e0203b60877f83b848dd8493d54d239676ce5165730e",
+      "tools/internal/toolutil/toolutil.go": "7e808da7e3e1ba568583c13fad195b0a53799958c68eacaa98fa246eab04f4dc",
+      "tools/perf/benchmark.go": "9d731bb0aa18c434ed9741281561ffecce8f4632a5c2004de234e35605665cb2",
+      "tools/perf/overlay.go": "c5d846043f766f929a99a07e33bdf22aec7d83f0896cff0533fb9fb92f1d23f3",
+      "tools/perf/summarize.go": "0a58f5d956727679e65ddfe79c3a583769eb8ed2c8ef20ce308f129fa08047b2",
+      "tools/perf/convert.go": "fb9241405775672506d766841312f89a00ab6260e9144496d80d6024f14944a4",
+      "tools/perf/perf_test.go": "c738b4e34f101ae50abbbc92cc29a18034b43cfeab5ccb5aecbf36414a2e16e2",
+      "tools/perf/main.go": "39080263eba283240811be6e4f2d4bed623a7b4a9a8b11ddd7d4fc92b3e965b1",
+      "go.mod": "9bdc47a9ef5f5a1745708bc209aec59f25f02542c7de5ed10eb93ebcec80d179",
+      "go.sum": "5882d3880a0dd2facfecd93b53c5fa56082d1f8369d9475eab87d47d5824d911"
+    }
+  },
+  "matched": {
+    "10k": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.004917,
+            "p95": 0.007667,
+            "max": 0.02025
+          },
+          "frame_ms": {
+            "p50": 0.23975,
+            "p95": 0.283375,
+            "max": 1.176959
+          },
+          "total_ms": {
+            "p50": 0.24425,
+            "p95": 0.289792,
+            "max": 1.197209
+          },
+          "allocated_mb_per_op": 0.24707464,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.0465,
+            "p95": 0.059208,
+            "max": 0.196583
+          },
+          "frame_ms": {
+            "p50": 0.234333,
+            "p95": 0.250708,
+            "max": 0.6165
+          },
+          "total_ms": {
+            "p50": 0.280083,
+            "p95": 0.303709,
+            "max": 0.655416
+          },
+          "allocated_mb_per_op": 0.261232,
+          "gc_cycles": 1
+        },
+        "scroll": {
+          "step_ms": {
+            "p50": 0.002209,
+            "p95": 0.0025,
+            "max": 0.005166
+          },
+          "frame_ms": {
+            "p50": 0.311916,
+            "p95": 0.946417,
+            "max": 1.455292
+          },
+          "total_ms": {
+            "p50": 0.314124,
+            "p95": 0.948667,
+            "max": 1.460458
+          },
+          "allocated_mb_per_op": 0.11898808,
+          "gc_cycles": 1
+        },
+        "open_cpu_ms": 33.027
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.001959,
+            "p95": 0.00325,
+            "max": 0.035958
+          },
+          "frame_ms": {
+            "p50": 0.226584,
+            "p95": 0.253708,
+            "max": 1.060541
+          },
+          "total_ms": {
+            "p50": 0.228541,
+            "p95": 0.256,
+            "max": 1.096499
+          },
+          "allocated_mb_per_op": 0.12575,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.044416,
+            "p95": 0.055083,
+            "max": 0.162959
+          },
+          "frame_ms": {
+            "p50": 0.220292,
+            "p95": 0.244166,
+            "max": 0.41675
+          },
+          "total_ms": {
+            "p50": 0.265708,
+            "p95": 0.297166,
+            "max": 0.579709
+          },
+          "allocated_mb_per_op": 0.14029408,
+          "gc_cycles": 0
+        },
+        "scroll": {
+          "step_ms": {
+            "p50": 0.002291,
+            "p95": 0.002833,
+            "max": 0.016791
+          },
+          "frame_ms": {
+            "p50": 0.3075,
+            "p95": 0.878084,
+            "max": 1.518167
+          },
+          "total_ms": {
+            "p50": 0.309833,
+            "p95": 0.880376,
+            "max": 1.524042
+          },
+          "allocated_mb_per_op": 0.11906192,
+          "gc_cycles": 1
+        },
+        "open_cpu_ms": 31.088625
+      }
+    },
+    "100k": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.024208,
+            "p95": 0.038208,
+            "max": 0.062041
+          },
+          "frame_ms": {
+            "p50": 0.272584,
+            "p95": 0.30975,
+            "max": 0.961583
+          },
+          "total_ms": {
+            "p50": 0.297167,
+            "p95": 0.333416,
+            "max": 1.002
+          },
+          "allocated_mb_per_op": 0.34548192,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.060125,
+            "p95": 0.079416,
+            "max": 0.178083
+          },
+          "frame_ms": {
+            "p50": 0.270125,
+            "p95": 0.306208,
+            "max": 0.450542
+          },
+          "total_ms": {
+            "p50": 0.329625,
+            "p95": 0.3765,
+            "max": 0.634333
+          },
+          "allocated_mb_per_op": 0.35989920000000003,
+          "gc_cycles": 0
+        },
+        "scroll": {
+          "step_ms": {
+            "p50": 0.003375,
+            "p95": 0.003625,
+            "max": 0.0075
+          },
+          "frame_ms": {
+            "p50": 0.362583,
+            "p95": 0.934125,
+            "max": 1.739084
+          },
+          "total_ms": {
+            "p50": 0.365958,
+            "p95": 0.937375,
+            "max": 1.742418
+          },
+          "allocated_mb_per_op": 0.13429664000000002,
+          "gc_cycles": 1
+        },
+        "open_cpu_ms": 111.25025
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.002125,
+            "p95": 0.003208,
+            "max": 0.014083
+          },
+          "frame_ms": {
+            "p50": 0.238333,
+            "p95": 0.271583,
+            "max": 0.953875
+          },
+          "total_ms": {
+            "p50": 0.240959,
+            "p95": 0.275041,
+            "max": 0.966417
+          },
+          "allocated_mb_per_op": 0.06675424,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.044833,
+            "p95": 0.055791,
+            "max": 0.155417
+          },
+          "frame_ms": {
+            "p50": 0.235958,
+            "p95": 0.26525,
+            "max": 0.410334
+          },
+          "total_ms": {
+            "p50": 0.281375,
+            "p95": 0.315626,
+            "max": 0.565751
+          },
+          "allocated_mb_per_op": 0.08125688,
+          "gc_cycles": 0
+        },
+        "scroll": {
+          "step_ms": {
+            "p50": 0.003333,
+            "p95": 0.003583,
+            "max": 0.007334
+          },
+          "frame_ms": {
+            "p50": 0.342333,
+            "p95": 0.931167,
+            "max": 1.511959
+          },
+          "total_ms": {
+            "p50": 0.345791,
+            "p95": 0.934542,
+            "max": 1.515292
+          },
+          "allocated_mb_per_op": 0.1225632,
+          "gc_cycles": 1
+        },
+        "open_cpu_ms": 111.881125
+      }
+    },
+    "1m": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.2405,
+            "p95": 0.346375,
+            "max": 0.487667
+          },
+          "frame_ms": {
+            "p50": 0.748875,
+            "p95": 0.937333,
+            "max": 2.371959
+          },
+          "total_ms": {
+            "p50": 0.988542,
+            "p95": 1.176708,
+            "max": 2.682792
+          },
+          "allocated_mb_per_op": 2.83601504,
+          "gc_cycles": 2
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.14525,
+            "p95": 0.296958,
+            "max": 0.59875
+          },
+          "frame_ms": {
+            "p50": 0.702708,
+            "p95": 1.011292,
+            "max": 3.59525
+          },
+          "total_ms": {
+            "p50": 0.879334,
+            "p95": 1.296667,
+            "max": 4.134334
+          },
+          "allocated_mb_per_op": 2.8507664,
+          "gc_cycles": 2
+        },
+        "scroll": {
+          "step_ms": {
+            "p50": 0.003417,
+            "p95": 0.003667,
+            "max": 0.008875
+          },
+          "frame_ms": {
+            "p50": 0.786208,
+            "p95": 1.470083,
+            "max": 3.535
+          },
+          "total_ms": {
+            "p50": 0.789583,
+            "p95": 1.473416,
+            "max": 3.538583
+          },
+          "allocated_mb_per_op": 0.29007792,
+          "gc_cycles": 0
+        },
+        "open_cpu_ms": 852.153542
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.00225,
+            "p95": 0.002875,
+            "max": 0.015709
+          },
+          "frame_ms": {
+            "p50": 0.272625,
+            "p95": 0.290958,
+            "max": 0.962125
+          },
+          "total_ms": {
+            "p50": 0.274708,
+            "p95": 0.293874,
+            "max": 0.977834
+          },
+          "allocated_mb_per_op": 0.0666888,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.045042,
+            "p95": 0.055042,
+            "max": 0.160291
+          },
+          "frame_ms": {
+            "p50": 0.270625,
+            "p95": 0.306209,
+            "max": 0.686292
+          },
+          "total_ms": {
+            "p50": 0.316083,
+            "p95": 0.357125,
+            "max": 0.737708
+          },
+          "allocated_mb_per_op": 0.08125624000000001,
+          "gc_cycles": 0
+        },
+        "scroll": {
+          "step_ms": {
+            "p50": 0.003417,
+            "p95": 0.003834,
+            "max": 0.010084
+          },
+          "frame_ms": {
+            "p50": 0.547583,
+            "p95": 1.131625,
+            "max": 1.829708
+          },
+          "total_ms": {
+            "p50": 0.551042,
+            "p95": 1.135167,
+            "max": 1.839792
+          },
+          "allocated_mb_per_op": 0.12222144,
+          "gc_cycles": 0
+        },
+        "open_cpu_ms": 856.678292
+      }
+    }
+  },
+  "diagnostic": {
+    "control": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.217917,
+            "p95": 0.266167,
+            "max": 0.421584
+          },
+          "frame_ms": {
+            "p50": 0.706792,
+            "p95": 0.888709,
+            "max": 1.635459
+          },
+          "total_ms": {
+            "p50": 0.914292,
+            "p95": 1.073666,
+            "max": 1.923292
+          },
+          "allocated_mb_per_op": 2.83618464,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.143083,
+            "p95": 0.321375,
+            "max": 0.402583
+          },
+          "frame_ms": {
+            "p50": 0.689709,
+            "p95": 0.846667,
+            "max": 1.426958
+          },
+          "total_ms": {
+            "p50": 0.861834,
+            "p95": 1.091501,
+            "max": 1.802042
+          },
+          "allocated_mb_per_op": 2.84983832,
+          "gc_cycles": 1
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.002125,
+            "p95": 0.003083,
+            "max": 0.014166
+          },
+          "frame_ms": {
+            "p50": 0.273125,
+            "p95": 0.315292,
+            "max": 0.900792
+          },
+          "total_ms": {
+            "p50": 0.275083,
+            "p95": 0.318792,
+            "max": 0.915208
+          },
+          "allocated_mb_per_op": 0.06703752,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.044,
+            "p95": 0.0525,
+            "max": 0.107584
+          },
+          "frame_ms": {
+            "p50": 0.267083,
+            "p95": 0.29675,
+            "max": 0.6485
+          },
+          "total_ms": {
+            "p50": 0.310792,
+            "p95": 0.3485,
+            "max": 0.697125
+          },
+          "allocated_mb_per_op": 0.08055232000000001,
+          "gc_cycles": 0
+        }
+      }
+    },
+    "tail": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.202208,
+            "p95": 0.353167,
+            "max": 0.501542
+          },
+          "frame_ms": {
+            "p50": 0.756834,
+            "p95": 0.949958,
+            "max": 6.742917
+          },
+          "total_ms": {
+            "p50": 0.962751,
+            "p95": 1.157084,
+            "max": 6.811375
+          },
+          "allocated_mb_per_op": 2.91410008,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.132,
+            "p95": 0.31875,
+            "max": 0.491959
+          },
+          "frame_ms": {
+            "p50": 0.71525,
+            "p95": 0.946167,
+            "max": 3.202458
+          },
+          "total_ms": {
+            "p50": 0.871416,
+            "p95": 1.154291,
+            "max": 3.422458
+          },
+          "allocated_mb_per_op": 2.8778104,
+          "gc_cycles": 1
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.003208,
+            "p95": 0.004458,
+            "max": 0.01775
+          },
+          "frame_ms": {
+            "p50": 0.323667,
+            "p95": 0.378375,
+            "max": 5.639292
+          },
+          "total_ms": {
+            "p50": 0.326792,
+            "p95": 0.381209,
+            "max": 5.655417
+          },
+          "allocated_mb_per_op": 0.14479712,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.064375,
+            "p95": 0.073209,
+            "max": 0.15275
+          },
+          "frame_ms": {
+            "p50": 0.319833,
+            "p95": 0.358084,
+            "max": 0.473583
+          },
+          "total_ms": {
+            "p50": 0.384958,
+            "p95": 0.429626,
+            "max": 0.547959
+          },
+          "allocated_mb_per_op": 0.11284,
+          "gc_cycles": 0
+        }
+      }
+    },
+    "footnote": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.226792,
+            "p95": 0.36725,
+            "max": 0.971458
+          },
+          "frame_ms": {
+            "p50": 0.743125,
+            "p95": 0.988375,
+            "max": 1.64525
+          },
+          "total_ms": {
+            "p50": 0.959416,
+            "p95": 1.278209,
+            "max": 2.474791
+          },
+          "allocated_mb_per_op": 2.84436696,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.160166,
+            "p95": 0.337125,
+            "max": 0.479167
+          },
+          "frame_ms": {
+            "p50": 0.714,
+            "p95": 0.866667,
+            "max": 1.549375
+          },
+          "total_ms": {
+            "p50": 0.886708,
+            "p95": 1.135667,
+            "max": 2.031666
+          },
+          "allocated_mb_per_op": 2.859806,
+          "gc_cycles": 1
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.002125,
+            "p95": 0.00325,
+            "max": 0.017125
+          },
+          "frame_ms": {
+            "p50": 0.29575,
+            "p95": 0.360041,
+            "max": 0.937542
+          },
+          "total_ms": {
+            "p50": 0.297875,
+            "p95": 0.362125,
+            "max": 0.952334
+          },
+          "allocated_mb_per_op": 0.07510127999999999,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.062541,
+            "p95": 0.073667,
+            "max": 0.184125
+          },
+          "frame_ms": {
+            "p50": 0.292042,
+            "p95": 0.315125,
+            "max": 0.680959
+          },
+          "total_ms": {
+            "p50": 0.353709,
+            "p95": 0.382083,
+            "max": 0.749001
+          },
+          "allocated_mb_per_op": 0.09052384,
+          "gc_cycles": 0
+        }
+      }
+    },
+    "heading": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.233333,
+            "p95": 0.301291,
+            "max": 0.470458
+          },
+          "frame_ms": {
+            "p50": 1.070375,
+            "p95": 1.237708,
+            "max": 2.217459
+          },
+          "total_ms": {
+            "p50": 1.272583,
+            "p95": 1.482666,
+            "max": 2.39875
+          },
+          "allocated_mb_per_op": 2.8425498399999998,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.140209,
+            "p95": 0.338625,
+            "max": 0.472917
+          },
+          "frame_ms": {
+            "p50": 0.703458,
+            "p95": 0.960958,
+            "max": 3.194958
+          },
+          "total_ms": {
+            "p50": 0.854375,
+            "p95": 1.246625,
+            "max": 3.620958
+          },
+          "allocated_mb_per_op": 2.8316873599999997,
+          "gc_cycles": 1
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.001209,
+            "p95": 0.002458,
+            "max": 0.016375
+          },
+          "frame_ms": {
+            "p50": 0.593041,
+            "p95": 0.667875,
+            "max": 1.071209
+          },
+          "total_ms": {
+            "p50": 0.594125,
+            "p95": 0.66975,
+            "max": 1.082125
+          },
+          "allocated_mb_per_op": 0.07284264,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.04,
+            "p95": 0.049166,
+            "max": 0.119916
+          },
+          "frame_ms": {
+            "p50": 0.277666,
+            "p95": 0.298125,
+            "max": 0.654041
+          },
+          "total_ms": {
+            "p50": 0.318124,
+            "p95": 0.346333,
+            "max": 0.695208
+          },
+          "allocated_mb_per_op": 0.062194400000000004,
+          "gc_cycles": 0
+        }
+      }
+    },
+    "cell": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.217625,
+            "p95": 0.298791,
+            "max": 2.729917
+          },
+          "frame_ms": {
+            "p50": 0.689792,
+            "p95": 0.90925,
+            "max": 9.073041
+          },
+          "total_ms": {
+            "p50": 0.900958,
+            "p95": 1.056208,
+            "max": 9.168624
+          },
+          "allocated_mb_per_op": 2.94866272,
+          "gc_cycles": 1
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.126417,
+            "p95": 0.340334,
+            "max": 0.562042
+          },
+          "frame_ms": {
+            "p50": 0.675167,
+            "p95": 1.044667,
+            "max": 3.066125
+          },
+          "total_ms": {
+            "p50": 0.814209,
+            "p95": 1.441041,
+            "max": 3.837125
+          },
+          "allocated_mb_per_op": 2.8952403199999996,
+          "gc_cycles": 2
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.001083,
+            "p95": 0.001959,
+            "max": 0.014
+          },
+          "frame_ms": {
+            "p50": 0.286667,
+            "p95": 0.590584,
+            "max": 8.233875
+          },
+          "total_ms": {
+            "p50": 0.28775,
+            "p95": 0.591668,
+            "max": 8.246625
+          },
+          "allocated_mb_per_op": 0.17954872,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.0255,
+            "p95": 0.034833,
+            "max": 0.078083
+          },
+          "frame_ms": {
+            "p50": 0.281958,
+            "p95": 0.353834,
+            "max": 0.870333
+          },
+          "total_ms": {
+            "p50": 0.31075,
+            "p95": 0.416291,
+            "max": 0.9025
+          },
+          "allocated_mb_per_op": 0.12568608,
+          "gc_cycles": 0
+        }
+      }
+    },
+    "pause": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.091291,
+            "p95": 0.279542,
+            "max": 0.58175
+          },
+          "frame_ms": {
+            "p50": 0.868125,
+            "p95": 1.363875,
+            "max": 2.655458
+          },
+          "total_ms": {
+            "p50": 0.964333,
+            "p95": 1.524958,
+            "max": 3.237208
+          },
+          "allocated_mb_per_op": 19.6661552,
+          "gc_cycles": 10,
+          "idle_ms": {
+            "p50": 1.37725,
+            "p95": 4.104791,
+            "max": 6.051541
+          }
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.162167,
+            "p95": 0.279916,
+            "max": 0.60475
+          },
+          "frame_ms": {
+            "p50": 0.837333,
+            "p95": 1.386625,
+            "max": 3.266166
+          },
+          "total_ms": {
+            "p50": 0.996959,
+            "p95": 1.651834,
+            "max": 3.515166
+          },
+          "allocated_mb_per_op": 19.680348,
+          "gc_cycles": 11,
+          "idle_ms": {
+            "p50": 1.354833,
+            "p95": 2.550666,
+            "max": 5.465959
+          }
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.002417,
+            "p95": 0.003875,
+            "max": 0.017625
+          },
+          "frame_ms": {
+            "p50": 0.287333,
+            "p95": 0.544708,
+            "max": 1.362125
+          },
+          "total_ms": {
+            "p50": 0.289875,
+            "p95": 0.548541,
+            "max": 1.366833
+          },
+          "allocated_mb_per_op": 5.405126480000001,
+          "gc_cycles": 2,
+          "idle_ms": {
+            "p50": 1.028458,
+            "p95": 1.701042,
+            "max": 3.14275
+          }
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.051667,
+            "p95": 0.097417,
+            "max": 0.177375
+          },
+          "frame_ms": {
+            "p50": 0.274667,
+            "p95": 0.379208,
+            "max": 0.727792
+          },
+          "total_ms": {
+            "p50": 0.326625,
+            "p95": 0.535417,
+            "max": 0.783417
+          },
+          "allocated_mb_per_op": 5.41899624,
+          "gc_cycles": 3,
+          "idle_ms": {
+            "p50": 0.920625,
+            "p95": 1.622792,
+            "max": 3.671916
+          }
+        }
+      }
+    }
+  },
+  "algorithms": {
+    "find": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 0.087083,
+            "p95": 0.230458,
+            "max": 0.412958
+          },
+          "frame_ms": {
+            "p50": 15.659042,
+            "p95": 19.145417,
+            "max": 20.649334
+          },
+          "total_ms": {
+            "p50": 15.745,
+            "p95": 19.236792,
+            "max": 20.755709
+          },
+          "allocated_mb_per_op": 29.4491008,
+          "gc_cycles": 16
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.182875,
+            "p95": 0.231875,
+            "max": 0.312667
+          },
+          "frame_ms": {
+            "p50": 15.826708,
+            "p95": 19.62,
+            "max": 21.339125
+          },
+          "total_ms": {
+            "p50": 16.006833,
+            "p95": 19.806792,
+            "max": 21.531708
+          },
+          "allocated_mb_per_op": 29.46362816,
+          "gc_cycles": 16
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.002084,
+            "p95": 0.002834,
+            "max": 0.013166
+          },
+          "frame_ms": {
+            "p50": 0.278833,
+            "p95": 0.318334,
+            "max": 0.871167
+          },
+          "total_ms": {
+            "p50": 0.280958,
+            "p95": 0.322084,
+            "max": 0.883709
+          },
+          "allocated_mb_per_op": 0.06619728,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.043541,
+            "p95": 0.053166,
+            "max": 0.11775
+          },
+          "frame_ms": {
+            "p50": 0.275125,
+            "p95": 0.298792,
+            "max": 0.648542
+          },
+          "total_ms": {
+            "p50": 0.319625,
+            "p95": 0.350751,
+            "max": 0.698042
+          },
+          "allocated_mb_per_op": 0.08070767999999999,
+          "gc_cycles": 0
+        }
+      }
+    },
+    "ime": {
+      "before": {
+        "type": {
+          "step_ms": {
+            "p50": 5.726958,
+            "p95": 9.519,
+            "max": 11.49075
+          },
+          "frame_ms": {
+            "p50": 84.3655,
+            "p95": 89.632208,
+            "max": 110.370042
+          },
+          "total_ms": {
+            "p50": 91.048292,
+            "p95": 96.942668,
+            "max": 118.184625
+          },
+          "allocated_mb_per_op": 273.01175151999996,
+          "gc_cycles": 145
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 5.711416,
+            "p95": 9.61625,
+            "max": 10.75875
+          },
+          "frame_ms": {
+            "p50": 84.045375,
+            "p95": 89.644916,
+            "max": 102.940333
+          },
+          "total_ms": {
+            "p50": 91.005333,
+            "p95": 96.770543,
+            "max": 113.181958
+          },
+          "allocated_mb_per_op": 273.67916432,
+          "gc_cycles": 147
+        }
+      },
+      "after": {
+        "type": {
+          "step_ms": {
+            "p50": 0.002583,
+            "p95": 0.003458,
+            "max": 0.012375
+          },
+          "frame_ms": {
+            "p50": 0.261084,
+            "p95": 0.304458,
+            "max": 0.670708
+          },
+          "total_ms": {
+            "p50": 0.263626,
+            "p95": 0.307,
+            "max": 0.683083
+          },
+          "allocated_mb_per_op": 0.05938088,
+          "gc_cycles": 0
+        },
+        "backspace": {
+          "step_ms": {
+            "p50": 0.002541,
+            "p95": 0.003167,
+            "max": 0.009458
+          },
+          "frame_ms": {
+            "p50": 0.258416,
+            "p95": 0.282292,
+            "max": 0.442625
+          },
+          "total_ms": {
+            "p50": 0.260916,
+            "p95": 0.285042,
+            "max": 0.455375
+          },
+          "allocated_mb_per_op": 0.059042239999999996,
+          "gc_cycles": 0
+        }
+      }
+    }
+  }
+}

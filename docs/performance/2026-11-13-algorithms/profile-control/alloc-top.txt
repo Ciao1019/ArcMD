@@ -1,0 +1,32 @@
+File: after.test
+Type: alloc_space
+Time: 2026-11-13 06:38:24 CST
+Showing nodes accounting for 306.71MB, 92.82% of 330.45MB total
+Dropped 53 nodes (cum <= 1.65MB)
+Showing top 25 nodes out of 122
+      flat  flat%   sum%        cum   cum%
+  109.74MB 33.21% 33.21%   119.30MB 36.10%  github.com/egoist/mygo/internal/text.(*System).paragraph
+   38.21MB 11.56% 44.77%    48.23MB 14.60%  github.com/egoist/mygo/internal/text.(*Boundaries).Reset
+   16.09MB  4.87% 49.64%   209.72MB 63.47%  github.com/egoist/mygo/ui.shapeTextAligned
+   16.01MB  4.85% 54.49%    16.01MB  4.85%  github.com/Ciao1019/ArcMD/internal/app.pageStyle
+   15.52MB  4.70% 59.18%    15.52MB  4.70%  github.com/egoist/mygo/internal/text.(*Line).lineCarets
+   13.08MB  3.96% 63.14%    13.08MB  3.96%  slices.Clone[go.shape.[]int,go.shape.int] (inline)
+   13.03MB  3.94% 67.08%   132.32MB 40.04%  github.com/egoist/mygo/internal/text.(*System).layout
+      11MB  3.33% 70.41%       15MB  4.54%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).outlineList.func2.1
+    8.03MB  2.43% 72.84%    20.03MB  6.06%  fmt.Sprint
+    8.03MB  2.43% 75.27%    10.03MB  3.03%  github.com/go-text/typesetting/segmenter.(*Segmenter).Init
+       8MB  2.42% 77.69%        8MB  2.42%  reflect.unsafe_New
+    7.50MB  2.27% 79.96%     7.50MB  2.27%  strings.(*Builder).WriteString (inline)
+    7.50MB  2.27% 82.23%     9.50MB  2.88%  github.com/egoist/mygo/ui.(*spanCache).update
+    6.50MB  1.97% 84.20%       12MB  3.63%  internal/fmtsort.Sort
+    5.31MB  1.61% 85.81%     5.31MB  1.61%  internal/bytealg.MakeNoZero
+    3.50MB  1.06% 86.87%     3.50MB  1.06%  github.com/egoist/mygo/ui.(*Path).LineTo (inline)
+    3.50MB  1.06% 87.93%     3.50MB  1.06%  github.com/egoist/mygo/ui.coreDrop[go.shape.struct { github.com/Ciao1019/ArcMD/internal/editor.id string }] (inline)
+       3MB  0.91% 88.83%     9.06MB  2.74%  github.com/egoist/mygo/internal/text.(*coreText).shape
+    2.65MB   0.8% 89.64%   329.14MB 99.60%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+       2MB  0.61% 90.24%        2MB  0.61%  bytes.Clone (inline)
+       2MB  0.61% 90.85%   149.68MB 45.30%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).blockLayouter.func1
+       2MB  0.61% 91.45%        2MB  0.61%  github.com/go-text/typesetting/segmenter.(*Segmenter).initAttributes (inline)
+       2MB  0.61% 92.06%        2MB  0.61%  github.com/egoist/mygo/ui.LightTheme
+    1.50MB  0.45% 92.51%   210.74MB 63.77%  github.com/Ciao1019/ArcMD/internal/editor.View
+       1MB   0.3% 92.82%   178.22MB 53.93%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).layout

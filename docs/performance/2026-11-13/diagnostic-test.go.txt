@@ -1,0 +1,157 @@
+// TestPerformanceReview measures positions and delayed work outside the saved
+// README workload. It lives only in the diagnostic build overlay.
+func TestPerformanceReview(t *testing.T) {
+	mode := os.Getenv("ARCMD_REVIEW_MODE")
+	count := 100
+	if s := os.Getenv("ARCMD_PERF_SAMPLES"); s != "" {
+		var err error
+		count, err = strconv.Atoi(s)
+		if err != nil || count < 1 {
+			t.Fatal("invalid samples")
+		}
+	}
+	out := os.Getenv("ARCMD_PERF_OUTPUT")
+	if err := os.MkdirAll(out, 0755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(os.Getenv("ARCMD_PERF_FIXTURE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := model.Decode(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode == "footnote" {
+		note := model.NewBlock("footnote", "One diagnostic footnote.")
+		note.NoteLabel = "review"
+		doc.Blocks = append(doc.Blocks, note)
+		for _, leaf := range doc.Leaves() {
+			if leaf.Block.Kind == "paragraph" {
+				leaf.Block.Runs = append(leaf.Block.Runs, model.Run{Text: " [^review]"})
+				break
+			}
+		}
+	}
+	encoded, err := doc.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, tt := newTestApp(t)
+	tt.PerfPrepare()
+	tt.SetSize(1280, 800)
+	if err := vault.Write(root(a), "Review.arcmd", encoded); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("Review.arcmd")
+	tt.PerfFrame()
+	ed := a.doc.ed
+	if a.doc.loadErr != nil {
+		t.Fatal(a.doc.loadErr)
+	}
+	caret := -1
+	for i, leaf := range ed.Doc.Leaves() {
+		if (mode == "heading" && i > 0 && leaf.Block.Kind == "heading") || (mode == "cell" && leaf.Block.Kind == "cell") {
+			caret = leaf.End
+			break
+		}
+		if mode != "heading" && mode != "cell" && leaf.Block.Kind == "paragraph" {
+			caret = leaf.End
+			if mode != "tail" {
+				break
+			}
+		}
+	}
+	if caret < 0 {
+		t.Fatal("missing target leaf")
+	}
+	ed.SetSelection(caret, caret)
+	ed.RequestFocus = true
+	tt.PerfFrame()
+	if active, _ := tt.TextInputActive(); !active {
+		t.Fatal("missing focus")
+	}
+	before := ed.Text()
+	runtime.GC()
+	profile := os.Getenv("ARCMD_PERF_PROFILE")
+	if profile != "" {
+		f, err := os.Create(filepath.Join(out, "setup-heap.pprof"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		f, err = os.Create(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := map[string]any{"mode": mode, "samples_per_operation": count, "caret_utf16": caret, "fixture_characters": utf8.RuneCountInString(before), "timing": "one event + one CPU scene; buffered results; no snapshots"}
+	for _, action := range []string{"type", "backspace"} {
+		samples := make([]perfSample, count)
+		idle := make([]float64, 0, count)
+		var m0, m1 runtime.MemStats
+		runtime.ReadMemStats(&m0)
+		for i := range samples {
+			step, frame := tt.PerfOperation(action)
+			samples[i] = perfSample{float64(step) / 1e6, float64(frame) / 1e6, float64(step+frame) / 1e6}
+			if mode == "pause" {
+				idle = append(idle, float64(tt.PerfReviewIdle(500*time.Millisecond))/1e6)
+			}
+		}
+		runtime.ReadMemStats(&m1)
+		result[action] = map[string]any{"samples": samples, "idle_frames_ms": idle, "allocated_bytes": m1.TotalAlloc - m0.TotalAlloc, "gc_cycles": m1.NumGC - m0.NumGC}
+		if action == "type" {
+			at := model.ByteOffset(before, caret)
+			if ed.Text() != before[:at]+strings.Repeat("x", count)+before[at:] {
+				t.Fatal("typed text mismatch")
+			}
+		}
+		if action == "backspace" && ed.Text() != before {
+			t.Fatal("backspace did not restore text")
+		}
+	}
+	if profile != "" {
+		pprof.StopCPUProfile()
+		runtime.GC()
+		f, err := os.Create(filepath.Join(out, "after-heap.pprof"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "results.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"type", "backspace"} {
+		entry := result[action].(map[string]any)
+		samples := entry["samples"].([]perfSample)
+		frames := make([]float64, count)
+		totals := make([]float64, count)
+		for i, s := range samples {
+			frames[i], totals[i] = s.FrameMS, s.TotalMS
+		}
+		slices.Sort(frames)
+		slices.Sort(totals)
+		at := func(q float64) int { return int(math.Round(float64(count-1) * q)) }
+		t.Logf("%s %s frame p50=%.3f p95=%.3f total p50=%.3f p95=%.3f MB/op=%.3f", mode, action, frames[at(.5)], frames[at(.95)], totals[at(.5)], totals[at(.95)], float64(entry["allocated_bytes"].(uint64))/float64(count)/1e6)
+		if idle := entry["idle_frames_ms"].([]float64); len(idle) > 0 {
+			slices.Sort(idle)
+			t.Logf("%s delayed frame p50=%.3f p95=%.3f", action, idle[at(.5)], idle[at(.95)])
+		}
+	}
+}

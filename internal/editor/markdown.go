@@ -2,6 +2,8 @@ package editor
 
 import (
 	"fmt"
+	"html"
+	"regexp"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -132,7 +134,7 @@ func ImportMarkdown(source string) *document.Document {
 		}
 		return out
 	}
-	result.Blocks = append(result.Blocks, blocks(0, "", 0)...)
+	result.Blocks = append(result.Blocks, importDetails(blocks(0, "", 0))...)
 	if len(result.Blocks) == 0 {
 		result.Blocks = []*document.Block{document.NewBlock("paragraph", text)}
 	}
@@ -206,9 +208,28 @@ func ExportMarkdown(doc *document.Document) string {
 	var render func([]*document.Block) string
 	render = func(blocks []*document.Block) string {
 		var parts []string
-		for _, b := range blocks {
+		for i := 0; i < len(blocks); i++ {
+			b := blocks[i]
 			text := exportRuns(b.Runs)
 			switch b.Kind {
+			case "toggle":
+				// HTML's disclosure, its content the blocks indented under it.
+				var body []*document.Block
+				for i+1 < len(blocks) && blocks[i+1].Kind != "heading" && blocks[i+1].Indent > b.Indent {
+					inner := *blocks[i+1]
+					inner.Indent -= b.Indent + 1
+					body = append(body, &inner)
+					i++
+				}
+				open := "<details>"
+				if !b.Folded {
+					open = "<details open>"
+				}
+				text = open + "\n<summary>" + html.EscapeString(b.Text()) + "</summary>\n\n"
+				if len(body) > 0 {
+					text += render(body) + "\n"
+				}
+				text += "</details>"
 			case "footnote":
 				text = "[^" + b.NoteLabel + "]: " + strings.ReplaceAll(text, "\n", "\n    ")
 			case "heading":
@@ -280,11 +301,12 @@ func ExportMarkdown(doc *document.Document) string {
 }
 
 func exportRuns(runs []document.Run) string {
-	// Markdown has no text colors: runs that differ only in them merge, so
-	// marks don't break apart at a color.
+	// Markdown has no text colors or annotations: runs that differ only in
+	// them merge, so marks don't break apart at a color.
 	plain := make([]document.Run, len(runs))
 	for i, r := range runs {
 		r.Style.Color, r.Style.Highlight = "", ""
+		r.Style.Annotation, r.Style.AnnotationColor = "", ""
 		plain[i] = r
 	}
 	runs = document.Compact(plain)
@@ -366,4 +388,46 @@ func alertColor(children []*document.Block) (string, bool) {
 	start := document.Len(text) - document.Len(trimmed)
 	first.Runs = document.SliceRuns(first.Runs, start, document.Len(text))
 	return color, true
+}
+
+// detailsOpen matches the HTML block that opens a disclosure with its
+// summary, as ExportMarkdown writes a toggle; detailsClose the one that
+// closes it.
+var (
+	detailsOpen  = regexp.MustCompile(`(?is)^\s*<details(\s+open)?\s*>\s*<summary>(.*?)</summary>\s*$`)
+	detailsClose = regexp.MustCompile(`(?i)^\s*</details>\s*$`)
+)
+
+// importDetails turns HTML disclosures, kept as raw blocks, into toggles:
+// what is between <details><summary>…</summary> and </details> becomes
+// the toggle's content, indented under it. Unbalanced ones stay raw.
+func importDetails(blocks []*document.Block) []*document.Block {
+	var out []*document.Block
+	var open []*document.Block // the toggles being filled, innermost last
+	for _, b := range blocks {
+		if b.Kind == "raw" {
+			if m := detailsOpen.FindStringSubmatch(b.Text()); m != nil {
+				t := document.NewBlock("toggle", html.UnescapeString(strings.TrimSpace(stripTags(m[2]))))
+				t.Indent = len(open)
+				t.Folded = m[1] == ""
+				out = append(out, t)
+				open = append(open, t)
+				continue
+			}
+			if detailsClose.MatchString(b.Text()) && len(open) > 0 {
+				open = open[:len(open)-1]
+				continue
+			}
+		}
+		if len(open) > 0 {
+			b.Indent = min(12, b.Indent+len(open))
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// stripTags drops HTML tags from a summary's text.
+func stripTags(s string) string {
+	return regexp.MustCompile(`<[^>]*>`).ReplaceAllString(s, "")
 }

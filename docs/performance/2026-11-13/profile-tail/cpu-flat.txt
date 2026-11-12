@@ -1,0 +1,38 @@
+File: review.test
+Type: cpu
+Time: 2026-11-13 05:45:47 CST
+Duration: 3.26s, Total samples = 2.90s (89.06%)
+Showing nodes accounting for 2.80s, 96.55% of 2.90s total
+Dropped 38 nodes (cum <= 0.01s)
+Showing top 30 nodes out of 91
+      flat  flat%   sum%        cum   cum%
+     1.19s 41.03% 41.03%      1.19s 41.03%  runtime.decoderune
+     0.54s 18.62% 59.66%      1.25s 43.10%  github.com/egoist/mygo/internal/platform.UTF16ByteOffset
+     0.35s 12.07% 71.72%      0.36s 12.41%  unicode/utf16.RuneLen (inline)
+     0.31s 10.69% 82.41%      0.93s 32.07%  github.com/egoist/mygo/internal/platform.UTF16Len (inline)
+     0.12s  4.14% 86.55%      0.34s 11.72%  github.com/Ciao1019/ArcMD/internal/document.ByteOffset (inline)
+     0.07s  2.41% 88.97%      0.07s  2.41%  runtime.memmove
+     0.05s  1.72% 90.69%      0.05s  1.72%  runtime.mmap
+     0.05s  1.72% 92.41%      0.05s  1.72%  runtime.pthread_cond_signal
+     0.04s  1.38% 93.79%      0.04s  1.38%  runtime.madvise
+     0.02s  0.69% 94.48%      0.02s  0.69%  runtime.memclrNoHeapPointers
+     0.02s  0.69% 95.17%      0.04s  1.38%  runtime.tryDeferToSpanScan
+     0.01s  0.34% 95.52%      0.40s 13.79%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).lineRange
+     0.01s  0.34% 95.86%      0.03s  1.03%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).paint
+     0.01s  0.34% 96.21%      0.05s  1.72%  runtime.scanObject
+     0.01s  0.34% 96.55%      0.02s  0.69%  runtime.scanObjectsSmall
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).View
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).View.func3
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).documentContent.func3
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).main
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1
+         0     0% 96.55%      0.04s  1.38%  github.com/Ciao1019/ArcMD/internal/app.(*App).main.func1.1
+         0     0% 96.55%      2.68s 92.41%  github.com/Ciao1019/ArcMD/internal/app.TestPerformanceReview
+         0     0% 96.55%      1.10s 37.93%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).ReplaceText
+         0     0% 96.55%      0.82s 28.28%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).boundary
+         0     0% 96.55%      1.38s 47.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).clamp
+         0     0% 96.55%      0.41s 14.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).slice
+         0     0% 96.55%      0.41s 14.14%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).sync
+         0     0% 96.55%      1.38s 47.59%  github.com/Ciao1019/ArcMD/internal/editor.(*Buffer).validRange
+         0     0% 96.55%      1.79s 61.72%  github.com/Ciao1019/ArcMD/internal/editor.(*Editor).ReplaceText

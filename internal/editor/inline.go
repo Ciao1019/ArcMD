@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -321,43 +322,117 @@ type noteTarget struct {
 	id            string
 }
 
+// Only blocks with effective references need to participate in renumbering.
+// A text edit cannot change definition labels or the order of blocks.
+type noteReferences struct {
+	id     string
+	start  int
+	labels []string
+}
+
+func referencedNotes(b *document.Block, text string) []string {
+	if literalBlock(b.Kind) || !strings.Contains(text, "[^") {
+		return nil
+	}
+	var labels []string
+	for _, token := range inlineTokens(text) {
+		if token.note != "" && tokenAllowed(b, document.Len(text[:token.start]), document.Len(text[:token.end])) {
+			labels = append(labels, token.note)
+		}
+	}
+	return labels
+}
+
 func (e *Editor) collectNotes() {
 	if e.notesDoc == e.Doc && e.notesRevision == e.Revision() {
 		return
 	}
+	if change, ok := e.TextChangeSince(e.notesRevision); ok && e.notesDoc == e.Doc {
+		e.notesRevision = e.Revision()
+		if len(e.notes) == 0 {
+			return // text-only edits cannot create a footnote definition
+		}
+		delta := change.AfterEnd - change.BeforeEnd
+		for label, note := range e.notes {
+			if note.start > change.Start {
+				note.start += delta
+				e.notes[label] = note
+			}
+		}
+		at := sort.Search(len(e.noteRefs), func(i int) bool { return e.noteRefs[i].start >= change.Start })
+		labels := referencedNotes(e.Engine.LeafAt(change.Start).Block, change.After)
+		var previous []string
+		present := at < len(e.noteRefs) && e.noteRefs[at].id == change.ID
+		if present {
+			previous = e.noteRefs[at].labels
+		}
+		for i := at; i < len(e.noteRefs); i++ {
+			if e.noteRefs[i].start > change.Start {
+				e.noteRefs[i].start += delta
+			}
+		}
+		if !slices.Equal(previous, labels) {
+			switch {
+			case present && len(labels) == 0:
+				e.noteRefs = slices.Delete(e.noteRefs, at, at+1)
+			case present:
+				e.noteRefs[at].labels = labels
+			default:
+				e.noteRefs = slices.Insert(e.noteRefs, at, noteReferences{change.ID, change.Start, labels})
+			}
+			e.numberNotes()
+		}
+		return
+	}
 	e.notesDoc, e.notesRevision = e.Doc, e.Revision()
-	defer func() { e.notesKey = e.buildNoteKey() }()
+	e.noteRefs, e.noteOrder = nil, nil
+	e.notesKey = ""
 	e.notes = map[string]noteTarget{}
+	if !e.Doc.HasKind("footnote") {
+		// Only references to a definition are numbered, so a page without
+		// one has nothing to number: skip the pass over all its text,
+		// which every keystroke on a long page would otherwise pay.
+		return
+	}
 	leaves := e.Doc.Leaves()
 	for _, l := range leaves {
 		if l.Block.Kind == "footnote" {
 			if _, exists := e.notes[l.Block.NoteLabel]; !exists {
 				e.notes[l.Block.NoteLabel] = noteTarget{start: l.Start, id: l.Block.ID}
+				e.noteOrder = append(e.noteOrder, l.Block.NoteLabel)
 			}
 		}
+	}
+	for _, l := range leaves {
+		if labels := referencedNotes(l.Block, l.Block.Text()); len(labels) > 0 {
+			e.noteRefs = append(e.noteRefs, noteReferences{l.Block.ID, l.Start, labels})
+		}
+	}
+	e.numberNotes()
+}
+
+func (e *Editor) numberNotes() {
+	for label, note := range e.notes {
+		note.number = 0
+		e.notes[label] = note
 	}
 	n := 0
-	for _, l := range leaves {
-		s := l.Block.Text()
-		for _, t := range inlineTokens(s) {
-			note, ok := e.notes[t.note]
-			if ok && note.number == 0 && tokenAllowed(l.Block, document.Len(s[:t.start]), document.Len(s[:t.end])) {
-				n++
-				note.number = n
-				e.notes[t.note] = note
-			}
+	assign := func(label string) {
+		if note, ok := e.notes[label]; ok && note.number == 0 {
+			n++
+			note.number = n
+			e.notes[label] = note
 		}
 	}
-	for _, l := range leaves {
-		if l.Block.Kind == "footnote" {
-			note := e.notes[l.Block.NoteLabel]
-			if note.number == 0 {
-				n++
-				note.number = n
-				e.notes[l.Block.NoteLabel] = note
-			}
+	for _, refs := range e.noteRefs {
+		for _, label := range refs.labels {
+			assign(label)
 		}
 	}
+	for _, label := range e.noteOrder {
+		assign(label)
+	}
+	e.notesKey = e.buildNoteKey()
 }
 func (e *Editor) noteKey() string { return e.notesKey }
 func (e *Editor) buildNoteKey() string {

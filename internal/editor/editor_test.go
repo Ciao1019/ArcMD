@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -367,6 +368,38 @@ func TestOutlineJumpsToHeading(t *testing.T) {
 	}
 }
 
+// A long outline builds only the rows near what it shows, keeping the
+// others' room so that it scrolls as far as before.
+func TestLongOutlineBuildsRowsInView(t *testing.T) {
+	var md strings.Builder
+	md.WriteString("# Title\n\n")
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&md, "## Heading %d\n\ntext\n\n", i)
+	}
+	e := New(md.String())
+	open := true
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{Width: w, Theme: c.Theme(), Outline: open, SetOutline: func(o bool) { open = o }})
+	}, 1400, 650)
+	tt.Frame()
+	if !tt.HasText("Heading 1") || tt.HasText("Heading 300") {
+		t.Fatal("rows out of view were built")
+	}
+	if e.outlineState.list.MaxY < 300*outlineRow-650 {
+		t.Fatal("outline lost the room of the rows out of view", e.outlineState.list.MaxY)
+	}
+	e.outlineState.list.Y = math.MaxFloat32
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText("Heading 300") || tt.HasText("Heading 1") {
+		t.Fatal("scrolled outline does not show its end", e.outlineState.list.Y)
+	}
+	if err := tt.Click("跳到 Heading 300"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOutlineCollapses(t *testing.T) {
 	e := outlineDoc()
 	open := true
@@ -723,39 +756,21 @@ func TestBlockMenuTurnsIndentsAndDeletes(t *testing.T) {
 	}
 }
 
-func TestTextColorPanelAndExport(t *testing.T) {
+func TestTextColorsAndExport(t *testing.T) {
 	e, tt := newTester("Hello world")
 	focus(e, tt)
+	// The selection bar has no color button: hand-drawn marks stand in for
+	// it, and colors stay in the command bar.
 	e.SetSelection(6, 11)
 	tt.Frame()
-	if err := tt.Click("文字颜色"); err != nil {
-		t.Fatal(err)
+	if tt.Click("文字颜色") == nil || tt.Click("应用颜色") == nil {
+		t.Fatal("selection bar still has a color button")
 	}
-	if !e.colorPanel {
-		t.Fatal("panel did not open")
-	}
-	if err := tt.Click("字体颜色：红色"); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.Click("背景颜色：浅蓝"); err != nil {
-		t.Fatal(err)
-	}
+	red, blue := "red", "light-blue"
+	e.Engine.SetTextColor(&red, &blue)
 	r := e.Doc.Blocks[0].Runs[1]
 	if r.Text != "world" || r.Style.Color != "red" || r.Style.Highlight != "light-blue" {
 		t.Fatal("colors", e.Doc.Blocks[0].Runs)
-	}
-	// "A" applies the last colors to another selection.
-	e.SetSelection(0, 5)
-	tt.Frame()
-	if err := tt.Click("应用颜色"); err != nil {
-		t.Fatal(err)
-	}
-	if s := e.Doc.Blocks[0].Runs[0].Style; s.Color != "red" || s.Highlight != "light-blue" {
-		t.Fatal("apply last", s)
-	}
-	tt.Key(0, ui.KeyEscape)
-	if e.colorPanel {
-		t.Fatal("escape")
 	}
 	// Colors don't split Markdown marks.
 	e.SetSelection(0, 11)
@@ -763,10 +778,8 @@ func TestTextColorPanelAndExport(t *testing.T) {
 	if md := ExportMarkdown(e.Doc); md != "**Hello world**\n" {
 		t.Fatalf("export %q", md)
 	}
-	tt.Click("文字颜色")
-	if err := tt.Click("恢复默认"); err != nil {
-		t.Fatal(err)
-	}
+	none := ""
+	e.Engine.SetTextColor(&none, &none)
 	for _, r := range e.Doc.Blocks[0].Runs {
 		if r.Style.Color != "" || r.Style.Highlight != "" {
 			t.Fatal("reset", r.Style)
