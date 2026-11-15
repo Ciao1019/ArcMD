@@ -6,7 +6,6 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
-	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -47,8 +46,12 @@ func (a *App) sees(d dragged) { a.carrying = &d }
 // it reports whether one is over it, opens s after it rests there, and
 // moves it to the end of s's root when let go.
 func (a *App) spaceIconDrag(c *ui.Context, b ui.Element, s *space.Space, on bool) bool {
+	if s.IsExternal() {
+		return false
+	}
 	if d, ok := ui.Drop[dragged](b); ok {
 		a.spaceSpring = spaceSpring{}
+		a.dragGrab.consumed = true
 		if d.space != s.ID {
 			a.moveAcross(d.space, d.rel, s.ID, "")
 		}
@@ -85,6 +88,9 @@ func (a *App) spacesMenu(m *ui.Menu, sp *space.Space, rel string) {
 	}
 	m.Submenu(i18n.T("移到空间"), func(sub *ui.Menu) {
 		for _, s := range a.state.Spaces {
+			if s.IsExternal() {
+				continue
+			}
 			name := s.Name
 			if s.Icon != "" {
 				name = s.Icon + " " + s.Name
@@ -106,8 +112,12 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	if src == nil || dst == nil || src == dst {
 		return ""
 	}
+	moving := a.residentDocument(src.ID, rel)
 	if !a.flush() {
 		return ""
+	}
+	if moving != nil {
+		rel = moving.rel
 	}
 	to, copied, err := a.moveWithResources(src, rel, dst, dir)
 	if err != nil {
@@ -116,13 +126,19 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	}
 	if copied {
 		// Another disk: the copy is there; the original goes to the trash.
-		if p, err := vault.Resolve(src.Root, rel); err == nil {
+		if p, err := resolveFile(src, rel); err == nil {
 			if err := a.trashItem(p); err != nil {
 				a.notify("已复制 %s 到「%s」，但未能将原件移到废纸篓。%v", path.Base(rel), dst.Name, err)
 			}
 		}
 	}
 	a.state.MovedAcross(fromID, rel, toID, to)
+	if a.dragGrab.active && a.dragGrab.space == fromID && a.dragGrab.rel == rel {
+		a.dragGrab.space, a.dragGrab.rel = toID, to
+	}
+	if src.IsExternal() {
+		delete(src.ExternalFiles, rel)
+	}
 	if dir != "" {
 		dst.SetExpanded(dir, true)
 	}
@@ -142,7 +158,9 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	if follow && a.state.ActiveSpace() != dst {
 		a.followTo(dst)
 	}
-	a.offerUndo(i18n.T("已移到空间「")+dst.Name+"」", path.Base(to), func() { a.moveAcross(toID, to, fromID, parentDir(rel)) })
+	if !src.IsExternal() {
+		a.offerUndo(i18n.T("已移到空间「")+dst.Name+"」", path.Base(to), func() { a.moveAcross(toID, to, fromID, parentDir(rel)) })
+	}
 	return to
 }
 

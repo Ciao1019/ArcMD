@@ -116,13 +116,18 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				ui.Column(c.Key("header-pad")).Margin(8, 0, 0, 0).Children(func() { a.spaceHeader(c, sp, live) })
 			}
 			nodes, err := a.treeOf(sp)
+			pins := pinnedNodes(sp, nodes)
 			tree := ui.Scroll(c.Key("tree")).Grow(1).MinHeight(0).TrackScroll(&a.session(sp.ID).tree)
+			tb := tree.Bounds()
 			var prev []rowFrame
+			var seams []seamPoint
+			restingPins := len(pins)
 			highlight := 0
 			if live {
 				prev = append([]rowFrame(nil), a.rows...)
 				a.rows = a.rows[:0]
-				a.listDrag(c, tree, prev)
+				over := a.listDrag(c, tree, prev)
+				a.slot, restingPins = a.computeSlot(sp, pins, over)
 				highlight = a.dropSection(a.listDrop)
 				tree.ContextMenu(func(m *ui.Menu) { a.listMenu(m, sp) })
 			}
@@ -130,7 +135,6 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				if err != nil {
 					ui.Text(c, i18n.T("读取文件夹失败。")+err.Error()).TextColor(t.Danger).FontSize(12).Padding(4, 10)
 				}
-				pins := pinnedNodes(sp, nodes)
 				// Cra's sections: 3 DIPs on top, the pinned rows (with the
 				// placeholder taking a drag while there are none), the line,
 				// then the rest. The section a drop pins or unpins into lights up.
@@ -139,29 +143,38 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				// moves its views: rows coming fade in, rows going fade out
 				// where they were, the rest slide, over 0.22 s.
 				pinned := ui.Column(c.Key("pinned")).Gap(rowGap).Radius(10).Transition(sectionMove)
-				if highlight == sectionPinned && len(pins) > 0 {
+				if highlight == sectionPinned && restingPins > 0 {
 					pinned.Background(hoverFill(t))
 				}
 				if live {
 					a.tourMark("pinned", pinned)
 				}
 				pinned.Children(func() {
+					slotHere := live && a.slot.active && a.slot.parent == pinRoot
 					for i, n := range pins {
 						// Folded, the section keeps only the pin holding the
 						// open document in sight.
 						if sp.PinsCollapsed && !a.holdsOpen(sp, n.Path) {
 							continue
 						}
-						a.nodeRow(c, sp, n, 0, pinRoot, i, live)
+						if slotHere && !a.slot.emitted && a.slot.index <= i {
+							a.dragSlot(c, 0, pinRoot, a.slot.index, a.slot.self)
+							a.slot.emitted = true
+						}
+						a.nodeRow(c, sp, n, 0, pinRoot, i, live, prev)
 						if n.Dir {
-							a.folderContent(c, sp, n, 1, live)
+							a.folderContent(c, sp, n, 1, live, prev)
 						}
 					}
-					if len(pins) == 0 && live && a.listDragging {
+					if slotHere && !a.slot.emitted {
+						a.dragSlot(c, 0, pinRoot, a.slot.index, a.slot.self)
+						a.slot.emitted = true
+					}
+					if live && a.listDragging && restingPins == 0 && !(a.slot.active && a.slot.parent == pinRoot) {
 						a.pinPlaceholder(c, highlight == sectionPinned)
 					}
 				})
-				today := a.showsAny(sp, nodes)
+				today := a.showsAny(sp, nodes) || live && a.slot.active && a.slot.parent != pinRoot
 				a.divider(c, live, today)
 				rest := ui.Column(c.Key("today")).Gap(rowGap).Radius(10).Transition(sectionMove)
 				if highlight == sectionToday {
@@ -171,7 +184,7 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 					if live {
 						a.splitSidebarRow(c, sp)
 					}
-					a.nodes(c, sp, nodes, 0, "", live)
+					a.nodes(c, sp, nodes, 0, "", live, prev, &seams)
 					if err == nil && live {
 						a.newDocRow(c)
 					}
@@ -179,7 +192,7 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				ui.Box(c).Height(40)
 			})
 			if live {
-				a.dropLine(c)
+				a.updateInsertSeam(c, sp, tb, seams)
 			}
 		})
 	}
@@ -207,7 +220,7 @@ func (a *App) divider(c *ui.Context, live, shown bool) {
 	}
 	line := ui.Box(c.Key("divider")).Height(h).Transition(sectionMove)
 	if live {
-		b := line.LayoutBounds()
+		b := line.Bounds()
 		a.dividerY = b.Y + b.H/2
 	}
 	if shown {
@@ -222,19 +235,55 @@ func (a *App) divider(c *ui.Context, live, shown bool) {
 // a dashed row saying "拖到此处置顶", lit while the drop would land there.
 func (a *App) pinPlaceholder(c *ui.Context, active bool) {
 	t := c.Theme()
-	row := ui.Row(c.Key("pin-placeholder")).Height(rowHeight).Radius(10).Gap(6).Center()
-	a.rows = append(a.rows, rowFrame{placeholder: true, parent: pinRoot, r: row.LayoutBounds()})
+	row := ui.Row(c.Key("pin-placeholder")).Height(rowHeight).Radius(10).Gap(6).Center().
+		Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: &ui.Motion{Scale: 0.98}})
+	a.rows = append(a.rows, rowFrame{placeholder: true, parent: pinRoot, r: row.Bounds()})
 	border := t.TextMuted.Alpha(0.3)
 	if active {
 		border = t.TextMuted.Alpha(0.6)
 		row.Background(hoverFill(t))
 	}
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
-		p.StrokeDashed(ui.Rect{X: r.X + 0.5, Y: r.Y + 0.5, W: r.W - 1, H: r.H - 1}, border, 10, 1)
+		p.StrokeDashed(ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: r.W - 1, H: r.H - 5}, border, 10, 1)
 	})
 	row.Children(func() {
 		ui.Icon(c, iconPin).FontSize(11).TextColor(t.TextMuted)
 		ui.Text(c, i18n.T("拖到此处置顶")).FontSize(12).FontWeight(500).TextColor(t.TextMuted).NoWrap()
+	})
+}
+
+// dragSlot is the dashed placeholder holding the target insertion spot in
+// the list while a row is lifted onto the floating drag card.
+func (a *App) dragSlot(c *ui.Context, depth int, parent string, index int, self bool) {
+	t := c.Theme()
+	row := ui.Box(c.Key("drag-slot")).Height(rowHeight).Background(ui.Transparent)
+	var enter *ui.Motion
+	if !a.slot.fromList {
+		enter = &ui.Motion{Scale: 0.97}
+	}
+	row.Transition(ui.ElementTransition{
+		Animation: &listAnim,
+		Position:  true,
+		Match:     "sidebar-drag-slot",
+		Enter:     enter,
+	})
+	a.rows = append(a.rows, rowFrame{
+		slot:     true,
+		slotSelf: self,
+		parent:   parent,
+		index:    index,
+		depth:    depth,
+		r:        row.Bounds(),
+		target:   row.LayoutBounds(),
+	})
+	inset := float32(depth * rowIndent)
+	fill, border := dashedSlotColors(t, 1)
+	row.Draw(func(p *ui.Painter, r ui.Rect) {
+		fr := ui.Rect{X: r.X + inset + 0.5, Y: r.Y + 2.5, W: max(0, r.W-inset-1), H: max(0, r.H-5)}
+		if fill.A > 0 {
+			p.Fill(fr, fill, 10)
+		}
+		p.StrokeDashed(fr, border, 10, 1)
 	})
 }
 
@@ -354,15 +403,35 @@ func (a *App) dropZone(e ui.Element, dir string) bool {
 // nodes builds the rows of folders and documents of the folder parent, the
 // open folders' children under them. What is pinned or a favorite shows
 // there alone: it has no row here.
-func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth int, parent string, live bool) {
+func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth int, parent string, live bool, prev []rowFrame, seams *[]seamPoint) {
+	slotHere := live && a.slot.active && a.slot.parent == parent
+	shownRoot := 0
 	for i, n := range nodes {
 		if a.hidden(sp, n) {
 			continue
 		}
-		a.nodeRow(c, sp, n, depth, parent, i, live)
-		if n.Dir {
-			a.folderContent(c, sp, n, depth+1, live)
+		if slotHere && !a.slot.emitted && a.slot.index <= i {
+			a.dragSlot(c, depth, parent, a.slot.index, a.slot.self)
+			a.slot.emitted = true
 		}
+		if live && depth == 0 && parent == "" && shownRoot > 0 && len(a.rows) > 0 {
+			last := a.rows[len(a.rows)-1].r
+			seamY := last.Y + last.H + float32(rowGap)/2
+			if a.insertSeam.open && a.insertSeam.space == sp.ID && a.insertSeam.index == i {
+				a.inlineNewDocRow(c, i, seamY)
+			} else if seams != nil && last.W > 0 {
+				*seams = append(*seams, seamPoint{index: i, y: seamY})
+			}
+		}
+		shownRoot++
+		a.nodeRow(c, sp, n, depth, parent, i, live, prev)
+		if n.Dir {
+			a.folderContent(c, sp, n, depth+1, live, prev)
+		}
+	}
+	if slotHere && !a.slot.emitted {
+		a.dragSlot(c, depth, parent, a.slot.index, a.slot.self)
+		a.slot.emitted = true
 	}
 }
 
@@ -375,9 +444,9 @@ func (a *App) holdsOpen(sp *space.Space, rel string) bool {
 // folderContent is what a folder shows under its row: open, its rows; closed,
 // the open document when it holds it, one level in, as Arc keeps the open
 // tab of a closed folder in sight.
-func (a *App) folderContent(c *ui.Context, sp *space.Space, n *vault.Node, depth int, live bool) {
+func (a *App) folderContent(c *ui.Context, sp *space.Space, n *vault.Node, depth int, live bool, prev []rowFrame) {
 	if sp.IsExpanded(n.Path) {
-		a.folderBody(c, sp, n, depth, live)
+		a.folderBody(c, sp, n, depth, live, prev)
 		return
 	}
 	if !a.holdsOpen(sp, n.Path) || a.doc.rel == n.Path {
@@ -400,7 +469,7 @@ func (a *App) folderContent(c *ui.Context, sp *space.Space, n *vault.Node, depth
 			}
 		}
 	}
-	a.nodeRow(c, sp, doc, depth, parent, index, live)
+	a.nodeRow(c, sp, doc, depth, parent, index, live, prev)
 }
 
 // columnLook is the look a space's page is drawn in.
@@ -412,14 +481,19 @@ func (a *App) columnLook(sp *space.Space) spaceLook {
 }
 
 // folderBody is an open folder's rows, or a line saying it is empty.
-func (a *App) folderBody(c *ui.Context, sp *space.Space, n *vault.Node, depth int, live bool) {
+func (a *App) folderBody(c *ui.Context, sp *space.Space, n *vault.Node, depth int, live bool, prev []rowFrame) {
 	if !a.showsAny(sp, n.Children) {
+		if live && a.slot.active && a.slot.parent == n.Path && !a.slot.emitted {
+			a.dragSlot(c, depth, n.Path, a.slot.index, a.slot.self)
+			a.slot.emitted = true
+			return
+		}
 		ui.Text(c.Key("empty:"+n.Path), i18n.T("空文件夹")).FontSize(12).TextColor(c.Theme().TextMuted).
 			PaddingStart(float32(10 + depth*rowIndent + 27)).Height(28).
 			Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: &ui.Motion{Y: -6}, Exit: &ui.Motion{}})
 		return
 	}
-	a.nodes(c, sp, n.Children, depth, n.Path, live)
+	a.nodes(c, sp, n.Children, depth, n.Path, live, prev, nil)
 }
 
 // docCount is how many documents a folder holds, at any depth, as a closed
@@ -436,64 +510,184 @@ func docCount(n *vault.Node) int {
 	return k
 }
 
-// nodeRow is a folder's or a document's row, as Cra draws Arc's: a click
-// opens it, its context menu offers renaming, and it drags to another
-// place in the list, into a folder, across the line to pin or unpin it,
-// or onto the favorites.
-func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, parent string, index int, live bool) {
+// nodeRow is a folder's or a document's row: a click opens it, its context
+// menu offers renaming, and dragging lifts it onto a floating card while a
+// dashed slot holds where it will land in the list, into a folder, across
+// the divider to pin or unpin, or onto the favorites.
+func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, parent string, index int, live bool, prev []rowFrame) {
 	t := c.Theme()
 	chosen := !n.Dir && a.doc != nil && a.doc.space == sp && a.doc.rel == n.Path
 	open := n.Dir && sp.IsExpanded(n.Path)
 	renaming := live && a.renameSpace == sp.ID && a.renaming == n.Path
+	pinned := !n.Dir && inPins(sp, n.Path)
+	opened := pinned && a.isOpen(sp, n.Path)
+	inset := float32(depth * rowIndent)
+
+	row := ui.Row(c.Key("node:" + n.Path))
+	// The row dragged to another space keeps dragging from its page,
+	// which no longer acts.
+	carried := a.carried != nil && *a.carried == dragged{sp.ID, n.Path}
+	if live && !renaming || carried {
+		row.Drag(dragged{sp.ID, n.Path})
+	}
+	dragging := (live || carried) && row.Dragging()
+	if dragging {
+		a.sees(dragged{sp.ID, n.Path})
+		px, py, _ := c.Root().PointerPosition()
+		if !a.dragGrab.active || a.dragGrab.space != sp.ID || a.dragGrab.rel != n.Path {
+			var rb ui.Rect
+			for _, pf := range prev {
+				if pf.rel == n.Path {
+					rb = pf.r
+					break
+				}
+			}
+			if rb.W <= 0 {
+				rb = row.Bounds()
+			}
+			cardX, cardY, cardW := rb.X+inset, rb.Y, rb.W-inset
+			if cardW <= 0 {
+				cardW = sidebarWidth - 2*rowInset - inset
+			}
+			gx := min(max(px-cardX, 8), max(8, cardW-8))
+			gy := min(max(py-cardY, 4), rowHeight-4)
+			a.dragGrab = dragGrab{
+				active:     true,
+				space:      sp.ID,
+				rel:        n.Path,
+				dir:        n.Dir,
+				openFolder: open,
+				holdsOpen:  a.holdsOpen(sp, n.Path),
+				dim:        pinned && !opened,
+				title:      n.Title(),
+				grabX:      gx,
+				grabY:      gy,
+				cardW:      cardW,
+				x:          px - gx,
+				y:          py - gy,
+				started:    c.Now(),
+			}
+		} else {
+			a.dragGrab.x = px - a.dragGrab.grabX
+			a.dragGrab.y = py - a.dragGrab.grabY
+			a.dragGrab.openFolder = open
+			a.dragGrab.holdsOpen = a.holdsOpen(sp, n.Path)
+			a.dragGrab.dim = pinned && !opened
+		}
+		// Keep the source node alive with zero layout footprint so MyGo's
+		// drag stays active while the floating card owns all visuals.
+		row.Absolute().Size(0, 0).Background(ui.Transparent).Transition(ui.ElementTransition{Colors: true})
+		return
+	}
+
 	gap := float32(10)
 	if n.Dir {
 		gap = 11
 	}
-	row := ui.Row(c.Key("node:" + n.Path)).Height(rowHeight).PaddingStart(float32(10 + depth*rowIndent)).PaddingEnd(8).
+	row.Height(rowHeight).PaddingStart(float32(10 + depth*rowIndent)).PaddingEnd(8).
 		Gap(gap).AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Label(n.Title())
 	if n.Dir {
 		row.Role(ui.RoleTreeItem).Expanded(open)
 	} else {
 		row.Role(ui.RoleTreeItem).Selected(chosen)
 	}
-	// Rows opening in a folder drop in from just above; others fade in
-	// place, and all slide to new places, as Cra's list moves them.
-	enter := &ui.Motion{}
-	if depth > 0 {
-		enter.Y = -6
+	if sp.IsExternal() {
+		row.Tooltip(sp.ExternalFiles[n.Path])
 	}
-	row.Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: enter, Exit: &ui.Motion{}})
-	// The row dragged to another space keeps dragging from its page,
-	// which no longer acts.
-	carried := a.carried != nil && *a.carried == dragged{sp.ID, n.Path}
-	if live {
-		a.rows = append(a.rows, rowFrame{rel: n.Path, parent: parent, index: index, depth: depth, dir: n.Dir, open: open, r: row.LayoutBounds()})
+
+	justLanded := live && a.dragGrab.active && !a.dragGrab.consumed && a.dragGrab.space == sp.ID && a.dragGrab.rel == n.Path
+	if justLanded {
+		if !a.reduceMotion && !renaming {
+			a.dragSettle = dragSettle{
+				active:     true,
+				space:      sp.ID,
+				rel:        n.Path,
+				dir:        n.Dir,
+				openFolder: open,
+				holdsOpen:  a.holdsOpen(sp, n.Path),
+				dim:        pinned && !opened,
+				title:      n.Title(),
+				fromX:      a.dragGrab.x,
+				fromY:      a.dragGrab.y,
+				fromW:      a.dragGrab.cardW,
+				started:    c.Now(),
+			}
+		}
+		a.dragGrab = dragGrab{}
 	}
-	if live && !renaming || carried {
-		row.Drag(dragged{sp.ID, n.Path})
-	}
-	d := a.listDrop
-	var nudge float32
-	if d != nil && d.line {
-		switch n.Path {
-		case d.above:
-			nudge = -listNudge
-		case d.below:
-			nudge = listNudge
+	settling := live && !renaming && a.dragSettle.active && a.dragSettle.space == sp.ID && a.dragSettle.rel == n.Path
+	var settleK float32
+	if settling {
+		elapsed := c.Now().Sub(a.dragSettle.started)
+		if a.reduceMotion || elapsed >= dragSettleDur {
+			a.dragSettle = dragSettle{}
+			settling = false
+		} else {
+			settleK = listEase(min(max(float32(elapsed)/float32(dragSettleDur), 0), 1))
 		}
 	}
-	row.AnimatePose(ui.Pose{Y: nudge}, listAnim)
-	into := live && d != nil && d.kind == dropInto && d.parent == n.Path
-	dragging := (live || carried) && row.Dragging()
-	if dragging {
-		a.sees(dragged{sp.ID, n.Path})
+
+	if justLanded {
+		row.Transition(ui.ElementTransition{Colors: true})
+	} else {
+		enter := &ui.Motion{}
+		if depth > 0 {
+			enter.Y = -6
+		} else if chosen && !a.newDocPulse.IsZero() {
+			enter.Y = -6
+			enter.Scale = 0.97
+		}
+		row.Transition(ui.ElementTransition{
+			Animation: &listAnim,
+			Position:  true,
+			Enter:     enter,
+			Exit:      &ui.Motion{},
+		})
 	}
-	hovered := live && row.Hovered() && a.listDrop == nil && !a.listDragging
-	// A pinned document stays open once shown (opendocs.go): open, it shows
-	// a minus on hover that closes it and keeps it pinned; closed, it dims.
-	pinned := !n.Dir && inPins(sp, n.Path)
-	opened := pinned && a.isOpen(sp, n.Path)
-	minus := opened && hovered && !renaming && !dragging
+
+	if live {
+		rb := row.Bounds()
+		a.rows = append(a.rows, rowFrame{rel: n.Path, parent: parent, index: index, depth: depth, dir: n.Dir, open: open, r: rb})
+		if settling {
+			tr := row.LayoutBounds()
+			if tr.W <= 0 {
+				tr = rb
+			}
+			if tr.W <= 0 {
+				for _, pf := range prev {
+					if pf.slot && pf.parent == parent {
+						tr = pf.target
+						if tr.W <= 0 {
+							tr = pf.r
+						}
+						break
+					}
+					if pf.rel == n.Path {
+						tr = pf.r
+					}
+				}
+			}
+			if tr.W <= 0 && len(a.rows) >= 2 {
+				above := a.rows[len(a.rows)-2].r
+				if above.W > 0 {
+					tr = ui.Rect{X: above.X, Y: above.Y + above.H + rowGap, W: above.W, H: rowHeight}
+				}
+			}
+			if tr.W <= 0 {
+				tr = ui.Rect{X: rowInset, Y: a.dragSettle.fromY, W: sidebarWidth - 2*rowInset, H: rowHeight}
+			}
+			a.dragSettle.toRect = ui.Rect{X: tr.X + inset, Y: tr.Y, W: tr.W - inset, H: tr.H}
+			a.dragSettle.hasTarget = true
+			a.dragSettle.openFolder = open
+			a.dragSettle.holdsOpen = a.holdsOpen(sp, n.Path)
+			a.dragSettle.dim = pinned && !opened
+		}
+	}
+
+	d := a.listDrop
+	into := live && d != nil && d.kind == dropInto && d.parent == n.Path
+	hovered := live && !settling && row.Hovered() && a.listDrop == nil && !a.listDragging
+	minus := opened && hovered && !renaming
 	if minus {
 		row.PaddingEnd(6)
 	}
@@ -509,25 +703,33 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			a.hoverRow(previewDoc, sp, n.Path, row.Bounds())
 		}
 	}
+	if a.dragGrab.active && a.dragGrab.space == sp.ID && n.Path != a.dragGrab.rel && under(n.Path, a.dragGrab.rel) {
+		row.Opacity(0.45)
+	}
 	var fill ui.Color
 	lifted := false
 	switch {
-	case dragging:
-		fill = dragCard(t)
+	case settling:
 	case chosen:
 		fill, lifted = glass(t), !t.Dark
 	case hovered:
 		fill = hoverFill(t)
 	}
-	if dragging {
-		row.Opacity(0.4)
-	}
 	// The fill starts after the indent, so the gutter by a folder's rows
 	// stays empty, as Arc's does; the row's own background, which a chosen
 	// tree item would take, is none.
 	row.Background(ui.Transparent)
-	inset := float32(depth * rowIndent)
+	slotFade := 1 - settleK
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
+		if settling {
+			sfill, sborder := dashedSlotColors(t, slotFade)
+			sfr := ui.Rect{X: r.X + inset + 0.5, Y: r.Y + 2.5, W: max(0, r.W-inset-1), H: max(0, r.H-5)}
+			if sfill.A > 0 {
+				p.Fill(sfr, scaleAlpha(sfill, slotFade), 10)
+			}
+			p.StrokeDashed(sfr, scaleAlpha(sborder, slotFade), 10, 1)
+			return
+		}
 		fr := ui.Rect{X: r.X + inset, Y: r.Y + 2, W: r.W - inset, H: r.H - 4}
 		if lifted {
 			p.Shadow(fr, 10, 0, 1, 3, 0, black.Alpha(0.06))
@@ -540,51 +742,53 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		}
 	})
 	closed := false
-	row.Children(func() {
-		dim := pinned && !opened && !dragging
-		if n.Dir {
-			folderGlyph(c, a.columnLook(sp), open, a.holdsOpen(sp, n.Path))
-		} else if icon := docIcon(c, n.Title(), 16); dim {
-			icon.Opacity(closedIconAlpha)
-		}
-		if renaming {
-			a.renameField(c)
-			return
-		}
-		ink := t.Text
-		if dim {
-			ink = closedInk(t)
-		}
-		name := ui.Text(c, docName(n.Title())).FontSize(14).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
-		if n.Dir {
-			name.FontWeight(500)
-		}
-		if n.Dir && !open && hovered {
-			// A closed folder tells how many documents it holds.
-			ui.Text(c, fmt.Sprint(docCount(n))).FontSize(11).FontWeight(500).TextColor(t.TextMuted)
-		}
-		switch {
-		case minus:
-			// The button takes the dot's place while hovered, as Arc's.
-			b := ui.Box(c.Key("close-open")).Size(24, 24).Radius(6).Shrink(0).Cursor(ui.CursorPointer).
-				Focusable().Role(ui.RoleButton).Label(i18n.T("关闭并保持置顶")).Tooltip(i18n.T("关闭并保持置顶"))
-			if b.Hovered() {
-				b.Background(hoverFill(t))
-				a.overClose = place{sp.ID, n.Path}
+	if !settling {
+		row.Children(func() {
+			dim := pinned && !opened
+			if n.Dir {
+				folderGlyph(c, a.columnLook(sp), open, a.holdsOpen(sp, n.Path))
+			} else if icon := docIcon(c, n.Title(), 16); dim {
+				icon.Opacity(closedIconAlpha)
 			}
-			ink := closeMarkInk(t)
-			b.Draw(func(p *ui.Painter, r ui.Rect) { minusMark(p, r, ink) })
-			if b.Clicked() {
-				a.closeOpen(sp, n.Path)
-				closed = true
+			if renaming {
+				a.renameField(c)
+				return
 			}
-		case chosen && a.doc.dirty():
-			ui.Box(c).Size(6, 6).Radius(3).Background(t.Accent).Tooltip(i18n.T("已修改"))
-		}
-		if into {
-			intoBadge(c)
-		}
-	})
+			ink := t.Text
+			if dim {
+				ink = closedInk(t)
+			}
+			name := ui.Text(c, docName(n.Title())).FontSize(14).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
+			if n.Dir {
+				name.FontWeight(500)
+			}
+			if n.Dir && !open && hovered {
+				// A closed folder tells how many documents it holds.
+				ui.Text(c, fmt.Sprint(docCount(n))).FontSize(11).FontWeight(500).TextColor(t.TextMuted)
+			}
+			switch {
+			case minus:
+				// The button takes the dot's place while hovered, as Arc's.
+				b := ui.Box(c.Key("close-open")).Size(24, 24).Radius(6).Shrink(0).Cursor(ui.CursorPointer).
+					Focusable().Role(ui.RoleButton).Label(i18n.T("关闭并保持置顶")).Tooltip(i18n.T("关闭并保持置顶"))
+				if b.Hovered() {
+					b.Background(hoverFill(t))
+					a.overClose = place{sp.ID, n.Path}
+				}
+				ink := closeMarkInk(t)
+				b.Draw(func(p *ui.Painter, r ui.Rect) { minusMark(p, r, ink) })
+				if b.Clicked() {
+					a.closeOpen(sp, n.Path)
+					closed = true
+				}
+			case chosen && a.doc.dirty():
+				ui.Box(c).Size(6, 6).Radius(3).Background(t.Accent).Tooltip(i18n.T("已修改"))
+			}
+			if into {
+				intoBadge(c)
+			}
+		})
+	}
 	if !live {
 		return
 	}
@@ -666,6 +870,17 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 			a.renameIn(sp, n.Path)
 		}
 		m.Separator()
+		if sp.IsExternal() {
+			a.spacesMenu(m, sp, n.Path)
+			m.Separator()
+			if m.Item(i18n.T("在访达中显示")).Chosen() {
+				a.revealIn(sp, n.Path)
+			}
+			if m.Item(i18n.T("从外部空间移除")).Chosen() {
+				a.forgetExternal(sp, n.Path)
+			}
+			return
+		}
 		var folders []*vault.Node
 		for _, f := range a.tree {
 			if f.Dir {
@@ -700,6 +915,13 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 	a.spaceEditMenu(m, sp)
 	m.Separator()
+	if sp.IsExternal() {
+		if m.Item(i18n.T("打开文件…")).Chosen() {
+			a.chooseExternalFiles()
+		}
+		a.sortMenu(m, sp, "")
+		return
+	}
 	if m.Item(i18n.T("新建文档")).Shortcut(ui.Cmd, ui.KeyN).Chosen() {
 		a.newDoc("")
 	}
@@ -726,7 +948,7 @@ func (a *App) spaceEditMenu(m *ui.Menu, sp *space.Space) {
 	if m.Item(i18n.T("更改空间图标…")).Chosen() {
 		a.editSpaceProperty(sp, "icon")
 	}
-	if m.Item(i18n.T("重命名空间…")).Chosen() {
+	if m.Item(i18n.T("重命名空间…")).Disabled(sp.IsExternal()).Chosen() {
 		a.editSpaceProperty(sp, "name")
 	}
 	if m.Item(i18n.T("编辑主题颜色…")).Chosen() {
@@ -783,11 +1005,11 @@ func (a *App) spaceBar(c *ui.Context) {
 					b.ContextMenu(func(m *ui.Menu) {
 						a.spaceEditMenu(m, s)
 						m.Separator()
-						if m.Item(i18n.T("在访达中显示")).Chosen() {
+						if m.Item(i18n.T("在访达中显示")).Disabled(s.IsExternal()).Chosen() {
 							revealDir(s.Root)
 						}
 						m.Separator()
-						if m.Item(i18n.T("从 ArcMD 移除")).Disabled(len(a.state.Spaces) < 2).Chosen() {
+						if m.Item(i18n.T("从 ArcMD 移除")).Disabled(s.IsExternal() || len(a.state.Spaces) < 2).Chosen() {
 							a.removeSpace(s.ID)
 						}
 					})
@@ -843,23 +1065,96 @@ func (a *App) spaceBarGlyph(c *ui.Context, emoji, symbol, name string, on, hover
 	}
 }
 
-// newDocRow ends the tree with a faint row making a document at the root,
-// as Arc's New Tab row ends its tabs; it is also the empty space's hint.
-func (a *App) newDocRow(c *ui.Context) {
+// inlineNewDocRow opens in a hovered seam between root items in today so a
+// document can be created right at that index.
+func (a *App) inlineNewDocRow(c *ui.Context, index int, seamY float32) {
 	t := c.Theme()
-	row := ui.Row(c.Key("new-doc-row")).Height(rowHeight).PaddingX(10).Gap(10).Radius(10).AlignItems(ui.Center).
-		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("新建文档")).Tooltip(i18n.T("新建文档 (⌘N)"))
-	alpha := float32(0.45)
-	if row.Hovered() {
-		row.Background(hoverFill(t))
-		alpha = 0.75
+	label := i18n.T("新建文档")
+	row := ui.Row(c.Key("inline-new-doc")).Height(rowHeight).PaddingX(10).Gap(6).Radius(10).Center().
+		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("在此处新建文档")).Tooltip(label).
+		Background(ui.Transparent).
+		Transition(ui.ElementTransition{
+			Animation: &listAnim,
+			Position:  true,
+			Enter:     &ui.Motion{Collapse: true, Scale: 0.97},
+			Exit:      &ui.Motion{Collapse: true, Scale: 0.97},
+		})
+	if b := row.Bounds(); b.W > 0 {
+		a.insertSeam.slotY = b.Y
+	} else {
+		a.insertSeam.slotY = seamY
 	}
+	target := float32(0.55)
+	if row.Hovered() {
+		target = 1
+	}
+	lit := row.Animate("lit", target, 150*time.Millisecond)
+	fill, border := dashedSlotColors(t, lit)
+	row.Draw(func(p *ui.Painter, r ui.Rect) {
+		fr := ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: max(0, r.W-1), H: max(0, r.H-5)}
+		if fill.A > 0 {
+			p.Fill(fr, fill, 10)
+		}
+		p.StrokeDashed(fr, border, 10, 1)
+	})
+	alpha := 0.58 + 0.28*lit
 	row.Children(func() {
-		ui.Icon(c, iconPlus).FontSize(16).TextColor(t.Text.Alpha(alpha))
-		ui.Text(c, i18n.T("新建文档")).TextColor(t.Text.Alpha(alpha))
+		ui.Icon(c, iconPlus).FontSize(14).TextColor(t.Text.Alpha(alpha))
+		ui.Text(c, label).FontSize(13).FontWeight(500).TextColor(t.Text.Alpha(alpha)).NoWrap()
 	})
 	if row.Clicked() {
-		a.newDoc("")
+		a.insertSeam = insertSeam{index: -1}
+		a.newDocPulse = c.Now()
+		a.newDocAt("", index)
+	}
+}
+
+// newDocRow ends the tree with a dashed slot making a document at the root,
+// sliding down smoothly as new documents appear above it.
+func (a *App) newDocRow(c *ui.Context) {
+	t := c.Theme()
+	label, tip := i18n.T("新建文档"), i18n.T("新建文档 (⌘N)")
+	open := a.state.ActiveSpace().IsExternal()
+	if open {
+		label, tip = i18n.T("打开文件…"), i18n.T("只添加选中的文件，保留原位置")
+	}
+	pulsing := false
+	if !a.newDocPulse.IsZero() {
+		const pulseDur = 260 * time.Millisecond
+		if rem := pulseDur - c.Now().Sub(a.newDocPulse); rem > 0 {
+			pulsing = true
+			c.After(rem)
+		} else {
+			a.newDocPulse = time.Time{}
+		}
+	}
+	row := ui.Row(c.Key("new-doc-row")).Height(rowHeight).PaddingX(10).Gap(6).Radius(10).Center().
+		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(label).Tooltip(tip).
+		Background(ui.Transparent)
+	if pulsing || a.listDragging {
+		row.Transition(ui.ElementTransition{Animation: &listAnim, Position: true})
+	}
+	lit := row.Animate("lit", b2f(row.Hovered() || pulsing), 180*time.Millisecond)
+	fill, border := dashedSlotColors(t, lit)
+	row.Draw(func(p *ui.Painter, r ui.Rect) {
+		fr := ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: max(0, r.W-1), H: max(0, r.H-5)}
+		if fill.A > 0 {
+			p.Fill(fr, fill, 10)
+		}
+		p.StrokeDashed(fr, border, 10, 1)
+	})
+	alpha := 0.48 + 0.34*lit
+	row.Children(func() {
+		ui.Icon(c, iconPlus).FontSize(14).TextColor(t.Text.Alpha(alpha))
+		ui.Text(c, label).FontSize(13).FontWeight(500).TextColor(t.Text.Alpha(alpha)).NoWrap()
+	})
+	if row.Clicked() {
+		if open {
+			a.chooseExternalFiles()
+		} else {
+			a.newDocPulse = c.Now()
+			a.newDoc("")
+		}
 	}
 }
 

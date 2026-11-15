@@ -8,6 +8,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -65,8 +66,9 @@ func (a *App) View(c *ui.Context) {
 	c.SetTheme(t)
 	a.syncTree()
 	a.syncWatches()
+	post := a.asyncPost()
 	for _, d := range a.residentDocuments() {
-		a.withDocument(d, func() { d.autosave(c); a.followMigration(); a.followTitle(); a.syncExcerpts(a.doc) })
+		a.withDocument(d, func() { d.autosaveWith(c, post); a.followTitle(); a.syncExcerpts(a.doc) })
 	}
 	for _, n := range a.notices {
 		c.Toast(n)
@@ -135,6 +137,7 @@ func (a *App) View(c *ui.Context) {
 		a.peek = false
 		a.peekLeave = time.Time{}
 	}
+	a.dragOverlayView(c)
 	a.previewView(c)
 	a.paletteView(c)
 	a.updateToast(c)
@@ -321,8 +324,29 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 		})
 		return
 	}
+	applyModeFade := func(el ui.Element) {
+		if d.modeSwitchPending {
+			d.modeSwitchPending = false
+			if !a.reduceMotion {
+				d.modeAt = c.Now()
+			}
+		}
+		if !d.modeAt.IsZero() && !a.reduceMotion {
+			const dur = 90 * time.Millisecond
+			if elapsed := c.Now().Sub(d.modeAt); elapsed >= 0 && elapsed < dur {
+				p := float32(elapsed) / float32(dur)
+				k := 1 - (1-p)*(1-p)
+				el.Opacity(0.84 + 0.16*k)
+				c.After(0)
+			} else {
+				d.modeAt = time.Time{}
+			}
+		}
+	}
 	if d.source {
-		ui.Column(c).Grow(1).Padding(24).Gap(12).Children(func() {
+		box := ui.Column(c.Key("source-page")).Grow(1).Padding(24).Gap(12)
+		applyModeFade(box)
+		box.Children(func() {
 			ui.Row(c).Gap(12).Children(func() {
 				ui.Text(c, i18n.T("Markdown 导出预览")).Grow(1)
 				if ui.Button(c, i18n.T("导出 Markdown 文件")).Clicked() {
@@ -330,13 +354,38 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 					a.exportMarkdown()
 				}
 			})
-			ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).Label(i18n.T("Markdown 导出预览"))
+			ta := ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).
+				TrackScroll(&d.previewScroll).Label(i18n.T("Markdown 导出预览"))
+			if d.previewCaretPending {
+				d.previewCaretPending = false
+				ta.SetTextSelection(d.previewCaret, d.previewCaret)
+			} else if d.previewEnteredY < 0 {
+				d.previewEnteredY = d.previewScroll.Y
+			}
 		})
 		return
 	}
 	// One column always, so that the bar coming and going keeps the
 	// editor's place in the tree, and with it its scroll and focus.
-	ui.Column(c.Key("page")).Grow(1).MinHeight(0).Children(func() {
+	page := ui.Column(c.Key("page")).Grow(1).MinHeight(0)
+	applyModeFade(page)
+	if d == a.doc && a.navDir != 0 && !a.reduceMotion {
+		if a.navAt.IsZero() {
+			a.navAt = c.Now()
+		}
+		elapsed := c.Now().Sub(a.navAt)
+		const dur = 90 * time.Millisecond
+		if elapsed >= 0 && elapsed < dur {
+			p := float32(elapsed) / float32(dur)
+			k := 1 - (1-p)*(1-p)
+			page.Opacity(0.86+0.14*k).Translate(float32(a.navDir)*6*(1-k), 0)
+			c.After(0)
+		} else {
+			a.navDir = 0
+			a.navAt = time.Time{}
+		}
+	}
+	page.Children(func() {
 		a.conflictBarFor(c, d)
 		editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, cardWidth, false, d))
 	})
@@ -403,7 +452,11 @@ func (a *App) address(c *ui.Context) {
 			parts = append(parts, strings.Split(dir, "/")...)
 		}
 		ui.Text(c, strings.Join(parts, " / ")+" /").TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
-		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).Tooltip(a.doc.rel)
+		tip := a.doc.rel
+		if sp.IsExternal() {
+			tip = sp.ExternalFiles[a.doc.rel]
+		}
+		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).Tooltip(tip)
 		ui.Spacer(c)
 		status, color := "", t.TextMuted
 		switch {
@@ -451,8 +504,17 @@ func errText(err error) string {
 // or a web address in the browser.
 func (a *App) followLink(url string) {
 	if a.doc != nil {
+		if a.doc.space.IsExternal() {
+			file, _, _ := strings.Cut(url, "#")
+			if vault.IsDocument(file) {
+				if full, err := a.doc.localImage(file); err == nil {
+					a.openSystemFile(full)
+					return
+				}
+			}
+		}
 		if rel, ok := a.doc.resolveLink(url); ok {
-			a.open(rel)
+			a.openIn(a.doc.space, rel)
 			return
 		}
 	}
@@ -473,13 +535,19 @@ func (a *App) emptyState(c *ui.Context) {
 		switch {
 		case a.treeErr != nil:
 			ui.Text(c, i18n.T("读取空间文件夹失败。")+a.treeErr.Error()).TextColor(t.Danger).MaxWidth(420).TextAlign(ui.Center)
+		case sp.IsExternal() && len(a.docs) == 0:
+			ui.Text(c, i18n.T("打开的外部文档会显示在这里，文件保留在原位置。")).TextColor(t.TextMuted).MaxWidth(360).TextAlign(ui.Center)
 		case len(a.docs) == 0:
 			ui.Text(c, i18n.T("此空间暂无文档。")).TextColor(t.TextMuted)
 		default:
 			ui.Text(c, i18n.T("选择一篇文档，或按 ⌘K 搜索。")).TextColor(t.TextMuted)
 		}
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.PrimaryButton(c.Key("empty-new"), i18n.T("新建文档")).Tooltip("⌘N").Clicked() {
+			if sp.IsExternal() {
+				if ui.PrimaryButton(c.Key("empty-open"), i18n.T("打开文件…")).Clicked() {
+					a.chooseExternalFiles()
+				}
+			} else if ui.PrimaryButton(c.Key("empty-new"), i18n.T("新建文档")).Tooltip("⌘N").Clicked() {
 				a.newDoc("")
 			}
 			if ui.Button(c.Key("empty-palette"), i18n.T("命令栏")).Tooltip("⌘K").Clicked() {

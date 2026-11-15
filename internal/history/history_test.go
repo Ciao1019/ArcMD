@@ -43,6 +43,14 @@ func TestRecordCoalescesAndKeeps(t *testing.T) {
 	if _, err := List(root, "../x.arcmd"); err == nil {
 		t.Error("listed outside the space")
 	}
+
+	must(Record(root, "Notes/Doc.md", "# v1\n", t0, true))
+	must(Record(root, "Notes/Doc.md", "# v2\n", t0.Add(2*time.Minute), false))
+	mdVs, err := List(root, "Notes/Doc.md")
+	must(err)
+	if len(mdVs) != 2 || filepath.Ext(mdVs[0].File) != ".md" {
+		t.Fatalf("markdown snapshots %+v", mdVs)
+	}
 }
 
 func TestKeepLimit(t *testing.T) {

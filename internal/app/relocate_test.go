@@ -13,11 +13,19 @@ import (
 func TestMovedImportKeepsParentImages(t *testing.T) {
 	for _, mode := range []string{"folder", "space"} {
 		t.Run(mode, func(t *testing.T) {
-			a, _, source, original := parentImagesApp(t)
+			a, _, source, _ := parentImagesApp(t)
+			if mode == "folder" {
+				// Folder operations require explicitly adding a folder space;
+				// opening one external article no longer imports its parent.
+				a.state.Add("Articles", filepath.Dir(source))
+				if !a.openSystemFile(source) {
+					t.Fatal("open folder space")
+				}
+			}
 			a.doc.ed.SetSelection(a.doc.ed.Len(), a.doc.ed.Len())
 			a.doc.ed.ReplaceText(nil, " edited")
 			if !a.flush() {
-				t.Fatal("convert import")
+				t.Fatal("save import")
 			}
 			if mode == "folder" {
 				if err := os.Mkdir(filepath.Join(a.doc.space.Root, "Archive"), 0700); err != nil {
@@ -44,9 +52,6 @@ func TestMovedImportKeepsParentImages(t *testing.T) {
 					t.Errorf("image lost after move: %s", url)
 				}
 			}
-			if got, err := os.ReadFile(source); err != nil || string(got) != original {
-				t.Fatal("original Markdown changed", err)
-			}
 			if _, err := os.Stat(filepath.Join(filepath.Dir(source), "..", "images", "png", "window.png")); err != nil {
 				t.Fatal("shared source image lost", err)
 			}
@@ -54,20 +59,25 @@ func TestMovedImportKeepsParentImages(t *testing.T) {
 	}
 }
 
-func TestMarkdownParentImagesMoveRollsBack(t *testing.T) {
-	a, _, file, original := parentImagesApp(t)
-	dst := a.state.Add("Other", t.TempDir())
-	if a.moveAcross(a.doc.space.ID, a.doc.rel, dst.ID, "") != "" {
-		t.Fatal("Markdown move should require conversion to rebase images")
+func TestMarkdownParentImagesMoveRebasesIntoAssets(t *testing.T) {
+	a, _, source, _ := parentImagesApp(t)
+	dst := a.state.Add("Other", filepath.Join(t.TempDir(), "space"))
+	if err := os.MkdirAll(dst.Root, 0700); err != nil {
+		t.Fatal(err)
 	}
-	if got, err := os.ReadFile(file); err != nil || string(got) != original {
-		t.Fatal("original Markdown was not restored", err)
+	if a.moveAcross(a.doc.space.ID, a.doc.rel, dst.ID, "") == "" {
+		t.Fatal("Markdown move should copy parent images into destination assets")
 	}
-	if a.doc.loadImage("../images/png/window.png") == nil {
-		t.Fatal("original image lost")
+	if _, err := os.Stat(filepath.Join(dst.Root, "..", "images")); !os.IsNotExist(err) {
+		t.Fatal("move wrote outside the destination Space")
 	}
-	if _, err := os.Stat(filepath.Join(dst.Root, "launch.md")); !os.IsNotExist(err) {
-		t.Fatal("rolled back document remains at destination")
+	for _, url := range a.doc.ed.ImageURLs() {
+		if a.doc.loadImage(url) == nil {
+			t.Fatalf("rebased image failed to load: %s", url)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(source), "..", "images", "png", "window.png")); err != nil {
+		t.Fatal("shared source image lost")
 	}
 }
 
@@ -242,13 +252,13 @@ func TestMoveResourceFailureRollsBackDocument(t *testing.T) {
 func TestMoveFolderKeepsNestedImagesAndHistory(t *testing.T) {
 	a, _ := newTestApp(t)
 	src := a.state.ActiveSpace()
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	img, _ := pngFile(t, "nested.png")
 	a.insertImages([]string{img}, -1)
 	if !a.flush() {
 		t.Fatal("save")
 	}
-	before, _ := history.List(src.Root, "Journal/Ideas.arcmd")
+	before, _ := history.List(src.Root, "Journal/Ideas.md")
 	dst := a.state.Add("Other", t.TempDir())
 	if a.moveAcross(src.ID, "Journal", dst.ID, "") != "Journal" {
 		t.Fatal("folder move")
@@ -256,16 +266,16 @@ func TestMoveFolderKeepsNestedImagesAndHistory(t *testing.T) {
 	if a.doc.loadImage("assets/nested.png") == nil {
 		t.Fatal("nested image lost")
 	}
-	after, _ := history.List(dst.Root, "Journal/Ideas.arcmd")
+	after, _ := history.List(dst.Root, "Journal/Ideas.md")
 	if len(after) != len(before) {
 		t.Fatal("nested history lost")
 	}
-	if original, _ := history.List(src.Root, "Journal/Ideas.arcmd"); len(original) != 0 {
+	if original, _ := history.List(src.Root, "Journal/Ideas.md"); len(original) != 0 {
 		t.Fatal("source history remains after commit")
 	}
 }
 
-func TestMarkdownImageCollisionLeavesSourceUntouched(t *testing.T) {
+func TestMarkdownImageCollisionRebasesWithoutOverwriting(t *testing.T) {
 	a, _ := newTestApp(t)
 	src := a.state.ActiveSpace()
 	_, data := pngFile(t, "md.png")
@@ -280,13 +290,17 @@ func TestMarkdownImageCollisionLeavesSourceUntouched(t *testing.T) {
 	if err := vault.Write(dst.Root, "assets/md.png", "occupied"); err != nil {
 		t.Fatal(err)
 	}
-	if a.moveAcross(src.ID, "Import.md", dst.ID, "") != "" {
-		t.Fatal("ambiguous Markdown move succeeded")
-	}
-	if got, _ := vault.Read(src.Root, "Import.md"); got != text {
-		t.Fatal("Markdown bytes changed")
+	if a.moveAcross(src.ID, "Import.md", dst.ID, "") != "Import.md" {
+		t.Fatal("Markdown move did not rebase colliding asset")
 	}
 	if got, _ := vault.Read(dst.Root, "assets/md.png"); got != "occupied" {
 		t.Fatal("destination picture overwritten")
+	}
+	moved, _ := vault.Read(dst.Root, "Import.md")
+	if !strings.Contains(moved, "assets/md-1.png") {
+		t.Fatalf("Markdown did not rebase to numbered asset: %q", moved)
+	}
+	if got, _ := vault.Read(dst.Root, "assets/md-1.png"); got != string(data) {
+		t.Fatal("numbered asset bytes mismatch")
 	}
 }

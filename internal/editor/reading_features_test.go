@@ -38,8 +38,8 @@ func TestInlineMathUTF16EditingAndRoundTrip(t *testing.T) {
 	o := r.layout.objects[0]
 	tt.ClickAt(b.X+r.x+o.rect.X+o.rect.W/2, b.Y+r.y+o.rect.Y+o.rect.H/2)
 	tt.Frame()
-	if e.inlineEditing == "" || len(e.rows[0].layout.objects) != 1 {
-		t.Fatal("formula did not reveal")
+	if e.inlineEditing == "" || len(e.rows[0].layout.objects) != 2 || !e.rows[0].layout.objects[0].editing {
+		t.Fatal("formula did not enter live inline editing")
 	}
 	e.SetSelection(e.Len(), e.Len())
 	tt.Frame()

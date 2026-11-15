@@ -300,7 +300,16 @@ func (e *Engine) Enter(soft bool) {
 		return
 	}
 	leaf := e.LeafAt(e.Caret)
-	if e.enterMath(leaf) {
+	if e.enterMath(leaf) || e.enterPipeTable(leaf) {
+		return
+	}
+	if leaf.Block.Kind == "image" && leaf.Parent != nil {
+		e.Edit(func() {
+			next := NewBlock("paragraph", "")
+			next.Indent = leaf.Block.Indent
+			*leaf.Parent = append((*leaf.Parent)[:leaf.Index+1], append([]*Block{next}, (*leaf.Parent)[leaf.Index+1:]...)...)
+			e.FocusBlock(next.ID)
+		})
 		return
 	}
 	if !soft && e.Anchor == e.Caret && leaf.Block.Text() == "" && (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task" || leaf.Block.Kind == "quote" || leaf.Block.Kind == "toggle") {

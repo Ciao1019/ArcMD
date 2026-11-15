@@ -80,7 +80,7 @@ func TestSplitPickerAndControls(t *testing.T) {
 	tt.Type("Ideas")
 	tt.Key(0, ui.KeyEnter)
 	settle(tt)
-	if a.doc == nil || a.doc.rel != "Journal/Ideas.arcmd" || a.split == nil {
+	if a.doc == nil || a.doc.rel != "Journal/Ideas.md" || a.split == nil {
 		t.Fatalf("picker failed: %+v", a.doc)
 	}
 	tt.Key(ui.Ctrl|ui.Shift, ui.Key1)
@@ -255,7 +255,7 @@ func TestSplitPersistsAndFollowsMigration(t *testing.T) {
 	if reopened.split == nil || !reopened.split.vertical || reopened.doc.rel != "Left.arcmd" || reopened.split.panes[0].factor != .35 {
 		t.Fatalf("layout not restored: saved=%+v group=%+v doc=%v", a.state.ActiveSpace().Split, reopened.split, reopened.doc.rel)
 	}
-	// Saving Markdown from an inactive pane follows its native-format migration.
+	// Saving Markdown from an inactive pane updates the Markdown file in place.
 	if err := vault.Write(root(a), "Import.md", "# Imported\n\nNotes"); err != nil {
 		t.Fatal(err)
 	}
@@ -268,8 +268,11 @@ func TestSplitPersistsAndFollowsMigration(t *testing.T) {
 		t.Fatal("save")
 	}
 	tt.Frame()
-	if d.rel != "Import.arcmd" || a.split.panes[0].doc != d {
-		t.Fatalf("migration lost pane: %s", d.rel)
+	if d.rel != "Import.md" || a.split.panes[0].doc != d {
+		t.Fatalf("in-place save lost pane: %s", d.rel)
+	}
+	if got, _ := vault.Read(root(a), "Import.md"); !strings.Contains(got, "Updated Imported") {
+		t.Fatalf("inactive pane did not save Markdown in place: %q", got)
 	}
 }
 
@@ -371,7 +374,7 @@ func TestSplitCloseFailureKeepsBothEditors(t *testing.T) {
 func TestSplitFourPanesAndSeparation(t *testing.T) {
 	a, tt := splitTestApp(t)
 	a.openSplit(a.state.ActiveSpace(), "Third.arcmd", false, false)
-	a.openSplit(a.state.ActiveSpace(), "Welcome.arcmd", false, false)
+	a.openSplit(a.state.ActiveSpace(), "Welcome.md", false, false)
 	if len(a.split.panes) != splitLimit {
 		t.Fatal("four panes")
 	}

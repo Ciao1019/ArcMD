@@ -24,7 +24,7 @@ func titleBarTestApp(t *testing.T, mode string, width int, bar ui.TitleBar) (*Ap
 	case "focus":
 		a.toggleFocus()
 	case "split", "split-folded", "split-vertical":
-		a.openSplit(a.state.ActiveSpace(), "Journal/Ideas.arcmd", false, false)
+		a.openSplit(a.state.ActiveSpace(), "Journal/Ideas.md", false, false)
 		a.sidebarHidden = mode == "split-folded"
 		a.split.vertical = mode == "split-vertical"
 	}

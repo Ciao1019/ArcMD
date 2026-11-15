@@ -4,21 +4,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 )
 
 func TestRenameTagEverywhere(t *testing.T) {
 	a, tt := newTestApp(t)
 	tt.Frame()
-	for name, md := range map[string]string{"A.arcmd": "# 甲\n\n今天 #工作 很忙", "Journal/B.arcmd": "# 乙\n\n#工作/2026 和 #职场\n\n```\n#工作 in code\n```"} {
-		doc := editor.ImportMarkdown(md)
-		doc.ImportSource = ""
-		text, _ := doc.Encode()
-		vault.Write(root(a), name, text)
+	for name, md := range map[string]string{"A.md": "# 甲\n\n今天 #工作 很忙", "Journal/B.md": "# 乙\n\n#工作/2026 和 #职场\n\n```\n#工作 in code\n```"} {
+		vault.Write(root(a), name, md)
 	}
 	a.refreshTree()
-	a.open("A.arcmd")
+	a.open("A.md")
 	a.refreshSearch()
 	tt.Frame()
 	a.openPalette()
@@ -40,7 +36,7 @@ func TestRenameTagEverywhere(t *testing.T) {
 	if !strings.Contains(a.doc.ed.Text(), "#职场 很忙") {
 		t.Fatal("open document", a.doc.ed.Text())
 	}
-	b, _ := vault.Read(root(a), "Journal/B.arcmd")
+	b, _ := vault.Read(root(a), "Journal/B.md")
 	if !strings.Contains(b, "#职场/2026") || !strings.Contains(b, "#工作 in code") {
 		t.Fatal("other document; code unchanged", b)
 	}
@@ -50,7 +46,7 @@ func TestRenameTagEverywhere(t *testing.T) {
 	if err := tt.Click("撤销"); err != nil {
 		t.Fatal(err)
 	}
-	b, _ = vault.Read(root(a), "Journal/B.arcmd")
+	b, _ = vault.Read(root(a), "Journal/B.md")
 	if !strings.Contains(b, "#工作/2026") || !strings.Contains(a.doc.ed.Text(), "#工作 很忙") {
 		t.Fatal("undo")
 	}

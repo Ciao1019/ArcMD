@@ -1,7 +1,9 @@
 package app
 
 import (
+	"math"
 	"slices"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
@@ -15,11 +17,20 @@ const splitGap, splitMinimum, splitSnap = float32(10), float32(200), float32(6)
 const splitLimit = 4
 
 type splitPane struct {
-	doc     *document
-	history []place
-	at      int
-	factor  float32
-	bounds  ui.Rect
+	doc         *document
+	history     []place
+	at          int
+	factor      float32
+	shownFactor float32
+	shownReady  bool
+	bounds      ui.Rect
+}
+
+func (p *splitPane) visualFactor() float32 {
+	if p.shownReady {
+		return p.shownFactor
+	}
+	return p.factor
 }
 
 // A group belongs to a space session. Leaving it keeps its editors and
@@ -31,6 +42,49 @@ type splitGroup struct {
 	// The raw drag distance is independent of visual snapping/clamping.
 	dragPane                 *splitPane
 	dragOrigin, dragDistance float32
+	dragSnapped              bool
+	animAt                   time.Time
+}
+
+func (s *splitGroup) stepFactors(c *ui.Context) (animating bool) {
+	now := c.Now()
+	if c.Preferences().ReduceMotion || s.dragPane != nil {
+		for _, p := range s.panes {
+			p.shownFactor, p.shownReady = p.factor, true
+		}
+		s.animAt = now
+		return false
+	}
+	dt := 0.0
+	if !s.animAt.IsZero() {
+		dt = now.Sub(s.animAt).Seconds()
+		if dt < 0 {
+			dt = 0
+		}
+		if dt > 0.25 {
+			dt = 0.25
+		}
+	}
+	s.animAt = now
+	alpha := float32(0)
+	if dt > 0 {
+		alpha = 1 - float32(math.Exp(-dt/0.045))
+	}
+	for _, p := range s.panes {
+		if !p.shownReady {
+			p.shownFactor, p.shownReady = p.factor, true
+			continue
+		}
+		if alpha > 0 {
+			p.shownFactor += (p.factor - p.shownFactor) * alpha
+		}
+		if math.Abs(float64(p.factor-p.shownFactor)) < 0.0015 {
+			p.shownFactor = p.factor
+		} else {
+			animating = true
+		}
+	}
+	return animating
 }
 
 func (a *App) syncSplit() {
@@ -88,7 +142,7 @@ func (a *App) beginSplit() bool {
 	if a.doc == nil || !a.flush() {
 		return false
 	}
-	s := &splitGroup{panes: []*splitPane{{doc: a.doc, history: slices.Clone(a.history), at: a.at, factor: 1}}}
+	s := &splitGroup{panes: []*splitPane{{doc: a.doc, history: slices.Clone(a.history), at: a.at, factor: 1, shownFactor: 1, shownReady: true}}}
 	a.split = s
 	a.session(a.state.ActiveSpace().ID).split = s
 	a.focus = false
@@ -105,7 +159,7 @@ func (a *App) addSplitPane() {
 	}
 	a.syncSplit()
 	index := a.split.active + 1
-	a.split.panes = slices.Insert(a.split.panes, index, &splitPane{})
+	a.split.panes = slices.Insert(a.split.panes, index, &splitPane{shownFactor: 0.16, shownReady: true})
 	a.equalSplit()
 	a.focusPane(index, false)
 	a.openPalette()
@@ -143,7 +197,7 @@ func (a *App) openSplit(sp *space.Space, rel string, leading bool, vertical bool
 		a.fillPane(a.split.panes[a.split.active], sp.ID, rel)
 		return
 	}
-	text, err := vault.Read(sp.Root, rel)
+	text, err := readFile(sp, rel)
 	if err != nil {
 		a.notify("打开 %s 失败。%v", vault.Title(rel), err)
 		return
@@ -165,7 +219,7 @@ func (a *App) openSplit(sp *space.Space, rel string, leading bool, vertical bool
 		index--
 	}
 	a.syncSplit()
-	s.panes = slices.Insert(s.panes, index, &splitPane{doc: d, history: []place{{sp.ID, rel}}})
+	s.panes = slices.Insert(s.panes, index, &splitPane{doc: d, history: []place{{sp.ID, rel}}, shownFactor: 0.16, shownReady: true})
 	if leading {
 		s.active++
 	}
@@ -339,18 +393,26 @@ func (a *App) withDocument(d *document, fn func()) {
 }
 
 func splitLengths(panes []*splitPane, total float32) []float32 {
+	return splitLengthsBy(panes, total, func(p *splitPane) float32 { return p.factor })
+}
+
+func splitVisualLengths(panes []*splitPane, total float32) []float32 {
+	return splitLengthsBy(panes, total, func(p *splitPane) float32 { return p.visualFactor() })
+}
+
+func splitLengthsBy(panes []*splitPane, total float32, share func(*splitPane) float32) []float32 {
 	available := max(0, total-splitGap*float32(len(panes)-1))
 	minimum := min(splitMinimum, available/float32(len(panes)))
 	lengths := make([]float32, len(panes))
 	sum := float32(0)
 	for _, p := range panes {
-		sum += max(0, p.factor)
+		sum += max(0, share(p))
 	}
 	for i, p := range panes {
 		if sum == 0 {
 			lengths[i] = available / float32(len(panes))
 		} else {
-			lengths[i] = available * max(0, p.factor) / sum
+			lengths[i] = available * max(0, share(p)) / sum
 		}
 	}
 	for range panes {

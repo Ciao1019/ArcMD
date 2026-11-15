@@ -3,13 +3,14 @@ package app
 import (
 	"fmt"
 	"os"
+	"path"
 	"strings"
 	"time"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
-	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -56,14 +57,14 @@ func (d *document) recordVersion(before string) {
 
 // fullPath is the document's file.
 func (d *document) fullPath() string {
-	p, _ := vault.Resolve(d.space.Root, d.rel)
+	p, _ := resolveFile(d.space, d.rel)
 	return p
 }
 
 // openVersions shows the history of the open document.
 func (a *App) openVersions() {
 	d := a.doc
-	if d == nil || d.loadErr != nil || vault.IsMarkdown(d.rel) {
+	if d == nil || d.loadErr != nil {
 		a.notify("这篇文档还没有版本历史。")
 		return
 	}
@@ -88,7 +89,11 @@ func (a *App) selectVersion(i int) {
 	v.shown, v.doc, v.diff, v.err = ver.File, nil, nil, nil
 	text, err := history.Read(v.for_.space.Root, v.for_.rel, ver)
 	if err == nil {
-		v.doc, err = model.Decode(text)
+		if strings.EqualFold(path.Ext(ver.File), ".arcmd") {
+			v.doc, err = model.Decode(text)
+		} else {
+			v.doc = editor.ImportMarkdown(text)
+		}
 	}
 	if err != nil {
 		v.err = err

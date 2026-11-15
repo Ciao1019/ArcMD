@@ -64,9 +64,17 @@ func TestAnnotationPanelAppliesMarks(t *testing.T) {
 	if s := e.Doc.Blocks[0].Runs[0].Style; s.Annotation != "circle" || s.AnnotationColor != "green" {
 		t.Fatal("apply last", s)
 	}
-	// Markdown has no annotations; the panel's remover clears them.
-	if md := ExportMarkdown(e.Doc); strings.TrimSpace(md) != "Hand drawn notes" {
-		t.Fatalf("export %q", md)
+	// Markdown preserves hand-drawn annotations losslessly; the panel's remover clears them.
+	md := ExportMarkdown(e.Doc)
+	if !strings.Contains(md, `data-mark="circle"`) {
+		t.Fatalf("missing annotation markup in %q", md)
+	}
+	round := ImportMarkdown(md)
+	if round.PlainText() != "Hand drawn notes" ||
+		round.Blocks[0].Runs[0].Style.Annotation != "circle" ||
+		round.Blocks[0].Runs[0].Style.AnnotationColor != "green" ||
+		round.Blocks[0].Runs[2].Style.Annotation != "circle" {
+		t.Fatalf("roundtrip %q -> %+v", md, round.Blocks[0].Runs)
 	}
 	e.SetSelection(0, 16)
 	tt.Frame()

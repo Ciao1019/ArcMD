@@ -46,10 +46,10 @@ func focusDocument(a *App, tt *ui.Tester) {
 
 func TestFirstRun(t *testing.T) {
 	a, tt := newTestApp(t)
-	if a.doc == nil || a.doc.rel != "Welcome.arcmd" || a.doc.source {
+	if a.doc == nil || a.doc.rel != "Welcome.md" || a.doc.source {
 		t.Fatalf("welcome not open in the live editor: %+v", a.doc)
 	}
-	for _, s := range []string{"Personal", "Journal", "Ideas", "Welcome.arcmd"} {
+	for _, s := range []string{"Personal", "Journal", "Ideas", "Welcome.md"} {
 		if !tt.HasText(s) {
 			t.Errorf("no %q in %q", s, tt.Texts())
 		}
@@ -59,10 +59,10 @@ func TestFirstRun(t *testing.T) {
 // Opening a document never writes it; editing does, after a rest.
 func TestAutosaveOnlyAfterEdits(t *testing.T) {
 	a, tt := newTestApp(t)
-	before, _ := vault.Read(root(a), "Welcome.arcmd")
+	before, _ := vault.Read(root(a), "Welcome.md")
 	tt.Advance(2 * autosaveDelay)
 	tt.Frame()
-	if after, _ := vault.Read(root(a), "Welcome.arcmd"); after != before || a.doc.dirty() {
+	if after, _ := vault.Read(root(a), "Welcome.md"); after != before || a.doc.dirty() {
 		t.Fatal("opening the document changed it")
 	}
 	a.doc.ed.SetSelection(0, 0)
@@ -73,7 +73,7 @@ func TestAutosaveOnlyAfterEdits(t *testing.T) {
 	}
 	tt.Advance(autosaveDelay + 50*time.Millisecond)
 	tt.Frame()
-	got, _ := vault.Read(root(a), "Welcome.arcmd")
+	got, _ := vault.Read(root(a), "Welcome.md")
 	if a.doc.dirty() || !strings.Contains(got, "Hello Welcome to ArcMD") {
 		t.Errorf("after the delay: dirty %v, file starts %q", a.doc.dirty(), got[:min(40, len(got))])
 	}
@@ -106,20 +106,20 @@ func TestFoldersRenameAndMove(t *testing.T) {
 	if err := tt.Click("Ideas"); err != nil {
 		t.Fatal(err)
 	}
-	if a.doc.rel != "Journal/Ideas.arcmd" {
+	if a.doc.rel != "Journal/Ideas.md" {
 		t.Fatalf("open = %q", a.doc.rel)
 	}
 	a.startRename("Journal")
 	a.newName = "Notes"
 	a.commitRename()
-	if a.doc.rel != "Notes/Ideas.arcmd" || !sp.IsExpanded("Notes") {
+	if a.doc.rel != "Notes/Ideas.md" || !sp.IsExpanded("Notes") {
 		t.Errorf("after rename: doc %q, expanded %v", a.doc.rel, sp.Expanded)
 	}
-	a.moveInto("Welcome.arcmd", "Notes")
-	if !a.state.IsFavorite(sp.ID, "Notes/Welcome.arcmd") {
+	a.moveInto("Welcome.md", "Notes")
+	if !a.state.IsFavorite(sp.ID, "Notes/Welcome.md") {
 		t.Errorf("pin did not follow the move: %v", a.state.Favorites)
 	}
-	if _, err := os.Stat(filepath.Join(root(a), "Notes", "Welcome.arcmd")); err != nil {
+	if _, err := os.Stat(filepath.Join(root(a), "Notes", "Welcome.md")); err != nil {
 		t.Error(err)
 	}
 	tt.Frame()
@@ -130,13 +130,13 @@ func TestFoldersRenameAndMove(t *testing.T) {
 
 func TestHistory(t *testing.T) {
 	a, tt := newTestApp(t)
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	tt.Key(ui.Cmd, ui.KeyBracketLeft)
-	if a.doc.rel != "Welcome.arcmd" {
+	if a.doc.rel != "Welcome.md" {
 		t.Fatalf("back = %q", a.doc.rel)
 	}
 	tt.Key(ui.Cmd, ui.KeyBracketRight)
-	if a.doc.rel != "Journal/Ideas.arcmd" {
+	if a.doc.rel != "Journal/Ideas.md" {
 		t.Fatalf("forward = %q", a.doc.rel)
 	}
 }
@@ -185,7 +185,7 @@ func TestSpacesSwitchAndRemember(t *testing.T) {
 		t.Fatal("new document not in Work")
 	}
 	tt.Key(ui.Cmd, ui.Key1)
-	if a.state.ActiveSpace() != first || a.doc == nil || a.doc.rel != "Welcome.arcmd" {
+	if a.state.ActiveSpace() != first || a.doc == nil || a.doc.rel != "Welcome.md" {
 		t.Fatalf("Cmd+1 did not go back to Personal's last document: %+v", a.doc)
 	}
 	tt.Key(ui.Cmd, ui.KeyBracketLeft)
@@ -203,7 +203,7 @@ func TestCommandBar(t *testing.T) {
 	a.palette.query = "ideas"
 	tt.Frame()
 	tt.Key(0, ui.KeyEnter)
-	if a.palette.open || a.doc.rel != "Journal/Ideas.arcmd" {
+	if a.palette.open || a.doc.rel != "Journal/Ideas.md" {
 		t.Errorf("running the result: open %v, doc %q", a.palette.open, a.doc.rel)
 	}
 }

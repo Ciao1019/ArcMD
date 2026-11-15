@@ -33,7 +33,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.0.11"
+const Version = "0.1.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -157,6 +157,11 @@ type App struct {
 	listDragging bool
 	dividerY     float32
 	rows         []rowFrame
+	slot         slotState
+	dragGrab     dragGrab
+	dragSettle   dragSettle
+	insertSeam   insertSeam
+	newDocPulse  time.Time
 	favDrop      *favDrop
 	// preview is the card a folder or a document shows when the pointer
 	// rests on it (preview.go).
@@ -228,6 +233,10 @@ type App struct {
 	updates updateState
 	// tour introduces the sidebar on the first run (tour.go).
 	tour tour
+
+	runAsync func(func())
+	navDir   int
+	navAt    time.Time
 }
 
 // trashItem moves the file or folder at p to the system's trash.
@@ -250,7 +259,8 @@ func New(cfg Config) (*App, error) {
 		prefStore: prefs.Store{Path: filepath.Join(cfg.ConfigDir, "prefs.json")},
 		bin:       trashbin.Bin{Dir: filepath.Join(cfg.ConfigDir, "trash")},
 		// The spaces fade in on coming back from the library, not at start.
-		library: library{frames: 1},
+		library:    library{frames: 1},
+		insertSeam: insertSeam{index: -1},
 	}
 	if p, err := a.prefStore.Load(); err == nil {
 		a.prefs = p
@@ -265,6 +275,13 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.state = st
+	if sp := st.Get(space.ExternalID); sp != nil {
+		sp.Name = i18n.T("外部空间")
+		sp.Root = filepath.Join(cfg.ConfigDir, "external")
+		if err := os.MkdirAll(sp.Root, 0700); err != nil {
+			return nil, err
+		}
+	}
 	if len(st.Spaces) == 0 {
 		if err := a.firstRun(); err != nil {
 			return nil, err
@@ -293,14 +310,14 @@ func (a *App) firstRun() error {
 	}
 	sp := a.state.Add("Personal", root)
 	if docs, _ := vault.List(root); len(docs) == 0 {
-		if err := writeNative(root, "Welcome.arcmd", welcome); err != nil {
+		if err := vault.Write(root, "Welcome.md", welcome); err != nil {
 			return err
 		}
-		if err := writeNative(root, "Journal/Ideas.arcmd", ideas); err != nil {
+		if err := vault.Write(root, "Journal/Ideas.md", ideas); err != nil {
 			return err
 		}
-		sp.LastOpen = "Welcome.arcmd"
-		a.state.ToggleFavorite(sp.ID, "Welcome.arcmd")
+		sp.LastOpen = "Welcome.md"
+		a.state.ToggleFavorite(sp.ID, "Welcome.md")
 		sp.Expanded = []string{"Journal"}
 	}
 	return a.store.Save(a.state)
@@ -490,9 +507,28 @@ func (a *App) flushCurrent() bool {
 		}
 		return false
 	}
-	a.followMigration()
 	a.followTitle()
 	return true
+}
+
+func (a *App) asyncPost() func(func()) {
+	if !a.search.async {
+		return nil
+	}
+	if a.runAsync != nil {
+		return a.runAsync
+	}
+	if a.win != nil {
+		return a.win.Update
+	}
+	return nil
+}
+
+func (a *App) imageResourceFor(d *document, url string) editor.ImageResource {
+	if d == nil {
+		return editor.ImageResource{}
+	}
+	return d.imageResourceWith(url, a.asyncPost())
 }
 
 func (a *App) session(id string) *spaceSession {
@@ -614,9 +650,13 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 		return false
 	}
 	restoring := a.doc == nil && sp.LastOpen == rel
-	text, err := vault.Read(sp.Root, rel)
+	text, err := readFile(sp, rel)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if sp.IsExternal() {
+				a.notify("文件已被移动或删除：%s", sp.ExternalFiles[rel])
+				return false
+			}
 			a.state.Forget(sp.ID, rel)
 			a.saveState()
 			a.refreshTree()
@@ -719,18 +759,21 @@ func (a *App) goHistory(step int) {
 		if a.state.IsFavorite(p.space, p.rel) {
 			// A favorite opens where the window is, as from its tile.
 			if a.showIn(sp, p.rel) {
+				a.navDir, a.navAt = step, time.Time{}
 				return
 			}
 			continue
 		}
 		if a.split != nil {
 			if a.showIn(sp, p.rel) {
+				a.navDir, a.navAt = step, time.Time{}
 				return
 			}
 			continue
 		}
 		a.switchSpaceOnly(p.space)
 		if a.show(p.rel) {
+			a.navDir, a.navAt = step, time.Time{}
 			return
 		}
 	}
@@ -750,7 +793,7 @@ func (a *App) reload() {
 		return
 	}
 	rel, source := a.doc.rel, a.doc.source
-	text, err := vault.Read(a.doc.space.Root, rel)
+	text, err := readFile(a.doc.space, rel)
 	if err != nil {
 		a.notify("重新载入 %s 失败。%v", vault.Title(rel), err)
 		return
@@ -770,9 +813,27 @@ func (a *App) toggleSource() {
 // newDoc makes a document in the folder dir of the active space and
 // opens it.
 func (a *App) newDoc(dir string) {
+	a.newDocAt(dir, -1)
+}
+
+// newDocAt makes a document in the folder dir of the active space, placed
+// at index among dir's entries when index >= 0, and opens it.
+func (a *App) newDocAt(dir string, index int) {
 	sp := a.state.ActiveSpace()
 	if sp == nil {
 		return
+	}
+	if sp.IsExternal() {
+		a.notify("请在普通空间中新建文档。")
+		return
+	}
+	var names []string
+	if index >= 0 {
+		kids := a.childrenOf(dir)
+		names = make([]string, len(kids))
+		for i, n := range kids {
+			names[i] = n.Name
+		}
 	}
 	// An empty title to type, its placeholder showing, and the starter
 	// below; the file is named for the title once it has one.
@@ -780,8 +841,8 @@ func (a *App) newDoc(dir string) {
 	title := model.NewBlock("heading", "")
 	title.Level = 1
 	doc.Blocks = []*model.Block{title, model.NewBlock("paragraph", "")}
-	content, _ := doc.Encode()
-	rel, err := vault.CreateFile(sp.Root, dir, untitled, ".arcmd", content)
+	content := editor.ExportMarkdown(doc)
+	rel, err := vault.CreateFile(sp.Root, dir, untitled, ".md", content)
 	if err != nil {
 		a.notify("新建文档失败。%v", err)
 		return
@@ -789,9 +850,14 @@ func (a *App) newDoc(dir string) {
 	if dir != "" {
 		sp.SetExpanded(dir, true)
 	}
+	if index >= 0 {
+		sp.Place(dir, names, path.Base(rel), index)
+		a.saveState()
+	}
 	a.refreshTree()
 	a.open(rel)
 	if d := a.doc; d != nil && d.rel == rel && d.loadErr == nil {
+		d.ensureBodyParagraph()
 		d.ed.SetSelection(0, 0)
 		d.ed.RequestFocus = true
 	}
@@ -828,7 +894,7 @@ func isUntitled(name string) bool {
 // by hand keeps its name. A title taken by another file is numbered.
 func (a *App) followTitle() {
 	d := a.doc
-	if d == nil || d.loadErr != nil || d.conflict || d.missing || !strings.EqualFold(path.Ext(d.rel), ".arcmd") || d.dirty() {
+	if d == nil || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
 	if _, composing := d.ed.MarkedRange(); composing {
@@ -849,7 +915,7 @@ func (a *App) followTitle() {
 			want = fmt.Sprintf("%s %d", title, i)
 		}
 		sources := a.renameSources(sp, d.rel)
-		to, err := vault.Rename(sp.Root, d.rel, want)
+		to, err := renameFile(sp, d.rel, want)
 		if errors.Is(err, vault.ErrExists) {
 			continue
 		}
@@ -889,6 +955,9 @@ func docTitle(doc *model.Document) string {
 // newFolder makes a folder in dir and starts naming it.
 func (a *App) newFolder(dir string) {
 	sp := a.state.ActiveSpace()
+	if sp == nil || sp.IsExternal() {
+		return
+	}
 	rel, err := vault.Mkdir(sp.Root, dir, i18n.T("新建文件夹"))
 	if err != nil {
 		a.notify("新建文件夹失败。%v", err)
@@ -914,6 +983,9 @@ func (a *App) startRename(rel string) {
 // its row, or under its tile for a favorite, which may be another space's.
 func (a *App) renameIn(sp *space.Space, rel string) {
 	a.renaming, a.renameSpace, a.renameFocused = rel, sp.ID, false
+	if sp.IsExternal() {
+		rel = filepath.Base(sp.ExternalFiles[rel])
+	}
 	a.newName = path.Base(rel)
 	if vault.IsDocument(rel) {
 		a.newName = vault.Title(rel)
@@ -928,11 +1000,18 @@ func (a *App) commitRename() {
 		return
 	}
 	sp := a.state.Get(a.renameSpace)
-	if sp == nil || !a.flush() {
+	if sp == nil {
 		return
 	}
+	renaming := a.residentDocument(sp.ID, rel)
+	if !a.flush() {
+		return
+	}
+	if renaming != nil {
+		rel = renaming.rel
+	}
 	sources := a.renameSources(sp, rel)
-	to, err := vault.Rename(sp.Root, rel, name)
+	to, err := renameFile(sp, rel, name)
 	if err != nil {
 		a.notify("重命名 %s 失败。%v", path.Base(rel), err)
 		return
@@ -968,8 +1047,14 @@ func (a *App) moveInto(rel, dir string) {
 // moved follows a file or folder of the space sp that moved from one path
 // to another.
 func (a *App) moved(sp *space.Space, from, to string) {
+	if sp.IsExternal() && from != to {
+		delete(sp.ExternalFiles, from)
+	}
 	_ = history.Move(sp.Root, from, to)
 	a.state.Renamed(sp.ID, from, to)
+	if a.dragGrab.active && a.dragGrab.space == sp.ID && a.dragGrab.rel == from {
+		a.dragGrab.rel = to
+	}
 	a.followOpen(sp.ID, from, sp.ID, to)
 	a.followSplitPaths(sp.ID, from, sp.ID, to)
 	a.saveState()
@@ -1066,6 +1151,9 @@ func (a *App) togglePin(sp *space.Space, rel string) {
 // Tab".
 func (a *App) newFolderWith(rel string) {
 	sp := a.state.ActiveSpace()
+	if sp == nil || sp.IsExternal() {
+		return
+	}
 	dir := parentDir(rel)
 	folder, err := vault.Mkdir(sp.Root, dir, i18n.T("新建文件夹"))
 	if err != nil {
@@ -1093,7 +1181,11 @@ func (a *App) toggleFolder(rel string) {
 // system's trash, which never deletes it for good.
 func (a *App) trash(rel string) {
 	sp := a.state.ActiveSpace()
-	p, err := vault.Resolve(sp.Root, rel)
+	if sp.IsExternal() {
+		a.forgetExternal(sp, rel)
+		return
+	}
+	p, err := resolveFile(sp, rel)
 	if err != nil {
 		return
 	}
@@ -1128,7 +1220,7 @@ func (a *App) revealInFinder(rel string) { a.revealIn(a.state.ActiveSpace(), rel
 // revealIn shows the file or folder at rel of the space sp in the file
 // manager.
 func (a *App) revealIn(sp *space.Space, rel string) {
-	if p, err := vault.Resolve(sp.Root, rel); err == nil {
+	if p, err := resolveFile(sp, rel); err == nil {
 		mygo.Shell.ShowItemInFolder(p)
 	}
 }
@@ -1158,7 +1250,7 @@ func (a *App) defaultRoot(name string) string {
 
 const welcome = `# Welcome to ArcMD
 
-ArcMD is a calm place for writing, in the spirit of Arc and Zen. Documents save as structured .arcmd files. Markdown is available for import and export. Use the formatting bar or type ` + "`#`" + ` and a space for a heading, ` + "`-`" + ` and a space for a list, ` + "`**bold**`" + ` for **bold**.
+ArcMD is a calm place for writing, in the spirit of Arc and Zen. Documents save directly as standard Markdown (.md) files, so any editor, Git or sync tool works on the same folder. Use the formatting bar or type ` + "`#`" + ` and a space for a heading, ` + "`-`" + ` and a space for a list, ` + "`**bold**`" + ` for **bold**.
 
 - **Spaces** keep separate worlds apart: each is a folder of local documents with its own color. Switch with the icons at the foot of the sidebar, or ⌘1…⌘9.
 - **The command bar** (⌘K) finds documents and runs commands; click the address above to open it.
@@ -1177,28 +1269,27 @@ Folders open and close in the sidebar, as Arc's do.
 `
 
 func writeNative(root, rel, markdown string) error {
-	text, err := editor.ImportMarkdown(markdown).Encode()
-	if err != nil {
-		return err
+	if strings.EqualFold(path.Ext(rel), ".arcmd") {
+		text, err := editor.ImportMarkdown(markdown).Encode()
+		if err != nil {
+			return err
+		}
+		return vault.Write(root, rel, text)
 	}
-	return vault.Write(root, rel, text)
+	return vault.Write(root, rel, markdown)
 }
-func (a *App) followMigration() {
-	if a.doc == nil || a.doc.migratedFrom == "" {
-		return
-	}
-	from := a.doc.migratedFrom
-	a.doc.migratedFrom = ""
-	focus := a.doc.ed.Focused()
-	a.moved(a.doc.space, from, a.doc.rel)
-	a.doc.ed.RequestFocus = focus
-}
+
 func (a *App) exportMarkdown() {
 	if a.doc == nil || a.doc.loadErr != nil {
 		return
 	}
 	a.doc.ed.UnmarkText()
-	rel, err := vault.CreateFile(a.doc.space.Root, path.Dir(a.doc.rel), a.doc.title()+" Export", ".md", a.doc.text())
+	root, name, err := fileLocation(a.doc.space, a.doc.rel)
+	if err != nil {
+		a.notify("导出失败。%v", err)
+		return
+	}
+	rel, err := vault.CreateFile(root, path.Dir(name), a.doc.title()+" Export", ".md", a.doc.text())
 	if err != nil {
 		a.notify("导出失败。%v", err)
 		return
@@ -1215,6 +1306,11 @@ func (a *App) applyLanguage() {
 		tag = a.systemLanguage
 	}
 	i18n.SetLanguage(tag)
+	if a.state != nil {
+		if sp := a.state.Get(space.ExternalID); sp != nil {
+			sp.Name = i18n.T("外部空间")
+		}
+	}
 	if a.win != nil {
 		mygo.App.SetLocale(i18n.Language())
 	}

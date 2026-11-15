@@ -9,7 +9,9 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
@@ -28,7 +30,7 @@ var today = time.Now
 // spaceTemplates lists the templates of sp, telling the user when the
 // folder cannot be read.
 func (a *App) spaceTemplates(sp *space.Space) []templates.Template {
-	if sp == nil {
+	if sp == nil || sp.IsExternal() {
 		return nil
 	}
 	list, err := templates.List(sp.Root)
@@ -44,7 +46,10 @@ func readTemplate(sp *space.Space, t templates.Template) (*model.Document, error
 	if err != nil {
 		return nil, err
 	}
-	return model.Decode(text)
+	if strings.EqualFold(path.Ext(t.Path), ".arcmd") {
+		return model.Decode(text)
+	}
+	return editor.ImportMarkdown(text), nil
 }
 
 // newFromTemplate makes a document from the template t in the folder dir
@@ -52,7 +57,7 @@ func readTemplate(sp *space.Space, t templates.Template) (*model.Document, error
 // file is untitled until its title names it, as a new document's is.
 func (a *App) newFromTemplate(dir string, t templates.Template) {
 	sp := a.state.ActiveSpace()
-	if sp == nil || !a.flush() {
+	if sp == nil || sp.IsExternal() || !a.flush() {
 		return
 	}
 	tmpl, err := readTemplate(sp, t)
@@ -61,12 +66,12 @@ func (a *App) newFromTemplate(dir string, t templates.Template) {
 		return
 	}
 	doc := templates.Instantiate(tmpl, today(), "")
-	text, err := doc.Encode()
-	if err != nil {
+	if err := doc.Validate(); err != nil {
 		a.notify("模板「%s」无法使用。%v", t.Name, err)
 		return
 	}
-	rel, err := vault.CreateFile(sp.Root, dir, untitled, ".arcmd", text)
+	text := editor.ExportMarkdown(doc)
+	rel, err := vault.CreateFile(sp.Root, dir, untitled, ".md", text)
 	if err != nil {
 		a.notify("从模板新建文档失败。%v", err)
 		return
@@ -77,6 +82,7 @@ func (a *App) newFromTemplate(dir string, t templates.Template) {
 	a.refreshTree()
 	a.open(rel)
 	if d := a.doc; d != nil && d.rel == rel && d.loadErr == nil {
+		d.ensureBodyParagraph()
 		leaves := d.ed.Doc.Leaves()
 		d.ed.SetSelection(leaves[0].End, leaves[0].End)
 		d.ed.RequestFocus = true
@@ -87,19 +93,20 @@ func (a *App) newFromTemplate(dir string, t templates.Template) {
 // space, named by its title.
 func (a *App) saveAsTemplate() {
 	d := a.doc
-	if d == nil || d.loadErr != nil {
+	if d == nil || d.space.IsExternal() || d.loadErr != nil {
 		return
 	}
 	doc := d.ed.Committed().Clone()
 	doc.ImportSource = ""
-	text, err := doc.Encode()
+	err := doc.Validate()
 	if err == nil {
+		text := editor.ExportMarkdown(doc)
 		name := docTitle(doc)
 		if name == "" {
 			name = vault.Title(d.rel)
 		}
 		var rel string
-		if rel, err = vault.CreateFile(d.space.Root, templates.Dir, name, ".arcmd", text); err == nil {
+		if rel, err = vault.CreateFile(d.space.Root, templates.Dir, name, ".md", text); err == nil {
 			a.notify("已存为模板「%s」", vault.Title(rel))
 			return
 		}
@@ -111,7 +118,7 @@ func (a *App) saveAsTemplate() {
 // file manager, making it first.
 func (a *App) openTemplatesFolder() {
 	sp := a.state.ActiveSpace()
-	if sp == nil {
+	if sp == nil || sp.IsExternal() {
 		return
 	}
 	dir := filepath.Join(sp.Root, filepath.FromSlash(templates.Dir))
@@ -126,7 +133,7 @@ func (a *App) openTemplatesFolder() {
 // space's 日记 template when it has one — the first time.
 func (a *App) openDaily() {
 	sp := a.state.ActiveSpace()
-	if sp == nil || !a.flush() {
+	if sp == nil || sp.IsExternal() || !a.flush() {
 		return
 	}
 	now := today()
@@ -138,6 +145,13 @@ func (a *App) openDaily() {
 		return
 	}
 	if _, err := os.Stat(full); errors.Is(err, fs.ErrNotExist) {
+		legacyRel := strings.TrimSuffix(rel, ".md") + ".arcmd"
+		if legacyFull, lerr := vault.Resolve(sp.Root, legacyRel); lerr == nil {
+			if _, serr := os.Stat(legacyFull); serr == nil {
+				rel = legacyRel
+				goto openNote
+			}
+		}
 		var tmpl *model.Document
 		if t, ok := templates.Find(a.spaceTemplates(sp), templates.DailyTemplate); ok {
 			if tmpl, err = readTemplate(sp, t); err != nil {
@@ -145,9 +159,11 @@ func (a *App) openDaily() {
 				tmpl = nil
 			}
 		}
-		text, err := templates.Daily(tmpl, now).Encode()
+		dailyDoc := templates.Daily(tmpl, now)
+		err = dailyDoc.Validate()
 		if err == nil {
-			rel, err = vault.CreateFile(sp.Root, templates.Folder(), templates.DailyName(now), ".arcmd", text)
+			text := editor.ExportMarkdown(dailyDoc)
+			rel, err = vault.CreateFile(sp.Root, templates.Folder(), templates.DailyName(now), ".md", text)
 		}
 		if err != nil {
 			a.notify("新建今日笔记失败。%v", err)
@@ -157,10 +173,12 @@ func (a *App) openDaily() {
 		a.notify("打开今日笔记失败。%v", err)
 		return
 	}
+openNote:
 	sp.SetExpanded(templates.Folder(), true)
 	a.refreshTree()
 	a.open(rel)
 	if d := a.doc; d != nil && d.rel == rel && d.loadErr == nil {
+		d.ensureBodyParagraph()
 		end := d.ed.Len()
 		d.ed.SetSelection(end, end)
 		d.ed.RequestFocus = true
@@ -187,12 +205,12 @@ func (a *App) templateMenu(m *ui.Menu, dir string) {
 }
 
 // starterName is the page a new, empty space starts with.
-const starterName = "从这里开始.arcmd"
+const starterName = "从这里开始.md"
 
 // starterFile is its name in the language shown.
 func starterFile() string {
 	if i18n.English() {
-		return "Start here.arcmd"
+		return "Start here.md"
 	}
 	return starterName
 }
@@ -249,12 +267,6 @@ func writeStarter(root, rel string) error {
 	text := starter
 	if i18n.English() {
 		text = starterEnglish
-	}
-	doc := editor.ImportMarkdown(text)
-	doc.ImportSource = ""
-	text, err := doc.Encode()
-	if err != nil {
-		return err
 	}
 	return vault.Write(root, rel, text)
 }

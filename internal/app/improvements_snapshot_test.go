@@ -63,7 +63,7 @@ func TestImprovementsSnapshot(t *testing.T) {
 		},
 		"undo-toast": func(t *testing.T, a *App, tt *ui.Tester) {
 			tt.Frame()
-			a.placeEntry("Journal/Ideas.arcmd", "", 0)
+			a.placeEntry("Journal/Ideas.md", "", 0)
 		},
 		"toggle": func(t *testing.T, a *App, tt *ui.Tester) {
 			openSample(t, a, "FAQ.arcmd", "# 常见问题\n\n<details open>\n<summary>文档保存在哪里？</summary>\n\n每篇文档都是空间文件夹里的一个 .arcmd 文件。\n\n- 可以随时在访达中打开\n\n</details>\n\n<details>\n<summary>可以导出 Markdown 吗？</summary>\n\n可以。\n\n</details>\n\n其他问题请在 GitHub 提出。")

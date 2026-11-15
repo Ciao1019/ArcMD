@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -139,16 +140,17 @@ func styled(n *html.Node, style document.Style) document.Style {
 	if css == "" {
 		return style
 	}
+	hasDataMark := attr(n, "data-mark") != ""
 	if strings.Contains(css, "font-weight:bold") || strings.Contains(css, "font-weight:700") || strings.Contains(css, "font-weight:600") {
 		style.Bold = true
 	}
 	if strings.Contains(css, "font-style:italic") {
 		style.Italic = true
 	}
-	if strings.Contains(css, "text-decoration:underline") || strings.Contains(css, "text-decoration-line:underline") {
+	if !hasDataMark && (strings.Contains(css, "text-decoration:underline") || strings.Contains(css, "text-decoration-line:underline")) {
 		style.Underline = true
 	}
-	if strings.Contains(css, "line-through") {
+	if !hasDataMark && strings.Contains(css, "line-through") {
 		style.Strike = true
 	}
 	if strings.Contains(css, "vertical-align:super") {
@@ -178,7 +180,7 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 	default:
 		return
 	}
-	style = styled(n, style)
+	style = applyNodeRichStyle(n, styled(n, style))
 	switch n.DataAtom {
 	case atom.Script, atom.Style, atom.Head, atom.Title, atom.Meta, atom.Link, atom.Noscript, atom.Template, atom.Button, atom.Svg:
 		return
@@ -216,6 +218,13 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		h.block("heading", level, func() { h.children(n, style) })
 		return
 	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav, atom.Figure, atom.Figcaption, atom.Dt, atom.Dd, atom.Address, atom.Center:
+		if n.DataAtom == atom.Div && hasHTMLClass(n, "arcmd-columns") {
+			h.flush()
+			if cols := columnsOfHTML(n); cols != nil {
+				h.blocks = append(h.blocks, cols)
+				return
+			}
+		}
 		if h.kind == "quote" || h.kind == "bullet" || h.kind == "numbered" {
 			// Paragraphs inside a quote or a list item stay what they are in.
 			h.flush()
@@ -324,6 +333,45 @@ func taskState(li *html.Node) *bool {
 	return found
 }
 
+func hasHTMLClass(n *html.Node, want string) bool {
+	for _, cl := range strings.Fields(attr(n, "class")) {
+		if strings.EqualFold(cl, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func columnsOfHTML(n *html.Node) *document.Block {
+	var cols []*document.Block
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != html.ElementNode || c.DataAtom != atom.Div {
+			continue
+		}
+		inner := &htmlImporter{}
+		inner.children(c, document.Style{})
+		inner.flush()
+		children := inner.blocks
+		if len(children) == 0 {
+			children = []*document.Block{document.NewBlock("paragraph", "")}
+		}
+		cols = append(cols, &document.Block{
+			ID:       document.NewID(),
+			Kind:     "column",
+			Children: children,
+		})
+	}
+	if len(cols) < 2 || len(cols) > 5 {
+		return nil
+	}
+	return &document.Block{
+		ID:       document.NewID(),
+		Kind:     "columns",
+		Widths:   parseDataWidthsAttr(attr(n, "data-widths"), len(cols)),
+		Children: cols,
+	}
+}
+
 // codeLanguage reads a code block's language from its class, as
 // "language-go" or "lang-go".
 func codeLanguage(pre *html.Node) string {
@@ -345,60 +393,183 @@ func codeLanguage(pre *html.Node) string {
 // tableOf makes a table block of an HTML table, its cells' text with its
 // styles; rows are padded to the widest.
 func tableOf(n *html.Node) *document.Block {
-	var rows [][]*document.Block
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
+	return tableOfMode(n, false)
+}
+
+func tableOfMode(n *html.Node, exactWhitespace bool) *document.Block {
+	var colWidths []float32
+	var rawRows [][]*html.Node
+	var collect func(*html.Node)
+	collect = func(cur *html.Node) {
+		for c := cur.FirstChild; c != nil; c = c.NextSibling {
 			if c.Type != html.ElementNode {
 				continue
 			}
 			switch c.DataAtom {
-			case atom.Tr:
-				var row []*document.Block
-				for td := c.FirstChild; td != nil; td = td.NextSibling {
-					if td.Type == html.ElementNode && (td.DataAtom == atom.Td || td.DataAtom == atom.Th) {
-						inner := &htmlImporter{kind: "paragraph"}
-						inner.children(td, document.Style{})
-						inner.flush()
-						cell := document.NewBlock("cell", "")
-						var runs []document.Run
-						for i, b := range inner.blocks {
-							if i > 0 {
-								runs = append(runs, document.Run{Text: " "})
-							}
-							runs = append(runs, b.Runs...)
-						}
-						if runs = document.Compact(runs); len(runs) > 0 {
-							cell.Runs = runs
-						}
-						row = append(row, cell)
+			case atom.Colgroup:
+				for col := c.FirstChild; col != nil; col = col.NextSibling {
+					if col.Type == html.ElementNode && col.DataAtom == atom.Col {
+						colWidths = append(colWidths, parseHTMLWidth(col))
 					}
 				}
-				if len(row) > 0 {
-					rows = append(rows, row)
+			case atom.Col:
+				colWidths = append(colWidths, parseHTMLWidth(c))
+			case atom.Tr:
+				var tds []*html.Node
+				for td := c.FirstChild; td != nil; td = td.NextSibling {
+					if td.Type == html.ElementNode && (td.DataAtom == atom.Td || td.DataAtom == atom.Th) {
+						tds = append(tds, td)
+					}
+				}
+				if len(tds) > 0 {
+					rawRows = append(rawRows, tds)
 				}
 			case atom.Table:
 				// A table inside a cell is not followed.
 			default:
-				walk(c)
+				collect(c)
 			}
 		}
 	}
-	walk(n)
-	if len(rows) == 0 {
+	collect(n)
+	if len(rawRows) == 0 {
 		return nil
 	}
-	cols := 0
-	for _, r := range rows {
-		cols = max(cols, len(r))
-	}
-	table := document.Table(len(rows), cols)
-	for i, r := range rows {
-		for j := range cols {
-			if j < len(r) {
-				table.Children[i].Children[j] = r[j]
+
+	occupied := map[[2]int]bool{}
+	placed := map[[2]int]*document.Block{}
+	numRows := len(rawRows)
+	numCols := 0
+
+	for r, tds := range rawRows {
+		c := 0
+		for _, td := range tds {
+			for occupied[[2]int{r, c}] {
+				c++
 			}
+			colSpan := parseSpanAttr(attr(td, "colspan"))
+			rowSpan := parseSpanAttr(attr(td, "rowspan"))
+			// Clamp spans that would collide with an already occupied cell.
+			for dc := 1; dc < colSpan; dc++ {
+				if occupied[[2]int{r, c + dc}] {
+					colSpan = dc
+					break
+				}
+			}
+			cell := document.NewBlock("cell", "")
+			if exactWhitespace {
+				if runs := parseInlineHTMLNodes(td, document.Style{}); len(runs) > 0 {
+					cell.Runs = runs
+				}
+			} else {
+				inner := &htmlImporter{kind: "paragraph"}
+				inner.children(td, document.Style{})
+				inner.flush()
+				var runs []document.Run
+				for i, b := range inner.blocks {
+					if i > 0 {
+						runs = append(runs, document.Run{Text: "\n"})
+					}
+					runs = append(runs, b.Runs...)
+				}
+				if runs = document.Compact(runs); len(runs) > 0 {
+					cell.Runs = runs
+				}
+			}
+			if align := parseBlockAlign(td); align != "" {
+				cell.Align = align
+			}
+			if bg := parseCellBackground(td); bg != "" {
+				cell.Background = bg
+			}
+			if colSpan > 1 {
+				cell.ColSpan = colSpan
+			}
+			if rowSpan > 1 {
+				cell.RowSpan = rowSpan
+			}
+			placed[[2]int{r, c}] = cell
+			for dr := 0; dr < rowSpan; dr++ {
+				for dc := 0; dc < colSpan; dc++ {
+					occupied[[2]int{r + dr, c + dc}] = true
+				}
+			}
+			numRows = max(numRows, r+rowSpan)
+			numCols = max(numCols, c+colSpan)
+			c += colSpan
+		}
+	}
+	if numCols == 0 {
+		return nil
+	}
+	table := document.Table(numRows, numCols)
+	for pos, cell := range placed {
+		table.Children[pos[0]].Children[pos[1]] = cell
+	}
+	if len(colWidths) == numCols {
+		valid := true
+		for _, w := range colWidths {
+			if !(w > 0 && w <= 10000) {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			table.Widths = colWidths
 		}
 	}
 	return table
+}
+
+func parseSpanAttr(val string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(val))
+	if err != nil || n < 1 {
+		return 1
+	}
+	return min(64, n)
+}
+
+func parseHTMLWidth(n *html.Node) float32 {
+	raw := strings.TrimSpace(attr(n, "width"))
+	if raw == "" {
+		raw = parseCSSProps(attr(n, "style"))["width"]
+	}
+	raw = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), "px")
+	if raw == "" || strings.HasSuffix(raw, "%") {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 32)
+	if err != nil || v <= 0 || v > 10000 {
+		return 0
+	}
+	return float32(v)
+}
+
+func parseBlockAlign(n *html.Node) string {
+	a := strings.ToLower(strings.TrimSpace(attr(n, "align")))
+	if a == "" {
+		a = strings.ToLower(strings.TrimSpace(parseCSSProps(attr(n, "style"))["text-align"]))
+	}
+	switch a {
+	case "center", "right":
+		return a
+	case "left":
+		return ""
+	}
+	return ""
+}
+
+func parseCellBackground(n *html.Node) string {
+	if bg := attr(n, "data-bg"); validStyleName(bg, document.TextHighlights) {
+		return bg
+	}
+	props := parseCSSProps(attr(n, "style"))
+	raw := props["background-color"]
+	if raw == "" {
+		raw = props["background"]
+	}
+	if raw == "" {
+		raw = attr(n, "bgcolor")
+	}
+	return matchHighlightCSS(raw)
 }

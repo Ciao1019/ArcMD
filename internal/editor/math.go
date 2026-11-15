@@ -4,21 +4,23 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
 
-// Math follows Textus: an unboxed formula at rest, a centered source panel
-// while editing, and a separate live preview with room below that panel.
+// Display math renders as an unboxed formula at rest, and while editing opens
+// a unified card with the live centered formula on top and a rounded monospace
+// TeX input bar directly below.
 const (
 	mathSize     = 16 * 1.21 // KaTeX's size relative to the document body.
 	mathMargin   = 18
 	mathPaddingX = 12
-	mathPaddingY = 6
+	mathPaddingY = 8
 	mathFenceH   = 20
 	mathPreviewY = 16
-	mathPreviewW = 420
+	mathPreviewW = 520
 )
 
 // mathFont is the family formulas are set in: a book face, as TeX's.
@@ -40,6 +42,37 @@ func (e *Editor) watchMath() {
 	if leaf := e.Engine.LeafAt(e.Caret); leaf.Block.Kind == "math" && e.Anchor >= leaf.Start && e.Anchor <= leaf.End {
 		e.mathEditing = leaf.Block.ID
 	}
+}
+
+// exitDisplayMath jumps out of a display math block onto the block below (or
+// inserts a new paragraph below if at the end of the parent list).
+func (e *Editor) exitDisplayMath() bool {
+	if e.ReadOnly || e.Anchor != e.Caret {
+		return false
+	}
+	leaf := e.Engine.LeafAt(e.Caret)
+	if leaf.Block.Kind != "math" || leaf.Parent == nil {
+		return false
+	}
+	if leaf.Index+1 < len(*leaf.Parent) {
+		next := (*leaf.Parent)[leaf.Index+1]
+		for _, l := range e.Doc.Leaves() {
+			if l.Block.ID == next.ID || l.Owner == next.ID {
+				e.SetSelection(l.Start, l.Start)
+				e.reveal = true
+				return true
+			}
+		}
+	}
+	e.Engine.Edit(func() {
+		next := document.NewBlock("paragraph", "")
+		next.Indent = leaf.Block.Indent
+		*leaf.Parent = append((*leaf.Parent)[:leaf.Index+1], append([]*document.Block{next}, (*leaf.Parent)[leaf.Index+1:]...)...)
+		e.Engine.FocusBlock(next.ID)
+	})
+	e.sync()
+	e.reveal = true
+	return true
 }
 
 // glyphs shapes a piece of a formula's text, kept for drawing.
@@ -86,8 +119,8 @@ func (e *Editor) formula(id, src string) mathShape {
 	return s
 }
 
-// mathRow reserves a preview's room so it never covers the following block.
-// All formula geometry stays relative to the row, including narrow columns.
+// mathRow reserves room for the unified card (live formula preview on top and
+// monospace TeX bar below) while editing, or just the clean formula at rest.
 func (e *Editor) mathRow(r *row, textH float32) float32 {
 	b := r.leaf.Block
 	src := strings.TrimSpace(b.Text())
@@ -95,56 +128,82 @@ func (e *Editor) mathRow(r *row, textH float32) float32 {
 	r.mathHidden = e.mathEditing != b.ID
 	r.mathTop = mathMargin
 	r.y = r.rect.Y + mathMargin
-	if !r.mathHidden {
-		r.mathPanel = textH + 2*mathPaddingY + 2*mathFenceH
-		r.y += mathPaddingY + mathFenceH
-		r.mathTop += r.mathPanel + 10 + mathPreviewY
-	}
-	if src == "" {
-		return 2*mathMargin + max(26, r.mathPanel)
-	}
-	shape := e.formula(b.ID, src)
-	if shape.err != nil {
-		r.mathErr = i18n.T("公式有误：") + strings.TrimPrefix(shape.err.Error(), "tex: ")
-		r.mathError = ui.ShapeText(r.mathErr, ui.Font{Family: "system-ui", Size: 12}, max(24, r.rect.W-2*mathPaddingX))
-		_, errorH := r.mathError.Size()
-		if r.mathHidden {
-			r.mathHidden = false // Malformed TeX always remains editable and visible.
-			r.mathTop = mathMargin + textH + 8
+
+	previewH := float32(26)
+	if src != "" {
+		shape := e.formula(b.ID, src)
+		if shape.err != nil {
+			r.mathErr = i18n.T("公式有误：") + strings.TrimPrefix(shape.err.Error(), "tex: ")
+			r.mathError = ui.ShapeText(r.mathErr, ui.Font{Family: "system-ui", Size: 12}, max(24, r.rect.W-2*mathPaddingX))
+			_, errorH := r.mathError.Size()
+			previewH = max(20, errorH)
+			if r.mathHidden {
+				r.mathHidden = false // Malformed TeX always remains editable and visible.
+			}
+		} else {
+			box := shape.box
+			r.math = &box
+			width := r.rect.W
+			if !r.mathHidden {
+				width = max(24, min(width, mathPreviewW)-2*mathPaddingX)
+			}
+			if box.W > width {
+				r.mathScale = max(1, width) / box.W
+			}
+			previewH = max(26, (box.Ascent+box.Descent)*r.mathScale)
 		}
-		return r.mathTop + errorH + mathMargin
 	}
-	box := shape.box
-	r.math = &box
-	width := r.rect.W
-	if !r.mathHidden {
-		width = min(width, mathPreviewW) - 2*mathPaddingX
+
+	if r.mathHidden {
+		r.mathPanel = 0
+		return 2*mathMargin + previewH
 	}
-	if box.W > width {
-		r.mathScale = max(1, width) / box.W
-	}
-	h := (box.Ascent + box.Descent) * r.mathScale
-	if !r.mathHidden {
-		return r.mathTop + h + mathPreviewY + mathMargin
-	}
-	return 2*mathMargin + max(26, h)
+
+	r.mathTop = mathMargin + mathPreviewY
+	wellTop := r.mathTop + previewH + 14
+	r.y = r.rect.Y + wellTop + mathFenceH + mathPaddingY
+	wellH := mathFenceH + mathPaddingY + textH + mathPaddingY
+	r.mathPanel = (wellTop - mathMargin) + wellH + 10
+	return mathMargin + r.mathPanel + mathMargin
 }
 
-// paintMath draws a math block's formula, and reports whether it stands
-// for the block's TeX, which then is not drawn.
+// paintMath draws a math block's formula and unified editing card, reporting
+// whether it stands for the block's TeX (which then is not drawn).
 func (e *Editor) paintMath(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bool {
 	if r.leaf.Block.Kind != "math" {
 		return false
 	}
-	x, y := bounds.X+r.rect.X, bounds.Y+r.rect.Y
-	if r.mathPanel > 0 {
-		panel := ui.Rect{X: x, Y: y + mathMargin, W: r.rect.W, H: r.mathPanel}
-		p.Stroke(panel, e.page.MathBorder, 8, 1)
-		fence := ui.ShapeText("$$", ui.Font{Family: "monospace", Size: 14.4}, 0)
-		fw, fh := fence.Size()
-		p.TextLayout(fence, x+(r.rect.W-fw)/2, panel.Y+mathPaddingY+(mathFenceH-fh)/2, e.page.Caption)
-		p.TextLayout(fence, x+(r.rect.W-fw)/2, panel.Y+panel.H-mathPaddingY-mathFenceH+(mathFenceH-fh)/2, e.page.Caption)
+	dx, dy := e.visualOffset(r)
+	x, y := bounds.X+r.rect.X+dx, bounds.Y+r.rect.Y+dy
+
+	if !r.mathHidden && r.mathPanel > 0 {
+		card := ui.Rect{X: x, Y: y + mathMargin, W: r.rect.W, H: r.mathPanel}
+		p.Shadow(card, 12, 0, 4, 16, 0, e.page.MathShadow)
+		p.Fill(card, e.page.Popover, 12)
+		border := e.page.MathBorder
+		if r.mathError != nil {
+			border = t.Danger.Alpha(0.5)
+		}
+		p.Stroke(card, border, 12, 1)
+
+		wellY := bounds.Y + r.y + dy - mathFenceH - mathPaddingY
+		wellH := (card.Y + card.H - 10) - wellY
+		if r.rect.W > 24 && wellH > 12 {
+			well := ui.Rect{X: x + 10, Y: wellY, W: r.rect.W - 20, H: wellH}
+			p.Fill(well, e.page.CodeFill, 8)
+			fence := ui.ShapeText("$$", ui.Font{Family: "monospace", Size: 11.5, Weight: 600}, 0)
+			_, fh := fence.Size()
+			p.TextLayout(fence, well.X+10, well.Y+(mathFenceH-fh)/2+2, e.page.Caption)
+			if !e.printing && well.W >= 150 {
+				hint := ui.ShapeText("↵↵ · ⇥", ui.Font{Family: "system-ui", Size: 11, Weight: 500}, 0)
+				hw, hh := hint.Size()
+				pill := ui.Rect{X: well.X + well.W - hw - 18, Y: well.Y + 4, W: hw + 10, H: max(15, hh+2)}
+				p.Fill(pill, t.Accent.Alpha(0.10), 4)
+				p.TextLayout(hint, pill.X+5, pill.Y+(pill.H-hh)/2, t.Accent.Alpha(0.85))
+			}
+		}
 	}
+
 	if r.mathError != nil {
 		ew, _ := r.mathError.Size()
 		p.TextLayout(r.mathError, x+(r.rect.W-ew)/2, y+r.mathTop, t.Danger)
@@ -154,23 +213,16 @@ func (e *Editor) paintMath(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bo
 		if !e.printing {
 			hint := ui.ShapeText(i18n.T("输入 LaTeX 公式"), ui.Font{Family: "system-ui", Size: 14}, 0)
 			hw, hh := hint.Size()
-			p.TextLayout(hint, x+(r.rect.W-hw)/2, bounds.Y+r.y+(22-hh)/2, e.page.Placeholder)
+			p.TextLayout(hint, x+(r.rect.W-hw)/2, y+r.mathTop+(26-hh)/2, e.page.Placeholder)
 		}
 		return r.mathHidden
 	}
 	box, scale := r.math, r.mathScale
-	w, h := box.W*scale, (box.Ascent+box.Descent)*scale
-	if !r.mathHidden {
-		previewW := min(r.rect.W, w+2*mathPaddingX)
-		preview := ui.Rect{X: x + (r.rect.W-previewW)/2, Y: y + r.mathTop - mathPreviewY, W: previewW, H: h + 2*mathPreviewY}
-		p.Shadow(preview, 12, 0, 4, 16, 0, e.page.MathShadow)
-		p.Fill(preview, e.page.Popover, 12)
-		p.Stroke(preview, e.page.MathBorder, 12, 1)
-	}
-	x += (r.rect.W - w) / 2
-	y += r.mathTop
-	p.Transform(ui.Scaling(scale, scale), x, y, func() {
-		e.paintFormula(p, *box, x, y+box.Ascent, t)
+	w := box.W * scale
+	fx := x + (r.rect.W-w)/2
+	fy := y + r.mathTop
+	p.Transform(ui.Scaling(scale, scale), fx, fy, func() {
+		e.paintFormula(p, *box, fx, fy+box.Ascent, t)
 	})
 	return r.mathHidden
 }

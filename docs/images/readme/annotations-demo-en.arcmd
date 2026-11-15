@@ -18,7 +18,7 @@
       "kind": "paragraph",
       "runs": [
         {
-          "text": "A page of notes can have a voice of its own.",
+          "text": "A plain .md page can still carry a voice of its own.",
           "style": {}
         }
       ]

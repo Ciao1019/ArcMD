@@ -1,8 +1,9 @@
 // Package templates keeps a space's document templates and makes daily
-// notes. Templates are ordinary .arcmd documents in the space's hidden
-// .arcmd/templates folder; making a document from one gives every block a
-// fresh ID and fills in the placeholders {{date}}, {{time}}, {{weekday}}
-// and {{title}}. It does not depend on the UI.
+// notes. Templates are Markdown documents in the space's hidden
+// .arcmd/templates folder (legacy .arcmd templates are also read); making a
+// document from one gives every block a fresh ID and fills in the
+// placeholders {{date}}, {{time}}, {{weekday}} and {{title}}. It does not
+// depend on the UI.
 package templates
 
 import (
@@ -44,12 +45,24 @@ func List(root string) ([]Template, error) {
 		return nil, err
 	}
 	var out []Template
+	seen := map[string]int{}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || strings.HasPrefix(name, ".") || !strings.EqualFold(path.Ext(name), ".arcmd") {
+		ext := strings.ToLower(path.Ext(name))
+		if e.IsDir() || strings.HasPrefix(name, ".") || (ext != ".md" && ext != ".arcmd") {
 			continue
 		}
-		out = append(out, Template{Name: strings.TrimSuffix(name, path.Ext(name)), Path: path.Join(Dir, name)})
+		base := strings.TrimSuffix(name, path.Ext(name))
+		key := strings.ToLower(base)
+		item := Template{Name: base, Path: path.Join(Dir, name)}
+		if idx, exists := seen[key]; exists {
+			if ext == ".md" {
+				out[idx] = item
+			}
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out, nil
@@ -89,6 +102,7 @@ func Fill(text string, now time.Time, title string) string {
 func Instantiate(tmpl *document.Document, now time.Time, title string) *document.Document {
 	doc := tmpl.Clone()
 	doc.ImportSource = ""
+	doc.Frontmatter = Fill(doc.Frontmatter, now, title)
 	doc.Version = document.CurrentVersion
 	var walk func([]*document.Block)
 	walk = func(blocks []*document.Block) {
@@ -111,7 +125,7 @@ func Instantiate(tmpl *document.Document, now time.Time, title string) *document
 func DailyName(now time.Time) string { return now.Format("2006-01-02") }
 
 // DailyPath is where the daily note of now goes in a space.
-func DailyPath(now time.Time) string { return path.Join(DailyDir, DailyName(now)+".arcmd") }
+func DailyPath(now time.Time) string { return path.Join(DailyDir, DailyName(now)+".md") }
 
 // English names the daily notes' folder and titles in English, for an
 // interface shown in English: the folder Daily, titles as Thursday,
@@ -127,7 +141,7 @@ func Folder() string {
 }
 
 // PathFor is where the daily note of now goes, in the language shown.
-func PathFor(now time.Time) string { return path.Join(Folder(), DailyName(now)+".arcmd") }
+func PathFor(now time.Time) string { return path.Join(Folder(), DailyName(now)+".md") }
 
 // DailyTitle is the title of the daily note of now, as 2026年11月12日 星期四.
 func DailyTitle(now time.Time) string {

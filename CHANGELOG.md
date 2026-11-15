@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.0
+
+This release makes standard `.md` Markdown the primary document format, adds a built-in External space for standalone files, and brings fluid motion and tactile micro-interactions across typing, math, tables, images, and the sidebar.
+
+### Native Markdown and external files
+
+- Save and autosave `.md`, `.markdown`, and `.mdx` documents directly in place without creating sidecar `.arcmd` copies. Unmodified top-level blocks preserve their original Markdown formatting, while rich attributes—colors, highlights, hand-drawn annotations, callouts, toggles, merged or colored tables, custom two-column widths, and page icons, covers, and word goals—round-trip losslessly through standard Markdown, semantic HTML, and YAML frontmatter.
+- Open standalone files outside any Space in a built-in **External** space (`Open File…` or OS file associations) without scanning parent folders. Edits save in place, images resolve relative to each file's folder, and removing an entry drops only the reference. Legacy `.arcmd` documents and snapshots remain supported.
+
+### Fluid writing and micro-interactions
+
+- Glide the caret smoothly across characters, lines, and math capsules; scroll with interruptible exponential damping for typewriter mode, edge tracking, and search or footnote jumps; and animate block, fold, indent, and table row/column displacement without disturbing document coordinates.
+- Compile inline `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `--`, `...`, and `---` live as you type, with one-keystroke Backspace rollback to literal text. Auto-pair brackets, smart curly quotes, and inline `$…$` math with soft scope highlights and `Tab` jump-out badges.
+- Preview inline `$…$` TeX in a floating source capsule below the line without shifting baselines, and edit display math in a unified preview-and-source card (`↵↵` or `Tab` to continue prose).
+- Unfold `| A | B |` pipe headers into native tables on Enter, drag table rows and columns to reorder, resize two-column seams alongside table columns and split panes with `50% · 50%` magnetic snap pills, and toggle task checkboxes with spring motion.
+- Preview dragged images as tilted Polaroid cards that spring upright on drop, size local images immediately from file headers without layout jumps, open double-clicked images in a damped hero lightbox, and save documents and history snapshots asynchronously off the UI thread.
+- Refine sidebar drag-and-drop with floating cards and dashed insertion slots, inline hover `+ New Document` seams, instant zero-blocking command bar opening, directional back/forward transitions, and synchronized rich-text ⇄ Markdown preview cross-fades.
+
+### Documentation
+
+- Refresh the Chinese and English READMEs around a top-of-page fluid writing showcase and rebuild all localized vector animations from a unified `tools/readme-art` generator.
+
+### Data compatibility
+
+ArcMD 0.1.0 writes Space configuration format **9** (adding the built-in External space map) and continues to read and write legacy `.arcmd` document format **8** alongside native `.md` files. Older releases cannot open `spaces.json` v9; keep a copy of your configuration directory if you need to return to an earlier version.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates. The plugin marketplace and plugin execution runtimes remain unavailable.
+
 ## 0.0.11
 
 This release adds hand-drawn annotations, more ways to write and organize documents, and broad improvements to the editor's algorithms for long documents.

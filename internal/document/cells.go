@@ -130,6 +130,68 @@ func (e *Engine) SplitCell(cellID string) {
 	})
 }
 
+// MoveTableRow reorders row from to index to within table id as one history
+// step, normalizing any multi-row cell spans afterwards.
+func (e *Engine) MoveTableRow(id string, from, to int) {
+	e.Edit(func() {
+		table := e.table(id)
+		if table == nil {
+			return
+		}
+		n := len(table.Children)
+		if from < 0 || from >= n {
+			return
+		}
+		to = max(0, min(to, n-1))
+		if from == to {
+			return
+		}
+		row := table.Children[from]
+		rest := append(append([]*Block(nil), table.Children[:from]...), table.Children[from+1:]...)
+		table.Children = append(append(append([]*Block(nil), rest[:to]...), row), rest[to:]...)
+		normalizeSpans(table)
+		if len(row.Children) > 0 {
+			e.FocusBlock(row.Children[0].ID)
+		}
+	})
+}
+
+// MoveTableColumn reorders column from to index to within table id as one
+// history step, moving column widths in lockstep and normalizing merged spans.
+func (e *Engine) MoveTableColumn(id string, from, to int) {
+	e.Edit(func() {
+		table := e.table(id)
+		if table == nil || len(table.Children) == 0 {
+			return
+		}
+		cols := len(table.Children[0].Children)
+		if from < 0 || from >= cols {
+			return
+		}
+		to = max(0, min(to, cols-1))
+		if from == to {
+			return
+		}
+		for _, row := range table.Children {
+			if len(row.Children) != cols {
+				continue
+			}
+			cell := row.Children[from]
+			rest := append(append([]*Block(nil), row.Children[:from]...), row.Children[from+1:]...)
+			row.Children = append(append(append([]*Block(nil), rest[:to]...), cell), rest[to:]...)
+		}
+		if len(table.Widths) == cols {
+			w := table.Widths[from]
+			rest := append(append([]float32(nil), table.Widths[:from]...), table.Widths[from+1:]...)
+			table.Widths = append(append(append([]float32(nil), rest[:to]...), w), rest[to:]...)
+		}
+		normalizeSpans(table)
+		if len(table.Children[0].Children) > to {
+			e.FocusBlock(table.Children[0].Children[to].ID)
+		}
+	})
+}
+
 // shiftSpans keeps merged cells whole when a row (rows) or column is
 // inserted (delta 1) or deleted (delta -1) at line at, before the change.
 // A merge the line passes through grows or shrinks; a deleted line that

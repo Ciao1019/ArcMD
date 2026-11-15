@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/space"
-	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -234,7 +233,7 @@ func minusMark(p *ui.Painter, r ui.Rect, color ui.Color) {
 
 // exists reports whether the file at rel of the space sp is there.
 func (a *App) exists(sp *space.Space, rel string) bool {
-	p, err := vault.Resolve(sp.Root, rel)
+	p, err := resolveFile(sp, rel)
 	if err != nil {
 		return false
 	}

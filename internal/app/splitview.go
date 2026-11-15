@@ -44,7 +44,11 @@ func (a *App) splitView(c *ui.Context) {
 	}
 	panes := slices.Clone(s.panes)
 	vertical := s.vertical
-	lengths := splitLengths(panes, total)
+	animating := s.stepFactors(c)
+	if animating {
+		c.After(0)
+	}
+	lengths := splitVisualLengths(panes, total)
 	area.Children(func() {
 		// Resolve divider input before laying out either neighboring pane;
 		// both cards and their editors use the same frame's geometry.
@@ -57,8 +61,9 @@ func (a *App) splitView(c *ui.Context) {
 				cursor += n
 			}
 		}
-		if !a.splitResizing {
+		if s.dragPane != nil && !a.splitResizing && !animating {
 			s.dragPane = nil
+			s.dragSnapped = false
 		}
 		cursor = 0
 		for i, pane := range panes {
@@ -67,6 +72,12 @@ func (a *App) splitView(c *ui.Context) {
 				x, y, w, h = 0, cursor, b.W, lengths[i]
 			}
 			e := ui.Column(c.Key(fmt.Sprintf("pane:%p", pane))).Absolute().Left(x).Top(y).Size(w, h).MinWidth(0).MinHeight(0)
+			if !a.splitResizing && !animating && s.dragPane == nil {
+				e.Transition(ui.ElementTransition{
+					Duration: 150 * time.Millisecond,
+					Position: true,
+				})
+			}
 			pane.bounds = e.Bounds()
 			e.Children(func() { a.splitPaneView(c, s, pane, i, w) })
 			if a.split != s || !slices.Equal(panes, s.panes) || vertical != s.vertical {
@@ -241,12 +252,13 @@ func (a *App) splitDivider(c *ui.Context, s *splitGroup, index int, offset float
 	} else {
 		handle.Left(offset-4).Top(0).Size(splitGap+8, b.H).Cursor(ui.CursorResizeEW)
 	}
-	move := func(position float32) {
+	move := func(position float32, immediate bool) (snapped bool) {
 		sum := lengths[index] + lengths[index+1]
 		minLen := min(splitMinimum, sum/2)
 		left := max(minLen, min(sum-minLen, position))
 		if math.Abs(float64(left-sum/2)) < float64(splitSnap) {
 			left = sum / 2
+			snapped = true
 		}
 		lengths[index], lengths[index+1] = left, sum-left
 		total := float32(0)
@@ -256,8 +268,13 @@ func (a *App) splitDivider(c *ui.Context, s *splitGroup, index int, offset float
 		if total > 0 {
 			for i, n := range lengths {
 				s.panes[i].factor = n / total
+				if immediate {
+					s.panes[i].shownFactor = s.panes[i].factor
+					s.panes[i].shownReady = true
+				}
 			}
 		}
+		return snapped
 	}
 	dx, dy, held := handle.Dragged()
 	a.splitResizing = a.splitResizing || held
@@ -271,19 +288,26 @@ func (a *App) splitDivider(c *ui.Context, s *splitGroup, index int, offset float
 			delta = dy
 		}
 		s.dragDistance += delta
-		move(s.dragOrigin + s.dragDistance)
+		s.dragSnapped = move(s.dragOrigin+s.dragDistance, true)
+	} else if s.dragPane == s.panes[index] {
+		s.dragPane = nil
+		s.dragSnapped = false
 	}
 	if handle.DoubleClicked() {
-		move((lengths[index+1] + lengths[index]) / 2)
+		move((lengths[index+1]+lengths[index])/2, false)
+		c.After(0)
 	}
 	if handle.Shortcut(0, ui.KeyLeft) || handle.Shortcut(0, ui.KeyUp) {
-		move(lengths[index] - 10)
+		move(lengths[index]-10, false)
+		c.After(0)
 	}
 	if handle.Shortcut(0, ui.KeyRight) || handle.Shortcut(0, ui.KeyDown) {
-		move(lengths[index] + 10)
+		move(lengths[index]+10, false)
+		c.After(0)
 	}
 	if handle.Shortcut(0, ui.KeyEnter) {
-		move((lengths[index+1] + lengths[index]) / 2)
+		move((lengths[index+1]+lengths[index])/2, false)
+		c.After(0)
 	}
 	offset = splitGap * float32(index)
 	for _, n := range lengths[:index+1] {
@@ -294,14 +318,39 @@ func (a *App) splitDivider(c *ui.Context, s *splitGroup, index int, offset float
 	} else {
 		handle.Left(offset - 4)
 	}
-	alpha := handle.Animate("grip", b2f(held), 120*time.Millisecond)
+	showGrip := held || handle.Hovered() || handle.FocusVisible()
+	alpha := handle.Animate("grip", b2f(showGrip), 120*time.Millisecond)
+	snappedNow := held && s.dragSnapped
 	handle.Draw(func(p *ui.Painter, r ui.Rect) {
 		w, h := float32(4), float32(36)
 		if s.vertical {
 			w, h = h, w
 		}
-		p.Fill(ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y + (r.H-h)/2, W: w, H: h}, splitGrip(t).Alpha(alpha), 2)
+		gripCol := splitGrip(t).Alpha(alpha)
+		if snappedNow {
+			gripCol = t.Accent
+		}
+		p.Fill(ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y + (r.H-h)/2, W: w, H: h}, gripCol, 2)
 	})
+	if held {
+		pairSum := max(1, lengths[index]+lengths[index+1])
+		pct0 := int(math.Round(float64(lengths[index] * 100 / pairSum)))
+		pct1 := 100 - pct0
+		pillText := fmt.Sprintf("%d%% · %d%%", pct0, pct1)
+		hb := handle.Bounds()
+		ui.Overlay(c, func() {
+			scrim := pageStyle(a.paperDark)
+			pill := ui.Box(c.Key(fmt.Sprintf("split-pill-%d", index))).Absolute().
+				Left(hb.X + hb.W/2 - 38).Top(hb.Y + hb.H/2 - 12).Height(24).MinWidth(76).PaddingX(8).
+				Radius(6).Center().Background(scrim.Scrim)
+			if snappedNow {
+				pill.Border(1, t.Accent.Alpha(0.9))
+			}
+			pill.Children(func() {
+				ui.Text(c, pillText).FontSize(11.5).FontWeight(600).TextColor(scrim.OnScrim).NoWrap()
+			})
+		})
+	}
 }
 
 // A document dragged from the sidebar opens at the nearest page edge.
@@ -330,6 +379,7 @@ func (a *App) splitDropTargetFor(c *ui.Context, target ui.Element, index int) {
 		leading = y < r.H/2
 	}
 	if ok {
+		a.dragGrab.consumed = true
 		if index >= 0 {
 			a.focusPane(index, false)
 		}

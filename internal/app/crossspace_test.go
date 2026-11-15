@@ -56,11 +56,11 @@ func TestMoveToSpaceMenu(t *testing.T) {
 		t.Fatalf("%v; menu %q", err, tt.Menu())
 	}
 	tt.Frame()
-	if exists(home, "Journal/Ideas.arcmd") || !exists(work, "Ideas.arcmd") {
+	if exists(home, "Journal/Ideas.md") || !exists(work, "Ideas.md") {
 		t.Fatal("the document did not move to Work")
 	}
 	// The undo toast names the document; the list must not.
-	if a.state.ActiveSpace() != home || vault.Find(a.tree, "Journal/Ideas.arcmd") != nil || !tt.HasText("已移到空间「Work」") {
+	if a.state.ActiveSpace() != home || vault.Find(a.tree, "Journal/Ideas.md") != nil || !tt.HasText("已移到空间「Work」") {
 		t.Fatal("moving a closed document switched spaces or kept its row")
 	}
 }
@@ -68,15 +68,15 @@ func TestMoveToSpaceMenu(t *testing.T) {
 func TestMoveOpenDocumentFollows(t *testing.T) {
 	a, tt := newTestApp(t)
 	work := a.state.Add("Work", t.TempDir())
-	os.WriteFile(filepath.Join(work.Root, "Ideas.arcmd"), []byte("taken"), 0o644)
-	a.open("Journal/Ideas.arcmd")
+	os.WriteFile(filepath.Join(work.Root, "Ideas.md"), []byte("taken"), 0o644)
+	a.open("Journal/Ideas.md")
 	tt.Advance(time.Second)
-	a.history = append(a.history, place{a.state.Spaces[0].ID, "Journal/Ideas.arcmd"})
+	a.history = append(a.history, place{a.state.Spaces[0].ID, "Journal/Ideas.md"})
 	if a.moveAcross(a.state.Spaces[0].ID, "Journal", work.ID, "") != "Journal" {
 		t.Fatal("the folder did not move")
 	}
 	tt.Advance(time.Second)
-	if a.state.ActiveSpace() != work || a.doc.space != work || a.doc.rel != "Journal/Ideas.arcmd" {
+	if a.state.ActiveSpace() != work || a.doc.space != work || a.doc.rel != "Journal/Ideas.md" {
 		t.Fatalf("the window did not follow the open document: %q in %s", a.doc.rel, a.state.ActiveSpace().Name)
 	}
 	if !work.IsExpanded("Journal") || a.history[len(a.history)-1].space != work.ID {
@@ -97,14 +97,14 @@ func TestDragOntoSpaceIcon(t *testing.T) {
 	if !ok {
 		t.Fatal("no Work icon")
 	}
-	x, y := pressRow(t, a, tt, "Journal/Ideas.arcmd")
+	x, y := pressRow(t, a, tt, "Journal/Ideas.md")
 	glide(tt, x, y, icon.X+icon.W/2, icon.Y+icon.H/2)
 	if a.spaceSpring.id != work.ID {
 		t.Fatal("the icon does not take the drag")
 	}
 	tt.Release(icon.X+icon.W/2, icon.Y+icon.H/2)
 	tt.Frame()
-	if !exists(work, "Ideas.arcmd") || exists(home, "Journal/Ideas.arcmd") || a.state.ActiveSpace() != home {
+	if !exists(work, "Ideas.md") || exists(home, "Journal/Ideas.md") || a.state.ActiveSpace() != home {
 		t.Fatal("letting go on the icon did not move the document there")
 	}
 }
@@ -117,7 +117,7 @@ func TestDragHoldsOnSpaceIconThenDrops(t *testing.T) {
 	tt.Frame()
 	tt.Advance(time.Second)
 	icon, _ := tt.Find("切换到 Work")
-	x, y := pressRow(t, a, tt, "Journal/Ideas.arcmd")
+	x, y := pressRow(t, a, tt, "Journal/Ideas.md")
 	ix, iy := icon.X+icon.W/2, icon.Y+icon.H/2
 	glide(tt, x, y, ix, iy)
 	tt.Advance(spaceSpringDelay + 100*time.Millisecond)
@@ -144,7 +144,7 @@ func TestDragHoldsOnSpaceIconThenDrops(t *testing.T) {
 	inbox = row()
 	tt.Move(inbox.X+40, inbox.Y+inbox.H/2)
 	tt.Frame()
-	if a.carried == nil || a.carried.rel != "Journal/Ideas.arcmd" {
+	if a.carried == nil || a.carried.rel != "Journal/Ideas.md" {
 		t.Fatal("the drag from Personal is not carried into Work")
 	}
 	if d := a.listDrop; d == nil || d.kind != dropInto || d.parent != "Inbox" {
@@ -152,7 +152,7 @@ func TestDragHoldsOnSpaceIconThenDrops(t *testing.T) {
 	}
 	tt.Release(inbox.X+40, inbox.Y+inbox.H/2)
 	tt.Frame()
-	if !exists(work, "Inbox/Ideas.arcmd") || exists(home, "Journal/Ideas.arcmd") {
+	if !exists(work, "Inbox/Ideas.md") || exists(home, "Journal/Ideas.md") {
 		t.Fatal("the document did not land in Work's Inbox")
 	}
 	tt.Frame()

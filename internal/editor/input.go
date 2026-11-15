@@ -200,6 +200,9 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 			return true
 		}
 	}
+	if _, composing := e.MarkedRange(); !composing && key == ui.KeyEscape && mods == 0 && e.focused && e.escapeInlineMath() {
+		return true
+	}
 	if _, composing := e.MarkedRange(); !composing && key == ui.KeyEscape && mods == 0 && e.focused && e.SelectCaretBlock() {
 		// Escape with nothing open selects the caret's block, as Notion's.
 		return true
@@ -333,11 +336,23 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 	case ui.KeyEnter:
 		e.UnmarkText()
 		e.refused = e.refused || e.ReadOnly
+		if !shift && mods == 0 && !e.ReadOnly {
+			if e.exitInlineMath() || e.cellEnter() {
+				e.vertical = false
+				return true
+			}
+		}
 		e.Engine.Enter(shift)
 		e.sync()
 		e.reveal, e.vertical = true, false
 		return true
 	case ui.KeyTab:
+		if !shift && mods == 0 && e.Anchor == e.Caret && !e.ReadOnly {
+			if e.exitInlineMath() || e.tabOutPair() || e.exitDisplayMath() {
+				e.vertical = false
+				return true
+			}
+		}
 		if e.cellTab(shift) {
 			return true
 		}
@@ -371,7 +386,7 @@ func (e *Editor) delete(direction int, word, line bool) {
 		e.refused = true
 		return
 	}
-	if direction < 0 && !word && !line && e.deletePair() {
+	if direction < 0 && !word && !line && (e.rollbackSmartInput() || e.deletePair()) {
 		return
 	}
 	r := e.Selection().Range

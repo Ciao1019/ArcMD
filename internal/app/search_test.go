@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -39,8 +40,8 @@ func kinds(res []action) []string {
 // Before typing, the bar lists the documents last shown.
 func TestPaletteRecents(t *testing.T) {
 	a, tt := newTestApp(t)
-	a.open("Journal/Ideas.arcmd")
-	a.open("Welcome.arcmd")
+	a.open("Journal/Ideas.md")
+	a.open("Welcome.md")
 	tt.Key(ui.Cmd, ui.KeyK)
 	tt.Frame()
 	res := a.results()
@@ -60,14 +61,14 @@ func TestPaletteRecents(t *testing.T) {
 // Documents of every space are found by name, and open in their space.
 func TestPaletteFindsOtherSpaces(t *testing.T) {
 	a, tt := newTestApp(t)
-	id := addSpace(t, a, "Work", map[string]string{"Trips/Travel Plan.arcmd": "# Travel Plan\n\nPack light."})
+	id := addSpace(t, a, "Work", map[string]string{"Trips/Travel Plan.md": "# Travel Plan\n\nPack light."})
 	typeQuery(a, tt, "travel")
 	res := a.results()
 	if len(res) == 0 || res[0].title != "Travel Plan" || res[0].hint != "Work / Trips" {
 		t.Fatalf("results = %v, hint %q", kinds(res), res[0].hint)
 	}
 	tt.Key(0, ui.KeyEnter)
-	if a.state.ActiveSpace().ID != id || a.doc == nil || a.doc.rel != "Trips/Travel Plan.arcmd" {
+	if a.state.ActiveSpace().ID != id || a.doc == nil || a.doc.rel != "Trips/Travel Plan.md" {
 		t.Fatalf("not opened in its space: %+v", a.doc)
 	}
 }
@@ -76,7 +77,7 @@ func TestPaletteFindsOtherSpaces(t *testing.T) {
 // box on it.
 func TestPaletteFindsText(t *testing.T) {
 	a, tt := newTestApp(t)
-	id := addSpace(t, a, "Work", map[string]string{"Plan.arcmd": "# Plan\n\nThe harbor opens at dawn."})
+	id := addSpace(t, a, "Work", map[string]string{"Plan.md": "# Plan\n\nThe harbor opens at dawn."})
 	typeQuery(a, tt, "harbor")
 	res := a.results()
 	if len(res) != 1 || res[0].kind != "内容" || res[0].title != "Plan" || res[0].snippet != "The harbor opens at dawn." {
@@ -86,7 +87,7 @@ func TestPaletteFindsText(t *testing.T) {
 		t.Errorf("hit not shown: %q", tt.Texts())
 	}
 	tt.Key(0, ui.KeyEnter)
-	if a.state.ActiveSpace().ID != id || a.doc == nil || a.doc.rel != "Plan.arcmd" {
+	if a.state.ActiveSpace().ID != id || a.doc == nil || a.doc.rel != "Plan.md" {
 		t.Fatalf("hit not opened: %+v", a.doc)
 	}
 	if q, open := a.doc.ed.FindQuery(); !open || q != "harbor" {
@@ -133,7 +134,7 @@ func TestPaletteIndexRefreshes(t *testing.T) {
 		t.Fatal("found before written")
 	}
 	tt.Key(0, ui.KeyEscape)
-	writeElsewhere(t, a, "Journal/Ideas.arcmd", "# Ideas\n\nA lighthouse at the end.")
+	writeElsewhere(t, a, "Journal/Ideas.md", "# Ideas\n\nA lighthouse at the end.")
 	typeQuery(a, tt, "lighthouse")
 	res := a.results()
 	if len(res) != 1 || res[0].title != "Ideas" || !strings.Contains(res[0].snippet, "lighthouse") {
@@ -149,11 +150,11 @@ func TestPaletteSnapshot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			a, tt := newTestApp(t)
 			addSpace(t, a, "Work", map[string]string{
-				"Plan.arcmd":       "# Plan\n\nThe folders open at dawn, and the harbor is quiet.",
-				"Notes/Ship.arcmd": "# Ship\n\nFolders of letters, folders of maps.",
+				"Plan.md":       "# Plan\n\nThe folders open at dawn, and the harbor is quiet.",
+				"Notes/Ship.md": "# Ship\n\nFolders of letters, folders of maps.",
 			})
-			a.open("Journal/Ideas.arcmd")
-			a.open("Welcome.arcmd")
+			a.open("Journal/Ideas.md")
+			a.open("Welcome.md")
 			q := ""
 			if name == "text" {
 				q = "folders"
@@ -164,5 +165,67 @@ func TestPaletteSnapshot(t *testing.T) {
 			}
 			savePNG(t, filepath.Join(dir, "palette-"+name+".png"), tt)
 		})
+	}
+}
+
+func TestAsyncPaletteRefreshAndHistoryMicroGlide(t *testing.T) {
+	a, tt := newTestApp(t)
+	workID := addSpace(t, a, "Work", map[string]string{
+		"Roadmap.md": "# Roadmap\n\nInitial plan.",
+	})
+	workSpace := a.state.Get(workID)
+	if workSpace == nil {
+		t.Fatal("missing Work space")
+	}
+
+	updates := make(chan func(), 8)
+	a.search.async = true
+	a.runAsync = func(fn func()) { updates <- fn }
+	defer func() {
+		a.search.async = false
+		a.runAsync = nil
+	}()
+
+	// Write a new document in the inactive Work space and open the command bar.
+	if err := writeNative(workSpace.Root, "AsyncNote.md", "# AsyncNote\n\nZero blocking."); err != nil {
+		t.Fatal(err)
+	}
+	a.openPalette()
+	tt.Frame()
+	if !a.palette.open {
+		t.Fatal("palette did not open immediately on frame 0")
+	}
+	// Receive both async callbacks (pageTrees scan + search index refresh).
+	for range 2 {
+		fn := <-updates
+		fn()
+	}
+	a.palette.query = "AsyncNote"
+	tt.Frame()
+	res := a.results()
+	if len(res) == 0 || res[0].title != "AsyncNote" {
+		t.Fatalf("async pageTrees refresh did not discover AsyncNote: %v", res)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+
+	// History Back/Forward triggers directional 90ms micro-glide and settles cleanly.
+	a.open("Journal/Ideas.md")
+	tt.Frame()
+	a.open("Welcome.md")
+	tt.Frame()
+	a.goHistory(-1)
+	tt.Frame()
+	if a.navDir != -1 {
+		t.Fatalf("expected back navigation micro-glide dir=-1, got %d", a.navDir)
+	}
+	tt.Advance(36 * time.Millisecond)
+	if a.navDir != -1 {
+		t.Fatal("history micro-glide ended prematurely")
+	}
+	tt.Advance(100 * time.Millisecond)
+	tt.Frame()
+	if a.navDir != 0 {
+		t.Fatalf("history micro-glide did not settle: navDir=%d", a.navDir)
 	}
 }

@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="docs/images/readme/logo-horizontal.png" width="420" alt="ArcMD logo">
+<img src="docs/images/readme/logo-horizontal.png" width="400" alt="ArcMD logo">
 
-**A fresh take on the Markdown editor. Native, expressive, and built around your spaces.**
+**A fresh take on the Markdown editor — pure native 120 Hz performance, tactile motion, and spaces built around your life.**
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.11-F21158" alt="Version 0.0.11"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.1.0-F21158" alt="Version 0.1.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -15,9 +15,9 @@
 
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/arcmd)
 
-<br><br>
+<br>
 
-<img src="docs/images/readme/hero-en.svg" width="100%" alt="ArcMD swiping from a pink Personal space to an orange Reading space: each space has its own colors, files and open page">
+<img src="docs/images/readme/flow-en.svg" width="100%" alt="ArcMD hero animation: a gliding caret, live inline Markdown and TeX capsule compilation, pipe syntax unfolding into a table as blocks below glide smoothly down, springy task checkboxes, and a tilted Polaroid image card settling into place">
 
 <br><br>
 
@@ -25,231 +25,152 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.0.11. The buttons open the releases page; you can also <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.1.0. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
-[Highlights](#highlights) · [Features](#features) · [Performance](#performance) · [Build from source](#build-from-source) · [Contributing](#contributing)
+[Writing Flow](#writing-in-flow) · [Spaces & Reading](#spaces--reading-highlights) · [Native Markdown](#native-markdown-yours-forever) · [Features](#features-at-a-glance) · [Shortcuts](#essential-shortcuts) · [Performance](#performance) · [Build from source](#build-from-source) · [Contributing](#contributing)
 
 </div>
 
 <br>
 
+ArcMD brings Markdown's familiar writing flow onto a calm, expressive native canvas.
+**Built entirely in Go with [MyGo](https://github.com/egoist/mygo)'s Native UI** — windows, GPU drawing, glyph shaping, and input handling run directly from Go with **no HTML, JavaScript, WebView, Electron, or cgo**.
+
+| ⚡ Pure Native, 120 Hz Ready | 📄 Plain `.md`, Zero Lock-in | 🎨 Arc Spaces & Tactile Craft |
+| --- | --- | --- |
+| Custom document engine and incremental layout keep typing at **0.273 ms P50** even in 1M-character documents, with non-blocking background saves. | Edits and autosaves standard `.md` files in place — no sidecar copies — so Obsidian, VS Code, Typora, and Git work on the exact same folder. | Multi-color Spaces, global Favorites, persistent Pinned tabs, a gliding caret, live syntax/TeX compilation, and spring micro-interactions. |
+
 > **Tribute & Origin**
 >
-> The day The Browser Company announced Arc was entering maintenance mode, countless voices on X mourned the twilight of a piece of software crafted with so much taste, tactile delight, and soul.
->
-> As a longtime devotee of Arc, I couldn't bear to let go of what had fundamentally reshaped my workflow: the vertical sidebar, vibrant Spaces, effortless Favorites, and that calm, breathing canvas. Since Arc has paused its journey, we chose to carry its spirit forward into document editing with pure Go and Native UI — no Electron, no Webview, just pure native performance and the uncompromised joy of Arc's interactions.
->
-> ArcMD is dedicated to every creator who still believes that software should have craft, feel, and soul.
-
-ArcMD brings Markdown's familiar writing flow to a rich-text canvas, with a
-workspace inspired by [Arc](https://arc.net/): a vertical sidebar, colorful
-spaces, favorites, and a quiet page that puts your words first. Keep a journal,
-develop an idea, or organize an entire project in a place that feels like yours.
-
-**Built entirely in Go with [MyGo](https://github.com/egoist/mygo)'s Native UI.**
-MyGo provides native windows, GPU drawing, text shaping, and system input;
-ArcMD builds its own document engine and rich-text editor on top. The interface
-is drawn directly from Go, with no HTML, JavaScript, WebView, Electron, or cgo.
+> The day The Browser Company announced Arc was entering maintenance mode, countless voices on X mourned the twilight of software crafted with so much taste, tactile delight, and soul. As a longtime devotee of Arc, I couldn't bear to let go of the vertical sidebar, vibrant Spaces, effortless Favorites, and that calm, breathing canvas. Since Arc paused its journey, we chose to carry its spirit forward into document editing with pure Go and Native UI — dedicated to every creator who still believes software should have craft, feel, and soul.
 
 > [!NOTE]
-> **ArcMD is still young.** It's an early preview, and plenty is unfinished — the editor in particular is still fairly basic and improving one step at a time.
-> If you like where it's heading, share bugs and ideas in [Issues](https://github.com/Ciao1019/ArcMD/issues) or send a pull request. We'd love to build it together.
+> **ArcMD is an early preview**, and we're refining details one step at a time. Share bugs and ideas in [Issues](https://github.com/Ciao1019/ArcMD/issues) or send a pull request — we'd love to build it together.
 
-## Highlights
+---
 
-### A space for every part of your life
+## Writing in Flow
 
-Each space is a folder with its own name, icon, and color theme — one, two, or
-three colors with a touch of grain. Swipe with two fingers on the sidebar, or
-press <kbd>⌃1</kbd>…<kbd>⌃9</kbd>, and the whole window glides into the next
-space. Every space remembers the page you left open there; favorites stay with
-you wherever you go.
+Stay on one calm page instead of splitting your focus between raw source and preview — every keystroke, expansion, and drag you see in the hero animation above runs live on the same surface:
 
-### Colors, gradients, translucency and grain, previewed live
+| 🪄 Live Syntax & Instant Rollback | ∑ Floating Inline & Display TeX |
+| --- | --- |
+| `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `--`, and `...` compile in place as you type; auto-paired brackets, smart quotes, and `$…$` math show a soft scope tint and a <kbd>Tab</kbd> jump-out badge, while pressing <kbd>⌫</kbd> right away restores literal text. | Embedded KaTeX fonts render TeX natively; inline `$…$` floats a live source capsule below the line without shifting your baseline, and display math opens a unified preview + source card (<kbd>Tab</kbd> or `↵↵` continues prose). |
+| **📐 Fluid Motion & Magnetic Snap** | **🖼️ Spring Physics & Zero-Shift Media** |
+| Type `\| Header \|` + <kbd>Enter</kbd> to unfold a native table while folded sections, inserted blocks, and reordered rows glide smoothly out of the way; resizing table columns, two-column seams, or split panes snaps magnetically at `50% · 50%`. | A smoothly gliding caret, rounded selection capsules, and springy checkboxes keep editing tactile; drag in an image to watch a tilted Polaroid card settle upright with zero-shift header sizing and a damped hero lightbox on double-click. |
 
-<p align="center"><img src="docs/images/readme/themes-en.svg" width="100%" alt="Smooth vector animation of ArcMD themes: drag a color handle, blend two or three colors, lower the intensity for translucent frosted material, and transition between light and dark"></p>
+---
 
-Choose “编辑主题颜色…” (Edit Theme Colors) from the space name's ••• menu. Drag
-the dot on the color pad to change the color, and use − / + to blend one, two or
-three colors. Lower the intensity of a single-color theme and the window turns
-translucent, softly blurring the desktop behind it; turn the grain dial, or pick
-Auto, Light or Dark.
+## Spaces & Reading Highlights
+
+### Spaces & live themes: colors, gradients, translucency, and dark paper
+
+<p align="center"><img src="docs/images/readme/themes-en.svg" width="100%" alt="Smooth vector animation of ArcMD themes: drag a color handle, blend up to three colors, lower intensity for frosted translucency, and transition smoothly between light and dark paper"></p>
+
+Each space maps to a local folder with its own name, icon, persistent Pinned tabs, and last-open page. Swipe with two fingers on the sidebar or press <kbd>⌃1</kbd>…<kbd>⌃9</kbd> to glide into the next space, while global Favorites at the top open right in place without switching spaces. Open **Edit Theme Colors…** to blend one to three gradient stops, dial in frosted translucency and subtle grain, or flip between Light and Feishu-inspired Dark paper (`#1F2023`) with balanced color remapping.
+
+### The Library: every space at a glance
+
+<p align="center"><img src="docs/images/readme/library-en.svg" width="100%" alt="ArcMD Library animation: clicking the Library icon widens the sidebar into themed cards for Personal, Work, and Reading spaces, then opens a page directly in Reading"></p>
+
+Click the Library icon in the bottom-left corner or press <kbd>⇧⌘L</kbd>. The sidebar widens into a row of space cards painted in each space's own theme colors, with folders and pages ready to jump straight into. Plugins and the 30-day Recently Deleted collection live here too.
+
+### A sidebar that steps aside — and peeks on demand
+
+<p align="center"><img src="docs/images/readme/sidebar-en.svg" width="100%" alt="ArcMD Sidebar animation: press Command-Backslash for full-window focus, move to the left edge to slide out the floating sidebar with a live miniature page thumbnail preview, and move away to tuck it back"></p>
+
+Press <kbd>⌘&#92;</kbd> (or narrow the window) and your page fills the entire window. Whenever you need another file, move the pointer to the left edge: the frosted floating sidebar glides out over your page, shows live miniature page thumbnails on hover, and tucks itself away the moment you return to writing.
 
 ### Hand-drawn marks: give your ideas a human touch
 
-<p align="center"><img src="docs/images/readme/annotations-en.svg" width="100%" alt="Smooth vector animation of ArcMD hand-drawn marks: select words and draw a wave, circle, highlight, double underline, cross, arrow and box as an idea journal takes shape"></p>
+<p align="center"><img src="docs/images/readme/annotations-en.svg" width="100%" alt="Smooth vector animation of ArcMD hand-drawn marks: rounded text selections, floating toolbar, and progressive strokes for wave, circle, highlight, double underline, cross, arrow, and box"></p>
 
-Select a few words and open the dropdown beside the annotation button in the
-floating toolbar. Choose from 12 hand-drawn styles to circle what matters,
-cross out hesitation, or point to the next step. Each stroke draws itself in,
-and you can choose its color. Marks are saved in your `.arcmd` document.
-Try the [idea journal](docs/images/readme/annotations-demo-en.arcmd), or start
-with a sentence of your own.
+Select a phrase and pick from **12 hand-drawn stroke styles** and palette colors in the floating toolbar — circle what matters, cross out hesitation, or point an arrow at the next step. Every stroke draws itself in smoothly and round-trips losslessly in `.md` (and legacy `.arcmd`) files. Try the [idea journal sample](docs/images/readme/annotations-demo-en.arcmd), or start with a line of your own.
 
-### Bookmarks: pick up where you left off
+### Margin bookmarks: pick up right where you left off
 
-<p align="center"><img src="docs/images/readme/bookmarks-en.svg" width="100%" alt="Smooth vector animation of ArcMD bookmarks: click the margin to add bookmarks, watch their outline entries appear, jump smoothly back to a passage, and open all bookmarks with Shift Command D"></p>
+<p align="center"><img src="docs/images/readme/bookmarks-en.svg" width="100%" alt="ArcMD Bookmarks animation: hover the margin to mark passages, see them appear in the outline, scroll smoothly back with highlight glow, and press Shift Command D for all bookmarks"></p>
 
-Hover any paragraph and a bookmark appears in the margin; click it (or press
-<kbd>⌘D</kbd>) to mark the spot. The outline lists the document's bookmarks,
-<kbd>⌃⌘↑</kbd> / <kbd>⌃⌘↓</kbd> jump between them, and <kbd>⇧⌘D</kbd> lists
-the bookmarks of every document. Bookmarks never change the document itself.
+Hover any block to reveal a margin bookmark, or press <kbd>⌘D</kbd>. Your marks appear automatically in the document outline (with rendered TeX previews for math blocks), <kbd>⌃⌘↑</kbd> / <kbd>⌃⌘↓</kbd> hop smoothly between them, and <kbd>⇧⌘D</kbd> searches bookmarks across every space — without ever modifying the `.md` file itself.
 
-### The Library: all your spaces at a glance
+---
 
-<p align="center"><img src="docs/images/readme/library-en.svg" width="100%" alt="Clicking the Library button widens the sidebar into a row of space cards, each drawn in its own theme; clicking a page in the Reading space opens it there"></p>
+## Native Markdown, Yours Forever
 
-Click the Library button in the corner, or press <kbd>⇧⌘L</kbd>. The sidebar
-widens into a card for every space, each painted in its own colors, with its
-folders ready to open. Pick any page to jump straight into it. Plugins and
-recently deleted files live here too.
+ArcMD edits and autosaves standard **`.md` Markdown** files (`.md`, `.markdown`, `.mdx`) directly in place in the background — **no proprietary database and no sidecar `.arcmd` duplicates**. Every note is a plain local file with its images in a nearby `assets/` folder, ready for Obsidian, Typora, VS Code, or Git.
 
-### A sidebar that steps aside
+- **Untouched blocks stay untouched**: block-level source diffing (`ImportSource`) preserves your original indentation, list markers, and link syntax on paragraphs you didn't edit.
+- **100% lossless rich round-trips**: text colors, highlights, hand-drawn marks, five-tone callouts (GitHub `> [!NOTE]` alerts), `<details>` toggles, merged/colored tables, custom-width two-column layouts (`data-widths`), and page icons/covers/word goals degrade cleanly via standard Markdown + semantic HTML + YAML frontmatter and restore completely in ArcMD.
+- **Backward compatible**: existing legacy `.arcmd` files and history snapshots continue to open and edit seamlessly.
 
-<p align="center"><img src="docs/images/readme/sidebar-en.svg" width="100%" alt="Pressing Command-Backslash collapses the sidebar so the page fills the window; moving the pointer to the left edge slides the sidebar out as a floating panel, and it tucks away again when the pointer leaves"></p>
+---
 
-Press <kbd>⌘ &#92;</kbd> and the page takes the whole window. When you need your
-files, move the pointer to the left edge: the sidebar slides out over the page,
-and tucks itself away as soon as you move on. In narrow windows it collapses on
-its own.
+## Features at a Glance
 
-## Features
+| Area | Built-in Capabilities |
+| --- | --- |
+| **Expressive Blocks** | H1–H6 headings, nested lists & tasks, quotes, five-tone icon callouts, code blocks, `<details>` toggles, footnotes, superscript/subscript, `:sm` emoji search, `@` dates & page mentions, optional CJK–Latin auto-spacing. |
+| **Tables, Columns & Media** | CSV/TSV paste-to-table, row/column drag reorder, cell merge/split, 16 cell fills, natural column sort; adjustable two-column layouts; non-destructive image crop (keeping originals) & inline GIF playback; multi-block marquee selection & outline section drag. |
+| **Splits, Command Bar & Templates** | Up to four side-by-side split panes or dedicated native windows; zero-blocking <kbd>⌘K</kbd> command bar (full-text search, undoable <kbd>⇧⌘R</kbd> cross-document replace); Space templates (`{{date}}`, `{{time}}`, `{{weekday}}`, `{{title}}`) & <kbd>⌥⌘T</kbd> Daily Notes. |
+| **Links, Focus & Safety** | `[[Wiki links]]` autocomplete across spaces, backlinks footer & rename sync, workspace `#tags`; <kbd>⇧⌘F</kbd> Focus Mode, paragraph afterglow dimming, typewriter scroll, word goals & per-pane reading lock; <kbd>⇧⌘M</kbd> synced Markdown preview, selectable-text PDF & standalone HTML export; `.arcmd/history` diff restore & live external-edit protection. |
 
-### Write on a rich-text canvas
+**Small core, extensible by design**: AI writing, translation, and sync are designed as optional plugins so the core editor stays fast and lean. Plugin manifests, verified installers, and host contracts are in place; sandboxed runtimes and the marketplace are in active development. See the [plugin roadmap](docs/plugins.md).
 
-- **Rich formatting** — headings, bold, italic, underline, strikethrough, links,
-  inline code, text colors, and highlights. Select text to reveal a floating
-  toolbar; use `/` to insert a block.
-- **Hand-drawn marks** — 12 styles with selectable colors, including circles,
-  waves, highlights, arrows, and boxes, with animated strokes.
-- **More than paragraphs** — nested lists, tasks, quotes, colored callouts,
-  code blocks, images, inline and block TeX, footnotes, superscript/subscript,
-  editable tables with merged cells, and two-column layouts.
-- **Comfortable input** — Markdown and HTML clipboard exchange, bracket and
-  quote pairing, and optional Chinese–Latin spacing. Type `:sm` to search emoji,
-  or use `@` for dates and document links.
-- **A document with structure** — a navigable outline, collapsible headings
-  and lists, and dedicated toggle blocks. Select multiple blocks to move,
-  indent, duplicate, or delete them together. Add page icons and image or
-  gradient covers.
-- **Tables and images** — paste CSV or tab-separated text as a table and sort
-  rows by a column. Resize, zoom, and crop images while retaining the original;
-  animated GIFs play in the page.
-- **Bring your content along** — import and export Markdown, paste rich content
-  from webpages and document apps, and export pages to PDF or HTML.
+---
 
-### Give every project its own space
+## Essential Shortcuts
 
-- **Spaces** — separate folders for work, life, and projects, each with its own
-  name, icon, and light or dark color theme. Switch with a trackpad swipe or a
-  keyboard shortcut.
-- **Favorites and pins** — keep favorites across spaces and pin documents or
-  folders within a space. Drag to reorder, organize, or move between spaces.
-- **Bookmarks** — hover a passage and click the bookmark beside it (or press
-  ⌘D) to mark it, jump between marks with ⌃⌘↑ / ⌃⌘↓,
-  and find them all in the outline or the command bar. Bookmarks never change
-  the document itself.
-- **Split views and windows** — work in up to four resizable panes, or move a
-  document into its own native window, preserving its cursor, scroll position,
-  and undo history.
-- **Navigation and organization** — recent commands, full-text search,
-  cross-document replacement, document and folder previews, and back/forward
-  history. Sort folders by name or modification time.
-- **Templates and daily notes** — reuse Space templates with date, time,
-  weekday, and title placeholders; open or create today's note in one command.
+Every action is reachable from the <kbd>⌘K</kbd> command bar, and shortcuts can be customized in **Settings → Shortcuts** (use <kbd>Ctrl</kbd> in place of <kbd>⌘</kbd> on Windows and Linux):
 
-### Connect ideas and stay in flow
+| Shortcut | Action | Shortcut | Action |
+| --- | --- | --- | --- |
+| <kbd>⌘K</kbd> / <kbd>⌘P</kbd> | Command bar & full-text search | <kbd>⌃1</kbd>…<kbd>⌃9</kbd> | Switch to Space 1–9 |
+| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> | New document / New folder | <kbd>⇧⌘L</kbd> | Open Library (Spaces / Plugins / Trash) |
+| <kbd>⌘&#92;</kbd> | Collapse / expand sidebar | <kbd>⌃⇧=</kbd> / <kbd>⌃⇧−</kbd> | Add / close split pane |
+| <kbd>⇧⌘M</kbd> | Rich text ⇄ Markdown preview (synced) | <kbd>⇧⌘F</kbd> | Toggle Focus Mode |
+| <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | Find & replace / Replace across space | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | Toggle bookmark / All bookmarks |
+| <kbd>⌥⌘T</kbd> | Open or create Today's Note | <kbd>⌥⌘Y</kbd> | Version history & diff restore |
 
-- **Linked notes** — connect documents with `[[wiki links]]`, see backlinks,
-  and browse, rename, or merge `#tags`. Renaming a document updates links to it.
-- **Focused writing** — a distraction-free mode, optional paragraph dimming,
-  typewriter scrolling, word goals, estimated reading time, and customizable
-  keyboard shortcuts.
-- **Your reading preferences** — Chinese and English UI, a choice of fonts,
-  page width, text size, and line height, plus a per-editor reading lock.
-- **Local ownership** — documents and attachments stay in your folders.
-  Autosave, version history, external-change detection, and a 30-day recently
-  deleted collection help you recover your work. Undo deletion and moves from
-  their notifications.
-
-### A small core, room to extend
-
-AI writing, translation, and sync are planned as optional plugins. The manifest,
-installer, and host interfaces are in place; plugin runtimes and the marketplace
-are still in development. See the [plugin roadmap](docs/plugins.md).
+---
 
 ## Performance
 
-CPU frame processing time over **100 consecutive operations** of each type in a
-mixed document of **1 million characters and 549 chapters**, including 500 tables
-and 9,912 table cells. Each case runs in three fresh processes; the table reports
-the median of the three per-run P50 and P95 values.
+CPU frame construction time across **100 consecutive operations** in a mixed document of **1 million characters, 549 chapters, 500 tables, and 9,912 table cells** (median of P50 and P95 across three fresh processes):
 
 | Operation | P50 | P95 |
 | --- | ---: | ---: |
-| ⌨️ Typing | **0.273 ms** | 0.291 ms |
-| ⌫ Backspace | **0.271 ms** | 0.306 ms |
-| 🖱️ Scrolling | **0.548 ms** | 1.132 ms |
+| ⌨️ Typing | **0.273 ms** | **0.291 ms** |
+| ⌫ Backspace | **0.271 ms** | **0.306 ms** |
+| 🖱️ Scrolling | **0.548 ms** | **1.132 ms** |
 
-A 120 Hz display gives each frame **8.3 ms**. In this workload, CPU frame
-construction takes less than **1.2 ms at P95**, leaving room in that budget for
-input handling and presentation.
+A 120 Hz display budgets **8.3 ms** per frame. Even on a million-character document, CPU scene construction stays under **1.2 ms at P95**. Including event handling, body typing measures **0.275 ms P50**, typing with Find open **0.281 ms**, repeated IME candidate updates **0.264 ms**, and ordinary typing allocates **0.067 MB/op** (allocation volume, not resident memory).
 
-Including event handling, body typing in the same million-character document
-takes **0.275 ms P50**, typing with find open takes **0.281 ms**, and repeated IME
-candidate updates take **0.264 ms** (excluding composition start and commit).
-Position indexes, local layout, incremental find, and viewport culling reduce
-whole-document scans. Ordinary typing allocates about **0.067 MB per operation**;
-this is allocation volume, not resident memory.
+<details>
+<summary>Environment & benchmark notes</summary>
 
-Apple M5 / 24 GiB, macOS 26.5.1, Go 1.27.3, MyGo v0.7.4, `CGO_ENABLED=0`.
-The benchmark runs the normal frame pipeline through a headless
-host and measures CPU scene construction. Input dispatch, rasterization, GPU
-presentation, and display latency are outside the frame timer; these numbers
-are not end-to-end input latency or measured display FPS.
+- **Setup**: Apple M5 / 24 GiB, macOS 26.5.1, Go 1.27.3, MyGo v0.7.4, `CGO_ENABLED=0`.
+- **Scope**: Measures CPU scene construction through a headless host running the normal frame pipeline; excludes OS input dispatch, GPU rasterization/presentation, and display latency.
+- **Reproduce**: [Performance report](docs/performance.md) · [Benchmark harness](tools/perf/README.md).
 
-Methodology, raw measurements, and reproduction scripts:
-[Performance report](docs/performance.md) · [Benchmark harness](tools/perf/README.md).
+</details>
 
-Native Go + MyGo; no WebView, Electron, or separate background service. See
-[GitHub Releases](https://github.com/Ciao1019/ArcMD/releases/latest) for actual
-package sizes on each platform.
+---
 
-## Markdown and your files
+## Get ArcMD & Build from Source
 
-ArcMD uses **`.arcmd`**, a versioned, readable JSON format, to preserve rich
-document structure. Each document is a local file, with its images in a nearby
-`assets/` folder.
-
-Opening an existing `.md`, `.markdown`, or `.mdx` file imports it in memory.
-The first edit saves a new `.arcmd` document beside it and keeps the original
-Markdown file. Markdown export creates a separate `.md` file for sharing and
-use in other tools.
-
-Markdown cannot represent every rich-text feature: text colors, hand-drawn marks, some table
-formatting, and merged-cell structure are not preserved on export. Keep the
-`.arcmd` file for a complete copy of your document.
-
-## Get ArcMD
-
-Check [GitHub Releases](https://github.com/Ciao1019/ArcMD/releases) for published builds.
-The [packaging workflow](.github/workflows/build.yml) targets:
+Download prebuilt packages from [GitHub Releases](https://github.com/Ciao1019/ArcMD/releases) ([packaging workflow](.github/workflows/build.yml)):
 
 | Platform | Architectures | Packages |
 | --- | --- | --- |
-| macOS | Apple Silicon, Intel | `.dmg` |
-| Windows | x64 | Installer `.exe`, portable `.zip` |
+| macOS | Apple Silicon, Intel | `.dmg` (currently ad-hoc signed, not notarized) |
+| Windows | x64 | Installer `.exe`, portable `.zip` (currently unsigned) |
 | Linux | x64, ARM64 | `.deb`, `.tar.gz` |
 
-macOS is the primary development platform. Current macOS packages are ad-hoc
-signed and not notarized; Windows packages are unsigned.
+### Build from source
 
-## Build from source
-
-Requires **Go 1.27.3** or newer. With `GOTOOLCHAIN=auto`, an older Go installation
-downloads the required toolchain automatically.
+Requires **Go 1.27.3** or newer (`GOTOOLCHAIN=auto` downloads the matching toolchain automatically):
 
 ```sh
 git clone https://github.com/Ciao1019/ArcMD.git
@@ -257,26 +178,25 @@ cd ArcMD
 CGO_ENABLED=0 go run ./cmd/arcmd
 ```
 
-To try ArcMD with isolated development data:
+Run with an isolated development directory:
 
 ```sh
 ARCMD_HOME=/tmp/arcmd-dev CGO_ENABLED=0 go run ./cmd/arcmd
 ```
 
-Build a native application package with the pinned MyGo CLI:
+Build a native application bundle (see [Building and releasing](docs/building.md)):
 
 ```sh
 CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.7.4 build
 ```
 
-See [Building and releasing](docs/building.md) for cross-platform packages,
-CI artifacts, signing, and the release workflow.
+---
 
 ## Contributing
 
-Bug reports, ideas, and pull requests are welcome. Start with the
-[architecture guide](docs/architecture.md) and [contributor conventions](AGENTS.md).
-Report issues through [GitHub Issues](https://github.com/Ciao1019/ArcMD/issues).
+Bug reports, ideas, and pull requests are welcome via [GitHub Issues](https://github.com/Ciao1019/ArcMD/issues). Start with the [architecture guide](docs/architecture.md) and [contributor conventions](AGENTS.md).
+
+Before submitting changes, run:
 
 ```sh
 gofmt -l .
@@ -286,7 +206,7 @@ CGO_ENABLED=0 GOOS=linux go build ./...
 CGO_ENABLED=0 GOOS=windows go build ./...
 ```
 
-For UI changes, render and inspect the native snapshots:
+For UI changes, render and inspect headless native snapshots:
 
 ```sh
 ARCMD_SNAPSHOT=/tmp/arcmd-shots CGO_ENABLED=0 go test -run Snapshot ./internal/app
@@ -306,6 +226,4 @@ Thanks to the [LinuxDo](https://linux.do/) community for its support.
 
 ## License
 
-ArcMD is open source under the [MIT License](LICENSE).
-
-Third-party notices and licenses are preserved in [third_party](third_party/).
+ArcMD is open source under the [MIT License](LICENSE). Third-party notices and licenses are preserved in [third_party](third_party/).

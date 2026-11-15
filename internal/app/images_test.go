@@ -18,7 +18,7 @@ import (
 )
 
 // parentImagesApp reproduces opening an article whose pictures live beside
-// its folder, outside the Space created for the article.
+// its folder. The article is registered in the built-in external collection.
 func parentImagesApp(t *testing.T) (*App, *ui.Tester, string, string) {
 	t.Helper()
 	a, tt := newTestApp(t)
@@ -82,22 +82,25 @@ func TestSystemOpenLoadsParentImages(t *testing.T) {
 	if _, err := vault.Resolve(a.doc.space.Root, "../images/png/window.png"); err == nil {
 		t.Fatal("vault write boundary was relaxed")
 	}
-	// A real edit converts Markdown beside the source; reopening must retain
-	// the same image base, without changing the imported Markdown.
+	// A real edit updates the Markdown file in place; reopening must retain
+	// the same image base without creating any sidecar .arcmd file.
 	a.doc.ed.SetSelection(a.doc.ed.Len(), a.doc.ed.Len())
 	focusDocument(a, tt)
 	tt.Type("正文")
-	if !a.flush() || vault.IsMarkdown(a.doc.rel) {
-		t.Fatal("save edited import")
+	if !a.flush() || !vault.IsMarkdown(a.doc.rel) {
+		t.Fatal("save edited Markdown in place")
 	}
-	text, err := vault.Read(a.doc.space.Root, a.doc.rel)
+	if _, err := os.Stat(strings.TrimSuffix(file, ".md") + ".arcmd"); !os.IsNotExist(err) {
+		t.Fatal("editing Markdown created a .arcmd file")
+	}
+	text, err := readFile(a.doc.space, a.doc.rel)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.doc = openDocument(a.doc.space, a.doc.rel, text, false)
 	check()
-	if data, err := os.ReadFile(file); err != nil || string(data) != original {
-		t.Fatal("opening or editing changed the Markdown source", err)
+	if data, err := os.ReadFile(file); err != nil || string(data) == original || !strings.Contains(string(data), "正文") {
+		t.Fatal("editing did not update the Markdown source in place", err)
 	}
 }
 
@@ -131,18 +134,19 @@ func TestImageComponentSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the image component")
 	for _, mode := range []string{"light", "dark", "narrow", "preview"} {
 		t.Run(mode, func(t *testing.T) {
-			a, tt, _, _ := parentImagesApp(t)
-			if err := vault.Write(a.doc.space.Root, "assets/app-window.png", "broken picture"); err != nil {
+			a, tt, file, _ := parentImagesApp(t)
+			root := filepath.Dir(file)
+			if err := vault.Write(root, "assets/app-window.png", "broken picture"); err != nil {
 				t.Fatal(err)
 			}
 			text := "# 图片浏览\n\n![▲ Sylva 桌面端：点开引用，右侧打开原件并高亮引文](assets/app-window.png)\n\nSylva 是一款桌面文档库。图片加载失败时，可以重新选择图片，或在文件夹中定位原文件。\n\n"
-			if err := writeNative(a.doc.space.Root, "Images.arcmd", text); err != nil {
+			if err := writeNative(root, "Images.arcmd", text); err != nil {
 				t.Fatal(err)
 			}
-			a.open("Images.arcmd")
+			a.openSystemFile(filepath.Join(root, "Images.arcmd"))
 			a.doc.ed.SetSelection(a.doc.ed.Len(), a.doc.ed.Len())
 			focusDocument(a, tt)
-			data, err := os.ReadFile(filepath.Join(a.doc.space.Root, "..", "images", "png", "window.png"))
+			data, err := os.ReadFile(filepath.Join(root, "..", "images", "png", "window.png"))
 			if err != nil {
 				t.Fatal(err)
 			}

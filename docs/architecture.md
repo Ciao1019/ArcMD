@@ -72,9 +72,19 @@ panes. Editor undo history remains in memory only.
 
 ### Editing
 
-The primary file is a `.arcmd` document, encoded as readable JSON with a
-format marker, version and stable block IDs. `internal/document` contains the
-model, validation, cloning, structural editing and one shared undo history.
+The primary file is a standard `.md` Markdown document, edited and autosaved
+directly in place. Rich ArcMD attributes that exceed basic CommonMark—page
+icons, covers and word goals (YAML frontmatter), text colors, highlights and
+hand-drawn annotations (`<mark>` / `<span>` with CSS fallbacks and `data-*`
+attributes), callouts with custom emoji (`> [!NOTE]` alerts), disclosures
+(`<details>`), resized or aligned figures, rich tables (`<table>` with widths,
+spans and cell backgrounds) and multi-column layouts (`<div class="arcmd-columns">`)—
+round-trip losslessly through `internal/editor/markdown.go` while degrading
+cleanly in other Markdown readers. Unmodified top-level blocks retain their
+original author Markdown bytes via `ImportSource` chunk matching. Legacy
+`.arcmd` JSON files (with format marker, version and stable block IDs) remain
+supported in place for backwards compatibility. `internal/document` contains
+the model, validation, cloning, structural editing and one shared undo history.
 It uses the standard library and can be tested without the UI toolkit.
 
 Text blocks contain runs with bold, italic, underline, strike, code and link
@@ -134,14 +144,13 @@ alternative (verbatim selections keep their source). Whole selected tables and
 columns retain their structure. Markdown pastes recognize headings, lists,
 tables and code while literal editing contexts preserve source.
 
-Markdown parsing is an interchange adapter in `internal/editor/markdown.go`.
-Existing Markdown opens in memory. The first save after an edit publishes a
-new, uniquely named `.arcmd` file in the same folder. The original Markdown is
-retained, including a recovery copy in `importSource`. Navigation, pins and the
-active filename follow the newly saved native document. A failed migration
-leaves the original path and unsaved model available for retry.
+Markdown serialization and parsing live in `internal/editor/markdown.go`.
+Existing `.md`, `.markdown` and `.mdx` files open in memory and save edits
+directly back to the original file in place, never creating sidecar `.arcmd`
+duplicates. Unedited blocks preserve the author's original Markdown formatting
+from `ImportSource`.
 
-Native decode rejects unknown versions, fields, block types and invalid IDs or
+Legacy `.arcmd` decode rejects unknown versions, fields, block types and invalid IDs or
 table shapes. The app displays a read error and disables editing for that file.
 Exports create a separate `.md` with a unique name. Unsupported imported HTML
 and extensions are opaque text blocks. The editor supports merged table cells,
@@ -177,10 +186,9 @@ theme's accent and the chrome tint, and reopens the space's last document.
 `relocate.go` moves files and folders with their local image and cover resources.
 Shared source attachments remain available. Conflicting destination pictures
 receive distinct names, and URLs are rebased in current content, composition,
-undo/redo states and saved versions. A resource failure rolls back the file move.
-Markdown import sources retain their original bytes; rebasing image references
-requires converting to the native format first. Existing broken image references
-are not repaired by moving a document.
+undo/redo states and saved versions for both `.md` and legacy `.arcmd`
+documents. A resource failure rolls back the file move. Existing broken image
+references are not repaired by moving a document.
 
 Local images resolve relative to the document's directory, including URL-encoded
 names and `../images` resources outside its Space. This is a read-only exception:
@@ -210,8 +218,16 @@ keeps its links. Unopened native documents receive conflict-checked saves.
 MyGo's `OnOpenFile` handles installed file associations and Dock drops. A single
 instance forwards later opens to the existing window. Development command-line
 runs also accept document paths. The deepest matching Space owns an opened file;
-an external file's parent folder is registered as a new Space. Opening alone
-never converts Markdown or copies the file, and save conflicts block navigation.
+external files belong to a single built-in External space, created on first use
+and retained even when empty. State version 9 stores an explicit local-name to
+absolute-file map. This collection never scans parent directories: sidebar,
+library and search see only registered files. Duplicate basenames
+receive distinct list names. A single-file watcher follows each entry; file
+reads, in-place saves, images and exports use the original location.
+Private version history lives under the configuration directory. Removing an
+entry closes it after saving and drops only the reference; the built-in space
+cannot be removed. Opening alone never modifies or copies the file,
+and save conflicts block navigation.
 
 ### PDF export and printing
 

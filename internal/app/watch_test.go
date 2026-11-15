@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -50,11 +49,7 @@ func (w *fakeWatches) fire(t *testing.T, a *App, tt *ui.Tester, events ...mygo.F
 // writeElsewhere writes markdown to rel as another app would.
 func writeElsewhere(t *testing.T, a *App, rel, markdown string) {
 	t.Helper()
-	text, err := editor.ImportMarkdown(markdown).Encode()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := vault.Write(root(a), rel, text); err != nil {
+	if err := writeNative(root(a), rel, markdown); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -67,8 +62,8 @@ const conflictText = "这里还有未保存的修改"
 // A document without edits follows its file.
 func TestWatchReloadsCleanDocument(t *testing.T) {
 	a, tt, w := watchApp(t)
-	writeElsewhere(t, a, "Welcome.arcmd", "# Welcome\n\nChanged in another editor.")
-	w.fire(t, a, tt, written("Welcome.arcmd"))
+	writeElsewhere(t, a, "Welcome.md", "# Welcome\n\nChanged in another editor.")
+	w.fire(t, a, tt, written("Welcome.md"))
 	if !strings.Contains(a.doc.text(), "Changed in another editor.") || a.doc.dirty() || a.doc.conflict {
 		t.Fatalf("not reloaded: %q", tt.Texts())
 	}
@@ -78,7 +73,7 @@ func TestWatchReloadsCleanDocument(t *testing.T) {
 	tt.Frame()
 	tt.Advance(autosaveDelay + 50*time.Millisecond)
 	tt.Frame()
-	w.fire(t, a, tt, written("Welcome.arcmd"))
+	w.fire(t, a, tt, written("Welcome.md"))
 	if a.doc.conflict || a.doc.dirty() || tt.HasText(conflictText) {
 		t.Error("own save seen as a change elsewhere")
 	}
@@ -91,15 +86,15 @@ func TestWatchGuardsUnsavedEdits(t *testing.T) {
 		a, tt, w := watchApp(t)
 		a.doc.ed.SetSelection(0, 0)
 		a.doc.ed.ReplaceText(nil, "Mine ")
-		writeElsewhere(t, a, "Welcome.arcmd", "# Theirs")
-		theirs, _ := vault.Read(root(a), "Welcome.arcmd")
-		w.fire(t, a, tt, written("Welcome.arcmd"))
+		writeElsewhere(t, a, "Welcome.md", "# Theirs")
+		theirs, _ := vault.Read(root(a), "Welcome.md")
+		w.fire(t, a, tt, written("Welcome.md"))
 		if !a.doc.conflict || !tt.HasText(conflictText) {
 			t.Fatalf("no conflict bar: %q", tt.Texts())
 		}
 		tt.Advance(3 * autosaveDelay)
 		tt.Frame()
-		if got, _ := vault.Read(root(a), "Welcome.arcmd"); got != theirs {
+		if got, _ := vault.Read(root(a), "Welcome.md"); got != theirs {
 			t.Fatal("autosave overwrote the change elsewhere")
 		}
 		// Leaving the document waits too.
@@ -110,7 +105,7 @@ func TestWatchGuardsUnsavedEdits(t *testing.T) {
 			if err := tt.Click("保留我的修改"); err != nil {
 				t.Fatal(err)
 			}
-			got, _ := vault.Read(root(a), "Welcome.arcmd")
+			got, _ := vault.Read(root(a), "Welcome.md")
 			if !strings.Contains(got, "Mine Welcome") || a.doc.dirty() {
 				t.Errorf("mine not kept: dirty %v", a.doc.dirty())
 			}
@@ -134,12 +129,12 @@ func TestSaveNoticesChangeWithoutWatch(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.doc.ed.SetSelection(0, 0)
 	a.doc.ed.ReplaceText(nil, "Mine ")
-	writeElsewhere(t, a, "Welcome.arcmd", "# Theirs")
-	theirs, _ := vault.Read(root(a), "Welcome.arcmd")
+	writeElsewhere(t, a, "Welcome.md", "# Theirs")
+	theirs, _ := vault.Read(root(a), "Welcome.md")
 	tt.Frame()
 	tt.Advance(autosaveDelay + 50*time.Millisecond)
 	tt.Frame()
-	if got, _ := vault.Read(root(a), "Welcome.arcmd"); got != theirs {
+	if got, _ := vault.Read(root(a), "Welcome.md"); got != theirs {
 		t.Fatal("save overwrote the change elsewhere")
 	}
 	if !a.doc.conflict || !tt.HasText(conflictText) {
@@ -155,8 +150,8 @@ func TestSaveNoticesChangeWithoutWatch(t *testing.T) {
 // going closes it, or keeps its edits.
 func TestWatchFollowsFiles(t *testing.T) {
 	a, tt, w := watchApp(t)
-	writeElsewhere(t, a, "Fresh.arcmd", "# Fresh")
-	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileCreate, Path: "Fresh.arcmd"})
+	writeElsewhere(t, a, "Fresh.md", "# Fresh")
+	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileCreate, Path: "Fresh.md"})
 	if !tt.HasText("Fresh") {
 		t.Fatalf("new file not listed: %q", tt.Texts())
 	}
@@ -166,25 +161,25 @@ func TestWatchFollowsFiles(t *testing.T) {
 	}
 	a.doc.ed.SetSelection(0, 0)
 	a.doc.ed.ReplaceText(nil, "Mine ")
-	os.Remove(filepath.Join(root(a), "Fresh.arcmd"))
-	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileRemove, Path: "Fresh.arcmd"})
+	os.Remove(filepath.Join(root(a), "Fresh.md"))
+	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileRemove, Path: "Fresh.md"})
 	if a.doc == nil || !a.doc.missing || !tt.HasText("已被移动或删除") {
 		t.Fatalf("edits of a removed file not kept: %q", tt.Texts())
 	}
 	if err := tt.Click("重新保存到原位置"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := vault.Read(root(a), "Fresh.arcmd"); err != nil || !strings.Contains(got, "Mine Fresh") {
+	if got, err := vault.Read(root(a), "Fresh.md"); err != nil || !strings.Contains(got, "Mine Fresh") {
 		t.Fatalf("not saved again: %v", err)
 	}
 
-	os.Remove(filepath.Join(root(a), "Fresh.arcmd"))
-	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileRemove, Path: "Fresh.arcmd"})
+	os.Remove(filepath.Join(root(a), "Fresh.md"))
+	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileRemove, Path: "Fresh.md"})
 	if a.doc != nil {
 		t.Error("removed document still open")
 	}
 	for _, d := range a.docs {
-		if d.Path == "Fresh.arcmd" {
+		if d.Path == "Fresh.md" {
 			t.Error("removed document still listed")
 		}
 	}
@@ -195,14 +190,14 @@ func TestWatchFollowsFiles(t *testing.T) {
 func TestWatchFollowsRename(t *testing.T) {
 	a, tt, w := watchApp(t)
 	sp := a.state.ActiveSpace()
-	if err := os.Rename(filepath.Join(root(a), "Welcome.arcmd"), filepath.Join(root(a), "Hello.arcmd")); err != nil {
+	if err := os.Rename(filepath.Join(root(a), "Welcome.md"), filepath.Join(root(a), "Hello.md")); err != nil {
 		t.Fatal(err)
 	}
-	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileRename, Path: "Hello.arcmd", OldPath: "Welcome.arcmd"})
-	if a.doc == nil || a.doc.rel != "Hello.arcmd" || !a.state.IsFavorite(sp.ID, "Hello.arcmd") {
+	w.fire(t, a, tt, mygo.FileEvent{Op: mygo.FileRename, Path: "Hello.md", OldPath: "Welcome.md"})
+	if a.doc == nil || a.doc.rel != "Hello.md" || !a.state.IsFavorite(sp.ID, "Hello.md") {
 		t.Fatalf("rename not followed: %+v", a.doc)
 	}
-	if !tt.HasText("Hello.arcmd") {
+	if !tt.HasText("Hello.md") {
 		t.Errorf("address not updated: %q", tt.Texts())
 	}
 }
@@ -215,7 +210,7 @@ func TestWatchFollowsSpaces(t *testing.T) {
 	other := t.TempDir()
 	sp := a.state.Add("Work", other)
 	a.switchSpace(sp.ID)
-	a.openIn(a.state.Spaces[0], "Welcome.arcmd") // the favorite, from its tile
+	a.openIn(a.state.Spaces[0], "Welcome.md") // the favorite, from its tile
 	tt.Frame()
 	if w.changed[other] == nil || w.changed[first] == nil {
 		t.Fatalf("want both folders watched (the favorite is open): %v", w.changed)

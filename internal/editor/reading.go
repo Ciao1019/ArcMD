@@ -35,6 +35,8 @@ func (e *Editor) InsertInlineMath() {
 	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
 	e.Engine.Edit(func() { e.Engine.Replace(z, z, "$"); e.Engine.Replace(a, a, "$"); e.SetSelection(a+1, z+1) })
 	e.sync()
+	e.pairs = append(e.pairs, autoPair{a, z + 1, "$", "$"})
+	e.pairRevision = e.Revision()
 	e.RequestFocus, e.reveal = true, true
 }
 

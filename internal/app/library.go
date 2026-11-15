@@ -110,7 +110,7 @@ func (a *App) loadLibrary() {
 				l.trees[s.ID], l.errs[s.ID] = a.tree, a.treeErr
 				continue
 			}
-			l.trees[s.ID], l.errs[s.ID] = vault.Tree(s.Root)
+			l.trees[s.ID], l.errs[s.ID] = readTree(s)
 		}
 	case libTrash:
 		l.items, l.err = a.bin.List(time.Now())
@@ -423,18 +423,18 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 					a.closeLibrary()
 					a.editSpace(s)
 				}
-				if m.Item(i18n.T("新建文档")).Chosen() {
+				if m.Item(i18n.T("新建文档")).Disabled(s.IsExternal()).Chosen() {
 					a.switchSpace(s.ID)
 					if a.state.ActiveSpace() == s {
 						a.closeLibrary()
 						a.newDoc("")
 					}
 				}
-				if m.Item(i18n.T("在访达中显示")).Chosen() {
+				if m.Item(i18n.T("在访达中显示")).Disabled(s.IsExternal()).Chosen() {
 					revealDir(s.Root)
 				}
 				m.Separator()
-				if m.Item(i18n.T("从 ArcMD 移除")).Disabled(len(a.state.Spaces) < 2).Chosen() {
+				if m.Item(i18n.T("从 ArcMD 移除")).Disabled(s.IsExternal() || len(a.state.Spaces) < 2).Chosen() {
 					a.removeSpace(s.ID)
 					a.loadLibrary()
 				}

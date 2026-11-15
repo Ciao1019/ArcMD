@@ -7,6 +7,7 @@ package editor
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -131,11 +132,27 @@ func (e *Editor) tint(name string) ui.Color {
 	return e.page.Marker
 }
 
+var popoverTransition = ui.ElementTransition{
+	Duration: 110 * time.Millisecond,
+	Position: true,
+	Size:     true,
+	Colors:   true,
+	Enter:    &ui.Motion{Opacity: 0.9, Scale: 0.96, Y: 3},
+}
+
+type slashPillMatch struct{ ed *Editor }
+
+func slidingPill(c *ui.Context, match any, fill ui.Color, radius float32) {
+	ui.Box(c.Key("active-pill")).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+		Radius(radius).Background(fill).PassThrough().
+		Transition(ui.ElementTransition{Duration: 95 * time.Millisecond, Match: match})
+}
+
 // popover styles a floating panel : a hairline, radius 6, a
-// soft drop.
+// soft drop, and smooth position/size/enter transitions.
 func (e *Editor) popover(c *ui.Context, el ui.Element) ui.Element {
 	t := c.Theme()
-	return el.Background(e.page.Popover).Border(1, t.Border).Radius(6).Shadow(0, 4, 16, 0, t.Text.Alpha(.12)).KeepFocus()
+	return el.Background(e.page.Popover).Border(1, t.Border).Radius(6).Shadow(0, 4, 16, 0, t.Text.Alpha(.12)).Transition(popoverTransition).KeepFocus()
 }
 
 // menuRow is a 32 tall row: an 18 icon, the label, an optional hint.
@@ -183,14 +200,19 @@ func (e *Editor) gridCell(c *ui.Context, key string, it insertion, on, active bo
 	switch {
 	case active:
 		cell.Background(e.page.TurnActive)
-	case on || cell.Hovered():
+	case !on && cell.Hovered():
 		cell.Background(e.page.Hover)
 	}
 	color := e.page.CodeText
 	if active {
 		color = e.page.Marker
 	}
-	cell.Children(func() { ui.Icon(c, it.icon).FontSize(18).TextColor(color) })
+	cell.Children(func() {
+		if on && !active {
+			slidingPill(c, slashPillMatch{e}, e.page.Hover, 4)
+		}
+		ui.Icon(c, it.icon).FontSize(18).TextColor(color)
+	})
 	return cell
 }
 
@@ -264,11 +286,15 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 							e.groupTitle(c, i18n.T(slashGroups[group].title))
 						}
 						it := en.item
+						selected := i == e.slashIndex
 						row := ui.ButtonBase(c.Key("slash-row:" + it.label())).Height(32).PaddingX(4).Radius(4).KeepFocus().Label(it.label()).Cursor(ui.CursorPointer)
-						if i == e.slashIndex || row.Hovered() {
+						if !selected && row.Hovered() {
 							row.Background(e.page.Hover)
 						}
 						row.Children(func() {
+							if selected {
+								slidingPill(c, slashPillMatch{e}, e.page.Hover, 4)
+							}
 							ui.Row(c).Grow(1).AlignItems(ui.Center).Children(func() {
 								ui.Box(c).Size(24, 24).Center().Children(func() {
 									ui.Icon(c, it.icon).FontSize(18).TextColor(e.tint(it.tint))

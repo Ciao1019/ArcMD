@@ -44,14 +44,14 @@ func TestPinFromMenu(t *testing.T) {
 	}
 	settle(tt)
 	sp := a.state.ActiveSpace()
-	if !sp.IsPinned("Journal/Ideas.arcmd") || sectionOf(a, "Journal/Ideas.arcmd") != "pinned" {
-		t.Fatalf("pins %v, section %q", sp.Pins, sectionOf(a, "Journal/Ideas.arcmd"))
+	if !sp.IsPinned("Journal/Ideas.md") || sectionOf(a, "Journal/Ideas.md") != "pinned" {
+		t.Fatalf("pins %v, section %q", sp.Pins, sectionOf(a, "Journal/Ideas.md"))
 	}
 	if a.dividerY == 0 {
 		t.Error("no line")
 	}
 	st, _ := a.store.Load()
-	if !slices.Equal(st.Spaces[0].Pins, []string{"Journal/Ideas.arcmd"}) {
+	if !slices.Equal(st.Spaces[0].Pins, []string{"Journal/Ideas.md"}) {
 		t.Fatalf("saved pins %v", st.Spaces[0].Pins)
 	}
 	if err := tt.RightClick("Ideas"); err != nil {
@@ -61,7 +61,7 @@ func TestPinFromMenu(t *testing.T) {
 		t.Fatalf("%v: %q", err, tt.Menu())
 	}
 	settle(tt)
-	if sp.IsPinned("Journal/Ideas.arcmd") || sectionOf(a, "Journal/Ideas.arcmd") != "today" {
+	if sp.IsPinned("Journal/Ideas.md") || sectionOf(a, "Journal/Ideas.md") != "today" {
 		t.Fatal("still pinned")
 	}
 }
@@ -119,11 +119,11 @@ func TestPinByDrag(t *testing.T) {
 	}
 	settle(tt)
 	// Back below the line, after Welcome.
-	dragTo(a, tt, "Alpha.md", "Welcome.arcmd", 0.8, nil)
+	dragTo(a, tt, "Alpha.md", "Welcome.md", 0.8, nil)
 	if len(sp.Pins) != 0 {
 		t.Fatalf("still pinned: %v", sp.Pins)
 	}
-	if got := rootNames(a); !slices.Equal(got, []string{"Journal", "Welcome.arcmd", "Alpha.md"}) {
+	if got := rootNames(a); !slices.Equal(got, []string{"Journal", "Welcome.md", "Alpha.md"}) {
 		t.Fatalf("today %v", got)
 	}
 }
@@ -135,10 +135,10 @@ func TestPinFolder(t *testing.T) {
 	sp := a.state.ActiveSpace()
 	a.togglePin(sp, "Journal")
 	settle(tt)
-	if sectionOf(a, "Journal") != "pinned" || sectionOf(a, "Journal/Ideas.arcmd") != "pinned" {
-		t.Fatalf("Journal %q, Ideas %q", sectionOf(a, "Journal"), sectionOf(a, "Journal/Ideas.arcmd"))
+	if sectionOf(a, "Journal") != "pinned" || sectionOf(a, "Journal/Ideas.md") != "pinned" {
+		t.Fatalf("Journal %q, Ideas %q", sectionOf(a, "Journal"), sectionOf(a, "Journal/Ideas.md"))
 	}
-	if sectionOf(a, "Welcome.arcmd") != "today" {
+	if sectionOf(a, "Welcome.md") != "today" {
 		t.Fatal("Welcome left the rest")
 	}
 }
@@ -148,15 +148,15 @@ func TestPinOrFavorite(t *testing.T) {
 	a, tt := newTestApp(t)
 	sp := a.state.ActiveSpace()
 	settle(tt)
-	if !a.state.IsFavorite(sp.ID, "Welcome.arcmd") {
+	if !a.state.IsFavorite(sp.ID, "Welcome.md") {
 		t.Fatal("Welcome is not a favorite on the first run")
 	}
-	a.togglePin(sp, "Welcome.arcmd")
-	if a.state.IsFavorite(sp.ID, "Welcome.arcmd") || !sp.IsPinned("Welcome.arcmd") {
+	a.togglePin(sp, "Welcome.md")
+	if a.state.IsFavorite(sp.ID, "Welcome.md") || !sp.IsPinned("Welcome.md") {
 		t.Fatalf("pin: favorites %v pins %v", a.state.Favorites, sp.Pins)
 	}
-	a.toggleFavorite(sp, "Welcome.arcmd")
-	if !a.state.IsFavorite(sp.ID, "Welcome.arcmd") || sp.IsPinned("Welcome.arcmd") {
+	a.toggleFavorite(sp, "Welcome.md")
+	if !a.state.IsFavorite(sp.ID, "Welcome.md") || sp.IsPinned("Welcome.md") {
 		t.Fatalf("favorite: favorites %v pins %v", a.state.Favorites, sp.Pins)
 	}
 }
@@ -185,9 +185,9 @@ func TestNewFolderWithDoc(t *testing.T) {
 	a.state.Favorites = nil
 	sp := a.state.ActiveSpace()
 	settle(tt)
-	a.newFolderWith("Welcome.arcmd")
+	a.newFolderWith("Welcome.md")
 	tt.Frame()
-	if _, err := os.Stat(filepath.Join(sp.Root, "新建文件夹", "Welcome.arcmd")); err != nil || a.renaming != "新建文件夹" {
+	if _, err := os.Stat(filepath.Join(sp.Root, "新建文件夹", "Welcome.md")); err != nil || a.renaming != "新建文件夹" {
 		t.Fatalf("moved: %v, renaming %q", err, a.renaming)
 	}
 }
@@ -240,7 +240,7 @@ func TestHeaderFoldsPins(t *testing.T) {
 	sp := a.state.ActiveSpace()
 	os.WriteFile(filepath.Join(sp.Root, "Alpha.md"), []byte("# A\n"), 0o644)
 	a.refreshTree()
-	a.togglePin(sp, "Welcome.arcmd")
+	a.togglePin(sp, "Welcome.md")
 	a.togglePin(sp, "Alpha.md")
 	settle(tt)
 	if err := tt.Click("折叠或展开置顶"); err != nil {
@@ -250,8 +250,8 @@ func TestHeaderFoldsPins(t *testing.T) {
 	if !sp.PinsCollapsed {
 		t.Fatal("the click did not fold the pinned section")
 	}
-	if sectionOf(a, "Alpha.md") != "" || sectionOf(a, "Welcome.arcmd") != "pinned" {
-		t.Fatalf("folded: Alpha %q, Welcome %q", sectionOf(a, "Alpha.md"), sectionOf(a, "Welcome.arcmd"))
+	if sectionOf(a, "Alpha.md") != "" || sectionOf(a, "Welcome.md") != "pinned" {
+		t.Fatalf("folded: Alpha %q, Welcome %q", sectionOf(a, "Alpha.md"), sectionOf(a, "Welcome.md"))
 	}
 	if err := tt.Click("折叠或展开置顶"); err != nil {
 		t.Fatal(err)
@@ -267,21 +267,21 @@ func TestFolderPeek(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.state.Favorites = nil
 	sp := a.state.ActiveSpace()
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	sp.SetExpanded("Journal", false)
 	settle(tt)
 	var depth = -1
 	for _, r := range a.rows {
-		if r.rel == "Journal/Ideas.arcmd" {
+		if r.rel == "Journal/Ideas.md" {
 			depth = r.depth
 		}
 	}
 	if depth != 1 {
 		t.Fatalf("the open document under the closed folder: depth %d", depth)
 	}
-	a.open("Welcome.arcmd")
+	a.open("Welcome.md")
 	settle(tt)
-	if sectionOf(a, "Journal/Ideas.arcmd") != "" {
+	if sectionOf(a, "Journal/Ideas.md") != "" {
 		t.Fatal("the peek stayed after another document opened")
 	}
 }
@@ -309,7 +309,7 @@ func TestHeaderSnapshot(t *testing.T) {
 	os.WriteFile(filepath.Join(sp.Root, "Roadmap.md"), []byte("# R\n"), 0o644)
 	a.refreshTree()
 	a.togglePin(sp, "Roadmap.md")
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	sp.SetExpanded("Journal", false)
 	settle(tt)
 	h, _ := tt.Find("Personal")

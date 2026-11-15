@@ -26,25 +26,7 @@ func safeHTMLURL(s string) bool {
 func ExportHTML(doc *document.Document) string {
 	var blocks func([]*document.Block) string
 	runs := func(rs []document.Run) string {
-		var out strings.Builder
-		for _, r := range rs {
-			s := html.EscapeString(r.Text)
-			s = strings.NewReplacer("\u2028", "<br>", "\n", "<br>").Replace(s)
-			style := r.Style
-			for _, mark := range []struct {
-				on  bool
-				tag string
-			}{{style.Code, "code"}, {style.Bold, "strong"}, {style.Italic, "em"}, {style.Underline, "u"}, {style.Strike, "s"}, {style.Script == "sup", "sup"}, {style.Script == "sub", "sub"}} {
-				if mark.on {
-					s = "<" + mark.tag + ">" + s + "</" + mark.tag + ">"
-				}
-			}
-			if style.Link != "" && safeHTMLURL(style.Link) {
-				s = "<a href=\"" + html.EscapeString(style.Link) + "\">" + s + "</a>"
-			}
-			out.WriteString(s)
-		}
-		return out.String()
+		return exportHTMLRuns(rs, false)
 	}
 	blocks = func(bs []*document.Block) string {
 		var out strings.Builder
@@ -143,7 +125,23 @@ func ExportHTML(doc *document.Document) string {
 				}
 				out.WriteString("</tbody></table>")
 				continue
-			case "columns", "column":
+			case "columns":
+				ratios := columnRatioStrings(b)
+				if len(ratios) == len(b.Children) {
+					fmt.Fprintf(&out, `<div class="arcmd-columns" data-widths="%s" style="display:flex;gap:24px">`, strings.Join(ratios, ","))
+				} else {
+					out.WriteString(`<div class="arcmd-columns" style="display:flex;gap:24px">`)
+				}
+				for ci, col := range b.Children {
+					flexStyle := "flex:1;min-width:0"
+					if len(ratios) == len(b.Children) {
+						flexStyle = "flex:" + ratios[ci] + ";min-width:0"
+					}
+					fmt.Fprintf(&out, `<div class="arcmd-column" style="%s">%s</div>`, flexStyle, blocks(col.Children))
+				}
+				out.WriteString(`</div>`)
+				continue
+			case "column":
 				out.WriteString(blocks(b.Children))
 				continue
 			case "footnote":

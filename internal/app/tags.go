@@ -52,14 +52,23 @@ func (a *App) renameTag(from, to string) {
 	merging := !strings.EqualFold(from, to) && a.tagCount(to) > 0
 	resident := map[place]*document{}
 	var edited []*document
+	skipped := 0
 	for _, d := range a.residentDocuments() {
 		resident[place{d.space.ID, d.rel}] = d
-		if d.loadErr == nil && !d.ed.ReadOnly && d.ed.Engine.MapProse(change) {
+		if d.loadErr != nil {
+			continue
+		}
+		if d.ed.ReadOnly {
+			if strings.Contains(strings.ToLower(d.ed.Doc.PlainText()), "#"+strings.ToLower(from)) {
+				skipped++
+			}
+			continue
+		}
+		if d.ed.Engine.MapProse(change) {
 			edited = append(edited, d)
 		}
 	}
 	var files []replacedFile
-	skipped := 0
 	var places []place
 	a.eachDoc(func(sp *space.Space, n *vault.Node) bool {
 		places = append(places, place{sp.ID, n.Path})
@@ -70,12 +79,8 @@ func (a *App) renameTag(from, to string) {
 			continue
 		}
 		sp := a.state.Get(p.space)
-		before, err := vault.Read(sp.Root, p.rel)
+		before, err := readFile(sp, p.rel)
 		if err != nil || !strings.Contains(strings.ToLower(before), "#"+strings.ToLower(from)) {
-			continue
-		}
-		if vault.IsMarkdown(p.rel) {
-			skipped++
 			continue
 		}
 		d := openDocument(sp, p.rel, before, false)
@@ -86,7 +91,7 @@ func (a *App) renameTag(from, to string) {
 			a.notify("更新 %s 的标签失败。%v", p.rel, err)
 			continue
 		}
-		after, _ := vault.Read(sp.Root, d.rel)
+		after, _ := readFile(sp, d.rel)
 		files = append(files, replacedFile{sp.ID, d.rel, before, after})
 	}
 	a.refreshSearch()
@@ -101,7 +106,7 @@ func (a *App) renameTag(from, to string) {
 	}
 	note := ""
 	if skipped > 0 {
-		note = fmt.Sprintf(i18n.T("，跳过 %d 篇 Markdown 文档"), skipped)
+		note = fmt.Sprintf(i18n.T("，跳过 %d 篇只读文档"), skipped)
 	}
 	a.offerUndo(fmt.Sprintf(i18n.T("%s #%s，共 %d 篇文档%s"), verb, to, n, note), "#"+from+" → #"+to, func() { a.undoReplace(files, edited) })
 }

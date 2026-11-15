@@ -1,12 +1,15 @@
 package app
 
 import (
+	"maps"
 	"path"
+	"path/filepath"
 	"strings"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/search"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 )
 
 // searchState is the command bar's full-text search: the index of every
@@ -52,7 +55,8 @@ func extractText(name, content string) (search.Extracted, error) {
 		}
 		return search.Extracted{Text: doc.PlainText(), Icon: doc.Icon}, nil
 	}
-	return search.Extracted{Text: editor.ImportMarkdown(content).PlainText()}, nil
+	doc := editor.ImportMarkdown(content)
+	return search.Extracted{Text: doc.PlainText(), Icon: doc.Icon}, nil
 }
 
 // refreshSearch reads the spaces' documents into the index again, only
@@ -66,7 +70,14 @@ func (a *App) refreshSearch() {
 	}
 	roots := make([]search.Root, 0, len(a.state.Spaces))
 	for _, sp := range a.state.Spaces {
-		roots = append(roots, search.Root{Space: sp.ID, Path: sp.Root})
+		r := search.Root{Space: sp.ID, Path: sp.Root}
+		if sp.IsExternal() {
+			r.Files = vault.Files(maps.Clone(sp.ExternalFiles))
+			if r.Files == nil {
+				r.Files = vault.Files{}
+			}
+		}
+		roots = append(roots, r)
 	}
 	prev := s.index
 	s.busy = true
@@ -77,13 +88,17 @@ func (a *App) refreshSearch() {
 			a.refreshSearch()
 		}
 	}
-	if !s.async {
+	post := a.runAsync
+	if post == nil && a.win != nil {
+		post = a.win.Update
+	}
+	if !s.async || post == nil {
 		done(search.Refresh(prev, roots, extractText))
 		return
 	}
 	go func() {
 		ix := search.Refresh(prev, roots, extractText)
-		a.win.Update(func() { done(ix) })
+		post(func() { done(ix) })
 	}()
 }
 
@@ -149,6 +164,9 @@ func (a *App) openAtText(id, rel, query string) {
 // docHint is where a document is, for the bar: its folder, and its space
 // when that is not the active one.
 func (a *App) docHint(id, rel string) string {
+	if sp := a.state.Get(id); sp.IsExternal() {
+		return shortPath(filepath.Dir(sp.ExternalFiles[rel]))
+	}
 	var parts []string
 	if active := a.state.ActiveSpace(); active == nil || active.ID != id {
 		if sp := a.state.Get(id); sp != nil {

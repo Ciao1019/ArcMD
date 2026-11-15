@@ -341,6 +341,41 @@ func favoriteRim(t *ui.Theme) ui.Color {
 	return pick(t, black.Alpha(0.17), white.Alpha(0.14))
 }
 
+// dragCardLook are the colors of a sidebar row lifted on its floating card
+// while dragged or settling back into place (treedrag.go).
+type dragCardLook struct {
+	fill, rim, shadow ui.Color
+}
+
+func dragCardColors(t *ui.Theme, l spaceLook) dragCardLook {
+	face := l.opaqueTop()
+	if t.Dark {
+		return dragCardLook{
+			fill:   face.Mix(white, 0.12).Alpha(0.96),
+			rim:    white.Alpha(0.16),
+			shadow: black.Alpha(0.42),
+		}
+	}
+	return dragCardLook{
+		fill:   face.Mix(white, 0.86).Alpha(0.97),
+		rim:    black.Alpha(0.10),
+		shadow: black.Alpha(0.16),
+	}
+}
+
+// dashedSlotColors are the fill and dashed outline of an insertion slot or
+// new-document row in the sidebar, scaled by strength in [0, 1].
+func dashedSlotColors(t *ui.Theme, strength float32) (fill, border ui.Color) {
+	s := min(max(strength, 0), 1)
+	fill = pick(t, black.Alpha(0.035*s), white.Alpha(0.055*s))
+	border = pick(t, black.Alpha(0.14+0.18*s), white.Alpha(0.15+0.20*s))
+	return fill, border
+}
+
+func scaleAlpha(c ui.Color, f float32) ui.Color {
+	return c.Alpha(float32(c.A) / 255 * min(max(f, 0), 1))
+}
+
 // field is the fill of the address field.
 func field(t *ui.Theme) ui.Color {
 	return pick(t, white.Alpha(0.45), white.Alpha(0.08))

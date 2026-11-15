@@ -13,9 +13,9 @@ func TestUndoToastRestoresTrashedDocument(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.trashFile = os.RemoveAll
 	tt.Frame()
-	a.trash("Journal/Ideas.arcmd")
+	a.trash("Journal/Ideas.md")
 	tt.Frame()
-	if _, err := os.Stat(filepath.Join(root(a), "Journal", "Ideas.arcmd")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root(a), "Journal", "Ideas.md")); !os.IsNotExist(err) {
 		t.Fatal("not trashed")
 	}
 	if !tt.HasText("已移到废纸篓") {
@@ -25,7 +25,7 @@ func TestUndoToastRestoresTrashedDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if _, err := os.Stat(filepath.Join(root(a), "Journal", "Ideas.arcmd")); err != nil {
+	if _, err := os.Stat(filepath.Join(root(a), "Journal", "Ideas.md")); err != nil {
 		t.Fatal("undo did not put it back", err)
 	}
 }
@@ -33,9 +33,9 @@ func TestUndoToastRestoresTrashedDocument(t *testing.T) {
 func TestUndoToastMovesBack(t *testing.T) {
 	a, tt := newTestApp(t)
 	tt.Frame()
-	a.placeEntry("Journal/Ideas.arcmd", "", 0)
+	a.placeEntry("Journal/Ideas.md", "", 0)
 	tt.Frame()
-	if _, err := vault.Read(root(a), "Ideas.arcmd"); err != nil {
+	if _, err := vault.Read(root(a), "Ideas.md"); err != nil {
 		t.Fatal("not moved", err)
 	}
 	if !tt.HasText("已移到「Personal」") {
@@ -45,12 +45,12 @@ func TestUndoToastMovesBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if _, err := vault.Read(root(a), "Journal/Ideas.arcmd"); err != nil {
+	if _, err := vault.Read(root(a), "Journal/Ideas.md"); err != nil {
 		t.Fatal("not moved back", err)
 	}
 	// Left alone, the toast goes; it waits while the pointer rests on it.
 	tt.Move(600, 100)
-	a.placeEntry("Journal/Ideas.arcmd", "", 0)
+	a.placeEntry("Journal/Ideas.md", "", 0)
 	tt.Frame()
 	tt.Advance(undoTimeout + time.Second)
 	tt.Frame()

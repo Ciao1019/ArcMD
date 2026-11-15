@@ -189,6 +189,8 @@ func (e *Editor) completeKeys(ev ui.InputEvent) bool {
 	return true
 }
 
+type completePillMatch struct{ ed *Editor }
+
 // completeMenu is the list under the caret.
 func (e *Editor) completeMenu(c *ui.Context, surface ui.Element) {
 	m := &e.complete
@@ -216,12 +218,16 @@ func (e *Editor) completeMenu(c *ui.Context, surface ui.Element) {
 			ui.Text(c, title).FontSize(12).TextColor(e.page.Caption).Padding(8, 12, 2, 12).AlignSelf(ui.Start)
 			ui.Column(c).Padding(4, 6, 6, 6).Children(func() {
 				for i, it := range m.items {
+					selected := i == m.index
 					row := ui.ButtonBase(c.Key("complete-row:" + it.label + it.hint)).Height(rowH).PaddingX(8).Gap(8).Radius(4).
 						KeepFocus().Label(it.label).Cursor(ui.CursorPointer).AlignItems(ui.Center)
-					if i == m.index || row.Hovered() {
+					if !selected && row.Hovered() {
 						row.Background(e.page.Hover)
 					}
 					row.Children(func() {
+						if selected {
+							slidingPill(c, completePillMatch{e}, e.page.Hover, 4)
+						}
 						if it.icon != "" {
 							ui.Text(c, it.icon).FontSize(16).Width(20).NoWrap()
 						} else {
