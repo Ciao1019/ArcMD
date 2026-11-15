@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -85,22 +86,67 @@ func (a *App) syncWatches() {
 			}
 		}
 	}
+	type target struct {
+		sp        *space.Space
+		root, rel string
+	}
+	targets := map[string]target{}
+	for id, sp := range want {
+		if sp.IsExternal() {
+			for rel := range sp.ExternalFiles {
+				if full, err := vault.Files(sp.ExternalFiles).Resolve(rel); err == nil {
+					targets[id+":"+rel] = target{sp, full, rel}
+				}
+			}
+		} else {
+			targets[id] = target{sp: sp, root: sp.Root}
+		}
+	}
 	for id, w := range a.watches {
-		if sp, ok := want[id]; !ok || sp.Root != w.root {
+		if target, ok := targets[id]; !ok || target.root != w.root {
 			w.stop()
 			delete(a.watches, id)
 		}
 	}
-	for id, sp := range want {
+	for id, target := range targets {
 		if _, ok := a.watches[id]; ok {
 			continue
 		}
 		if a.watches == nil {
 			a.watches = map[string]folderWatch{}
 		}
-		a.watches[id] = folderWatch{sp.Root, a.watchFiles(sp.Root, func(events []mygo.FileEvent) {
-			a.filesChanged(id, events)
+		a.watches[id] = folderWatch{target.root, a.watchFiles(target.root, func(events []mygo.FileEvent) {
+			if target.sp.IsExternal() {
+				a.externalChanged(target.sp, target.rel, target.root, events)
+			} else {
+				a.filesChanged(target.sp.ID, events)
+			}
 		})}
+	}
+}
+
+// A single-file watch never enumerates the external file's parent tree.
+func (a *App) externalChanged(sp *space.Space, rel, full string, events []mygo.FileEvent) {
+	if sp.ExternalFiles[rel] != full {
+		return // a stopped watch may still have a queued callback
+	}
+	for _, e := range events {
+		if e.Op == mygo.FileRename && e.OldPath == filepath.Base(full) && vault.IsDocument(e.Path) {
+			if next, err := vault.Resolve(filepath.Dir(full), e.Path); err == nil {
+				to := sp.AddExternal(next)
+				a.moved(sp, rel, to)
+				rel, full = to, next
+			}
+		}
+	}
+	for _, d := range a.residentDocuments() {
+		if d.space == sp && d.rel == rel {
+			a.withDocument(d, a.checkDisk)
+		}
+	}
+	delete(a.pageTrees, sp.ID)
+	if sp == a.state.ActiveSpace() {
+		a.refreshTree()
 	}
 }
 
@@ -160,7 +206,13 @@ func (a *App) checkDisk() {
 	if d == nil {
 		return
 	}
-	text, err := vault.Read(d.space.Root, d.rel)
+	if d.pollAsyncSave(); d.saving {
+		return
+	}
+	text, err := readFile(d.space, d.rel)
+	if d.pollAsyncSave(); d.saving {
+		return
+	}
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return
@@ -228,7 +280,6 @@ func (a *App) keepMine() {
 		a.notify("保存 %s 失败。%v", d.title(), err)
 		return
 	}
-	a.followMigration()
 	a.refreshTree()
 }
 

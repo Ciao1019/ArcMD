@@ -8,6 +8,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -32,6 +33,7 @@ func (a *App) View(c *ui.Context) {
 		a.narrowTick(winW)
 	}
 	a.splitResizing = false
+	a.qa.resizing = false
 	a.carried, a.carrying = a.carrying, nil
 	a.syncOpen()
 	a.overClosed, a.overClose = a.overClose, place{}
@@ -65,8 +67,9 @@ func (a *App) View(c *ui.Context) {
 	c.SetTheme(t)
 	a.syncTree()
 	a.syncWatches()
+	post := a.asyncPost()
 	for _, d := range a.residentDocuments() {
-		a.withDocument(d, func() { d.autosave(c); a.followMigration(); a.followTitle(); a.syncExcerpts(a.doc) })
+		a.withDocument(d, func() { d.autosaveWith(c, post); a.followTitle(); a.syncExcerpts(a.doc) })
 	}
 	for _, n := range a.notices {
 		c.Toast(n)
@@ -135,6 +138,7 @@ func (a *App) View(c *ui.Context) {
 		a.peek = false
 		a.peekLeave = time.Time{}
 	}
+	a.dragOverlayView(c)
 	a.previewView(c)
 	a.paletteView(c)
 	a.updateToast(c)
@@ -210,6 +214,8 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.stepBookmark(1)
 	case a.pressed(c, "history"):
 		a.openVersions()
+	case a.pressed(c, "ask"):
+		a.toggleQA()
 	case a.pressed(c, "export-pdf"):
 		a.exportPDF()
 	}
@@ -281,22 +287,43 @@ func (a *App) peekSidebar(c *ui.Context) {
 // main is the toolbar over the card holding the open document.
 func (a *App) main(c *ui.Context, docked float32) {
 	t := c.Theme()
+	main := ui.Row(c.Key("main")).Grow(1).MinWidth(0).AlignItems(ui.Stretch)
+	target := float32(0)
+	if a.qa.open && a.state.ActiveSpace() != nil && (!a.spaceForm.open || a.spaceForm.id != "") {
+		target = qaWidth
+	}
+	// Resolve the panel before the document: both must use this frame's
+	// width, and offscreen paragraphs can keep their shaping while it moves.
+	a.qa.shown = main.Animate("qa-width", target, slide)
+	a.qa.resizing = a.qa.shown != target
 	left := float32(8)
 	if docked > 0.5 {
 		left = 0
 	}
-	ui.Column(c).Grow(1).MinWidth(0).Padding(0, 8, 8, left).Children(func() {
-		if a.split != nil && !(a.spaceForm.open && a.spaceForm.id == "") {
-			a.splitView(c)
-			return
+	// The question panel, when open, stands right of the document and its
+	// toolbar, which then leaves the window buttons' room to it.
+	panel := a.qa.shown
+	right := float32(8)
+	if panel > 0.5 {
+		right = 0
+	}
+	main.Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Padding(0, right, 8, left).Children(func() {
+			if a.split != nil && !(a.spaceForm.open && a.spaceForm.id == "") {
+				a.splitView(c)
+				return
+			}
+			a.toolbar(c)
+			card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
+				Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
+			w, _ := c.Size()
+			a.splitDropTarget(c, card)
+			a.tourMark("bookmarks", card)
+			card.Children(func() { a.documentContent(c, a.doc, w-docked-right-left-2-panel) })
+		})
+		if !a.spaceForm.open || a.spaceForm.id != "" {
+			a.qaPanel(c)
 		}
-		a.toolbar(c)
-		card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
-			Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
-		w, _ := c.Size()
-		a.splitDropTarget(c, card)
-		a.tourMark("bookmarks", card)
-		card.Children(func() { a.documentContent(c, a.doc, w-docked-8-left-2) })
 	})
 }
 
@@ -321,8 +348,29 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 		})
 		return
 	}
+	applyModeFade := func(el ui.Element) {
+		if d.modeSwitchPending {
+			d.modeSwitchPending = false
+			if !a.reduceMotion {
+				d.modeAt = c.Now()
+			}
+		}
+		if !d.modeAt.IsZero() && !a.reduceMotion {
+			const dur = 90 * time.Millisecond
+			if elapsed := c.Now().Sub(d.modeAt); elapsed >= 0 && elapsed < dur {
+				p := float32(elapsed) / float32(dur)
+				k := 1 - (1-p)*(1-p)
+				el.Opacity(0.84 + 0.16*k)
+				c.After(0)
+			} else {
+				d.modeAt = time.Time{}
+			}
+		}
+	}
 	if d.source {
-		ui.Column(c).Grow(1).Padding(24).Gap(12).Children(func() {
+		box := ui.Column(c.Key("source-page")).Grow(1).Padding(24).Gap(12)
+		applyModeFade(box)
+		box.Children(func() {
 			ui.Row(c).Gap(12).Children(func() {
 				ui.Text(c, i18n.T("Markdown 导出预览")).Grow(1)
 				if ui.Button(c, i18n.T("导出 Markdown 文件")).Clicked() {
@@ -330,13 +378,38 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 					a.exportMarkdown()
 				}
 			})
-			ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).Label(i18n.T("Markdown 导出预览"))
+			ta := ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).
+				TrackScroll(&d.previewScroll).Label(i18n.T("Markdown 导出预览"))
+			if d.previewCaretPending {
+				d.previewCaretPending = false
+				ta.SetTextSelection(d.previewCaret, d.previewCaret)
+			} else if d.previewEnteredY < 0 {
+				d.previewEnteredY = d.previewScroll.Y
+			}
 		})
 		return
 	}
 	// One column always, so that the bar coming and going keeps the
 	// editor's place in the tree, and with it its scroll and focus.
-	ui.Column(c.Key("page")).Grow(1).MinHeight(0).Children(func() {
+	page := ui.Column(c.Key("page")).Grow(1).MinHeight(0)
+	applyModeFade(page)
+	if d == a.doc && a.navDir != 0 && !a.reduceMotion {
+		if a.navAt.IsZero() {
+			a.navAt = c.Now()
+		}
+		elapsed := c.Now().Sub(a.navAt)
+		const dur = 90 * time.Millisecond
+		if elapsed >= 0 && elapsed < dur {
+			p := float32(elapsed) / float32(dur)
+			k := 1 - (1-p)*(1-p)
+			page.Opacity(0.86+0.14*k).Translate(float32(a.navDir)*6*(1-k), 0)
+			c.After(0)
+		} else {
+			a.navDir = 0
+			a.navAt = time.Time{}
+		}
+	}
+	page.Children(func() {
 		a.conflictBarFor(c, d)
 		editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, cardWidth, false, d))
 	})
@@ -349,7 +422,17 @@ func (a *App) toolbar(c *ui.Context) {
 	bar := c.TitleBar()
 	// The sidebar reserves the left controls; Windows and Linux can keep
 	// their window buttons on the right, over this toolbar instead.
-	ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, bar.Right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
+	right := bar.Right
+	if a.qa.shown > 0.5 {
+		right = 0 // the question panel's header holds the window buttons' room
+	}
+	toolbar := ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow()
+	if a.qa.shown > 0.5 {
+		// A narrow document's controls must not paint or receive clicks over
+		// the question panel while it takes room beside the document.
+		toolbar.Clip()
+	}
+	toolbar.Children(func() {
 		if a.folded() {
 			ui.Box(c).Width(bar.Left + 4)
 			if iconButton(c, "show-sidebar", iconSidebar, i18n.T("展开侧边栏"), a.withKey(i18n.T("展开侧边栏"), "sidebar"), false).Clicked() {
@@ -370,6 +453,13 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Box(c).Width(8)
 		if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
 			a.doc.ed.Corner(c)
+		}
+		ask := iconButton(c, "ask", iconAsk, i18n.T("问答"), a.withKey(i18n.T("向当前空间提问"), "ask"), a.state.ActiveSpace() == nil)
+		if a.qa.open {
+			ask.Background(glass(c.Theme()))
+		}
+		if ask.Clicked() {
+			a.toggleQA()
 		}
 		a.moreMenu(c)
 	})
@@ -403,7 +493,11 @@ func (a *App) address(c *ui.Context) {
 			parts = append(parts, strings.Split(dir, "/")...)
 		}
 		ui.Text(c, strings.Join(parts, " / ")+" /").TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
-		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).Tooltip(a.doc.rel)
+		tip := a.doc.rel
+		if sp.IsExternal() {
+			tip = sp.ExternalFiles[a.doc.rel]
+		}
+		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).Tooltip(tip)
 		ui.Spacer(c)
 		status, color := "", t.TextMuted
 		switch {
@@ -451,8 +545,17 @@ func errText(err error) string {
 // or a web address in the browser.
 func (a *App) followLink(url string) {
 	if a.doc != nil {
+		if a.doc.space.IsExternal() {
+			file, _, _ := strings.Cut(url, "#")
+			if vault.IsDocument(file) {
+				if full, err := a.doc.localImage(file); err == nil {
+					a.openSystemFile(full)
+					return
+				}
+			}
+		}
 		if rel, ok := a.doc.resolveLink(url); ok {
-			a.open(rel)
+			a.openIn(a.doc.space, rel)
 			return
 		}
 	}
@@ -473,13 +576,19 @@ func (a *App) emptyState(c *ui.Context) {
 		switch {
 		case a.treeErr != nil:
 			ui.Text(c, i18n.T("读取空间文件夹失败。")+a.treeErr.Error()).TextColor(t.Danger).MaxWidth(420).TextAlign(ui.Center)
+		case sp.IsExternal() && len(a.docs) == 0:
+			ui.Text(c, i18n.T("打开的外部文档会显示在这里，文件保留在原位置。")).TextColor(t.TextMuted).MaxWidth(360).TextAlign(ui.Center)
 		case len(a.docs) == 0:
 			ui.Text(c, i18n.T("此空间暂无文档。")).TextColor(t.TextMuted)
 		default:
 			ui.Text(c, i18n.T("选择一篇文档，或按 ⌘K 搜索。")).TextColor(t.TextMuted)
 		}
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.PrimaryButton(c.Key("empty-new"), i18n.T("新建文档")).Tooltip("⌘N").Clicked() {
+			if sp.IsExternal() {
+				if ui.PrimaryButton(c.Key("empty-open"), i18n.T("打开文件…")).Clicked() {
+					a.chooseExternalFiles()
+				}
+			} else if ui.PrimaryButton(c.Key("empty-new"), i18n.T("新建文档")).Tooltip("⌘N").Clicked() {
 				a.newDoc("")
 			}
 			if ui.Button(c.Key("empty-palette"), i18n.T("命令栏")).Tooltip("⌘K").Clicked() {

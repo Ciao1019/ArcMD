@@ -9,15 +9,15 @@
   "resources": ["LICENSE", "third_party"],
   "fileAssociations": [
     {
-      "ext": ["arcmd"],
-      "name": "ArcMD Document",
-      "mimeType": "application/x-arcmd",
-      "role": "Editor"
-    },
-    {
       "ext": ["md", "markdown", "mdx"],
       "name": "Markdown Document",
       "mimeType": "text/markdown",
+      "role": "Editor"
+    },
+    {
+      "ext": ["arcmd"],
+      "name": "ArcMD Document",
+      "mimeType": "application/x-arcmd",
       "role": "Editor"
     }
   ],

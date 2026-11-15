@@ -63,7 +63,7 @@ func TestFeaturesSnapshot(t *testing.T) {
 			case "shortcuts":
 				a.openSettings(tabShortcuts)
 			case "backlinks":
-				a.open("Journal/Ideas.arcmd")
+				a.open("Journal/Ideas.md")
 			case "pdf-page":
 				ed := editor.FromDocument(a.doc.ed.Committed())
 				theme := documentTheme(false)

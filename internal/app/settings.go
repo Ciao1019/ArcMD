@@ -15,6 +15,7 @@ const (
 	tabAppearance = "appearance"
 	tabSpaces     = "spaces"
 	tabShortcuts  = "shortcuts"
+	tabAI         = "ai"
 	tabAbout      = "about"
 )
 
@@ -98,6 +99,7 @@ func (a *App) settingsView(c *ui.Context) {
 					{tabGeneral, i18n.T("通用"), "settings"},
 					{tabAppearance, i18n.T("外观"), "type"},
 					{tabSpaces, i18n.T("空间"), "layers"},
+					{tabAI, i18n.T("AI 问答"), "ask"},
 					{tabShortcuts, i18n.T("快捷键"), "keyboard"},
 					{tabAbout, i18n.T("关于"), "info"},
 				} {
@@ -135,6 +137,8 @@ func (a *App) settingsView(c *ui.Context) {
 					a.settingsSpaces(c)
 				case tabShortcuts:
 					a.settingsShortcuts(c)
+				case tabAI:
+					a.settingsAI(c)
 				case tabAbout:
 					a.settingsAbout(c)
 				default:
@@ -333,16 +337,20 @@ func (a *App) settingsSpaces(c *ui.Context) {
 				})
 				ui.Column(c).Grow(1).MinWidth(0).Clip().Gap(2).Children(func() {
 					ui.Text(c, s.Name).FontWeight(600).SingleLine()
-					ui.Text(c, shortPath(s.Root)).FontSize(12).TextColor(t.TextMuted).SingleLine().Tooltip(s.Root)
+					if s.IsExternal() {
+						ui.Text(c, i18n.T("内置空间 · 文件保留在原位置")).FontSize(12).TextColor(t.TextMuted).SingleLine()
+					} else {
+						ui.Text(c, shortPath(s.Root)).FontSize(12).TextColor(t.TextMuted).SingleLine().Tooltip(s.Root)
+					}
 				})
 				if ui.Button(c.Key("edit"), i18n.T("编辑")).Label(i18n.T("编辑 ") + s.Name).Clicked() {
 					a.settingsOpen = false
 					a.editSpace(s)
 				}
-				if ui.Button(c.Key("reveal"), i18n.T("显示")).Label(i18n.T("在访达中显示 ") + s.Name).Clicked() {
+				if ui.Button(c.Key("reveal"), i18n.T("显示")).Label(i18n.T("在访达中显示 ") + s.Name).Disabled(s.IsExternal()).Clicked() {
 					revealDir(s.Root)
 				}
-				if ui.Button(c.Key("remove"), i18n.T("移除")).Label(i18n.T("从 ArcMD 移除 ") + s.Name).Disabled(len(a.state.Spaces) < 2).
+				if ui.Button(c.Key("remove"), i18n.T("移除")).Label(i18n.T("从 ArcMD 移除 ") + s.Name).Disabled(s.IsExternal() || len(a.state.Spaces) < 2).
 					Tooltip(i18n.T("只删除记录，文件夹保留")).Clicked() {
 					a.removeSpace(s.ID)
 				}

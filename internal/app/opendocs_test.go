@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-const ideasRel = "Journal/Ideas.arcmd"
+const ideasRel = "Journal/Ideas.md"
 
 // hoverRow rests the pointer on rel's row in the sidebar.
 func hoverRow(t *testing.T, a *App, tt interface {
@@ -160,7 +160,7 @@ func TestOpenFollowsRename(t *testing.T) {
 	a.newName = "Plans"
 	a.commitRename()
 	settle(tt)
-	if !a.isOpen(sp, "Journal/Plans.arcmd") {
+	if !a.isOpen(sp, "Journal/Plans.md") {
 		t.Fatalf("open %v", a.openDocs)
 	}
 }

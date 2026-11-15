@@ -185,6 +185,7 @@ func (a *App) favoritesDrag(c *ui.Context, box ui.Element, resting []int) {
 		if a.favDrop != nil {
 			slot = a.favDrop.slot
 		}
+		a.dragGrab.consumed = true
 		a.pinAt(d, slot)
 		a.favDrop, a.listDrop = nil, nil
 		return

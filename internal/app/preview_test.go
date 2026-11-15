@@ -57,7 +57,7 @@ func TestFolderPreview(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyEnter)
 	tt.Frame()
-	if a.doc == nil || a.doc.rel != "Journal/Ideas.arcmd" || !a.preview.closing {
+	if a.doc == nil || a.doc.rel != "Journal/Ideas.md" || !a.preview.closing {
 		t.Fatalf("pick: doc %+v closing %v", a.doc, a.preview.closing)
 	}
 	tt.Advance(time.Second)
@@ -97,12 +97,12 @@ func TestDocPreview(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.state.Favorites = nil
 	settle(tt)
-	r := rowRect(a, "Journal/Ideas.arcmd")
+	r := rowRect(a, "Journal/Ideas.md")
 	tt.Move(r.X+40, r.Y+r.H/2)
 	tt.Frame()
 	tt.Advance(time.Second)
 	tt.Frame()
-	if s := a.preview.shown; s == nil || s.kind != previewDoc || s.rel != "Journal/Ideas.arcmd" {
+	if s := a.preview.shown; s == nil || s.kind != previewDoc || s.rel != "Journal/Ideas.md" {
 		t.Fatalf("no document preview: %+v", s)
 	}
 	// The editor paints its text itself: the thumbnail is a second
@@ -137,7 +137,7 @@ func TestPreviewSnapshot(t *testing.T) {
 					os.WriteFile(filepath.Join(sp.Root, n), []byte("# "+filepath.Base(n)+"\n\n今天写一点东西，记录想法。\n\n- 一\n- 二\n"), 0o644)
 				}
 				a.refreshTree()
-				rel := "Welcome.arcmd"
+				rel := "Welcome.md"
 				if kind == "folder" {
 					sp.SetExpanded("Journal", false)
 					rel = "Journal"

@@ -189,6 +189,7 @@ func (e *Editor) ToggleOutline() {
 
 // jumpTo scrolls the page to y, easing out.
 func (e *Editor) jumpTo(c *ui.Context, id string, y float32) {
+	e.scrollGlide.active = false
 	to := min(max(0, y-24), e.outlineState.scrollMax)
 	if c.Preferences().ReduceMotion {
 		e.Scroll.Y = to
@@ -277,6 +278,9 @@ func (e *Editor) outlineView(c *ui.Context, pane ui.Element, reserve float32) {
 	}
 }
 
+type outlinePillMatch struct{ ed *Editor }
+type outlineBarMatch struct{ ed *Editor }
+
 // outlineList lists the entries: the section being read in the accent
 // color, a click scrolling to it, a heading dragged onto another moving
 // its section before it.
@@ -364,6 +368,12 @@ func (e *Editor) outlineList(c *ui.Context) {
 					color, weight = t.Accent, 500
 				}
 				row.Children(func() {
+					if on {
+						slidingPill(c, outlinePillMatch{e}, t.Accent.Alpha(0.08), 6)
+						ui.Box(c.Key("active-bar")).Absolute().Left(1).Top(6).Bottom(6).Width(2.5).
+							Radius(1.5).Background(t.Accent).PassThrough().
+							Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Match: outlineBarMatch{e}})
+					}
 					ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
 					})

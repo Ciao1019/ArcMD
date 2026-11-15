@@ -18,11 +18,11 @@ func TestListFindsTemplatesByName(t *testing.T) {
 	}
 	dir := filepath.Join(root, filepath.FromSlash(Dir))
 	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
-	for _, name := range []string{"周报.arcmd", "Meeting.arcmd", "notes.md", ".hidden.arcmd"} {
-		os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o644)
+	for _, name := range []string{"周报.md", "Meeting.md", "Meeting.arcmd", "Legacy.arcmd", "notes.txt", ".hidden.md"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("# t"), 0o644)
 	}
 	got, err := List(root)
-	if err != nil || len(got) != 2 || got[0].Name != "Meeting" || got[1].Path != ".arcmd/templates/周报.arcmd" {
+	if err != nil || len(got) != 3 || got[0].Name != "Legacy" || got[1].Path != ".arcmd/templates/Meeting.md" || got[2].Path != ".arcmd/templates/周报.md" {
 		t.Fatal(got, err)
 	}
 	if _, ok := Find(got, "meeting"); !ok {
@@ -55,7 +55,7 @@ func TestInstantiateFillsPlaceholdersWithFreshIDs(t *testing.T) {
 }
 
 func TestDailyNote(t *testing.T) {
-	if DailyPath(day) != "日记/2026-11-12.arcmd" || DailyTitle(day) != "2026年11月12日 星期四" {
+	if DailyPath(day) != "日记/2026-11-12.md" || DailyTitle(day) != "2026年11月12日 星期四" {
 		t.Fatal(DailyPath(day), DailyTitle(day))
 	}
 	doc := Daily(nil, day)

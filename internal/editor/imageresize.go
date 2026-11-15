@@ -3,6 +3,7 @@ package editor
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
@@ -100,11 +101,14 @@ func (e *Editor) imageCanvas(c *ui.Context, w, h float32) {
 		v.pan.X += dx
 		v.pan.Y += dy
 		v.clampPan(w, h)
+		v.shownPan = v.pan
 		canvas.Cursor(ui.CursorGrabbing)
 	}
 	canvas.HandleInput(func(ev ui.InputEvent) bool {
 		if ev.Kind == ui.InputZoom {
 			v.zoomAt(v.scaleFor(w, h)*ev.Scale, ev.X, ev.Y, w, h)
+			v.shownScale = v.scaleFor(w, h)
+			v.shownPan = v.pan
 			return true
 		}
 		if ev.Kind == ui.InputScroll {
@@ -135,11 +139,57 @@ func (e *Editor) imageCanvas(c *ui.Context, w, h float32) {
 		}
 		return false
 	})
+	v.clampPan(w, h)
+	targetScale := v.scaleFor(w, h)
+	targetPan := v.pan
+	now := c.Now()
+	reduceMotion := c.Preferences().ReduceMotion
+	if v.shownScale <= 0 || reduceMotion {
+		v.shownScale, v.shownPan, v.zoomAtTime = targetScale, targetPan, now
+	} else {
+		dt := now.Sub(v.zoomAtTime).Seconds()
+		v.zoomAtTime = now
+		if dt > 0 && dt < 0.25 {
+			alpha := 1 - float32(math.Exp(-dt/0.036))
+			v.shownScale += (targetScale - v.shownScale) * alpha
+			v.shownPan.X += (targetPan.X - v.shownPan.X) * alpha
+			v.shownPan.Y += (targetPan.Y - v.shownPan.Y) * alpha
+		}
+		if math.Abs(float64(targetScale-v.shownScale)) < 0.0015 &&
+			math.Abs(float64(targetPan.X-v.shownPan.X)) < 0.35 &&
+			math.Abs(float64(targetPan.Y-v.shownPan.Y)) < 0.35 {
+			v.shownScale, v.shownPan = targetScale, targetPan
+		} else {
+			c.AnimationFrame()
+		}
+	}
+	if !reduceMotion && !v.openedAt.IsZero() && v.origin.W > 0 && v.origin.H > 0 {
+		if elapsed := now.Sub(v.openedAt); elapsed >= 0 && elapsed < 180*time.Millisecond {
+			c.AnimationFrame()
+		}
+	}
 	canvas.Draw(func(p *ui.Painter, r ui.Rect) {
-		v.clampPan(w, h)
-		scale := v.scaleFor(w, h)
+		scale, pan := v.shownScale, v.shownPan
+		if scale <= 0 {
+			scale = targetScale
+		}
 		iw, ih := v.bitmap.Size()
 		pw, ph := float32(iw)*scale, float32(ih)*scale
-		p.Image(v.bitmap, ui.Rect{X: r.X + (w-pw)/2 + v.pan.X, Y: r.Y + (h-ph)/2 + v.pan.Y, W: pw, H: ph}, ui.Contain)
+		dst := ui.Rect{X: r.X + (w-pw)/2 + pan.X, Y: r.Y + (h-ph)/2 + pan.Y, W: pw, H: ph}
+		if !reduceMotion && !v.openedAt.IsZero() && v.origin.W > 0 && v.origin.H > 0 {
+			const heroDur = 180 * time.Millisecond
+			if elapsed := p.Now().Sub(v.openedAt); elapsed >= 0 && elapsed < heroDur {
+				u := float32(elapsed) / float32(heroDur)
+				inv := 1 - u
+				k := 1 - inv*inv*inv
+				dst = ui.Rect{
+					X: v.origin.X + (dst.X-v.origin.X)*k,
+					Y: v.origin.Y + (dst.Y-v.origin.Y)*k,
+					W: v.origin.W + (dst.W-v.origin.W)*k,
+					H: v.origin.H + (dst.H-v.origin.H)*k,
+				}
+			}
+		}
+		p.Image(v.bitmap, dst, ui.Contain)
 	})
 }

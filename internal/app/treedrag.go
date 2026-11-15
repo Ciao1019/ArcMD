@@ -12,25 +12,32 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Dragging in the sidebar's list follows Cra's (MIT) list, after Arc's:
-// the row dragged follows the pointer on a card while its place dims; over
-// the top or bottom half of a row (a quarter for a folder) a line shows
-// where it lands, the rows either side easing 3 DIPs apart; over the middle
-// of a folder the folder takes it, saying so, and a closed folder held over
-// for 0.6 s opens. Letting go moves the file there, folders included, and
-// the rows slide to their new places. The order is the space's to keep
-// (Space.Order): files are listed as they were dragged.
+// Dragging in the sidebar's list lifts the dragged row onto a floating card
+// above the window while a dashed slot holds where it will land: sliding
+// live as the pointer crosses other rows, across the divider to pin or unpin,
+// or into a folder whose middle is held over (opening a closed folder after
+// 0.6 s). Letting go glides the floating card into its slot as the outline
+// fades away. The order is the space's to keep (Space.Order).
 
 const (
-	// listNudge is how far the rows either side of the line ease apart.
-	listNudge = 3
 	// springDelay is how long a closed folder is held over before it opens.
 	springDelay = 600 * time.Millisecond
+	// dragLiftDur is how quickly a picked-up row scales and shadows into its floating card.
+	dragLiftDur = 120 * time.Millisecond
+	// dragSettleDur is how long a released floating card takes to glide into its slot.
+	dragSettleDur = 220 * time.Millisecond
+	// insertHoverDelay is how long the pointer rests on a seam between rows
+	// before an inline new-document slot opens there.
+	insertHoverDelay = 350 * time.Millisecond
+	// insertSeamBand is the half-height in DIPs around a seam between rows.
+	insertSeamBand = 5
 )
 
-// listAnim is how the list's rows move: SwiftUI's snappy curve over
-// 0.22 s, as Cra's list moves them.
-var listAnim = ui.Animation{Duration: 220 * time.Millisecond, Ease: ui.CubicBezier(0.2, 0.9, 0.25, 1)}
+// listEase is SwiftUI's snappy curve, shared by row transitions and card settle.
+var listEase = ui.CubicBezier(0.2, 0.9, 0.25, 1)
+
+// listAnim is how the list's rows and insertion slots move over 0.22 s.
+var listAnim = ui.Animation{Duration: 220 * time.Millisecond, Ease: listEase}
 
 // pageTree is a space's folders as read for the strip of spaces.
 type pageTree struct {
@@ -40,6 +47,11 @@ type pageTree struct {
 
 // readTree reads the space's folder in the order the space keeps.
 func readTree(sp *space.Space) ([]*vault.Node, error) {
+	if sp.IsExternal() {
+		nodes := vault.Files(sp.ExternalFiles).Tree()
+		arrangeNodes(sp, "", nodes)
+		return nodes, nil
+	}
 	nodes, err := vault.Tree(sp.Root)
 	arrangeNodes(sp, "", nodes)
 	return nodes, err
@@ -142,7 +154,7 @@ func (a *App) childrenOf(dir string) []*vault.Node {
 	return nil
 }
 
-// rowFrame is where a row of the list was in the frame before.
+// rowFrame is the resting box of a row or slot in the list from the frame before.
 type rowFrame struct {
 	rel, parent string
 	index       int // among its parent's children
@@ -150,7 +162,10 @@ type rowFrame struct {
 	dir, open   bool
 	// placeholder is the pinned section's "拖到此处置顶" row.
 	placeholder bool
-	r           ui.Rect
+	// slot is the dashed insertion slot replacing a dragged row, and
+	// slotSelf whether it sits at the dragged row's own original place.
+	slot, slotSelf bool
+	r, target      ui.Rect
 }
 
 // The kinds of listDrop.
@@ -160,16 +175,74 @@ const (
 )
 
 // listDrop is where a dragged file or folder would land: inserted at
-// index in the folder parent, with a line at y from x0 to x1, or into the
-// folder parent. above and below are the rows either side of the line.
+// index in the folder parent, or moved into the folder parent.
 type listDrop struct {
-	rel          string
-	kind         int
-	parent       string
-	index        int
-	line         bool
-	y, x0, x1    float32
-	above, below string
+	rel    string
+	kind   int
+	parent string
+	index  int
+}
+
+// slotState says where the dashed insertion slot sits in the active space's
+// list during the current frame.
+type slotState struct {
+	active   bool
+	parent   string
+	index    int
+	self     bool
+	fromList bool
+	emitted  bool
+}
+
+// dragGrab tracks a sidebar row actively lifted onto the floating drag card.
+type dragGrab struct {
+	active     bool
+	consumed   bool
+	space, rel string
+	dir        bool
+	openFolder bool
+	holdsOpen  bool
+	dim        bool
+	title      string
+	grabX      float32
+	grabY      float32
+	cardW      float32
+	x, y       float32
+	started    time.Time
+}
+
+// dragSettle glides a released floating card from its release coordinates
+// into its landed row's bounds over dragSettleDur.
+type dragSettle struct {
+	active     bool
+	space, rel string
+	dir        bool
+	openFolder bool
+	holdsOpen  bool
+	dim        bool
+	title      string
+	fromX      float32
+	fromY      float32
+	fromW      float32
+	toRect     ui.Rect
+	hasTarget  bool
+	started    time.Time
+}
+
+// seamPoint is a horizontal boundary between root items in today where
+// resting the pointer opens an inline new-document slot.
+type seamPoint struct {
+	index int
+	y     float32
+}
+
+// insertSeam tracks the pointer resting on a seam between root items.
+type insertSeam struct {
+	space string
+	index int
+	since time.Time
+	open  bool
+	slotY float32
 }
 
 // sidebarDrag is what the sidebar drags: a row of the list (dragged) or a
@@ -197,11 +270,12 @@ func parentDir(rel string) string {
 }
 
 // resolveDrop is where the file or folder rel dragged with the pointer at
-// (px, py) in window DIPs would land, as Cra resolves its list's drops: the
-// top and bottom quarters of a folder's row insert before and after it (an
-// open folder's bottom, at its top), its middle takes it; a document's row
-// inserts before its top half and after its bottom one. Over no row it goes
-// at the start or the end of the root. Nil changes nothing.
+// (px, py) in window DIPs would land: the top and bottom quarters of a
+// folder's row insert before and after it (an open folder's bottom, at its
+// top), its middle takes it; a document's row inserts before its top half
+// and after its bottom one; resting inside an open insertion slot keeps that
+// slot. Over no row it goes at the start or the end of the root. Nil changes
+// nothing.
 func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop {
 	const half = 1
 	d := &listDrop{rel: rel}
@@ -213,7 +287,32 @@ func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop
 			break
 		}
 	}
+	if hit == nil {
+		for i := range rows {
+			r := &rows[i]
+			if !r.slot {
+				continue
+			}
+			if r.target.W > 0 && py >= r.target.Y-half && py < r.target.Y+r.target.H+half {
+				hit = r
+				break
+			}
+			dist := py - (r.r.Y + r.r.H/2)
+			if dist < 0 {
+				dist = -dist
+			}
+			if !r.slotSelf && dist <= rowHeight+6 {
+				hit = r
+				break
+			}
+		}
+	}
 	switch {
+	case hit != nil && hit.slot:
+		if hit.slotSelf {
+			return nil
+		}
+		return &listDrop{rel: rel, kind: dropInsert, parent: hit.parent, index: hit.index}
 	case hit != nil && hit.placeholder:
 		d.kind, d.parent, d.index = dropInsert, pinRoot, 0
 	case hit != nil:
@@ -273,58 +372,6 @@ func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop
 			return nil // next to itself
 		}
 	}
-	// The line: above the row it goes before, else below the last one
-	// it goes after (with what that holds open), else under the folder.
-	var y float32
-	found := false
-	at := func(p string) *rowFrame {
-		for i := range rows {
-			if rows[i].rel == p {
-				return &rows[i]
-			}
-		}
-		return nil
-	}
-	if d.index < len(kids) {
-		if r := at(kids[d.index].Path); r != nil {
-			y, found = r.r.Y-half, true
-		}
-	}
-	if !found && d.index > 0 && d.index-1 < len(kids) {
-		prev := kids[d.index-1].Path
-		for i := len(rows) - 1; i >= 0; i-- {
-			if under(rows[i].rel, prev) {
-				y, found = rows[i].r.Y+rows[i].r.H+half, true
-				break
-			}
-		}
-	}
-	if !found && d.parent != "" && d.parent != pinRoot {
-		if r := at(d.parent); r != nil {
-			y, found = r.r.Y+r.r.H+half, true
-		}
-	}
-	if !found || len(rows) == 0 {
-		return d
-	}
-	depth := 0
-	if r := at(d.parent); r != nil {
-		depth = r.depth + 1
-	}
-	left, right := rows[0].r.X, rows[0].r.X+rows[0].r.W
-	d.line, d.y = true, y
-	d.x0, d.x1 = left+10+float32(depth*rowIndent), right-6
-	for _, r := range rows {
-		if r.r.Y+r.r.H <= y+1 {
-			d.above = r.rel
-		}
-	}
-	for _, r := range rows {
-		if r.r.Y >= y-1 {
-			d.below = r.rel
-			break
-		}
-	}
 	return d
 }
 
@@ -341,8 +388,8 @@ func (a *App) showsAny(sp *space.Space, nodes []*vault.Node) bool {
 
 // listDrag reads a drag over the list's element e, whose rows of the frame
 // before are rows: where it would land, the folder it springs open, and
-// what letting go does.
-func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) {
+// what letting go does. It returns the item currently dragged over e.
+func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) sidebarDrag {
 	// A favorite of this space dragged into the list leaves the favorites
 	// for the place it is let go at, as Arc's do.
 	sp := a.state.ActiveSpace()
@@ -368,7 +415,7 @@ func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) {
 			}
 		}
 		a.listDrop, a.favDrop = nil, nil
-		return
+		return nil
 	}
 	if d, ok := over.(favoriteDrag); isOver && ok {
 		if rel, ok := favorite(d.index); ok {
@@ -379,7 +426,7 @@ func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) {
 				a.listDrop = &listDrop{rel: rel}
 			}
 		}
-		return
+		return over
 	}
 	if d, ok := dropped.(dragged); isDrop && ok && a.foreign(d) {
 		drop := a.listDrop
@@ -389,7 +436,7 @@ func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) {
 		}
 		a.listDrop, a.springOpen = nil, springOpen{}
 		a.dropForeign(d, drop)
-		return
+		return nil
 	}
 	if d, ok := dropped.(dragged); isDrop && ok {
 		drop := a.listDrop
@@ -401,12 +448,12 @@ func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) {
 		if drop != nil {
 			a.applyDrop(drop)
 		}
-		return
+		return nil
 	}
 	d, ok := over.(dragged)
 	if !isOver || !ok {
 		a.listDrop, a.springOpen = nil, springOpen{}
-		return
+		return nil
 	}
 	key := d.rel
 	if a.foreign(d) {
@@ -429,6 +476,117 @@ func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) {
 		}
 	} else {
 		a.springOpen = springOpen{}
+	}
+	return over
+}
+
+// computeSlot determines where the dashed insertion slot sits for sp during
+// this frame, and counts how many pinned rows remain visible at rest.
+func (a *App) computeSlot(sp *space.Space, pins []*vault.Node, over sidebarDrag) (slotState, int) {
+	localRel := ""
+	fromList := false
+	if d, ok := over.(dragged); ok && d.space == sp.ID {
+		localRel, fromList = d.rel, true
+	} else if a.dragGrab.active && a.dragGrab.space == sp.ID {
+		localRel = a.dragGrab.rel
+	}
+	restingPins := 0
+	for _, n := range pins {
+		if sp.PinsCollapsed && !a.holdsOpen(sp, n.Path) {
+			continue
+		}
+		if n.Path == localRel {
+			continue
+		}
+		restingPins++
+	}
+	if !a.listDragging || over == nil {
+		return slotState{}, restingPins
+	}
+	d := a.listDrop
+	switch {
+	case d != nil && d.kind == dropInsert:
+		if d.parent == pinRoot && restingPins == 0 {
+			// The empty pinned section's own dashed placeholder takes this drop.
+			return slotState{}, restingPins
+		}
+		return slotState{active: true, parent: d.parent, index: d.index, fromList: fromList}, restingPins
+	case d != nil && d.kind == 0 && d.rel != "":
+		p := parentDir(d.rel)
+		idx := slices.IndexFunc(a.childrenOf(p), func(n *vault.Node) bool { return n.Path == d.rel })
+		if idx >= 0 {
+			return slotState{active: true, parent: p, index: idx}, restingPins
+		}
+	case d == nil && fromList:
+		if sp.IsPinned(localRel) {
+			idx := slices.IndexFunc(pins, func(n *vault.Node) bool { return n.Path == localRel })
+			if idx >= 0 && (!sp.PinsCollapsed || a.holdsOpen(sp, localRel)) {
+				return slotState{active: true, parent: pinRoot, index: idx, self: true, fromList: true}, restingPins
+			}
+			return slotState{}, restingPins
+		}
+		p := parentDir(localRel)
+		idx := slices.IndexFunc(a.childrenOf(p), func(n *vault.Node) bool { return n.Path == localRel })
+		if idx >= 0 {
+			return slotState{active: true, parent: p, index: idx, self: true, fromList: true}, restingPins
+		}
+	}
+	return slotState{}, restingPins
+}
+
+// updateInsertSeam opens an inline new-document slot when the pointer rests
+// on a horizontal seam between root items in today, and closes it once the
+// pointer moves away.
+func (a *App) updateInsertSeam(c *ui.Context, sp *space.Space, treeBox ui.Rect, seams []seamPoint) {
+	closeSeam := func() {
+		if a.insertSeam.open {
+			c.AnimationFrame()
+		}
+		a.insertSeam = insertSeam{index: -1}
+	}
+	if sp.IsExternal() || a.listDragging || a.carrying != nil || a.dragSettle.active ||
+		a.renaming != "" || a.palette.open || a.settingsOpen || a.tour.open || treeBox.W <= 0 {
+		closeSeam()
+		return
+	}
+	px, py, inside := c.Root().PointerPosition()
+	if !inside || px < treeBox.X || px >= treeBox.X+treeBox.W || py < treeBox.Y || py >= treeBox.Y+treeBox.H {
+		closeSeam()
+		return
+	}
+	if a.insertSeam.open && a.insertSeam.space == sp.ID {
+		if py >= a.insertSeam.slotY-6 && py <= a.insertSeam.slotY+rowHeight+6 {
+			return
+		}
+		closeSeam()
+	}
+	hit := -1
+	best := float32(insertSeamBand + 1)
+	for _, s := range seams {
+		dist := py - s.y
+		if dist < 0 {
+			dist = -dist
+		}
+		if dist <= insertSeamBand && dist < best {
+			best, hit = dist, s.index
+		}
+	}
+	if hit < 0 {
+		closeSeam()
+		return
+	}
+	now := c.Now()
+	switch {
+	case a.insertSeam.space != sp.ID || a.insertSeam.index != hit:
+		a.insertSeam = insertSeam{space: sp.ID, index: hit, since: now}
+		c.After(insertHoverDelay)
+	case now.Sub(a.insertSeam.since) >= insertHoverDelay:
+		if !a.insertSeam.open {
+			a.insertSeam.open = true
+			c.AnimationFrame()
+		}
+	default:
+		c.After(insertHoverDelay - now.Sub(a.insertSeam.since))
 	}
 }
 
@@ -543,27 +701,87 @@ func (a *App) pinIn(sp *space.Space, rel string, index int) {
 	a.saveState()
 }
 
-// dropLine draws the line where the drag lands, above the list.
-func (a *App) dropLine(c *ui.Context) {
-	d := a.listDrop
-	if d == nil || !d.line {
-		return
+// dragOverlayView draws the lifted floating card while a sidebar row is
+// dragged, and glides it smoothly into its target slot on release.
+func (a *App) dragOverlayView(c *ui.Context) {
+	if a.carrying == nil && a.dragGrab.active {
+		a.dragGrab = dragGrab{}
 	}
-	t := c.Theme()
-	ui.Overlay(c, func() {
-		ui.Box(c.Key("drop-line")).Absolute().Left(d.x0).Top(d.y-1).Size(max(0, d.x1-d.x0), 2).Radius(1).
-			Background(t.Text.Alpha(0.5)).
-			Transition(ui.ElementTransition{Duration: 200 * time.Millisecond, Position: true})
-	})
+	now := c.Now()
+	switch {
+	case a.carrying != nil && a.dragGrab.active:
+		g := &a.dragGrab
+		lift := float32(1)
+		if !a.reduceMotion {
+			elapsed := now.Sub(g.started)
+			if elapsed < dragLiftDur {
+				lift = ui.EaseOut(min(max(float32(elapsed)/float32(dragLiftDur), 0), 1))
+				c.AnimationFrame()
+			}
+		}
+		into := a.listDrop != nil && a.listDrop.kind == dropInto
+		ui.Overlay(c, func() {
+			a.floatingDragCard(c, g.x, g.y, g.cardW, lift, into, g.dir, g.openFolder, g.holdsOpen, g.dim, g.title, true)
+		})
+	case a.dragSettle.active:
+		s := &a.dragSettle
+		elapsed := now.Sub(s.started)
+		if a.reduceMotion || !s.hasTarget || elapsed >= dragSettleDur {
+			a.dragSettle = dragSettle{}
+			return
+		}
+		c.AnimationFrame()
+		k := listEase(min(max(float32(elapsed)/float32(dragSettleDur), 0), 1))
+		x := s.fromX + (s.toRect.X-s.fromX)*k
+		y := s.fromY + (s.toRect.Y-s.fromY)*k
+		w := s.fromW + (s.toRect.W-s.fromW)*k
+		lift := 1 - k
+		ui.Overlay(c, func() {
+			a.floatingDragCard(c, x, y, w, lift, false, s.dir, s.openFolder, s.holdsOpen, s.dim, s.title, false)
+		})
+	}
 }
 
-// dragCard is the fill of a row as it is dragged: a light card, as Cra's
-// drag image puts the row on.
-func dragCard(t *ui.Theme) ui.Color {
-	if t.Dark {
-		return ui.RGB(46, 46, 46).Alpha(0.92)
+// floatingDragCard draws a lifted row card at (x, y) above the window.
+func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder, dir, openFolder, holdsOpen, dim bool, title string, label bool) {
+	t := c.Theme()
+	look := dragCardColors(t, a.look)
+	gap := float32(10)
+	if dir {
+		gap = 11
 	}
-	return white.Alpha(0.92)
+	card := ui.Row(c.Key("drag-card")).Absolute().Left(x).Top(y).Size(max(48, w), rowHeight).
+		PaddingStart(10).PaddingEnd(8).Gap(gap).AlignItems(ui.Center).IgnoreInput(true).Background(ui.Transparent)
+	if intoFolder {
+		card.Opacity(0.68)
+	}
+	if label {
+		card.Label(title)
+	}
+	card.Draw(func(p *ui.Painter, r ui.Rect) {
+		grow := 1.5 * lift
+		fr := ui.Rect{X: r.X - grow, Y: r.Y + 2 - grow*0.6, W: r.W + 2*grow, H: r.H - 4 + 1.2*grow}
+		p.Shadow(fr, 10, 0, 1+5*lift, 3+15*lift, 0, scaleAlpha(look.shadow, 0.2+0.8*lift))
+		p.Fill(fr, look.fill, 10)
+		if lift > 0.01 {
+			p.Stroke(fr, scaleAlpha(look.rim, lift), 10, 1)
+		}
+	})
+	card.Children(func() {
+		if dir {
+			folderGlyph(c, a.look, openFolder, holdsOpen)
+		} else if icon := docIcon(c, title, 16); dim {
+			icon.Opacity(closedIconAlpha)
+		}
+		ink := t.Text
+		if dim {
+			ink = closedInk(t)
+		}
+		name := ui.Text(c, docName(title)).FontSize(14).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
+		if dir {
+			name.FontWeight(500)
+		}
+	})
 }
 
 // intoBadge is the pill a folder taking the drag shows at its right:

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -57,7 +56,7 @@ func TestWikiLinks(t *testing.T) {
 	}
 	tt.ClickAtWith(ui.Cmd, surface.X+r.X, surface.Y+r.Y+r.H/2)
 	tt.Frame()
-	if a.doc.rel != "Journal/Ideas.arcmd" {
+	if a.doc.rel != "Journal/Ideas.md" {
 		t.Fatalf("⌘-click opened %q", a.doc.rel)
 	}
 	tt.Frame()
@@ -67,12 +66,12 @@ func TestWikiLinks(t *testing.T) {
 	if err := tt.Click("打开 Welcome"); err != nil {
 		t.Fatal(err)
 	}
-	if a.doc.rel != "Welcome.arcmd" {
+	if a.doc.rel != "Welcome.md" {
 		t.Errorf("backlink opened %q", a.doc.rel)
 	}
 	// A link to a document that is not there makes it.
 	a.openWiki("Brand New")
-	if a.doc == nil || a.doc.rel != "Brand New.arcmd" || a.doc.ed.Doc.Blocks[0].Text() != "Brand New" {
+	if a.doc == nil || a.doc.rel != "Brand New.md" || a.doc.ed.Doc.Blocks[0].Text() != "Brand New" {
 		t.Fatalf("missing link made %+v", a.doc)
 	}
 }
@@ -81,22 +80,22 @@ func TestWikiLinks(t *testing.T) {
 // in files.
 func TestRenameFollowsLinks(t *testing.T) {
 	a, tt := newTestApp(t)
-	writeElsewhere(t, a, "Plan.arcmd", "# Plan\n\nRead [[Ideas]] and [[ideas|my notes]].")
+	writeElsewhere(t, a, "Plan.md", "# Plan\n\nRead [[Ideas]] and [[ideas|my notes]].")
 	a.refreshTree()
 	caretAtEnd(a, tt)
 	tt.Type(" [[Ideas]]")
 	saveSettle(tt)
 	a.refreshSearch()
-	a.renameIn(a.state.ActiveSpace(), "Journal/Ideas.arcmd")
+	a.renameIn(a.state.ActiveSpace(), "Journal/Ideas.md")
 	a.newName = "Thoughts"
 	a.commitRename()
 	if !strings.Contains(a.doc.ed.Text(), "[[Thoughts]]") {
 		t.Errorf("open document: %q", a.doc.ed.Text())
 	}
-	text, _ := vault.Read(root(a), "Plan.arcmd")
-	doc, err := model.Decode(text)
-	if err != nil || doc.PlainText() != "Plan\nRead [[Thoughts]] and [[Thoughts|my notes]]." {
-		t.Fatalf("file: %q %v", doc.PlainText(), err)
+	text, _ := vault.Read(root(a), "Plan.md")
+	doc := editor.ImportMarkdown(text)
+	if doc.PlainText() != "Plan\nRead [[Thoughts]] and [[Thoughts|my notes]]." {
+		t.Fatalf("file: %q", doc.PlainText())
 	}
 	tt.Frame()
 	if !tt.HasText("指向「Thoughts」的链接") {
@@ -107,8 +106,8 @@ func TestRenameFollowsLinks(t *testing.T) {
 // #tags show the documents holding them in the command bar.
 func TestTags(t *testing.T) {
 	a, tt := newTestApp(t)
-	writeElsewhere(t, a, "Plan.arcmd", "# Plan\n\nA #trip to #work/rome.")
-	writeElsewhere(t, a, "Other.arcmd", "# Other\n\nmore #trip ideas")
+	writeElsewhere(t, a, "Plan.md", "# Plan\n\nA #trip to #work/rome.")
+	writeElsewhere(t, a, "Other.md", "# Other\n\nmore #trip ideas")
 	a.refreshTree()
 	typeQuery(a, tt, "#trip")
 	res := a.results()
@@ -189,7 +188,7 @@ func TestVersionHistory(t *testing.T) {
 	saveSettle(tt)
 	tt.Type(" Second.")
 	saveSettle(tt)
-	vs, err := history.List(root(a), "Welcome.arcmd")
+	vs, err := history.List(root(a), "Welcome.md")
 	if err != nil || len(vs) != 2 || !vs[1].Kept {
 		t.Fatalf("versions %+v %v", vs, err)
 	}
@@ -214,10 +213,10 @@ func TestVersionHistory(t *testing.T) {
 		t.Errorf("undo of the restore: %q", got)
 	}
 	// The history follows the document's new name.
-	a.renameIn(a.state.ActiveSpace(), "Welcome.arcmd")
+	a.renameIn(a.state.ActiveSpace(), "Welcome.md")
 	a.newName = "Hello"
 	a.commitRename()
-	if vs, _ := history.List(root(a), "Hello.arcmd"); len(vs) < 2 {
+	if vs, _ := history.List(root(a), "Hello.md"); len(vs) < 2 {
 		t.Errorf("history did not follow the rename: %d", len(vs))
 	}
 }
@@ -227,11 +226,11 @@ func TestRecentlyDeleted(t *testing.T) {
 	a, tt := newTestApp(t)
 	var trashed []string
 	a.trashFile = func(p string) error { trashed = append(trashed, p); return os.RemoveAll(p) }
-	a.trash("Journal/Ideas.arcmd")
+	a.trash("Journal/Ideas.md")
 	if len(trashed) != 1 {
 		t.Fatal("not trashed")
 	}
-	if _, err := os.Stat(filepath.Join(root(a), "Journal/Ideas.arcmd")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root(a), "Journal/Ideas.md")); !os.IsNotExist(err) {
 		t.Fatal("still there")
 	}
 	a.openTrash()
@@ -239,10 +238,10 @@ func TestRecentlyDeleted(t *testing.T) {
 	if !tt.HasText("最近删除") || !tt.HasText("Ideas") || !tt.HasText("Personal / Journal · 刚刚删除") {
 		t.Fatalf("window: %q", tt.Texts())
 	}
-	if err := tt.Click("恢复 Ideas.arcmd"); err != nil {
+	if err := tt.Click("恢复 Ideas.md"); err != nil {
 		t.Fatal(err)
 	}
-	if a.doc == nil || a.doc.rel != "Journal/Ideas.arcmd" || a.library.open {
+	if a.doc == nil || a.doc.rel != "Journal/Ideas.md" || a.library.open {
 		t.Fatalf("restored doc %+v", a.doc)
 	}
 	if items, _ := a.bin.List(time.Now()); len(items) != 0 {
@@ -250,7 +249,7 @@ func TestRecentlyDeleted(t *testing.T) {
 	}
 	// A failed trash keeps no copy.
 	a.trashFile = func(string) error { return os.ErrPermission }
-	a.trash("Welcome.arcmd")
+	a.trash("Welcome.md")
 	if items, _ := a.bin.List(time.Now()); len(items) != 0 {
 		t.Error("copy kept of what stayed")
 	}
@@ -309,7 +308,7 @@ func TestPaginate(t *testing.T) {
 // one command each.
 func TestRebindShortcuts(t *testing.T) {
 	a, tt := newTestApp(t)
-	j := editor.Combo{Mods: ui.Cmd, Key: ui.KeyJ}
+	j := editor.Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyJ}
 	if !a.rebind("palette", &j) {
 		t.Fatal("rebind refused")
 	}
@@ -318,7 +317,7 @@ func TestRebindShortcuts(t *testing.T) {
 	if a.palette.open {
 		t.Fatal("old key still opens the bar")
 	}
-	tt.Key(ui.Cmd, ui.KeyJ)
+	tt.Key(ui.Cmd|ui.Shift, ui.KeyJ)
 	tt.Frame()
 	if !a.palette.open {
 		t.Fatal("new key does not open the bar")
@@ -334,7 +333,7 @@ func TestRebindShortcuts(t *testing.T) {
 	}
 	// Saved, and read again.
 	b, err := New(a.cfg)
-	if err != nil || b.prefs.Keys["palette"] != "Cmd+J" {
+	if err != nil || b.prefs.Keys["palette"] != "Cmd+Shift+J" {
 		t.Fatalf("prefs %+v %v", b.prefs, err)
 	}
 	// The editor's bold on ⇧⌘B.
@@ -381,7 +380,7 @@ func TestPageIconAndCover(t *testing.T) {
 	if err := tt.Click("图标：🚀"); err != nil {
 		t.Fatal(err)
 	}
-	if a.doc.ed.Doc.Icon != "🚀" || a.iconTitle(a.state.ActiveSpace().ID, "Welcome.arcmd") != "🚀 Welcome" {
+	if a.doc.ed.Doc.Icon != "🚀" || a.iconTitle(a.state.ActiveSpace().ID, "Welcome.md") != "🚀 Welcome" {
 		t.Fatalf("icon %q", a.doc.ed.Doc.Icon)
 	}
 	a.doc.ed.EditCover()
@@ -400,14 +399,14 @@ func TestPageIconAndCover(t *testing.T) {
 		t.Fatalf("cover %q", a.doc.ed.Doc.Cover)
 	}
 	saveSettle(tt)
-	text, _ := vault.Read(root(a), "Welcome.arcmd")
-	doc, err := model.Decode(text)
-	if err != nil || doc.Icon != "🚀" || doc.Cover != "assets/cover.png" || doc.Version != model.CurrentVersion {
-		t.Fatalf("saved %+v %v", doc, err)
+	text, _ := vault.Read(root(a), "Welcome.md")
+	doc := editor.ImportMarkdown(text)
+	if doc.Icon != "🚀" || doc.Cover != "assets/cover.png" {
+		t.Fatalf("saved %+v (raw: %q)", doc, text)
 	}
 	a.refreshSearch()
-	a.open("Journal/Ideas.arcmd")
-	if got := a.iconTitle(a.state.ActiveSpace().ID, "Welcome.arcmd"); got != "🚀 Welcome" {
+	a.open("Journal/Ideas.md")
+	if got := a.iconTitle(a.state.ActiveSpace().ID, "Welcome.md"); got != "🚀 Welcome" {
 		t.Errorf("indexed icon %q", got)
 	}
 }

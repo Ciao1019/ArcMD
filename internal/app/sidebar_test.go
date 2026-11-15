@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -28,7 +27,7 @@ func TestSidebarDoubleClickDoesNotRename(t *testing.T) {
 					if sp.IsExpanded("Journal") != (click == 2) {
 						t.Fatalf("click %d did not toggle the folder", click)
 					}
-				} else if a.doc == nil || a.doc.rel != "Journal/Ideas.arcmd" {
+				} else if a.doc == nil || a.doc.rel != "Journal/Ideas.md" {
 					t.Fatalf("click %d did not open the document", click)
 				}
 			}
@@ -138,7 +137,7 @@ func TestSpaceSwitchWhilePeeking(t *testing.T) {
 	if err := tt.Click("切换到 Personal"); err != nil {
 		t.Fatal(err)
 	}
-	if a.state.ActiveSpace() != first || a.doc.rel != "Welcome.arcmd" || !a.peek {
+	if a.state.ActiveSpace() != first || a.doc.rel != "Welcome.md" || !a.peek {
 		t.Fatal("switching back did not restore Personal in the floating sidebar")
 	}
 	tt.Move(900, 400)
@@ -233,8 +232,8 @@ func TestSpaceRestoreUsesChangedFile(t *testing.T) {
 	a.state.Add("Work", t.TempDir())
 	original := a.doc
 	tt.Key(ui.Cmd, ui.Key2)
-	changed, _ := editor.ImportMarkdown("# Changed externally\n").Encode()
-	if err := vault.Write(first.Root, "Welcome.arcmd", changed); err != nil {
+	changed := "# Changed externally\n"
+	if err := vault.Write(first.Root, "Welcome.md", changed); err != nil {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.Key1)
@@ -242,7 +241,7 @@ func TestSpaceRestoreUsesChangedFile(t *testing.T) {
 		t.Fatal("restored a stale editor over an externally changed file")
 	}
 	tt.Key(ui.Cmd, ui.Key2)
-	if err := os.Remove(filepath.Join(first.Root, "Welcome.arcmd")); err != nil {
+	if err := os.Remove(filepath.Join(first.Root, "Welcome.md")); err != nil {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.Key1)
@@ -263,7 +262,7 @@ func TestSpaceKeepsCollapsedFolders(t *testing.T) {
 	}
 	tt.Key(ui.Cmd, ui.Key2)
 	tt.Key(ui.Cmd, ui.Key1)
-	if a.doc.rel != "Journal/Ideas.arcmd" || first.IsExpanded("Journal") {
+	if a.doc.rel != "Journal/Ideas.md" || first.IsExpanded("Journal") {
 		t.Fatal("restoring the last document changed the space's collapsed folders")
 	}
 }

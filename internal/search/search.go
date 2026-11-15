@@ -22,6 +22,8 @@ import (
 type Root struct {
 	Space string // the space's ID
 	Path  string // its folder
+	// Files, when non-nil, limits indexing to an explicit collection.
+	Files vault.Files
 }
 
 // Extract turns a document file's content into the plain text searched,
@@ -39,6 +41,7 @@ type Extracted struct {
 type key struct{ space, path string }
 
 type entry struct {
+	file  string
 	text  string
 	icon  string
 	size  int64
@@ -61,21 +64,34 @@ type Index struct {
 func Refresh(prev *Index, roots []Root, extract Extract) *Index {
 	next := &Index{entries: map[key]*entry{}}
 	for _, r := range roots {
-		docs, _ := vault.List(r.Path)
+		var docs []vault.Doc
+		if r.Files != nil {
+			docs = r.Files.List()
+		} else {
+			docs, _ = vault.List(r.Path)
+		}
 		for _, d := range docs {
 			k := key{r.Space, d.Path}
-			info, err := os.Stat(filepath.Join(r.Path, filepath.FromSlash(d.Path)))
+			root, rel := r.Path, d.Path
+			if r.Files != nil {
+				full, err := r.Files.Resolve(rel)
+				if err != nil {
+					continue
+				}
+				root, rel = filepath.Dir(full), filepath.Base(full)
+			}
+			info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
 			if err != nil {
 				continue
 			}
 			if prev != nil {
-				if e, ok := prev.entries[k]; ok && e.size == info.Size() && e.mod.Equal(info.ModTime()) {
+				if e, ok := prev.entries[k]; ok && e.file == filepath.Join(root, rel) && e.size == info.Size() && e.mod.Equal(info.ModTime()) {
 					next.entries[k] = e
 					next.order = append(next.order, k)
 					continue
 				}
 			}
-			content, err := vault.Read(r.Path, d.Path)
+			content, err := vault.Read(root, rel)
 			if err != nil {
 				continue
 			}
@@ -83,7 +99,7 @@ func Refresh(prev *Index, roots []Root, extract Extract) *Index {
 			if err != nil {
 				continue
 			}
-			next.entries[k] = &entry{text: ex.Text, icon: ex.Icon, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
+			next.entries[k] = &entry{file: filepath.Join(root, rel), text: ex.Text, icon: ex.Icon, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
 			next.order = append(next.order, k)
 		}
 	}

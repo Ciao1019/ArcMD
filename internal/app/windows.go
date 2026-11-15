@@ -71,7 +71,7 @@ func (a *App) openInWindow(sp *space.Space, rel string) {
 		a.replaceReferences(d, nil)
 		delete(a.openDocs, place{sp.ID, rel})
 	} else {
-		text, err := vault.Read(sp.Root, rel)
+		text, err := readFile(sp, rel)
 		if err != nil {
 			a.notify("无法打开 %s。%v", vault.Title(rel), err)
 			return

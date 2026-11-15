@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -82,9 +83,9 @@ func TestSaveDuringCompositionRefreshesCommittedBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err := model.Decode(stored)
-	if err != nil || native.PlainText() != committed {
-		t.Fatal("save included preedit", err)
+	parsed := editor.ImportMarkdown(stored)
+	if parsed.PlainText() != committed {
+		t.Fatalf("save included preedit: got %q, want %q", parsed.PlainText(), committed)
 	}
 	if d.dirty() || d.changed() {
 		t.Fatal("saved committed baseline is dirty")

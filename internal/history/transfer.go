@@ -84,7 +84,11 @@ func CopyTo(fromRoot, from, toRoot, to string, rewrite func(string, string) (str
 			if bytes.Equal(old, data) {
 				return nil
 			}
-			base := strings.TrimSuffix(filepath.Base(target), ".arcmd")
+			ext := filepath.Ext(target)
+			if ext != ".md" && ext != ".arcmd" {
+				ext = ".md"
+			}
+			base := strings.TrimSuffix(filepath.Base(target), ext)
 			kept := strings.HasSuffix(base, "~")
 			at, err := time.ParseInLocation(stamp, strings.TrimSuffix(base, "~"), time.Local)
 			if err != nil {
@@ -94,7 +98,7 @@ func CopyTo(fromRoot, from, toRoot, to string, rewrite func(string, string) (str
 			if kept {
 				name += "~"
 			}
-			target = filepath.Join(filepath.Dir(target), name+".arcmd")
+			target = filepath.Join(filepath.Dir(target), name+ext)
 		}
 	})
 }

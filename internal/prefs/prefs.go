@@ -58,6 +58,17 @@ type Prefs struct {
 	// Until then every launch shows it: the first of a new installation,
 	// and the first after an update from a version that had no tour.
 	TourSeen bool `json:"tourSeen,omitempty"`
+	// AI is the model the space's questions are asked of. Its API key is
+	// not here but in a separate local file managed by Secrets.
+	AI AI `json:"ai,omitzero"`
+}
+
+// AI is a model service speaking the Chat Completions format.
+type AI struct {
+	// Provider is a preset's ID (agent.Presets), "custom" for another.
+	Provider string `json:"provider,omitempty"`
+	BaseURL  string `json:"baseURL,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // Store reads and writes prefs.json.

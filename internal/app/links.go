@@ -127,20 +127,22 @@ func (a *App) openWiki(name string) {
 // space and opens it, its title written.
 func (a *App) newDocNamed(dir, name string) {
 	sp := a.state.ActiveSpace()
-	if sp == nil || !a.flush() {
+	if sp == nil || sp.IsExternal() || !a.flush() {
 		return
 	}
 	doc := model.New()
 	title := model.NewBlock("heading", strings.TrimSpace(name))
 	title.Level = 1
 	doc.Blocks = []*model.Block{title, model.NewBlock("paragraph", "")}
-	text, err := doc.Encode()
+	err := doc.Validate()
 	if err == nil {
+		text := editor.ExportMarkdown(doc)
 		var rel string
-		if rel, err = vault.CreateFile(sp.Root, dir, name, ".arcmd", text); err == nil {
+		if rel, err = vault.CreateFile(sp.Root, dir, name, ".md", text); err == nil {
 			a.refreshTree()
 			a.open(rel)
 			if a.doc != nil && a.doc.rel == rel {
+				a.doc.ensureBodyParagraph()
 				end := a.doc.ed.Len()
 				a.doc.ed.SetSelection(end, end)
 				a.doc.ed.RequestFocus = true
@@ -440,11 +442,11 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 		return true
 	})
 	for _, file := range files {
-		if resident[file] || !strings.EqualFold(path.Ext(file.rel), ".arcmd") {
+		if resident[file] || !vault.IsDocument(file.rel) {
 			continue
 		}
 		sp := a.state.Get(file.space)
-		text, err := vault.Read(sp.Root, file.rel)
+		text, err := readFile(sp, file.rel)
 		if err != nil || !wiki.LinksTo(text, from) {
 			continue
 		}

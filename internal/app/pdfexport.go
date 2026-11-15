@@ -13,7 +13,6 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdf"
 	"github.com/Ciao1019/ArcMD/internal/space"
-	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -39,7 +38,12 @@ func (a *App) startPDF(printing bool) {
 		return
 	}
 	d.ed.UnmarkText()
-	source := &document{space: &space.Space{Root: d.space.Root}, rel: d.rel}
+	root, rel, err := fileLocation(d.space, d.rel)
+	if err != nil {
+		a.notify("导出 PDF 失败。%v", err)
+		return
+	}
+	source := &document{space: &space.Space{Root: root}, rel: rel}
 	dir := filepath.Dir(d.fullPath())
 	if printing {
 		dir = filepath.Join(os.TempDir(), i18n.T("ArcMD 打印"))
@@ -204,7 +208,7 @@ func (a *App) finishPDF(job *pdfExport) {
 			name = fmt.Sprintf("%s %d", name, i)
 		}
 		rel = path.Join(path.Dir(job.source.rel), name+".pdf")
-		full, resolveErr := vault.Resolve(job.source.space.Root, rel)
+		full, resolveErr := resolveFile(job.source.space, rel)
 		if resolveErr != nil {
 			err = resolveErr
 			break
@@ -222,7 +226,7 @@ func (a *App) finishPDF(job *pdfExport) {
 	}
 	a.notify("已导出 %s（%d 页）", rel, len(job.tops))
 	if a.win != nil {
-		if file, err := vault.Resolve(job.source.space.Root, rel); err == nil {
+		if file, err := resolveFile(job.source.space, rel); err == nil {
 			mygo.Shell.ShowItemInFolder(file)
 		}
 	}

@@ -772,11 +772,18 @@ func TestTextColorsAndExport(t *testing.T) {
 	if r.Text != "world" || r.Style.Color != "red" || r.Style.Highlight != "light-blue" {
 		t.Fatal("colors", e.Doc.Blocks[0].Runs)
 	}
-	// Colors don't split Markdown marks.
+	// Colors preserve rich styles in Markdown without splitting outer marks.
 	e.SetSelection(0, 11)
 	tt.Key(ui.Cmd, ui.KeyB)
-	if md := ExportMarkdown(e.Doc); md != "**Hello world**\n" {
+	md := ExportMarkdown(e.Doc)
+	if !strings.HasPrefix(md, "**Hello <span ") || !strings.HasSuffix(md, ">world</span>**\n") {
 		t.Fatalf("export %q", md)
+	}
+	round := ImportMarkdown(md)
+	if len(round.Blocks[0].Runs) != 2 || !round.Blocks[0].Runs[0].Style.Bold ||
+		!round.Blocks[0].Runs[1].Style.Bold || round.Blocks[0].Runs[1].Style.Color != "red" ||
+		round.Blocks[0].Runs[1].Style.Highlight != "light-blue" {
+		t.Fatalf("roundtrip %+v", round.Blocks[0].Runs)
 	}
 	none := ""
 	e.Engine.SetTextColor(&none, &none)

@@ -128,8 +128,8 @@ func TestLibraryPages(t *testing.T) {
 func TestLibraryTrash(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.trashFile = os.RemoveAll
-	a.trash("Journal/Ideas.arcmd")
-	a.trash("Welcome.arcmd")
+	a.trash("Journal/Ideas.md")
+	a.trash("Welcome.md")
 	a.undos = nil // the toasts name the documents, as the page does
 	a.openTrash()
 	settle(tt)
@@ -148,7 +148,7 @@ func TestLibraryTrash(t *testing.T) {
 	}
 	a.library.query = ""
 	tt.Frame()
-	if err := tt.Click("从列表移除 Welcome.arcmd"); err != nil {
+	if err := tt.Click("从列表移除 Welcome.md"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -189,8 +189,8 @@ func TestLibrarySnapshot(t *testing.T) {
 				tt.SetDark(dark)
 				if page == libTrash {
 					a.trashFile = os.RemoveAll
-					a.trash("Journal/Ideas.arcmd")
-					a.trash("Welcome.arcmd")
+					a.trash("Journal/Ideas.md")
+					a.trash("Welcome.md")
 				}
 				a.openLibrary(page)
 				for range 6 {

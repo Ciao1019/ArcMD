@@ -2,9 +2,14 @@ package editor
 
 // Tables show bars above their columns and left of their rows: a press on
 // a bar selects its row or column and shows a toolbar to insert beside it
-// or delete it; a "+" pin on a boundary inserts a line there.
+// or delete it; dragging a row bar reorders rows with live sliding neighbors;
+// a "+" pin on a boundary previews a dashed seam and inserts a line there.
 
 import (
+	"fmt"
+	"math"
+	"strings"
+
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
@@ -25,6 +30,26 @@ type tableSelection struct {
 	ok    bool
 }
 
+type tableRowDrag struct {
+	id      string
+	from    int
+	to      int
+	startY  float32
+	y       float32
+	holding bool
+	active  bool
+}
+
+type tableColDrag struct {
+	id      string
+	from    int
+	to      int
+	startX  float32
+	x       float32
+	holding bool
+	active  bool
+}
+
 // columnBar and rowBar are the bar segments of column or row i.
 func columnBar(d decoration, i int) ui.Rect {
 	return ui.Rect{X: d.cols[i], Y: d.rect.Y - tableBarGap - tableBar, W: d.cols[i+1] - d.cols[i], H: tableBar}
@@ -42,8 +67,17 @@ func pin(d decoration, cols bool, k int) ui.Rect {
 }
 
 // barsShown reports whether table d shows its bars: under the pointer,
-// holding the caret, or with a line selected.
+// holding the caret, dragging a row/column, or with a line selected.
 func (e *Editor) barsShown(d decoration) bool {
+	if e.tableDrag.active && e.tableDrag.id == d.id {
+		return true
+	}
+	if e.tableColDrag.active && e.tableColDrag.id == d.id {
+		return true
+	}
+	if e.resizing != nil && e.resizing.id == d.id {
+		return true
+	}
 	if e.tableSel.ok && e.tableSel.id == d.id {
 		return true
 	}
@@ -56,7 +90,7 @@ func (e *Editor) barsShown(d decoration) bool {
 // hoveredPin is the boundary pin under the pointer, if any.
 func (e *Editor) hoveredPin(d decoration) (cols bool, k int, ok bool) {
 	p := e.pointer
-	if !e.pointerInside || e.dragging {
+	if !e.pointerInside || e.dragging || e.tableDrag.holding || e.tableColDrag.holding || e.resizing != nil {
 		return false, 0, false
 	}
 	near := func(r ui.Rect) bool { return p.X >= r.X && p.X <= r.X+r.W && p.Y >= r.Y && p.Y <= r.Y+r.H }
@@ -93,15 +127,320 @@ func (e *Editor) selectedLine() (decoration, bool) {
 	return decoration{}, false
 }
 
-// paintTables draws the bars, pins and the selected line of each table.
+func findParentBlocks(list *[]*document.Block, id string) (*[]*document.Block, int) {
+	for i, b := range *list {
+		if b.ID == id {
+			return list, i
+		}
+		if b.Kind == "columns" || b.Kind == "column" {
+			if p, idx := findParentBlocks(&b.Children, id); p != nil {
+				return p, idx
+			}
+		}
+	}
+	return nil, -1
+}
+
+func (e *Editor) tableDecoration(id string) (decoration, bool) {
+	for _, d := range e.decorations {
+		if d.kind == "table" && d.id == id {
+			return d, true
+		}
+	}
+	return decoration{}, false
+}
+
+// tableDragShift returns the target vertical displacement for rowIdx while
+// dragging another row in the same table.
+func (e *Editor) tableDragShift(tableID string, rowIdx int) float32 {
+	if !e.tableDrag.active || e.tableDrag.id != tableID || e.tableDrag.from == e.tableDrag.to {
+		return 0
+	}
+	d, ok := e.tableDecoration(tableID)
+	if !ok || e.tableDrag.from < 0 || e.tableDrag.from >= len(d.rows)-1 {
+		return 0
+	}
+	dragH := d.rows[e.tableDrag.from+1] - d.rows[e.tableDrag.from]
+	if e.tableDrag.from < e.tableDrag.to && rowIdx > e.tableDrag.from && rowIdx <= e.tableDrag.to {
+		return -dragH
+	}
+	if e.tableDrag.to < e.tableDrag.from && rowIdx >= e.tableDrag.to && rowIdx < e.tableDrag.from {
+		return dragH
+	}
+	return 0
+}
+
+func (e *Editor) tableDragLandingY(d decoration) float32 {
+	from, to := e.tableDrag.from, e.tableDrag.to
+	if from < 0 || from >= len(d.rows)-1 || to < 0 || to >= len(d.rows)-1 {
+		return d.rect.Y
+	}
+	dragH := d.rows[from+1] - d.rows[from]
+	if to <= from {
+		return d.rows[to]
+	}
+	return d.rows[to+1] - dragH
+}
+
+// tableColDragShift returns the target horizontal displacement for colIdx while
+// dragging another column in the same table.
+func (e *Editor) tableColDragShift(tableID string, colIdx int) float32 {
+	if !e.tableColDrag.active || e.tableColDrag.id != tableID || e.tableColDrag.from == e.tableColDrag.to {
+		return 0
+	}
+	d, ok := e.tableDecoration(tableID)
+	if !ok || e.tableColDrag.from < 0 || e.tableColDrag.from >= len(d.cols)-1 {
+		return 0
+	}
+	dragW := d.cols[e.tableColDrag.from+1] - d.cols[e.tableColDrag.from]
+	if e.tableColDrag.from < e.tableColDrag.to && colIdx > e.tableColDrag.from && colIdx <= e.tableColDrag.to {
+		return -dragW
+	}
+	if e.tableColDrag.to < e.tableColDrag.from && colIdx >= e.tableColDrag.to && colIdx < e.tableColDrag.from {
+		return dragW
+	}
+	return 0
+}
+
+func (e *Editor) tableColDragLandingX(d decoration) float32 {
+	from, to := e.tableColDrag.from, e.tableColDrag.to
+	if from < 0 || from >= len(d.cols)-1 || to < 0 || to >= len(d.cols)-1 {
+		return d.rect.X
+	}
+	dragW := d.cols[from+1] - d.cols[from]
+	if to <= from {
+		return d.cols[to]
+	}
+	return d.cols[to+1] - dragW
+}
+
+func clampedResizeDelta(r *columnHandle, resizeX float32, movedFar bool) (delta float32, snapped bool) {
+	if r == nil || r.col < 0 || r.col+1 >= len(r.widths) {
+		return 0, false
+	}
+	raw := resizeX - r.x
+	lo := 48 - r.widths[r.col]
+	hi := r.widths[r.col+1] - 48
+	equalDelta := (r.widths[r.col+1] - r.widths[r.col]) * 0.5
+	if equalDelta >= lo && equalDelta <= hi && abs32(raw-equalDelta) <= 6 && (abs32(equalDelta) > 1 || movedFar) {
+		return equalDelta, true
+	}
+	return max(lo, min(raw, hi)), false
+}
+
+func (e *Editor) tableDragPointer(ev ui.InputEvent) bool {
+	if e.tableColDrag.holding {
+		switch ev.Kind {
+		case ui.InputPointerMove:
+			e.tableColDrag.x = ev.X
+			if !e.tableColDrag.active && abs32(ev.X-e.tableColDrag.startX) > 4 {
+				e.tableColDrag.active = true
+				e.tableSel = tableSelection{}
+			}
+			if e.tableColDrag.active {
+				if d, ok := e.tableDecoration(e.tableColDrag.id); ok && len(d.cols) >= 3 {
+					n := len(d.cols) - 1
+					target := n - 1
+					for i := 0; i < n; i++ {
+						if ev.X < d.cols[i+1] {
+							target = i
+							break
+						}
+					}
+					e.tableColDrag.to = target
+				}
+			}
+			return true
+		case ui.InputPointerUp:
+			drag := e.tableColDrag
+			e.tableColDrag = tableColDrag{}
+			if drag.active && drag.from != drag.to {
+				if d, ok := e.tableDecoration(drag.id); ok && e.motion.tableCols != nil {
+					if tb := e.blockByID(drag.id); tb != nil && len(tb.Children) > 0 && len(tb.Children[0].Children)+1 == len(d.cols) {
+						dragW := d.cols[drag.from+1] - d.cols[drag.from]
+						for i, cell := range tb.Children[0].Children {
+							shift := float32(0)
+							if i == drag.from {
+								shift = drag.x - drag.startX
+							} else if drag.from < drag.to && i > drag.from && i <= drag.to {
+								shift = -dragW
+							} else if drag.to < drag.from && i >= drag.to && i < drag.from {
+								shift = dragW
+							}
+							if s, ok := e.motion.tableCols[cell.ID]; ok {
+								s.laidX += shift
+								e.motion.tableCols[cell.ID] = s
+							}
+						}
+					}
+				}
+				e.Engine.MoveTableColumn(drag.id, drag.from, drag.to)
+				e.sync()
+				e.RequestFocus = true
+			}
+			return true
+		}
+		return false
+	}
+	if !e.tableDrag.holding {
+		return false
+	}
+	switch ev.Kind {
+	case ui.InputPointerMove:
+		e.tableDrag.y = ev.Y
+		if !e.tableDrag.active && abs32(ev.Y-e.tableDrag.startY) > 4 {
+			e.tableDrag.active = true
+			e.tableSel = tableSelection{}
+		}
+		if e.tableDrag.active {
+			if d, ok := e.tableDecoration(e.tableDrag.id); ok && len(d.rows) >= 3 {
+				n := len(d.rows) - 1
+				target := n - 1
+				for i := 0; i < n; i++ {
+					if ev.Y < d.rows[i+1] {
+						target = i
+						break
+					}
+				}
+				e.tableDrag.to = target
+			}
+		}
+		return true
+	case ui.InputPointerUp:
+		drag := e.tableDrag
+		e.tableDrag = tableRowDrag{}
+		if drag.active && drag.from != drag.to {
+			if d, ok := e.tableDecoration(drag.id); ok && e.motion.tableRows != nil {
+				if tb := e.blockByID(drag.id); tb != nil && len(tb.Children)+1 == len(d.rows) {
+					for i, tr := range tb.Children {
+						shift := float32(0)
+						if i == drag.from {
+							shift = drag.y - drag.startY
+						} else if drag.from < drag.to && i > drag.from && i <= drag.to {
+							shift = -(d.rows[drag.from+1] - d.rows[drag.from])
+						} else if drag.to < drag.from && i >= drag.to && i < drag.from {
+							shift = d.rows[drag.from+1] - d.rows[drag.from]
+						}
+						if s, ok := e.motion.tableRows[tr.ID]; ok {
+							s.laidY += shift
+							e.motion.tableRows[tr.ID] = s
+						}
+					}
+				}
+			}
+			e.Engine.MoveTableRow(drag.id, drag.from, drag.to)
+			e.sync()
+			e.RequestFocus = true
+		}
+		return true
+	}
+	return false
+}
+
+// cellEnter handles Enter inside a table cell: moves down to the same column,
+// appends a new row at the bottom, or exits out of a trailing empty row.
+func (e *Editor) cellEnter() bool {
+	if e.ReadOnly || e.Anchor != e.Caret {
+		return false
+	}
+	leaf := e.Engine.LeafAt(e.Caret)
+	if leaf.Block.Kind != "cell" {
+		return false
+	}
+	table, rowIdx, colIdx, ok := e.Doc.CellAt(leaf.Block.ID)
+	if !ok || table == nil || len(table.Children) == 0 {
+		return false
+	}
+	spanCols, spanRows := document.Span(leaf.Block)
+	nextRow := rowIdx + spanRows
+
+	focusCellAt := func(t *document.Block, r, c int) bool {
+		if r < 0 || r >= len(t.Children) || len(t.Children[r].Children) == 0 {
+			return false
+		}
+		c = max(0, min(c, len(t.Children[r].Children)-1))
+		target := t.Children[r].Children[c]
+		for ci := c; ci >= 0 && target.ColSpan < 0; ci-- {
+			target = t.Children[r].Children[ci]
+		}
+		for ri := r; ri >= 0 && target.RowSpan < 0; ri-- {
+			target = t.Children[ri].Children[min(c, len(t.Children[ri].Children)-1)]
+		}
+		if l, ok := e.Engine.LeafByID(target.ID); ok {
+			e.SetSelection(l.End, l.End)
+			e.reveal = true
+			return true
+		}
+		return false
+	}
+
+	if nextRow < len(table.Children) {
+		return focusCellAt(table, nextRow, colIdx)
+	}
+
+	// Double-Enter on a trailing blank data row at column 0 exits the table
+	// cleanly into a paragraph below.
+	if rowIdx >= 1 && colIdx == 0 {
+		rowEmpty := true
+		for _, cell := range table.Children[rowIdx].Children {
+			if strings.TrimSpace(cell.Text()) != "" {
+				rowEmpty = false
+				break
+			}
+		}
+		if rowEmpty {
+			tableID := table.ID
+			trimTrailing := len(table.Children) > 2
+			e.Engine.Edit(func() {
+				if trimTrailing {
+					e.Engine.TableDelete(tableID, true, rowIdx)
+				}
+				if parent, idx := findParentBlocks(&e.Doc.Blocks, tableID); parent != nil {
+					next := document.NewBlock("paragraph", "")
+					*parent = append((*parent)[:idx+1], append([]*document.Block{next}, (*parent)[idx+1:]...)...)
+					e.Engine.FocusBlock(next.ID)
+				}
+			})
+			e.sync()
+			e.reveal = true
+			return true
+		}
+	}
+
+	numCols := len(table.Children[rowIdx].Children)
+	targetCol := colIdx
+	if colIdx+spanCols >= numCols && numCols > 1 && strings.TrimSpace(table.Children[rowIdx].Children[0].Text()) != "" {
+		targetCol = 0
+	}
+	tableID := table.ID
+	e.Engine.ResizeTable(true, 1)
+	e.sync()
+	for _, b := range e.Doc.Blocks {
+		if b.ID == tableID {
+			return focusCellAt(b, len(b.Children)-1, targetCol)
+		}
+	}
+	if updated, _, _, ok := e.Doc.CellAt(leaf.Block.ID); ok {
+		return focusCellAt(updated, len(updated.Children)-1, targetCol)
+	}
+	return true
+}
+
+// paintTables draws the bars, pins, dashed seam previews, row/column drag slots,
+// and live column-width resize feedback.
 func (e *Editor) paintTables(p *ui.Painter, bounds ui.Rect) {
-	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
 	pg := e.page
 	for i := range e.visibleDecorations(24) {
 		d := e.decorations[i]
 		// Include the bars and insertion pins above and beside the table.
 		if d.kind != "table" || d.rect.Y+d.rect.H+24 < e.Scroll.Y || d.rect.Y-24 > e.Scroll.Y+e.viewport || len(d.cols) < 2 || !e.barsShown(d) {
 			continue
+		}
+		ownerDY := e.ownerVisualDY(d.id)
+		offset := func(r ui.Rect) ui.Rect {
+			r.X += bounds.X
+			r.Y += bounds.Y + ownerDY
+			return r
 		}
 		sel := e.tableSel
 		selected := func(rows bool, i int) bool { return sel.ok && sel.id == d.id && sel.rows == rows && sel.index == i }
@@ -110,9 +449,11 @@ func (e *Editor) paintTables(p *ui.Painter, bounds ui.Rect) {
 		if sel.ok && sel.id == d.id {
 			var r ui.Rect
 			if sel.rows && sel.index < len(d.rows)-1 {
-				r = ui.Rect{X: d.rect.X, Y: d.rows[sel.index], W: d.rect.W, H: d.rows[sel.index+1] - d.rows[sel.index]}
+				ry := e.tableRowVisualDY(d.id, sel.index)
+				r = ui.Rect{X: d.rect.X, Y: d.rows[sel.index] + ry, W: d.rect.W, H: d.rows[sel.index+1] - d.rows[sel.index]}
 			} else if !sel.rows && sel.index < len(d.cols)-1 {
-				r = ui.Rect{X: d.cols[sel.index], Y: d.rect.Y, W: d.cols[sel.index+1] - d.cols[sel.index], H: d.rect.H}
+				cx := e.tableColVisualDX(d.id, sel.index)
+				r = ui.Rect{X: d.cols[sel.index] + cx, Y: d.rect.Y, W: d.cols[sel.index+1] - d.cols[sel.index], H: d.rect.H}
 			}
 			fill := pg.CellSelected
 			if e.tableDanger {
@@ -125,23 +466,103 @@ func (e *Editor) paintTables(p *ui.Painter, bounds ui.Rect) {
 			p.Clip(offset(d.rect), 8, func() { p.Fill(offset(cells), pg.CellSelected, 0) })
 		}
 		for i := 0; i < len(d.cols)-1; i++ {
-			e.paintBar(p, offset(columnBar(d, i)), columnBar(d, i), selected(false, i))
+			cb := columnBar(d, i)
+			cx := e.tableColVisualDX(d.id, i)
+			if e.tableColDrag.active && e.tableColDrag.id == d.id && e.tableColDrag.from == i {
+				cx += e.tableColDrag.x - e.tableColDrag.startX
+			}
+			vis := offset(cb)
+			vis.X += cx
+			e.paintBar(p, vis, cb, selected(false, i) || e.tableColDrag.active && e.tableColDrag.id == d.id && e.tableColDrag.from == i)
 		}
 		for i := 0; i < len(d.rows)-1; i++ {
-			e.paintBar(p, offset(rowBar(d, i)), rowBar(d, i), selected(true, i))
+			rb := rowBar(d, i)
+			ry := e.tableRowVisualDY(d.id, i)
+			if e.tableDrag.active && e.tableDrag.id == d.id && e.tableDrag.from == i {
+				ry += e.tableDrag.y - e.tableDrag.startY
+			}
+			vis := offset(rb)
+			vis.Y += ry
+			e.paintBar(p, vis, rb, selected(true, i) || e.tableDrag.active && e.tableDrag.id == d.id && e.tableDrag.from == i)
+		}
+		if e.tableColDrag.active && e.tableColDrag.id == d.id && e.tableColDrag.from < len(d.cols)-1 {
+			dragW := d.cols[e.tableColDrag.from+1] - d.cols[e.tableColDrag.from]
+			slot := offset(ui.Rect{X: e.tableColDragLandingX(d), Y: d.rect.Y, W: dragW, H: d.rect.H})
+			p.Fill(slot, pg.Marker.Alpha(0.08), 4)
+			p.StrokeDashed(slot, pg.Marker.Alpha(0.65), 4, 1.25)
+
+			liftedX := d.cols[e.tableColDrag.from] + (e.tableColDrag.x - e.tableColDrag.startX)
+			lifted := offset(ui.Rect{X: liftedX, Y: d.rect.Y, W: dragW, H: d.rect.H})
+			p.Shadow(lifted, 6, 0, 4, 14, 0, pg.MathShadow)
+			p.Fill(lifted, pg.Popover.Alpha(0.88), 6)
+			p.Stroke(lifted, pg.Marker.Alpha(0.75), 6, 1.5)
+		}
+		if e.tableDrag.active && e.tableDrag.id == d.id && e.tableDrag.from < len(d.rows)-1 {
+			dragH := d.rows[e.tableDrag.from+1] - d.rows[e.tableDrag.from]
+			slot := offset(ui.Rect{X: d.rect.X, Y: e.tableDragLandingY(d), W: d.rect.W, H: dragH})
+			p.Fill(slot, pg.Marker.Alpha(0.08), 4)
+			p.StrokeDashed(slot, pg.Marker.Alpha(0.65), 4, 1.25)
+
+			liftedY := d.rows[e.tableDrag.from] + (e.tableDrag.y - e.tableDrag.startY)
+			lifted := offset(ui.Rect{X: d.rect.X, Y: liftedY, W: d.rect.W, H: dragH})
+			p.Shadow(lifted, 6, 0, 4, 14, 0, pg.MathShadow)
+			p.Fill(lifted, pg.Popover.Alpha(0.88), 6)
+			p.Stroke(lifted, pg.Marker.Alpha(0.75), 6, 1.5)
+		}
+		if e.resizing != nil && e.resizing.id == d.id {
+			e.paintColumnResizePreview(p, bounds, d, ownerDY)
 		}
 		if cols, k, ok := e.hoveredPin(d); ok {
 			r := offset(pin(d, cols, k))
-			// The line the insert would go along.
 			if cols {
-				p.Fill(ui.Rect{X: r.X + 7, Y: bounds.Y + d.rect.Y, W: 2, H: d.rect.H}, pg.Marker, 1)
+				slot := ui.Rect{X: r.X + 4, Y: bounds.Y + d.rect.Y + ownerDY, W: 8, H: d.rect.H}
+				p.Fill(slot, pg.Marker.Alpha(0.10), 3)
+				p.StrokeDashed(slot, pg.Marker.Alpha(0.75), 3, 1)
 			} else {
-				p.Fill(ui.Rect{X: bounds.X + d.rect.X, Y: r.Y + 7, W: d.rect.W, H: 2}, pg.Marker, 1)
+				slot := ui.Rect{X: bounds.X + d.rect.X, Y: r.Y + 4, W: d.rect.W, H: 8}
+				p.Fill(slot, pg.Marker.Alpha(0.10), 3)
+				p.StrokeDashed(slot, pg.Marker.Alpha(0.75), 3, 1)
 			}
 			p.Fill(r, pg.Marker, 8)
 			p.Icon(iconPlus, ui.Rect{X: r.X + 3, Y: r.Y + 3, W: 10, H: 10}, pg.OnMarker)
 		}
 	}
+}
+
+func (e *Editor) paintColumnResizePreview(p *ui.Painter, bounds ui.Rect, d decoration, ownerDY float32) {
+	r := e.resizing
+	if r == nil || r.col < 0 || r.col+1 >= len(r.widths) {
+		return
+	}
+	delta, snapped := clampedResizeDelta(r, e.resizeX, e.resizeMoved)
+	lineX := bounds.X + r.x + delta
+	topY := bounds.Y + d.rect.Y + ownerDY
+	lineColor := e.page.Marker
+	if snapped {
+		lineColor = p.Theme().Accent
+	}
+	p.Fill(ui.Rect{X: lineX - 1, Y: topY, W: 2, H: d.rect.H}, lineColor, 1)
+
+	w0 := r.widths[r.col] + delta
+	w1 := r.widths[r.col+1] - delta
+	total := max(1, r.width)
+	pct0 := int(math.Round(float64(w0 * 100 / total)))
+	pct1 := int(math.Round(float64(w1 * 100 / total)))
+	label := fmt.Sprintf("%d%% · %d%%", pct0, pct1)
+	span := ui.Span{Text: label, Size: 11.5, Weight: 600, Color: e.page.OnScrim, Features: "tnum"}
+	tw, th := p.MeasureText(0, span)
+	pw, ph := tw+14, float32(22)
+	pill := ui.Rect{
+		X: max(bounds.X+d.rect.X, min(lineX-pw/2, bounds.X+d.rect.X+d.rect.W-pw)),
+		Y: topY - tableBarGap - tableBar - ph - 4,
+		W: pw,
+		H: ph,
+	}
+	p.Fill(pill, e.page.Scrim, 6)
+	if snapped {
+		p.Stroke(pill, lineColor.Alpha(0.85), 6, 1)
+	}
+	p.RichText(pill.X+7, pill.Y+(ph-th)/2, 0, span)
 }
 
 // paintBar draws one bar segment at r (local is its page rectangle).
@@ -191,12 +612,18 @@ func (e *Editor) tableControl(d decoration, x, y float32) bool {
 	for i := 0; i < len(d.cols)-1; i++ {
 		if in(columnBar(d, i)) {
 			e.tableSel = tableSelection{id: d.id, index: i, ok: true}
+			if len(d.cols)-1 >= 2 {
+				e.tableColDrag = tableColDrag{id: d.id, from: i, to: i, startX: x, x: x, holding: true}
+			}
 			return true
 		}
 	}
 	for i := 0; i < len(d.rows)-1; i++ {
 		if in(rowBar(d, i)) {
 			e.tableSel = tableSelection{id: d.id, rows: true, index: i, ok: true}
+			if len(d.rows)-1 >= 2 {
+				e.tableDrag = tableRowDrag{id: d.id, from: i, to: i, startY: y, y: y, holding: true}
+			}
 			return true
 		}
 	}

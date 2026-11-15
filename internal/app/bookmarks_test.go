@@ -185,7 +185,7 @@ func TestBookmarkMarkdownFindsBlockByExcerpt(t *testing.T) {
 	}
 	// Read again, the file's blocks have new IDs; the excerpt finds Beta.
 	old := a.state.Bookmarks[0].Block
-	a.open("Welcome.arcmd")
+	a.open("Welcome.md")
 	tt.Frame()
 	if a.residentDoc(a.doc.space.ID, "Plain.md") != nil {
 		t.Fatal("the Markdown document stayed in memory")

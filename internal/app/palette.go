@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
@@ -56,14 +58,84 @@ type action struct {
 	danger bool
 }
 
+type palettePillMatch struct{}
+
 func (a *App) openPalette() {
 	a.palette = palette{open: true}
 	// Other spaces' folders are read again for their documents' names,
 	// and the index takes in what changed since.
-	for id := range a.pageTrees {
-		if active := a.state.ActiveSpace(); active == nil || id != active.ID {
-			delete(a.pageTrees, id)
+	active := a.state.ActiveSpace()
+	post := a.runAsync
+	if post == nil && a.win != nil {
+		post = a.win.Update
+	}
+	if !a.search.async || post == nil {
+		for id := range a.pageTrees {
+			if active == nil || id != active.ID {
+				delete(a.pageTrees, id)
+			}
 		}
+		a.refreshSearch()
+		return
+	}
+	if a.pageTrees == nil {
+		a.pageTrees = map[string]pageTree{}
+	}
+	type spaceJob struct {
+		id       string
+		root     string
+		external bool
+		files    map[string]string
+	}
+	var jobs []spaceJob
+	for _, sp := range a.state.Spaces {
+		if active != nil && sp.ID == active.ID {
+			continue
+		}
+		if _, ok := a.pageTrees[sp.ID]; !ok {
+			// Seed an empty placeholder so frame 0 opens with zero main-thread
+			// directory I/O; the background scan fills it in right after.
+			a.pageTrees[sp.ID] = pageTree{}
+		}
+		jobs = append(jobs, spaceJob{
+			id:       sp.ID,
+			root:     sp.Root,
+			external: sp.IsExternal(),
+			files:    maps.Clone(sp.ExternalFiles),
+		})
+	}
+	if len(jobs) > 0 {
+		go func() {
+			type scanned struct {
+				id    string
+				nodes []*vault.Node
+				err   error
+			}
+			out := make([]scanned, 0, len(jobs))
+			for _, j := range jobs {
+				if j.external {
+					out = append(out, scanned{id: j.id, nodes: vault.Files(j.files).Tree()})
+				} else {
+					nodes, err := vault.Tree(j.root)
+					out = append(out, scanned{id: j.id, nodes: nodes, err: err})
+				}
+			}
+			post(func() {
+				if a.pageTrees == nil {
+					a.pageTrees = map[string]pageTree{}
+				}
+				curActive := a.state.ActiveSpace()
+				for _, res := range out {
+					if curActive != nil && curActive.ID == res.id {
+						continue
+					}
+					if sp := a.state.Get(res.id); sp != nil {
+						arrangeNodes(sp, "", res.nodes)
+						a.pageTrees[res.id] = pageTree{res.nodes, res.err}
+					}
+				}
+			})
+		}()
 	}
 	a.refreshSearch()
 }
@@ -127,19 +199,24 @@ func (a *App) actions() []action {
 		cmd(i18n.T("从分屏中分离"), "", a.separateSplit)
 	}
 	dir := a.currentDir()
-	cmd(i18n.T("新建文档"), a.keyLabel("new-doc"), func() { a.newDoc(dir) })
-	cmd(i18n.T("新建文件夹"), a.keyLabel("new-folder"), func() { a.newFolder(dir) })
-	cmd(i18n.T("今日笔记"), a.keyLabel("daily"), a.openDaily)
+	cmd(i18n.T("打开文件…"), "", a.chooseExternalFiles)
 	cmd(i18n.T("在所有文档中查找和替换…"), a.keyLabel("replace-all"), a.openReplaceAll)
-	for _, t := range a.spaceTemplates(a.state.ActiveSpace()) {
-		cmd(i18n.T("从模板新建：")+t.Name, "", func() { a.newFromTemplate(dir, t) })
+	if !active.IsExternal() {
+		cmd(i18n.T("新建文档"), a.keyLabel("new-doc"), func() { a.newDoc(dir) })
+		cmd(i18n.T("新建文件夹"), a.keyLabel("new-folder"), func() { a.newFolder(dir) })
+		cmd(i18n.T("今日笔记"), a.keyLabel("daily"), a.openDaily)
+		for _, t := range a.spaceTemplates(a.state.ActiveSpace()) {
+			cmd(i18n.T("从模板新建：")+t.Name, "", func() { a.newFromTemplate(dir, t) })
+		}
+		cmd(i18n.T("打开模板文件夹"), "", a.openTemplatesFolder)
 	}
-	cmd(i18n.T("打开模板文件夹"), "", a.openTemplatesFolder)
 	cmd(i18n.T("新建空间…"), "", a.newSpaceForm)
 	if active != nil {
 		cmd(i18n.T("编辑主题颜色…"), "", func() { a.editSpace(active) })
 		cmd(i18n.T("更改空间图标…"), "", func() { a.editSpaceProperty(active, "icon") })
-		cmd(i18n.T("重命名空间…"), "", func() { a.editSpaceProperty(active, "name") })
+		if !active.IsExternal() {
+			cmd(i18n.T("重命名空间…"), "", func() { a.editSpaceProperty(active, "name") })
+		}
 	}
 	cmd(i18n.T("切换侧边栏"), a.keyLabel("sidebar"), a.toggleSidebar)
 	cmd(i18n.T("资料库"), a.keyLabel("library"), a.toggleLibrary)
@@ -172,6 +249,13 @@ func (a *App) actions() []action {
 	}
 	cmd(space, "", func() { a.prefs.AutoSpace = !a.prefs.AutoSpace; a.savePrefs() })
 	cmd(i18n.T("外观设置…"), "", func() { a.openSettings(tabAppearance) })
+	ask := i18n.T("向当前空间提问")
+	if a.qa.open {
+		ask = i18n.T("关闭问答")
+	}
+	cmd(ask, a.keyLabel("ask"), a.toggleQA)
+	cmd(i18n.T("问答：新对话"), "", func() { a.qa.open = true; a.clearQA() })
+	cmd(i18n.T("AI 问答设置…"), "", func() { a.openSettings(tabAI) })
 	cmd(i18n.T("书签…"), a.keyLabel("bookmarks"), a.openBookmarks)
 	cmd(i18n.T("按标签浏览"), "#", func() { a.openPalette(); a.palette.query = "#" })
 	cmd(i18n.T("最近删除…"), "", a.openTrash)
@@ -203,6 +287,9 @@ func (a *App) actions() []action {
 	if a.doc != nil {
 		rel := a.doc.rel
 		sp := a.doc.space
+		if sp.IsExternal() {
+			cmd(i18n.T("从外部空间移除"), "", func() { a.forgetExternal(sp, rel) })
+		}
 		fav := i18n.T("添加到收藏")
 		if a.state.IsFavorite(sp.ID, rel) {
 			fav = i18n.T("从收藏中移除")
@@ -436,22 +523,27 @@ func (a *App) paletteView(c *ui.Context) {
 			ui.Scroll(c.Key("palette-results")).MaxHeight(max(80, winH-190)).MinHeight(0).Children(func() {
 				for i, act := range res {
 					row := ui.Row(c.Key(i)).Gap(10).Padding(7, 12).Radius(7).AlignItems(ui.Center).Cursor(ui.CursorPointer).Label(act.title)
-					if i == p.index {
+					confirming := act.danger && p.confirm == act.title
+					renamingMark := act.bookmark != nil && p.renameOn && sameBookmark(p.renaming, *act.bookmark)
+					if confirming {
+						row.Background(t.Danger.Alpha(0.14))
+					} else if i == p.index && renamingMark {
 						row.Background(t.Accent.Alpha(0.16))
-					} else if row.Hovered() {
+					} else if i != p.index && row.Hovered() {
 						row.Background(t.Text.Alpha(0.06))
 					}
 					if act.faded {
 						row.Opacity(.55)
 					}
-					confirming := act.danger && p.confirm == act.title
-					if confirming {
-						row.Background(t.Danger.Alpha(0.14))
-					}
 					if act.bookmark != nil && a.bookmarkRow(c, row, act) {
 						continue
 					}
 					row.Children(func() {
+						if i == p.index && !confirming {
+							ui.Box(c.Key("sel")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(7).
+								Background(t.Accent.Alpha(0.16)).PassThrough().
+								Transition(ui.ElementTransition{Duration: 90 * time.Millisecond, Ease: ui.EaseOut, Match: palettePillMatch{}})
+						}
 						ui.Text(c, act.kind).FontSize(11).TextColor(t.TextMuted).Width(64).NoWrap()
 						if act.snippet == "" {
 							title := ui.Text(c, act.title).Grow(1).SingleLine().MinWidth(0)

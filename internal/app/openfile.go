@@ -5,13 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 )
 
 // openSystemFile handles file associations and command-line documents. The
-// deepest existing space wins. An external file's folder becomes a space;
+// deepest existing folder space wins. External files share one collection;
 // opening a Markdown file never converts it or copies the user's document.
 func (a *App) openSystemFile(file string) bool {
 	full, err := filepath.Abs(file)
@@ -34,6 +33,9 @@ func (a *App) openSystemFile(file string) bool {
 	var rel string
 	depth := -1
 	for _, sp := range a.state.Spaces {
+		if sp.IsExternal() {
+			continue
+		}
 		root, err := filepath.EvalSymlinks(sp.Root)
 		if err != nil {
 			continue
@@ -47,15 +49,17 @@ func (a *App) openSystemFile(file string) bool {
 		}
 	}
 	if target == nil {
-		root := filepath.Dir(full)
-		name := filepath.Base(root)
-		if name == string(filepath.Separator) || name == "." {
-			name = i18n.T("文档")
+		target, err = a.externalSpace()
+		if err != nil {
+			a.notify("无法打开文件。%v", err)
+			return false
 		}
-		target = a.state.Add(name, root)
-		rel = filepath.Base(full)
+		rel = target.AddExternal(full)
+		delete(a.pageTrees, target.ID)
+		if a.state.ActiveSpace() == target {
+			a.refreshTree()
+		}
 		a.saveState()
-		a.notify("已将文件夹「%s」添加为空间。", name)
 	}
 	if !a.openAnywhere(target.ID, rel) {
 		return false

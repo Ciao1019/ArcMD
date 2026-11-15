@@ -12,13 +12,13 @@ func TestFolderSortByNameAndTime(t *testing.T) {
 	tt.Frame()
 	dir := filepath.Join(root(a), "Journal")
 	base := time.Now().Add(-time.Hour)
-	for i, name := range []string{"b.arcmd", "a.arcmd", "c.arcmd"} {
+	for i, name := range []string{"b.md", "a.md", "c.md"} {
 		p := filepath.Join(dir, name)
-		os.WriteFile(p, []byte(`{"format":"arcmd","version":1,"blocks":[{"id":"x","kind":"paragraph"}]}`), 0o644)
+		os.WriteFile(p, []byte("# x\n"), 0o644)
 		at := base.Add(time.Duration(i) * time.Minute)
 		os.Chtimes(p, at, at)
 	}
-	idea := filepath.Join(dir, "Ideas.arcmd")
+	idea := filepath.Join(dir, "Ideas.md")
 	os.Chtimes(idea, base.Add(-time.Hour), base.Add(-time.Hour))
 	a.refreshTree()
 	names := func() string {

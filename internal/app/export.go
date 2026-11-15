@@ -142,7 +142,12 @@ func (a *App) exportHTML() {
 	d.ed.UnmarkText()
 	doc := d.ed.Committed()
 	page := htmlPage(docName(d.title()), editor.ExportHTML(doc))
-	dir := path.Dir(d.rel)
+	root, nameOnDisk, err := fileLocation(d.space, d.rel)
+	if err != nil {
+		a.notify("导出失败。%v", err)
+		return
+	}
+	dir := path.Dir(nameOnDisk)
 	if dir == "." {
 		dir = ""
 	}
@@ -152,7 +157,7 @@ func (a *App) exportHTML() {
 			name = fmt.Sprintf("%s %d", name, i)
 		}
 		rel := path.Join(dir, name+".html")
-		full, err := vault.Resolve(d.space.Root, rel)
+		full, err := vault.Resolve(root, rel)
 		if err != nil {
 			a.notify("导出失败。%v", err)
 			return

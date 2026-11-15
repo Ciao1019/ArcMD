@@ -108,7 +108,7 @@ func (e *Editor) linkPopover(c *ui.Context, surface ui.Element) {
 			e.linkOpen = false
 			e.RequestFocus = true
 		}
-		ui.Column(c.Key("edit-link")).Absolute().Left(x).Top(y).Width(pw).Padding(12).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).Children(func() {
+		ui.Column(c.Key("edit-link")).Absolute().Left(x).Top(y).Width(pw).Padding(12).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).Transition(popoverTransition).Children(func() {
 			ui.Text(c, i18n.T("编辑链接")).FontSize(13).FontWeight(600)
 			label := ui.TextInput(c.Key("link-label"), &e.linkText).Label(i18n.T("链接文字")).Placeholder(i18n.T("链接文字"))
 			address := ui.TextInput(c.Key("link-address"), &e.linkURL).Label(i18n.T("链接地址")).Placeholder("https://")
@@ -203,7 +203,7 @@ func (e *Editor) wikiPreview(c *ui.Context, surface ui.Element, load func(string
 	x := max(float32(12), min(w-pw-12, b.X+hover.at.X))
 	y := max(float32(12), min(h-240, b.Y+hover.at.Y+hover.at.H+4))
 	ui.Overlay(c, func() {
-		panel := ui.Column(c.Key("wiki-preview")).Absolute().Left(x).Top(y).Width(pw).MaxHeight(230).Padding(14).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).KeepFocus()
+		panel := ui.Column(c.Key("wiki-preview")).Absolute().Left(x).Top(y).Width(pw).MaxHeight(230).Padding(14).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).Transition(popoverTransition).KeepFocus()
 		hover.over = panel.Hovered()
 		panel.Children(func() {
 			p := hover.preview
@@ -226,6 +226,9 @@ func (e *Editor) wikiPreview(c *ui.Context, surface ui.Element, load func(string
 }
 
 func (e *Editor) inlineClick(x, y float32) bool {
+	if e.clickInlineMathPopover(x, y) {
+		return true
+	}
 	// A footnote's return target stays 26 DIP high even with small fonts;
 	// include its overhang before applying the original exact hit tests.
 	for i := range e.rowSpace.between(y-26, y+26) {

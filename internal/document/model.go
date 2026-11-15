@@ -129,6 +129,9 @@ type Document struct {
 	// Goal is how many words the writer means the page to reach, 0 for
 	// none (version 8).
 	Goal int `json:"goal,omitempty"`
+	// Frontmatter holds user YAML frontmatter keys preserved across Markdown
+	// round-trips outside ArcMD's own page metadata.
+	Frontmatter string `json:"frontmatter,omitempty"`
 	// ImportSource preserves the original interchange file for recovery.
 	ImportSource string `json:"importSource,omitempty"`
 }
@@ -454,6 +457,14 @@ func (d *Document) Validate() error {
 			for _, column := range b.Children {
 				if column == nil || column.Kind != "column" {
 					return errors.New("document: invalid column")
+				}
+			}
+			if len(b.Widths) != 0 && len(b.Widths) != len(b.Children) {
+				return errors.New("document: invalid column widths")
+			}
+			for _, width := range b.Widths {
+				if width <= 0 || width > 10000 {
+					return errors.New("document: invalid column width")
 				}
 			}
 		case "column":

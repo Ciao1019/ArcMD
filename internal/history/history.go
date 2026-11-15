@@ -51,6 +51,23 @@ func folder(root, rel string) (string, error) {
 	return filepath.Join(root, filepath.FromSlash(Dir), filepath.FromSlash(rel)), nil
 }
 
+func snapshotStem(name string) (base string, ok bool) {
+	switch {
+	case strings.HasSuffix(name, ".md"):
+		return strings.TrimSuffix(name, ".md"), true
+	case strings.HasSuffix(name, ".arcmd"):
+		return strings.TrimSuffix(name, ".arcmd"), true
+	}
+	return "", false
+}
+
+func snapshotExt(rel string) string {
+	if strings.EqualFold(filepath.Ext(rel), ".arcmd") {
+		return ".arcmd"
+	}
+	return ".md"
+}
+
 // List returns the versions of the document at rel, newest first.
 func List(root, rel string) ([]Version, error) {
 	dir, err := folder(root, rel)
@@ -67,10 +84,10 @@ func List(root, rel string) ([]Version, error) {
 	var out []Version
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".arcmd") {
+		base, ok := snapshotStem(name)
+		if e.IsDir() || !ok {
 			continue
 		}
-		base := strings.TrimSuffix(name, ".arcmd")
 		kept := strings.HasSuffix(base, "~")
 		at, err := time.ParseInLocation(stamp, strings.TrimSuffix(base, "~"), time.Local)
 		if err != nil {
@@ -128,12 +145,13 @@ func Record(root, rel, content string, now time.Time, keep bool) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	name := now.Format(stamp) + ".arcmd"
+	ext := snapshotExt(rel)
+	name := now.Format(stamp) + ext
 	if keep {
-		name = now.Format(stamp) + "~.arcmd"
+		name = now.Format(stamp) + "~" + ext
 	}
 	for _, v := range versions {
-		if strings.TrimSuffix(strings.TrimSuffix(v.File, ".arcmd"), "~") == now.Format(stamp) {
+		if base, ok := snapshotStem(v.File); ok && strings.TrimSuffix(base, "~") == now.Format(stamp) {
 			// Two versions in one millisecond: the later wins.
 			_ = os.Remove(filepath.Join(dir, v.File))
 		}

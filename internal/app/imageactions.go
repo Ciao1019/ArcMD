@@ -82,7 +82,7 @@ func (a *App) pickReplacementImage(d *document, id, expected string) {
 }
 
 func (a *App) revealImage(d *document, src string) {
-	file, err := localImageFile(d.space.Root, d.rel, src)
+	file, err := d.localImage(src)
 	if err != nil {
 		return
 	}
@@ -111,7 +111,7 @@ func (a *App) cropImage(d *document, id, expected string, r image.Rectangle) {
 	if d == nil || d.ed.ReadOnly || d.loadErr != nil || d.source {
 		return
 	}
-	full, err := localImageFile(d.space.Root, d.rel, expected)
+	full, err := d.localImage(expected)
 	if err != nil {
 		a.notify("无法裁剪这张图片。%v", err)
 		return

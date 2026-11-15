@@ -53,6 +53,9 @@ func (a *App) editSpace(s *space.Space) {
 // editSpaceProperty opens the appropriate anchored editor after switching
 // to its space. A failed switch must not edit the space left behind.
 func (a *App) editSpaceProperty(s *space.Space, property string) {
+	if s.IsExternal() && property == "name" {
+		return
+	}
 	a.finishSpaceEdit()
 	if a.state.ActiveSpace() != s {
 		a.switchSpace(s.ID)
@@ -136,7 +139,7 @@ func (a *App) submitSpace() {
 
 // removeSpace takes a space out of ArcMD; its folder stays on disk.
 func (a *App) removeSpace(id string) {
-	if len(a.state.Spaces) < 2 {
+	if id == space.ExternalID || len(a.state.Spaces) < 2 {
 		return
 	}
 	if !a.flush() {

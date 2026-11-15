@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Ciao1019/ArcMD/internal/vault"
 )
 
 // plain treats a file's content as its text, counting reads.
@@ -22,6 +24,22 @@ func (p *plain) extract(name, content string) (Extracted, error) {
 		icon = ""
 	}
 	return Extracted{Text: content, Icon: icon}, nil
+}
+
+func TestExplicitFilesDoNotScanTheirParents(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "chosen.md", "allowed text")
+	write(t, root, "sibling.md", "private text")
+	p := &plain{}
+	files := vault.Files{"chosen.md": filepath.Join(root, "chosen.md")}
+	ix := Refresh(nil, []Root{{Space: "external", Path: root, Files: files}}, p.extract)
+	if ix.Len() != 1 || len(ix.Search("private", nil, 10)) != 0 || len(ix.Search("allowed", nil, 10)) != 1 {
+		t.Fatal("collection included an unopened file")
+	}
+	ix = Refresh(ix, []Root{{Space: "external", Path: root, Files: vault.Files{}}}, p.extract)
+	if ix.Len() != 0 {
+		t.Fatal("empty collection scanned a directory")
+	}
 }
 
 func write(t *testing.T, root, rel, text string) {
@@ -44,7 +62,7 @@ func TestRefreshAndSearch(t *testing.T) {
 	write(t, a, "Bad.arcmd", "calm BROKEN")
 	write(t, b, "Plan.arcmd", "Calm, calm, CALM.")
 	p := &plain{}
-	roots := []Root{{"a", a}, {"b", b}}
+	roots := []Root{{Space: "a", Path: a}, {Space: "b", Path: b}}
 	ix := Refresh(nil, roots, p.extract)
 	if ix.Len() != 3 || p.reads != 4 {
 		t.Fatalf("indexed %d documents with %d reads, want 3 and 4", ix.Len(), p.reads)
@@ -82,7 +100,7 @@ func TestSearchLiveAndLimits(t *testing.T) {
 	a := t.TempDir()
 	write(t, a, "Notes.arcmd", "saved words")
 	p := &plain{}
-	ix := Refresh(nil, []Root{{"a", a}}, p.extract)
+	ix := Refresh(nil, []Root{{Space: "a", Path: a}}, p.extract)
 	live := &Live{Space: "a", Path: "Notes.arcmd", Text: "unsaved words"}
 	if hits := ix.Search("unsaved", live, 10); len(hits) != 1 {
 		t.Errorf("live text not searched: %+v", hits)
@@ -131,7 +149,7 @@ func TestLinksTagsAndIcons(t *testing.T) {
 	write(t, a, "Notes.arcmd", "# Notes\n[[notes]] self #work/2026 #idea")
 	write(t, a, "Other.arcmd", "nothing #Idea")
 	var p plain
-	ix := Refresh(nil, []Root{{"s", a}}, p.extract)
+	ix := Refresh(nil, []Root{{Space: "s", Path: a}}, p.extract)
 	hits := ix.Backlinks("Notes", Live{Space: "s", Path: "Notes.arcmd"}, nil)
 	if len(hits) != 1 || hits[0].Path != "Plan.arcmd" || hits[0].Snippet[hits[0].Match[0]:hits[0].Match[1]] != "[[Notes]]" {
 		t.Fatalf("backlinks = %+v", hits)

@@ -48,8 +48,8 @@ func TestMathReadingAndEditing(t *testing.T) {
 	tt.ClickAt(bounds.X+r.rect.X+r.rect.W/2, bounds.Y+r.rect.Y+r.mathTop+8)
 	tt.Frame()
 	r = e.rows[1]
-	if r.mathHidden || r.mathPanel == 0 || r.mathTop <= mathMargin+r.mathPanel {
-		t.Fatal("click did not reveal the source and separate preview")
+	if r.mathHidden || r.mathPanel == 0 || r.y <= r.rect.Y+r.mathTop {
+		t.Fatal("click did not reveal the unified preview and source card")
 	}
 	e.SetSelection(r.leaf.End, r.leaf.End)
 	tt.Frame()

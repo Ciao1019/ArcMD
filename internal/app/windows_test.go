@@ -28,7 +28,7 @@ func TestDocumentInItsOwnWindow(t *testing.T) {
 		return w
 	}
 	tt.Frame()
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	tt.Frame()
 	a.doc.ed.SetSelection(0, 0)
 	a.doc.ed.ReplaceText(nil, "窗口里")
@@ -53,7 +53,7 @@ func TestDocumentInItsOwnWindow(t *testing.T) {
 		t.Fatal(wt.Texts())
 	}
 	// Opening it from the main window brings its window forward.
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	if made[0].focused != 1 || a.doc == moved || len(made) != 1 {
 		t.Fatal("one file has one editor")
 	}
@@ -61,12 +61,12 @@ func TestDocumentInItsOwnWindow(t *testing.T) {
 	if !made[0].close() || len(a.windows) != 0 {
 		t.Fatal("close")
 	}
-	text, _ := vault.Read(root(a), "Journal/Ideas.arcmd")
+	text, _ := vault.Read(root(a), "Journal/Ideas.md")
 	if !strings.Contains(text, "窗口里") {
 		t.Fatal("saved on close")
 	}
-	a.open("Journal/Ideas.arcmd")
-	if a.doc == nil || a.doc.rel != "Journal/Ideas.arcmd" {
+	a.open("Journal/Ideas.md")
+	if a.doc == nil || a.doc.rel != "Journal/Ideas.md" {
 		t.Fatal("back in the main window")
 	}
 }

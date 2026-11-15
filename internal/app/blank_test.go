@@ -23,7 +23,7 @@ func TestNewDocumentIsNamedByItsTitle(t *testing.T) {
 	a, tt := newTestApp(t)
 	tt.Key(ui.Cmd, ui.KeyN)
 	tt.Frame()
-	if a.doc == nil || a.doc.rel != "未命名.arcmd" {
+	if a.doc == nil || a.doc.rel != "未命名.md" {
 		t.Fatalf("new document %+v", a.doc)
 	}
 	if !tt.Focused("文档") || a.doc.ed.Caret != 0 || !a.doc.ed.Blank() {
@@ -34,15 +34,15 @@ func TestNewDocumentIsNamedByItsTitle(t *testing.T) {
 	}
 	tt.Type("Trip")
 	settle(tt)
-	if a.doc.rel != "Trip.arcmd" || !tt.HasText("Trip") {
-		t.Fatalf("file %q, want Trip.arcmd", a.doc.rel)
+	if a.doc.rel != "Trip.md" || !tt.HasText("Trip") {
+		t.Fatalf("file %q, want Trip.md", a.doc.rel)
 	}
-	if _, err := os.Stat(filepath.Join(root(a), "未命名.arcmd")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root(a), "未命名.md")); !os.IsNotExist(err) {
 		t.Error("the untitled file is still there")
 	}
 	tt.Type(" Plan")
 	settle(tt)
-	if a.doc.rel != "Trip Plan.arcmd" || !tt.Focused("文档") {
+	if a.doc.rel != "Trip Plan.md" || !tt.Focused("文档") {
 		t.Fatalf("file %q after the title grew", a.doc.rel)
 	}
 	// A name given by hand stays, whatever the title becomes.
@@ -52,7 +52,7 @@ func TestNewDocumentIsNamedByItsTitle(t *testing.T) {
 	a.doc.ed.SetSelection(9, 9)
 	tt.Type(" 2026")
 	settle(tt)
-	if a.doc.rel != "Mine.arcmd" {
+	if a.doc.rel != "Mine.md" {
 		t.Errorf("file %q, want the name given by hand", a.doc.rel)
 	}
 }
@@ -65,15 +65,15 @@ func TestTitleNameTakenAndOldDocuments(t *testing.T) {
 	a.doc.ed.SetSelection(0, 0)
 	tt.Type("Hi ")
 	settle(tt)
-	if a.doc.rel != "Welcome.arcmd" {
+	if a.doc.rel != "Welcome.md" {
 		t.Fatalf("an existing document was renamed to %q", a.doc.rel)
 	}
 	tt.Key(ui.Cmd, ui.KeyN)
 	tt.Frame()
 	tt.Type("Welcome")
 	settle(tt)
-	if a.doc.rel != "Welcome 2.arcmd" {
-		t.Errorf("file %q, want Welcome 2.arcmd", a.doc.rel)
+	if a.doc.rel != "Welcome 2.md" {
+		t.Errorf("file %q, want Welcome 2.md", a.doc.rel)
 	}
 	if !isUntitled("未命名") || !isUntitled("未命名 12") || isUntitled("未命名 a") || isUntitled("未命名的") || isUntitled("未命名 ") {
 		t.Error("isUntitled")
@@ -148,7 +148,7 @@ func TestTitleFollowKeepsComposition(t *testing.T) {
 	tt.Type("旅行")
 	tt.Compose("ji", 2)
 	saveSettle(tt)
-	if a.doc.rel != "未命名.arcmd" {
+	if a.doc.rel != "未命名.md" {
 		t.Fatalf("renamed to %q mid-composition", a.doc.rel)
 	}
 	if _, composing := a.doc.ed.MarkedRange(); !composing || !tt.Focused("文档") {
@@ -156,8 +156,8 @@ func TestTitleFollowKeepsComposition(t *testing.T) {
 	}
 	tt.Type("计划")
 	saveSettle(tt)
-	if a.doc.rel != "旅行计划.arcmd" {
-		t.Fatalf("file %q, want 旅行计划.arcmd", a.doc.rel)
+	if a.doc.rel != "旅行计划.md" {
+		t.Fatalf("file %q, want 旅行计划.md", a.doc.rel)
 	}
 	if !tt.Focused("文档") {
 		t.Fatal("the editor lost the focus when the file followed the title")

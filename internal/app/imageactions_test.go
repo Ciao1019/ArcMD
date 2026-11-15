@@ -124,7 +124,7 @@ func TestImageFailureReasonsAndRevealNearest(t *testing.T) {
 func TestReplacementStaysWithOriginalSplitPane(t *testing.T) {
 	a, tt := failedImageApp(t)
 	original := a.doc
-	a.openSplit(original.space, "Welcome.arcmd", false, false)
+	a.openSplit(original.space, "Welcome.md", false, false)
 	if a.split == nil {
 		t.Fatal("split")
 	}

@@ -9,7 +9,6 @@ func (e *Editor) paintDim(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 		return
 	}
 	owner := e.Engine.LeafAt(e.Caret).Owner
-	fill := t.Background.Alpha(.62)
 	for j, h := range e.handles {
 		if h.id == owner {
 			continue
@@ -18,11 +17,20 @@ func (e *Editor) paintDim(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 		if j+1 < len(e.handles) {
 			bottom = e.handles[j+1].top
 		}
-		if bottom < e.Scroll.Y || h.top > e.Scroll.Y+e.viewport {
+		dy := e.ownerVisualDY(h.id)
+		if bottom+dy < e.Scroll.Y || h.top+dy > e.Scroll.Y+e.viewport {
+			continue
+		}
+		glow := float32(0)
+		if !e.reduceMotion && e.motion.dimGlow != nil {
+			glow = e.motion.dimGlow[h.id]
+		}
+		alpha := float32(0.62) * (1 - glow)
+		if alpha <= 0.005 {
 			continue
 		}
 		// Up to the next block, the gap between them included, across the
 		// whole page.
-		p.Fill(ui.Rect{X: bounds.X, Y: bounds.Y + h.top - 4, W: e.width, H: bottom - h.top}, fill, 0)
+		p.Fill(ui.Rect{X: bounds.X, Y: bounds.Y + h.top + dy - 4, W: e.width, H: bottom - h.top}, t.Background.Alpha(alpha), 0)
 	}
 }

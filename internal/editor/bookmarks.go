@@ -43,8 +43,10 @@ type bookmarkState struct {
 	// ghost is the block whose hollow mark the pointer was on last frame.
 	ghost string
 	// reveal is the block RevealBlock asked for, scrolled to once laid out;
+	// quiet skips moving focus/flashing when syncing reading mode scroll;
 	// flash the block lit up since flashAt.
 	reveal  string
+	quiet   bool
 	flash   string
 	flashAt time.Time
 	// renaming is the outline entry whose label is being typed.
@@ -124,7 +126,57 @@ func (e *Editor) RevealBlock(id string) {
 	e.Engine.FocusBlock(id)
 	e.sync()
 	e.bookmarks.reveal = id
+	e.bookmarks.quiet = false
 	e.RequestFocus = true
+}
+
+// ScrollToBlock places the top-level block near the top of the viewport once
+// laid out, without stealing selection or flashing it.
+func (e *Editor) ScrollToBlock(id string) {
+	if id == "" || e.blockByID(id) == nil {
+		return
+	}
+	e.bookmarks.reveal = id
+	e.bookmarks.quiet = true
+}
+
+// ActiveOrTopBlockID returns the top-level block owning the caret when it is
+// currently in view, or else the topmost block visible in the viewport.
+func (e *Editor) ActiveOrTopBlockID() string {
+	owner := e.Engine.LeafAt(e.Caret).Owner
+	if len(e.handles) == 0 {
+		if owner != "" {
+			return owner
+		}
+		if len(e.Doc.Blocks) > 0 {
+			return e.Doc.Blocks[0].ID
+		}
+		return ""
+	}
+	viewY := e.Scroll.Y
+	if e.scrollGlide.active {
+		viewY = e.scrollGlide.to
+	}
+	if owner != "" && e.Caret > 0 && viewY == 0 {
+		return owner
+	}
+	if owner != "" && e.viewport > 0 {
+		if span, ok := e.blockSpan(owner); ok {
+			if span.Y+span.H >= viewY-32 && span.Y <= viewY+e.viewport+32 {
+				return owner
+			}
+		}
+	}
+	for j, h := range e.handles {
+		bottom := e.contentEnd
+		if j+1 < len(e.handles) {
+			bottom = e.handles[j+1].top
+		}
+		if bottom >= viewY+16 {
+			return h.id
+		}
+	}
+	return e.handles[len(e.handles)-1].id
 }
 
 // revealPending scrolls to the block RevealBlock asked for, once the page
@@ -134,10 +186,16 @@ func (e *Editor) revealPending(c *ui.Context) {
 	if b.reveal == "" {
 		return
 	}
-	id := b.reveal
-	b.reveal = ""
+	id, quiet := b.reveal, b.quiet
+	b.reveal, b.quiet = "", false
 	for _, h := range e.handles {
 		if h.id == id {
+			if quiet {
+				e.scrollGlide = scrollGlideState{}
+				e.Scroll.Y = max(0, h.top-48)
+				c.After(0)
+				return
+			}
 			e.jumpTo(c, id, h.top)
 			b.flash, b.flashAt = id, c.Now()
 			c.After(0)
@@ -162,12 +220,23 @@ func (e *Editor) blockSpan(id string) (ui.Rect, bool) {
 	return ui.Rect{}, false
 }
 
+func (e *Editor) flashBlock(id string) {
+	if id == "" {
+		return
+	}
+	e.bookmarks.flash = id
+	e.bookmarks.flashAt = time.Time{}
+}
+
 // paintFlash lights up the block just revealed, as a find match is lit,
 // then lets it fade.
 func (e *Editor) paintFlash(p *ui.Painter, bounds ui.Rect) {
 	b := &e.bookmarks
 	if b.flash == "" {
 		return
+	}
+	if b.flashAt.IsZero() {
+		b.flashAt = p.Now()
 	}
 	since := p.Now().Sub(b.flashAt)
 	if since >= flashHold+flashFade {
@@ -184,7 +253,7 @@ func (e *Editor) paintFlash(p *ui.Painter, bounds ui.Rect) {
 	}
 	color := e.page.FindMatch
 	r.X += bounds.X
-	r.Y += bounds.Y
+	r.Y += bounds.Y + e.ownerVisualDY(b.flash)
 	p.Fill(r, color.Alpha(float32(color.A)/255*k*.7), 6)
 	p.After(0)
 }

@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	model "github.com/Ciao1019/ArcMD/internal/document"
+	docpkg "github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -33,16 +34,16 @@ func TestEditorIMEAutosaveAndModeHistory(t *testing.T) {
 	tt.Type("中文")
 	tt.Frame()
 	tt.Advance(autosaveDelay + time.Millisecond)
-	if a.doc.rel != "Note.arcmd" {
-		t.Fatal("import did not migrate", a.doc.rel)
+	if a.doc.rel != "Note.md" {
+		t.Fatal("Markdown file changed path", a.doc.rel)
 	}
-	stored, _ := vault.Read(root(a), "Note.arcmd")
-	native, err := model.Decode(stored)
-	if err != nil || !strings.HasSuffix(native.PlainText(), "中文") {
-		t.Fatal("native commit failed", err)
+	if _, err := os.Stat(filepath.Join(root(a), "Note.arcmd")); !os.IsNotExist(err) {
+		t.Fatal("saving Markdown created a duplicate .arcmd file")
 	}
-	if original, _ := vault.Read(root(a), "Note.md"); original != source {
-		t.Fatal("migration changed original")
+	stored, _ := vault.Read(root(a), "Note.md")
+	parsed := editor.ImportMarkdown(stored)
+	if !strings.HasSuffix(parsed.PlainText(), "中文") {
+		t.Fatalf("in-place Markdown commit failed: %q", stored)
 	}
 
 	ed := a.doc.ed
@@ -151,7 +152,7 @@ func TestInvalidNativeDocumentCannotOverwriteFile(t *testing.T) {
 		t.Fatal("future format overwritten")
 	}
 }
-func TestMigrationCollisionAndExport(t *testing.T) {
+func TestMarkdownSavesInPlaceAndExports(t *testing.T) {
 	a, tt := newTestApp(t)
 	const original = "# Original\n\nText\n"
 	if err := vault.Write(root(a), "Import.md", original); err != nil {
@@ -162,16 +163,19 @@ func TestMigrationCollisionAndExport(t *testing.T) {
 	}
 	a.open("Import.md")
 	a.doc.ed.ReplaceText(nil, "Hello ")
-	if !a.flush() || a.doc.rel != "Import 2.arcmd" {
-		t.Fatal("migration collision")
+	if !a.flush() || a.doc.rel != "Import.md" {
+		t.Fatal("in-place save failed", a.doc.rel)
 	}
 	a.exportMarkdown()
 	tt.Frame()
-	if got, _ := vault.Read(root(a), "Import.md"); got != original {
-		t.Fatal("overwrote import")
+	if got, _ := vault.Read(root(a), "Import.md"); !strings.Contains(got, "Hello Original") {
+		t.Fatalf("did not save Markdown in place: %q", got)
 	}
 	if got, _ := vault.Read(root(a), "Import.arcmd"); got != "occupied" {
 		t.Fatal("overwrote neighbor")
+	}
+	if _, err := os.Stat(filepath.Join(root(a), "Import Export.md")); err != nil {
+		t.Fatal("export missing", err)
 	}
 	encoded, _ := vault.Read(root(a), a.doc.rel)
 	restored := openDocument(a.doc.space, a.doc.rel, encoded, false)
@@ -190,7 +194,7 @@ func TestSwitchDrawsTextInFirstFrame(t *testing.T) {
 	for range 3 {
 		tt.Frame()
 	}
-	a.open("Journal/Ideas.arcmd")
+	a.open("Journal/Ideas.md")
 	tt.Frame()
 	img := tt.Image()
 	b := img.Bounds()
@@ -207,5 +211,137 @@ func TestSwitchDrawsTextInFirstFrame(t *testing.T) {
 	}
 	if dark < 50 {
 		t.Fatalf("the first frame drew no text (%d dark pixels)", dark)
+	}
+}
+
+func TestRealtimeInPlaceMarkdownPreservesCustomStylesAndLegacyArcmd(t *testing.T) {
+	a, tt := newTestApp(t)
+	const initial = "---\ntags: [design]\n---\n\n# Styled\n\nPlain body.\n"
+	if err := vault.Write(root(a), "Styled.md", initial); err != nil {
+		t.Fatal(err)
+	}
+	a.open("Styled.md")
+	tt.Frame()
+
+	// Apply custom ArcMD page metadata, inline styles/annotations, callout, table, and columns.
+	a.doc.ed.Engine.SetPageIcon("🎨")
+	a.doc.ed.Engine.SetCover(".assets/banner.png")
+	a.doc.ed.Engine.SetCoverY(0.42)
+	a.doc.ed.Engine.SetGoal(1200)
+
+	styledPara := docpkg.NewBlock("paragraph", "")
+	styledPara.Runs = []docpkg.Run{
+		{Text: "Color ", Style: docpkg.Style{Color: "red", Bold: true}},
+		{Text: "drawn", Style: docpkg.Style{Highlight: "light-yellow", Annotation: "circle", AnnotationColor: "purple"}},
+		{Text: " link [[Ideas]] #roadmap"},
+	}
+	callout := docpkg.NewBlock("callout", "Custom callout")
+	callout.Color = "green"
+	callout.Emoji = "🌱"
+
+	table := docpkg.Table(2, 2)
+	table.Widths = []float32{220, 180}
+	table.Children[0].Children[0].Runs = []docpkg.Run{{Text: "Merged header", Style: docpkg.Style{Bold: true}}}
+	table.Children[0].Children[0].ColSpan = 2
+	table.Children[0].Children[0].Background = "light-blue"
+	table.Children[1].Children[0].Runs = []docpkg.Run{{Text: "A"}}
+	table.Children[1].Children[1].Runs = []docpkg.Run{{Text: "B"}}
+
+	cols := docpkg.Columns()
+	cols.Children[0].Children = []*docpkg.Block{docpkg.NewBlock("paragraph", "Left col")}
+	cols.Children[1].Children = []*docpkg.Block{docpkg.NewBlock("paragraph", "Right col")}
+
+	next := a.doc.ed.Doc.Clone()
+	next.Blocks = []*docpkg.Block{next.Blocks[0], styledPara, callout, table, cols}
+	a.doc.ed.Engine.ReplaceDocument(next)
+	tt.Frame()
+	tt.Advance(autosaveDelay + time.Millisecond)
+
+	if a.doc.rel != "Styled.md" {
+		t.Fatalf("expected Styled.md in place, got %q", a.doc.rel)
+	}
+	if _, err := os.Stat(filepath.Join(root(a), "Styled.arcmd")); !os.IsNotExist(err) {
+		t.Fatal("editing Styled.md spawned Styled.arcmd")
+	}
+	diskMD, err := vault.Read(root(a), "Styled.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"tags: [design]", "[[Ideas]]", "#roadmap"} {
+		if !strings.Contains(diskMD, want) {
+			t.Fatalf("missing %q in saved Styled.md:\n%s", want, diskMD)
+		}
+	}
+
+	reopened := openDocument(a.doc.space, "Styled.md", diskMD, false)
+	if reopened.loadErr != nil {
+		t.Fatal(reopened.loadErr)
+	}
+	rdoc := reopened.ed.Doc
+	if rdoc.Icon != "🎨" || rdoc.Cover != ".assets/banner.png" || rdoc.Goal != 1200 {
+		t.Fatalf("page metadata lost: icon=%q cover=%q goal=%d", rdoc.Icon, rdoc.Cover, rdoc.Goal)
+	}
+	if len(rdoc.Blocks) < 5 {
+		t.Fatalf("expected 5 blocks on reload, got %d", len(rdoc.Blocks))
+	}
+	if rdoc.Blocks[1].Runs[0].Style.Color != "red" || rdoc.Blocks[1].Runs[1].Style.Annotation != "circle" || rdoc.Blocks[1].Runs[1].Style.AnnotationColor != "purple" {
+		t.Fatalf("inline custom styles lost: %+v", rdoc.Blocks[1].Runs)
+	}
+	if rdoc.Blocks[2].Kind != "callout" || rdoc.Blocks[2].Color != "green" || rdoc.Blocks[2].Emoji != "🌱" {
+		t.Fatalf("callout lost: %+v", rdoc.Blocks[2])
+	}
+	if rdoc.Blocks[3].Kind != "table" || rdoc.Blocks[3].Children[0].Children[0].ColSpan != 2 || rdoc.Blocks[3].Children[0].Children[0].Background != "light-blue" {
+		t.Fatalf("table metadata lost: %+v", rdoc.Blocks[3].Children[0].Children[0])
+	}
+	if rdoc.Blocks[4].Kind != "columns" || len(rdoc.Blocks[4].Children) != 2 {
+		t.Fatalf("columns lost: %+v", rdoc.Blocks[4])
+	}
+
+	// External .md file edits also autosave directly in place without creating .arcmd.
+	extDir := t.TempDir()
+	extPath := filepath.Join(extDir, "Outside.md")
+	if err := os.WriteFile(extPath, []byte("# Outside\n\nHello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.openSystemFile(extPath)
+	tt.Frame()
+	a.doc.ed.SetSelection(a.doc.ed.Len(), a.doc.ed.Len())
+	a.doc.ed.ReplaceText(nil, " world")
+	tt.Frame()
+	tt.Advance(autosaveDelay + time.Millisecond)
+	if _, err := os.Stat(filepath.Join(extDir, "Outside.arcmd")); !os.IsNotExist(err) {
+		t.Fatal("external .md created Outside.arcmd")
+	}
+	extSaved, err := os.ReadFile(extPath)
+	if err != nil || !strings.Contains(string(extSaved), "Hello world") {
+		t.Fatalf("external .md not updated in place: %q (%v)", string(extSaved), err)
+	}
+
+	// Legacy .arcmd files remain readable and editable in place.
+	a.switchSpace(a.state.Spaces[0].ID)
+	legacyDoc := editor.ImportMarkdown("# Legacy\n\nStill works.\n")
+	legacyEncoded, err := legacyDoc.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(root(a), "Legacy.arcmd", legacyEncoded); err != nil {
+		t.Fatal(err)
+	}
+	a.open("Legacy.arcmd")
+	tt.Frame()
+	if a.doc.loadErr != nil {
+		t.Fatalf("legacy .arcmd failed to open: %v", a.doc.loadErr)
+	}
+	a.doc.ed.SetSelection(a.doc.ed.Len(), a.doc.ed.Len())
+	a.doc.ed.ReplaceText(nil, " Updated!")
+	tt.Frame()
+	tt.Advance(autosaveDelay + time.Millisecond)
+	legacySaved, err := vault.Read(root(a), "Legacy.arcmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedLegacy, err := docpkg.Decode(legacySaved)
+	if err != nil || !strings.Contains(decodedLegacy.PlainText(), "Still works. Updated!") {
+		t.Fatalf("legacy .arcmd round-trip failed: %v", err)
 	}
 }

@@ -44,6 +44,9 @@ type Space struct {
 	Theme *Theme `json:"theme,omitempty"`
 	// Root is the absolute path of the folder holding the space's files.
 	Root string `json:"root"`
+	// ExternalFiles maps the built-in external space's local names to the
+	// explicitly opened absolute files. Root holds only private metadata.
+	ExternalFiles map[string]string `json:"externalFiles,omitempty"`
 	// Pinned is what version 3 kept of the space's pinned documents; Load
 	// moves it to State.Favorites, which every space shows.
 	Pinned []string `json:"pinned,omitempty"`
@@ -401,8 +404,10 @@ type State struct {
 // Version 6 added Space.Pins, what is pinned at the top of a space's list,
 // and Space.PinsCollapsed. Version 7 added State.Bookmarks, the places
 // marked in documents; older states have none. Version 8 added
-// Space.Sort, folders sorted by name or time.
-const CurrentVersion = 8
+// Space.Sort, folders sorted by name or time. Version 9 adds the built-in
+// external space and its explicit ExternalFiles collection; older states
+// acquire it on the first external open.
+const CurrentVersion = 9
 
 // ErrNotFound reports a space ID the state does not have.
 var ErrNotFound = errors.New("space: not found")
@@ -460,6 +465,9 @@ func (st *State) Add(name, root string) *Space {
 // Remove deletes the space with the ID from the state; its folder stays on
 // disk. When it was active, the space before it becomes active.
 func (st *State) Remove(id string) error {
+	if id == ExternalID {
+		return ErrBuiltIn
+	}
 	i := slices.IndexFunc(st.Spaces, func(s *Space) bool { return s.ID == id })
 	if i < 0 {
 		return ErrNotFound

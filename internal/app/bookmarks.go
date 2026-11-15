@@ -221,7 +221,8 @@ func (a *App) reservedKeys() []editor.Combo {
 	for _, id := range bookmarkKeys {
 		out = append(out, a.combos(id)...)
 	}
-	return out
+	// The question panel opens over whatever has the focus.
+	return append(out, a.combos("ask")...)
 }
 
 // sameBookmark reports whether two bookmarks are the same one, though its

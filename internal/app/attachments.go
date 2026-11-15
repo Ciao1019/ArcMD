@@ -169,7 +169,7 @@ func (a *App) placeImages(blocks []*model.Block, at int) {
 			}
 		})
 	}
-	ed.RequestFocus = true
+	ed.FocusInsertedImage(blocks[len(blocks)-1].ID)
 }
 
 // copyAsset copies the file at src into the folder assets beside the
@@ -188,7 +188,13 @@ func (a *App) copyAsset(dir, src string) (string, []byte, error) {
 // dir as a new file named for name, numbered when the name is taken, and
 // returns its URL from them. It never replaces a file.
 func (a *App) writeAsset(dir, name string, data []byte) (string, error) {
-	root := a.doc.space.Root
+	root, nameOnDisk, err := fileLocation(a.doc.space, a.doc.rel)
+	if err != nil {
+		return "", err
+	}
+	if a.doc.space.IsExternal() {
+		dir = path.Dir(nameOnDisk)
+	}
 	base := assetName(name)
 	ext := path.Ext(base)
 	stem := strings.TrimSuffix(base, ext)

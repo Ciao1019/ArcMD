@@ -127,10 +127,6 @@ func (a *App) replaceEverywhere() {
 		if sp == nil {
 			continue
 		}
-		if vault.IsMarkdown(h.Path) {
-			skipped++
-			continue
-		}
 		n := 0
 		change := func(s string) string {
 			out, k := replaceFold(s, find, r.with)
@@ -148,7 +144,7 @@ func (a *App) replaceEverywhere() {
 			}
 			continue
 		}
-		before, err := vault.Read(sp.Root, h.Path)
+		before, err := readFile(sp, h.Path)
 		if err != nil {
 			failed++
 			continue
@@ -162,14 +158,14 @@ func (a *App) replaceEverywhere() {
 			a.notify("替换 %s 失败。%v", h.Path, err)
 			continue
 		}
-		after, _ := vault.Read(sp.Root, d.rel)
+		after, _ := readFile(sp, d.rel)
 		files = append(files, replacedFile{sp.ID, d.rel, before, after})
 		count, docs = count+n, docs+1
 	}
 	a.refreshSearch()
 	note := ""
 	if skipped > 0 {
-		note = fmt.Sprintf(i18n.T("，跳过 %d 篇（Markdown 或只读）"), skipped)
+		note = fmt.Sprintf(i18n.T("，跳过 %d 篇只读文档"), skipped)
 	}
 	if failed > 0 {
 		note += fmt.Sprintf(i18n.T("，%d 篇失败"), failed)
@@ -198,12 +194,12 @@ func (a *App) undoReplace(files []replacedFile, edited []*document) {
 			kept++
 			continue
 		}
-		now, err := vault.Read(sp.Root, f.rel)
+		now, err := readFile(sp, f.rel)
 		if err != nil || now != f.after {
 			kept++ // changed since: leave it
 			continue
 		}
-		if err := vault.Write(sp.Root, f.rel, f.before); err != nil {
+		if err := writeFile(sp, f.rel, f.before); err != nil {
 			kept++
 		}
 	}
@@ -294,9 +290,6 @@ func (a *App) replaceRow(c *ui.Context, hit search.Hit) {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, docName(vault.Title(hit.Path))).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
 				ui.Text(c, placeHint(sp, hit.Path)).FontSize(12).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
-				if vault.IsMarkdown(hit.Path) {
-					ui.Text(c, i18n.T("Markdown · 不替换")).FontSize(11).TextColor(t.Warning).NoWrap()
-				}
 			})
 			ui.RichText(c,
 				ui.Span{Text: hit.Snippet[:hit.Match[0]]},

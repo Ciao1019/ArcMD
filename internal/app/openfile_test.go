@@ -10,10 +10,10 @@ func TestSystemOpenUsesDeepestSpace(t *testing.T) {
 	a, _ := newTestApp(t)
 	nested := a.state.Add("Journal", filepath.Join(root(a), "Journal"))
 	count := len(a.state.Spaces)
-	if !a.openSystemFile(filepath.Join(nested.Root, "Ideas.arcmd")) {
+	if !a.openSystemFile(filepath.Join(nested.Root, "Ideas.md")) {
 		t.Fatal("open")
 	}
-	if a.doc.space != nested || a.doc.rel != "Ideas.arcmd" || len(a.state.Spaces) != count {
+	if a.doc.space != nested || a.doc.rel != "Ideas.md" || len(a.state.Spaces) != count {
 		t.Fatal("wrong space")
 	}
 }

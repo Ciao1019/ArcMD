@@ -2,11 +2,13 @@ package editor
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
@@ -22,16 +24,64 @@ const (
 	ImageRemote
 )
 
-// ImageResource is a decoded picture or the reason it could not be loaded.
-// Local means the host can reveal its file or the nearest existing folder.
+// ImageResource is a decoded picture, a picture whose header dimensions are
+// already known while its pixels decode in the background, or the reason it
+// could not be loaded. Local means the host can reveal its file or the nearest
+// existing folder.
 type ImageResource struct {
-	Bitmap  *ui.Bitmap
-	Problem ImageProblem
-	Local   bool
+	Bitmap        *ui.Bitmap
+	Width, Height int
+	Loading       bool
+	LoadedAt      time.Time
+	Problem       ImageProblem
+	Local         bool
 	// Frames and Delays animate a GIF: Bitmap is its first frame, which
 	// prints, and shows when the system reduces motion.
 	Frames []*ui.Bitmap
 	Delays []time.Duration
+}
+
+// InvalidateImage drops a cached image entry (such as a placeholder whose
+// background decode just finished) so the next frame picks up the new resource.
+func (e *Editor) InvalidateImage(src string) {
+	if e.images != nil {
+		delete(e.images, src)
+	}
+	e.ready = false
+}
+
+type imageEnterState struct {
+	id      string
+	start   time.Time
+	pending bool
+}
+
+// FocusInsertedImage focuses a freshly inserted picture's caption line (with
+// its default filename alt selected so typing immediately writes a caption)
+// and triggers its Polaroid-to-page spring expansion.
+func (e *Editor) FocusInsertedImage(id string) {
+	e.sync()
+	leaf, ok := e.Engine.LeafByID(id)
+	if !ok {
+		e.RequestFocus = true
+		return
+	}
+	e.SetSelection(leaf.Start, leaf.End)
+	e.imageCaptionID = id
+	e.imageEnter = imageEnterState{id: id, pending: true}
+	e.ready = false
+	e.RequestFocus = true
+	e.reveal = true
+}
+
+func (e *Editor) captionVisible(b *document.Block) bool {
+	if e.printing || b == nil {
+		return false
+	}
+	if e.imageCaptionID == b.ID {
+		return true
+	}
+	return e.captionedImages[b.ID] && strings.TrimSpace(b.Text()) != ""
 }
 
 // frameAt is the frame of an animated picture at now, and how long until
@@ -78,6 +128,11 @@ type imageViewer struct {
 	open, actual bool
 	zoom         float32
 	pan          ui.Point
+	shownScale   float32
+	shownPan     ui.Point
+	zoomAtTime   time.Time
+	openedAt     time.Time
+	origin       ui.Rect
 	name         string
 	bitmap       *ui.Bitmap
 	scroll       ui.ScrollState
@@ -129,7 +184,7 @@ func (p ImageProblem) text() string {
 }
 
 func (e *Editor) imageResource(src string, o Options) ImageResource {
-	if resource, ok := e.images[src]; ok {
+	if resource, ok := e.images[src]; ok && !resource.Loading {
 		return resource
 	}
 	resource := ImageResource{}
@@ -145,8 +200,13 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 	f := &imageFigure{resource: e.imageResource(b.URL, o), name: imageName(b.URL)}
 	r.picture = f
 	x, y, w := r.rect.X, r.rect.Y+16, r.rect.W
+	iw, ih := 0, 0
 	if bitmap := f.resource.Bitmap; bitmap != nil {
-		iw, ih := bitmap.Size()
+		iw, ih = bitmap.Size()
+	} else if f.resource.Loading && f.resource.Width > 0 && f.resource.Height > 0 {
+		iw, ih = f.resource.Width, f.resource.Height
+	}
+	if iw > 0 && ih > 0 {
 		scale := min(float32(1), w/float32(max(1, iw)))
 		preferred := b.ImageWidth
 		if e.imageResize.id == b.ID {
@@ -164,11 +224,18 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 		f.bounds = ui.Rect{X: x + (w-pw)/2, Y: y, W: pw, H: ph}
 		r.x, r.y = x, y+ph+8
 		bottom := y + ph
-		if !e.printing && e.imageCaptionID == b.ID {
+		if e.captionVisible(b) {
 			_, h := r.layout.Size()
-			bottom = r.y + h
+			bottom = r.y + max(20, h)
 		}
 		r.rect.H = bottom - r.rect.Y + 18
+		return r.rect.H
+	}
+	if f.resource.Loading {
+		ph := min(float32(220), max(96, w*0.42))
+		f.bounds = ui.Rect{X: x, Y: y, W: w, H: ph}
+		r.x, r.y = x, y+ph+8
+		r.rect.H = y + ph - r.rect.Y + 18
 		return r.rect.H
 	}
 	title := i18n.T("无法显示图片：") + f.name
@@ -231,12 +298,12 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 	}
 	f.bounds.H = cursor + 10
 	r.x, r.y = f.bounds.X+14, y+f.altY
-	if e.imageCaptionID == b.ID && !e.printing {
+	if e.captionVisible(b) {
 		// Captions are editable through the block's text input. Keep the
 		// editing line outside the recovery card and its action targets.
 		r.x, r.y = x, y+f.bounds.H+8
 		_, h := r.layout.Size()
-		r.rect.H = r.y + h - r.rect.Y + 18
+		r.rect.H = r.y + max(20, h) - r.rect.Y + 18
 	} else {
 		r.rect.H = y + f.bounds.H - r.rect.Y + 18
 	}
@@ -245,33 +312,138 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 
 func (e *Editor) paintImage(p *ui.Painter, bounds ui.Rect, row row, t *ui.Theme) {
 	f := row.picture
+	dx, dy := e.visualOffset(row)
 	r := f.bounds
-	r.X, r.Y = r.X+bounds.X, r.Y+bounds.Y
-	if f.resource.Bitmap != nil {
-		bitmap := f.resource.Bitmap
-		if !e.printing && !e.reduceMotion && r.Y+r.H > bounds.Y+e.Scroll.Y && r.Y < bounds.Y+e.Scroll.Y+e.viewport {
-			// An animated GIF in view plays.
-			frame, next := f.resource.frameAt(p.Now())
-			if next > 0 {
-				bitmap = frame
-				p.After(next)
+	r.X, r.Y = r.X+bounds.X+dx, r.Y+bounds.Y+dy
+
+	drawBody := func() {
+		if f.resource.Bitmap != nil {
+			bitmap := f.resource.Bitmap
+			if !e.printing && !e.reduceMotion && r.Y+r.H > bounds.Y+e.Scroll.Y && r.Y < bounds.Y+e.Scroll.Y+e.viewport {
+				// An animated GIF in view plays.
+				frame, next := f.resource.frameAt(p.Now())
+				if next > 0 {
+					bitmap = frame
+					p.After(next)
+				}
 			}
+			p.Shadow(r, 8, 0, 2, 10, 0, e.page.ImageShadow)
+			p.Clip(r, 8, func() {
+				p.Image(bitmap, r, ui.Contain)
+				if !e.printing && !e.reduceMotion && !f.resource.LoadedAt.IsZero() {
+					const fadeDur = 120 * time.Millisecond
+					if elapsed := p.Now().Sub(f.resource.LoadedAt); elapsed >= 0 && elapsed < fadeDur {
+						u := float32(elapsed) / float32(fadeDur)
+						veil := (1 - u) * (1 - u)
+						p.Fill(r, t.Background.Alpha(veil), 0)
+						p.AnimationFrame()
+					}
+				}
+			})
+			if !e.printing && e.imageResize.id == row.leaf.Block.ID && row.rect.W > 0 {
+				pct := max(1, min(100, int(math.Round(float64(f.bounds.W/row.rect.W*100)))))
+				txt := ui.ShapeText(fmt.Sprintf("%d%%", pct), ui.Font{Family: "system-ui", Size: 12, Weight: 600}, 0)
+				tw, th := txt.Size()
+				pill := ui.Rect{X: r.X + (r.W-tw-20)/2, Y: r.Y + 10, W: tw + 20, H: max(24, th+8)}
+				p.Fill(pill, e.page.Scrim.Alpha(0.75), pill.H/2)
+				p.TextLayout(txt, pill.X+10, pill.Y+(pill.H-th)/2, e.page.OnScrim)
+			}
+		} else if f.resource.Loading {
+			p.Fill(r, e.page.CodeFill, 8)
+			p.Stroke(r, e.page.CodeBorder, 8, 1)
+			ic := min(float32(20), min(r.W, r.H)/2)
+			if ic >= 12 {
+				p.Icon(iconImage, ui.Rect{X: r.X + (r.W-ic)/2, Y: r.Y + (r.H-ic)/2, W: ic, H: ic}, e.page.Placeholder)
+			}
+		} else {
+			p.StrokeDashed(r, e.page.Caption, 8, 1)
+			p.Icon(iconImage, ui.Rect{X: r.X + 14, Y: r.Y + 12, W: 16, H: 16}, e.page.Caption)
+			p.TextLayout(f.title, r.X+36, r.Y+10, t.Text)
+			if f.alt != nil {
+				p.TextLayout(f.alt, r.X+14, r.Y+f.altY, e.page.Caption)
+			}
+			p.TextLayout(f.reason, r.X+14, r.Y+f.reasonY, e.page.Caption)
 		}
-		p.Shadow(r, 8, 0, 2, 10, 0, e.page.ImageShadow)
-		p.Clip(r, 8, func() { p.Image(bitmap, r, ui.Contain) })
+		selection := e.Selection().Range
+		if !e.printing && e.focused && (selection.Start == selection.End && e.Engine.LeafAt(e.Caret).Block.ID == row.leaf.Block.ID || selection.End > row.leaf.Start && selection.Start <= row.leaf.End) {
+			p.Stroke(ui.Rect{X: r.X - 3, Y: r.Y - 3, W: r.W + 6, H: r.H + 6}, t.Accent, 10, 2)
+		}
+	}
+
+	if !e.printing && !e.reduceMotion && e.imageEnter.id == row.leaf.Block.ID {
+		if e.imageEnter.pending {
+			e.imageEnter.start = p.Now()
+			e.imageEnter.pending = false
+		}
+		const dur = 220 * time.Millisecond
+		elapsed := p.Now().Sub(e.imageEnter.start)
+		if elapsed >= 0 && elapsed < dur {
+			u := float32(elapsed) / float32(dur)
+			inv := 1 - u
+			ease := 1 - inv*inv*inv
+			scale := 0.82 + 0.18*ease
+			deg := -4.0 * (1 - ease)
+			cx, cy := r.X+r.W/2, r.Y+r.H/2
+			p.Transform(ui.Rotation(deg).Then(ui.Scaling(scale, scale)), cx, cy, drawBody)
+			p.AnimationFrame()
+		} else {
+			e.imageEnter = imageEnterState{}
+			drawBody()
+		}
 	} else {
-		p.StrokeDashed(r, e.page.Caption, 8, 1)
-		p.Icon(iconImage, ui.Rect{X: r.X + 14, Y: r.Y + 12, W: 16, H: 16}, e.page.Caption)
-		p.TextLayout(f.title, r.X+36, r.Y+10, t.Text)
-		if f.alt != nil {
-			p.TextLayout(f.alt, r.X+14, r.Y+f.altY, e.page.Caption)
+		if e.imageEnter.id == row.leaf.Block.ID && e.reduceMotion {
+			e.imageEnter = imageEnterState{}
 		}
-		p.TextLayout(f.reason, r.X+14, r.Y+f.reasonY, e.page.Caption)
+		drawBody()
 	}
-	selection := e.Selection().Range
-	if !e.printing && e.focused && (selection.Start == selection.End && e.Engine.LeafAt(e.Caret).Block.ID == row.leaf.Block.ID || selection.End > row.leaf.Start && selection.Start <= row.leaf.End) {
-		p.Stroke(ui.Rect{X: r.X - 3, Y: r.Y - 3, W: r.W + 6, H: r.H + 6}, t.Accent, 10, 2)
+
+	if !e.printing && e.imageCaptionID == row.leaf.Block.ID && row.leaf.Block.Text() == "" {
+		ph := ui.ShapeText(i18n.T("添加图片说明…"), ui.Font{Family: "system-ui", Size: 13}, 0)
+		pw, _ := ph.Size()
+		p.TextLayout(ph, bounds.X+row.rect.X+dx+(row.rect.W-pw)/2, bounds.Y+row.y+dy, e.page.Placeholder)
 	}
+}
+
+// paintFileDropPreview draws the dashed drop slot and a tilted Polaroid card
+// beside the pointer while files are dragged over the document.
+func (e *Editor) paintFileDropPreview(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
+	if e.printing || e.fileOver < 0 {
+		return
+	}
+	y := bounds.Y + e.fileOver - 4
+	slot := ui.Rect{X: bounds.X + e.padding, Y: y - 14, W: max(48, e.width-2*e.padding), H: 28}
+	p.Fill(slot, t.Accent.Alpha(0.06), 7)
+	p.StrokeDashed(slot, t.Accent.Alpha(0.65), 7, 1.25)
+	hint := ui.ShapeText(i18n.T("松手插入图片"), ui.Font{Family: "system-ui", Size: 12, Weight: 500}, 0)
+	hw, hh := hint.Size()
+	if slot.W > hw+16 {
+		p.TextLayout(hint, slot.X+(slot.W-hw)/2, slot.Y+(slot.H-hh)/2, t.Accent.Alpha(0.85))
+	}
+
+	if !e.pointerInside {
+		return
+	}
+	card := ui.Rect{
+		X: bounds.X + e.pointer.X + 14,
+		Y: bounds.Y + e.pointer.Y - 46,
+		W: 96,
+		H: 78,
+	}
+	deg := float32(-4.5)
+	if e.reduceMotion {
+		deg = 0
+	}
+	cx, cy := card.X+card.W/2, card.Y+card.H/2
+	p.Transform(ui.Rotation(deg), cx, cy, func() {
+		p.Shadow(card, 8, 0, 6, 18, 0, e.page.MathShadow)
+		p.Fill(card, e.page.Popover, 8)
+		p.Stroke(card, e.page.MathBorder, 8, 1)
+		photo := ui.Rect{X: card.X + 7, Y: card.Y + 7, W: card.W - 14, H: card.H - 24}
+		p.Fill(photo, t.Accent.Alpha(0.11), 4)
+		p.Icon(iconImage, ui.Rect{X: photo.X + (photo.W-20)/2, Y: photo.Y + (photo.H-20)/2, W: 20, H: 20}, t.Accent)
+		bar := ui.Rect{X: card.X + 20, Y: card.Y + card.H - 11, W: card.W - 40, H: 4}
+		p.Fill(bar, e.page.Placeholder.Alpha(0.45), 2)
+	})
 }
 
 func (e *Editor) imageControls(c *ui.Context, o Options) {
@@ -289,6 +461,9 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		f := row.picture
 		id, src := row.leaf.Block.ID, row.leaf.Block.URL
 		key := c.Key("image:" + id)
+		if f.resource.Loading {
+			continue
+		}
 		if f.resource.Bitmap == nil {
 			r := f.bounds
 			ui.Box(key.Key("status")).Absolute().Left(r.X).Top(r.Y).Size(r.W, r.H).
@@ -303,6 +478,9 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 					o.RevealImage(src)
 				}
 			}
+		}
+		if f.resource.Loading {
+			continue
 		}
 		if f.resource.Bitmap == nil {
 			continue
@@ -333,7 +511,15 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 			e.RequestFocus = true
 			return true
 		})
-		open := func() { e.imageViewer = imageViewer{open: true, name: f.name, bitmap: f.resource.Bitmap} }
+		open := func() {
+			e.imageViewer = imageViewer{
+				open:     true,
+				name:     f.name,
+				bitmap:   f.resource.Bitmap,
+				origin:   picture.Bounds(),
+				openedAt: c.Now(),
+			}
+		}
 		if picture.DoubleClicked() || picture.Focused() && (picture.Shortcut(0, ui.KeyEnter) || picture.Shortcut(0, ui.KeySpace)) {
 			open()
 		}
@@ -385,8 +571,14 @@ func (e *Editor) imageButton(c *ui.Context, label string, r ui.Rect) ui.Element 
 // Explicit typing reveals the editable description; reading and pasting keep
 // filenames and alt text out of a successfully loaded picture's layout.
 func (e *Editor) editImageCaption() {
-	if b := e.Engine.LeafAt(e.Caret).Block; b.Kind == "image" && e.imageCaptionID != b.ID {
-		e.imageCaptionID, e.ready = b.ID, false
+	if b := e.Engine.LeafAt(e.Caret).Block; b.Kind == "image" {
+		if e.captionedImages == nil {
+			e.captionedImages = map[string]bool{}
+		}
+		e.captionedImages[b.ID] = true
+		if e.imageCaptionID != b.ID {
+			e.imageCaptionID, e.ready = b.ID, false
+		}
 	}
 }
 
@@ -398,8 +590,15 @@ func (e *Editor) imagePreview(c *ui.Context) {
 	w, h := c.Size()
 	w, h = max(200, w-48), max(160, h-48)
 	ui.DialogBase(c.Key("image-preview"), &v.open, func(backdrop, panel ui.Element) {
-		backdrop.Background(e.page.Scrim)
-		panel.Size(w, h).Padding(12).Gap(10).Radius(12).Background(c.Theme().Background).Label(i18n.T("图片预览"))
+		backdrop.Background(e.page.Scrim).Transition(ui.ElementTransition{
+			Duration: 150 * time.Millisecond,
+			Enter:    &ui.Motion{Opacity: 0},
+		})
+		panel.Size(w, h).Padding(12).Gap(10).Radius(12).Background(c.Theme().Background).Label(i18n.T("图片预览")).
+			Transition(ui.ElementTransition{
+				Duration: 165 * time.Millisecond,
+				Enter:    &ui.Motion{Opacity: 0, Scale: 0.97},
+			})
 		ui.Row(c).Height(32).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, v.name).Grow(1).MinWidth(0).MaxLines(1).FontSize(14).FontWeight(600)
 			label := i18n.T("原始大小")

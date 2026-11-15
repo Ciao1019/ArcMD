@@ -49,6 +49,7 @@ var bindings = []binding{
 	{id: "bookmarks", label: "书签列表", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyD)}},
 	{id: "prev-bookmark", label: "上一个书签", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyUp)}},
 	{id: "next-bookmark", label: "下一个书签", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyDown)}},
+	{id: "ask", label: "问答", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyJ)}},
 	{id: "history", label: "版本历史", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyY)}},
 	{id: "export-pdf", label: "导出 PDF", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyE)}},
 	{id: "bold", label: "粗体", editor: true},

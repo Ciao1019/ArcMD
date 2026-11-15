@@ -221,6 +221,8 @@ func (e *Editor) wikiKeys(ev ui.InputEvent) bool {
 	return true
 }
 
+type wikiPillMatch struct{ ed *Editor }
+
 // wikiMenu is the completion list under the caret.
 func (e *Editor) wikiMenu(c *ui.Context, surface ui.Element) {
 	w := &e.wiki
@@ -245,12 +247,16 @@ func (e *Editor) wikiMenu(c *ui.Context, surface ui.Element) {
 			ui.Scroll(c.Key("wiki-scroll")).MaxHeight(8 * rowH).Children(func() {
 				ui.Column(c).Padding(4, 6, 6, 6).Children(func() {
 					for i, it := range w.items {
+						selected := i == w.index
 						row := ui.ButtonBase(c.Key("wiki-row:" + it.Name + it.Hint)).Height(rowH).PaddingX(8).Gap(8).Radius(4).
 							KeepFocus().Label(i18n.T("链接到 ") + it.Name).Cursor(ui.CursorPointer).AlignItems(ui.Center)
-						if i == w.index || row.Hovered() {
+						if !selected && row.Hovered() {
 							row.Background(e.page.Hover)
 						}
 						row.Children(func() {
+							if selected {
+								slidingPill(c, wikiPillMatch{e}, e.page.Hover, 4)
+							}
 							icon := iconLink
 							if it.Hint == i18n.T("新建文档") {
 								icon = iconPlus

@@ -2,6 +2,7 @@
 // UI by MyGo.
 //
 //	go run ./cmd/arcmd
+//	go run ./cmd/arcmd ask -space Work "why was the release delayed?"
 package main
 
 import (
@@ -21,6 +22,9 @@ func main() {
 	// folder, away from the user's own.
 	if home := os.Getenv("ARCMD_HOME"); home != "" {
 		cfg = app.Config{ConfigDir: filepath.Join(home, "config"), DocumentsDir: filepath.Join(home, "spaces")}
+	}
+	if len(os.Args) > 1 && os.Args[1] == "ask" {
+		os.Exit(ask(os.Args[2:], cfg, os.Stdout, os.Stderr))
 	}
 	a, err := app.New(cfg)
 	if err != nil {

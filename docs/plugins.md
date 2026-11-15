@@ -4,9 +4,12 @@
 > and the `Host` contract exist (`internal/plugin`); the runtimes and the
 > marketplace UI do not yet.
 
-ArcMD's core edits Markdown and organizes it into spaces. Everything else —
-AI writing tools first — comes from plugins that users download from the
-marketplace. This keeps the core small, lets features ship on their own
+ArcMD's core edits Markdown, organizes it into spaces, and answers
+questions about a space with a read-only agent (`internal/agent`,
+`internal/spacefs`: the model searches and reads the documents with tools,
+no vector index) on the model the user sets up. Everything else — AI
+writing tools first — comes from plugins that users download from the
+marketplace; a plugin may also give the agent tools of its own. This keeps the core small, lets features ship on their own
 schedule, and lets users choose what code, and which AI providers, touch
 their notes.
 

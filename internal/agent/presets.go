@@ -1,0 +1,103 @@
+package agent
+
+import (
+	"errors"
+	"net"
+	"net/url"
+	"strings"
+)
+
+// Preset is a model service the settings offer by name, its address
+// filled in. The user still chooses the model, as services rename theirs
+// often.
+type Preset struct {
+	ID, Name string
+	BaseURL  string
+	// Local services need no API key.
+	Local bool
+	// Example is a model name to show as the field's placeholder.
+	Example string
+}
+
+// Presets are the services offered, then Custom for any other speaking
+// the Chat Completions format.
+var Presets = []Preset{
+	{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1"},
+	{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://api.deepseek.com", Example: "deepseek-v4-pro"},
+	{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1"},
+	{ID: "ollama", Name: "Ollama", BaseURL: "http://localhost:11434/v1", Local: true},
+	{ID: Custom, Name: "自定义"},
+}
+
+// Custom is the preset of a service the user gives the address of.
+const Custom = "custom"
+
+// PresetOf is the preset with the ID, Custom's when there is none.
+func PresetOf(id string) Preset {
+	for _, p := range Presets {
+		if p.ID == id {
+			return p
+		}
+	}
+	return Presets[len(Presets)-1]
+}
+
+// Settings are what is needed to ask a model.
+type Settings struct {
+	BaseURL, Model, APIKey string
+}
+
+// Errors of settings that cannot be used.
+var (
+	ErrNoModel    = errors.New("no model is set")
+	ErrNoKey      = errors.New("no API key is set")
+	ErrBadAddress = errors.New("the address must start with https:// (http:// only for this computer)")
+)
+
+// IsLocal reports an address on this computer, which may use plain http
+// and needs no key.
+func IsLocal(base string) bool {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Check reports why the settings cannot be used, or nil. Documents go to
+// the service, so only https leaves this computer.
+func (s Settings) Check() error {
+	if err := s.CheckService(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(s.Model) == "" {
+		return ErrNoModel
+	}
+	return nil
+}
+
+// CheckService reports why the service cannot be reached with the settings,
+// whatever the model: enough to list its models.
+func (s Settings) CheckService() error {
+	u, err := url.Parse(strings.TrimSpace(s.BaseURL))
+	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && IsLocal(s.BaseURL))) {
+		return ErrBadAddress
+	}
+	if strings.TrimSpace(s.APIKey) == "" && !IsLocal(s.BaseURL) {
+		return ErrNoKey
+	}
+	return nil
+}
+
+// Provider is the Chat Completions service of the settings. DeepSeek's
+// thinking models need their reasoning sent back with tool calls.
+func (s Settings) Provider() *ChatCompletions {
+	u, _ := url.Parse(strings.TrimSpace(s.BaseURL))
+	replay := u != nil && (u.Hostname() == "api.deepseek.com" || strings.HasSuffix(u.Hostname(), ".deepseek.com"))
+	return &ChatCompletions{BaseURL: strings.TrimSpace(s.BaseURL), Model: strings.TrimSpace(s.Model), APIKey: strings.TrimSpace(s.APIKey), ReplayReasoning: replay}
+}

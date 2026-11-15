@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
@@ -127,7 +128,7 @@ func (a *App) previewView(c *ui.Context) {
 	now := c.Now()
 	hover := p.hover
 	p.hover = nil
-	if a.listDragging || a.listDrop != nil || a.favDrop != nil || a.renaming != "" || a.spaceForm.open {
+	if a.listDragging || a.carrying != nil || a.dragSettle.active || a.insertSeam.index >= 0 || a.listDrop != nil || a.favDrop != nil || a.renaming != "" || a.spaceForm.open {
 		hover = nil
 	}
 	// The pointer resting: a new row starts the wait, the same row ends it.
@@ -232,7 +233,7 @@ func (a *App) folderItems(sp *space.Space, rel string) []previewItem {
 				continue
 			}
 			it := previewItem{rel: k.Path, title: k.Title()}
-			if p, err := vault.Resolve(sp.Root, k.Path); err == nil {
+			if p, err := resolveFile(sp, k.Path); err == nil {
 				if info, err := os.Stat(p); err == nil {
 					it.changed = info.ModTime()
 				}
@@ -247,29 +248,67 @@ func (a *App) folderItems(sp *space.Space, rel string) []previewItem {
 
 // thumbOf is the document a thumbnail of rel draws, read again when its
 // file changed.
+const previewMaxBlocks = 25
+
+func clonePreviewPrefix(src *model.Document) *model.Document {
+	if src == nil {
+		return model.New()
+	}
+	limit := min(len(src.Blocks), previewMaxBlocks)
+	out := *src
+	out.Blocks = make([]*model.Block, limit)
+	for i := 0; i < limit; i++ {
+		out.Blocks[i] = src.Blocks[i].Clone()
+	}
+	return &out
+}
+
+func truncateMarkdownForPreview(text string) string {
+	const maxLines = 220
+	if len(text) <= 8192 {
+		return text
+	}
+	inFence := false
+	lines := 0
+	for i := 0; i < len(text); {
+		nl := strings.IndexByte(text[i:], '\n')
+		end := len(text)
+		if nl >= 0 {
+			end = i + nl + 1
+		}
+		line := strings.TrimSpace(text[i:end])
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+		}
+		lines++
+		i = end
+		if lines >= maxLines && !inFence {
+			return text[:i]
+		}
+	}
+	return text
+}
+
 func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	p := &a.preview
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
 		// The open one, as edited, in an editor of its own: one editor
-		// takes one place in a frame.
+		// takes one place in a frame. Only the top blocks can fit in the
+		// 150 DIP thumbnail card, so long documents skip cloning the rest.
 		key := "open/" + sp.ID + "/" + rel
 		rev := time.Unix(0, int64(a.doc.ed.Revision()))
 		if th, ok := p.thumbs[key]; ok && th.changed.Equal(rev) {
 			return th.doc
 		}
-		text, err := a.doc.ed.Committed().Encode()
-		if err != nil {
-			return nil
-		}
+		cloned := clonePreviewPrefix(a.doc.ed.Committed())
 		if p.thumbs == nil {
 			p.thumbs = map[string]thumb{}
 		}
-		d := openDocument(sp, strings.TrimSuffix(rel, path.Ext(rel))+".arcmd", text, false)
-		d.rel = rel
+		d := &document{space: sp, rel: rel, ed: editor.FromDocument(cloned)}
 		p.thumbs[key] = thumb{d, rev}
 		return d
 	}
-	full, err := vault.Resolve(sp.Root, rel)
+	full, err := resolveFile(sp, rel)
 	if err != nil {
 		return nil
 	}
@@ -281,14 +320,27 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	if th, ok := p.thumbs[key]; ok && th.changed.Equal(info.ModTime()) {
 		return th.doc
 	}
-	text, err := vault.Read(sp.Root, rel)
+	text, err := readFile(sp, rel)
 	if err != nil {
 		return nil
 	}
 	if p.thumbs == nil {
 		p.thumbs = map[string]thumb{}
 	}
-	d := openDocument(sp, rel, text, false)
+	var doc *model.Document
+	var loadErr error
+	if strings.EqualFold(path.Ext(rel), ".arcmd") {
+		doc, loadErr = model.Decode(text)
+		if loadErr != nil {
+			doc = model.New()
+		}
+	} else {
+		doc = editor.ImportMarkdown(truncateMarkdownForPreview(text))
+	}
+	if len(doc.Blocks) > previewMaxBlocks {
+		doc.Blocks = doc.Blocks[:previewMaxBlocks]
+	}
+	d := &document{space: sp, rel: rel, diskText: text, ed: editor.FromDocument(doc), loadErr: loadErr}
 	p.thumbs[key] = thumb{d, info.ModTime()}
 	return d
 }
@@ -506,7 +558,7 @@ func (a *App) docPreview(c *ui.Context) {
 			if dir := parentDir(t.rel); dir != "" {
 				where += " / " + dir
 			}
-			if full, err := vault.Resolve(t.space.Root, t.rel); err == nil {
+			if full, err := resolveFile(t.space, t.rel); err == nil {
 				if info, err := os.Stat(full); err == nil {
 					where += i18n.T(" · 修改于") + ago(info.ModTime(), time.Now())
 				}

@@ -31,6 +31,9 @@ type movingDocument struct {
 // are rolled back if a resource cannot be published; originals on another disk
 // remain untouched until the caller trashes them after this function succeeds.
 func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, dir string) (to string, copied bool, err error) {
+	if dst.IsExternal() {
+		return "", false, errors.New(i18n.T("外部空间只记录文件，不能作为移动目标。"))
+	}
 	if !a.flush() {
 		return "", false, errors.New(i18n.T("请先保存文档并解决文件冲突"))
 	}
@@ -38,10 +41,14 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	if err != nil {
 		return "", false, err
 	}
+	sourceRoot, sourcePath, err := fileLocation(src, rel)
+	if err != nil {
+		return "", false, err
+	}
 	if src.ID == dst.ID {
-		to, err = vault.Move(src.Root, rel, dir)
+		to, err = vault.Move(sourceRoot, sourcePath, dir)
 	} else {
-		to, copied, err = vault.MoveTo(src.Root, rel, dst.Root, dir)
+		to, copied, err = vault.MoveTo(sourceRoot, sourcePath, dst.Root, dir)
 	}
 	if err != nil || to == rel && src.Root == dst.Root {
 		return to, copied, err
@@ -62,7 +69,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 			_ = os.Remove(p)
 		}
 		if !copied {
-			old, _ := vault.Resolve(src.Root, rel)
+			old, _ := vault.Resolve(sourceRoot, sourcePath)
 			moved, _ := vault.Resolve(dst.Root, to)
 			if _, statErr := os.Lstat(old); errors.Is(statErr, fs.ErrNotExist) {
 				if rollbackErr := os.Rename(moved, old); rollbackErr != nil {
@@ -79,19 +86,23 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	}()
 	for _, d := range docs {
 		target := to + d.rel[len(rel):]
+		imageRoot, imagePath, locationErr := fileLocation(src, d.rel)
+		if locationErr != nil {
+			return to, copied, locationErr
+		}
 		for old := range d.urls {
-			file, resolveErr := localImageFile(src.Root, d.rel, old)
+			file, resolveErr := localImageFile(imageRoot, imagePath, old)
 			if resolveErr != nil {
 				continue
 			}
-			asset, relErr := filepath.Rel(src.Root, file)
+			asset, relErr := filepath.Rel(sourceRoot, file)
 			if relErr != nil {
 				return to, copied, relErr
 			}
 			asset = filepath.ToSlash(asset)
 			// Pictures inside a moved folder already live at its new path.
-			if !copied && within(asset, rel) {
-				file, resolveErr = vault.Resolve(dst.Root, to+asset[len(rel):])
+			if !copied && within(asset, sourcePath) {
+				file, resolveErr = vault.Resolve(dst.Root, to+asset[len(sourcePath):])
 				if resolveErr != nil {
 					return to, copied, resolveErr
 				}
@@ -154,7 +165,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 }
 
 func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, error) {
-	file, err := vault.Resolve(sp.Root, rel)
+	file, err := resolveFile(sp, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +188,15 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 		if !vault.IsDocument(p.Path) {
 			continue
 		}
-		text, err := vault.Read(sp.Root, p.Path)
+		live := a.residentDocument(sp.ID, p.Path)
+		if live != nil {
+			live.waitAsyncSave()
+		}
+		text, err := readFile(sp, p.Path)
 		if err != nil {
 			return nil, err
 		}
-		d := &movingDocument{rel: p.Path, original: text, urls: map[string]string{}, live: a.residentDocument(sp.ID, p.Path)}
+		d := &movingDocument{rel: p.Path, original: text, urls: map[string]string{}, live: live}
 		collect := func(text string) error {
 			doc, err := imageDocument(p.Path, text)
 			if err != nil {
@@ -218,6 +233,11 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 
 func imageDocument(rel, text string) (*model.Document, error) {
 	if vault.IsMarkdown(rel) {
+		if strings.HasPrefix(strings.TrimSpace(text), "{") {
+			if doc, err := model.Decode(text); err == nil {
+				return doc, nil
+			}
+		}
 		return editor.ImportMarkdown(text), nil
 	}
 	return model.Decode(text)
@@ -231,21 +251,33 @@ func relocateText(rel, text string, urls map[string]string) (string, error) {
 	if !changed {
 		return text, nil
 	}
+	mapURLs := func(doc *model.Document) {
+		doc.MapImages(func(url string) string {
+			if to, ok := urls[url]; ok {
+				return to
+			}
+			return url
+		})
+	}
 	if vault.IsMarkdown(rel) {
-		// Preserve Markdown source exactly. Refuse an ambiguous destination
-		// rather than round-trip a user's import source through the exporter.
-		return "", errors.New(i18n.T("移动图片需要调整引用；请先将 Markdown 转为 ArcMD 文档再移动"))
+		if strings.HasPrefix(strings.TrimSpace(text), "{") {
+			if doc, err := model.Decode(text); err == nil {
+				mapURLs(doc)
+				return doc.Encode()
+			}
+		}
+		doc := editor.ImportMarkdown(text)
+		mapURLs(doc)
+		if err := doc.Validate(); err != nil {
+			return "", err
+		}
+		return editor.ExportMarkdown(doc), nil
 	}
 	doc, err := model.Decode(text)
 	if err != nil {
 		return "", err
 	}
-	doc.MapImages(func(url string) string {
-		if to, ok := urls[url]; ok {
-			return to
-		}
-		return url
-	})
+	mapURLs(doc)
 	return doc.Encode()
 }
 

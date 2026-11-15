@@ -70,3 +70,58 @@ func TestPasteMathPreservesItsBlockAndSurroundingText(t *testing.T) {
 		t.Fatal("formula paste was not a single undo step")
 	}
 }
+
+func TestMathDoubleEnterExitAndPipeTableCompile(t *testing.T) {
+	e := textEngine("$$")
+	e.SetSelection(2, 2)
+	e.Enter(false)
+	e.Replace(0, 0, "F = ma")
+	e.Enter(false)
+	if len(e.Doc.Blocks) != 1 || e.Doc.Blocks[0].Kind != "math" || e.Doc.Blocks[0].Text() != "F = ma\n" {
+		t.Fatalf("first Enter inside math exited prematurely: %+v", e.Doc.Blocks)
+	}
+	e.Enter(false)
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Text() != "F = ma" || e.Doc.Blocks[1].Kind != "paragraph" {
+		t.Fatalf("second Enter on blank trailing line did not exit math: %+v", e.Doc.Blocks)
+	}
+	e.Undo()
+	if len(e.Doc.Blocks) != 1 || e.Doc.Blocks[0].Text() != "F = ma\n" {
+		t.Fatal("double-Enter exit was not one undo step")
+	}
+
+	p := textEngine("| Port | Low | High")
+	p.SetSelection(Len("| Port | Low | High"), Len("| Port | Low | High"))
+	before := p.Doc.Clone()
+	p.Enter(false)
+	if len(p.Doc.Blocks) != 1 || p.Doc.Blocks[0].Kind != "table" || len(p.Doc.Blocks[0].Children) != 2 || len(p.Doc.Blocks[0].Children[0].Children) != 3 {
+		t.Fatalf("pipe header did not compile into 2x3 table: %+v", p.Doc.Blocks)
+	}
+	tr := p.Doc.Blocks[0].Children[0]
+	if tr.Children[0].Text() != "Port" || tr.Children[1].Text() != "Low" || tr.Children[2].Text() != "High" {
+		t.Fatalf("unexpected header cells: %q, %q, %q", tr.Children[0].Text(), tr.Children[1].Text(), tr.Children[2].Text())
+	}
+	if p.LeafAt(p.Caret).Block.ID != p.Doc.Blocks[0].Children[1].Children[0].ID {
+		t.Fatal("caret did not land in first body cell")
+	}
+	p.Undo()
+	if !reflect.DeepEqual(before, p.Doc) {
+		t.Fatal("pipe table compile did not undo in one step")
+	}
+
+	tbl := p.Doc.Blocks[0]
+	_ = tbl
+	p.Redo()
+	id := p.Doc.Blocks[0].ID
+	p.Replace(p.Caret, p.Caret, "SSH")
+	p.TableInsert(id, true, 2)
+	p.Replace(p.Caret, p.Caret, "HTTPS")
+	beforeMove := p.Doc.Clone()
+	p.MoveTableRow(id, 2, 1)
+	if p.Doc.Blocks[0].Children[1].Children[0].Text() != "HTTPS" || p.Doc.Blocks[0].Children[2].Children[0].Text() != "SSH" {
+		t.Fatal("MoveTableRow did not reorder rows")
+	}
+	p.Undo()
+	if !reflect.DeepEqual(beforeMove, p.Doc) {
+		t.Fatal("MoveTableRow did not undo cleanly")
+	}
+}

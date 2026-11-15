@@ -46,7 +46,7 @@ func TestFavoritesAcrossSpaces(t *testing.T) {
 	}
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
-	if active(a) != "Work" || a.doc.space != personal || a.doc.rel != "Welcome.arcmd" {
+	if active(a) != "Work" || a.doc.space != personal || a.doc.rel != "Welcome.md" {
 		t.Fatalf("the tile: in %s with %s", active(a), a.doc.rel)
 	}
 	if work.LastOpen != "Tasks.md" {
@@ -79,7 +79,7 @@ func TestFavoritesAcrossSpaces(t *testing.T) {
 	r, _ = tt.Find("Welcome")
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Key(ui.Ctrl, ui.Key1)
-	a.toggleFavorite(personal, "Welcome.arcmd")
+	a.toggleFavorite(personal, "Welcome.md")
 	tt.Key(ui.Ctrl, ui.Key2)
 	tt.Frame()
 	if a.doc == nil || a.doc.rel != "Tasks.md" {
@@ -102,7 +102,7 @@ func TestPinFromTree(t *testing.T) {
 		t.Fatalf("%v: %q", err, tt.Menu())
 	}
 	tt.Frame()
-	if !a.state.IsFavorite(sp.ID, "Journal/Ideas.arcmd") || tt.HasText("拖动以添加收藏") {
+	if !a.state.IsFavorite(sp.ID, "Journal/Ideas.md") || tt.HasText("拖动以添加收藏") {
 		t.Fatalf("favorites %v", a.state.Favorites)
 	}
 	// Dragging a row onto the tile opens a slot before it and pins it there.
@@ -111,7 +111,7 @@ func TestPinFromTree(t *testing.T) {
 			t.Errorf("no slot held open: %+v", a.favDrop)
 		}
 	})
-	if fmt.Sprint(a.state.Favorites) != fmt.Sprintf("[{%s Welcome.arcmd} {%s Journal/Ideas.arcmd}]", sp.ID, sp.ID) {
+	if fmt.Sprint(a.state.Favorites) != fmt.Sprintf("[{%s Welcome.md} {%s Journal/Ideas.md}]", sp.ID, sp.ID) {
 		t.Fatalf("after the drop: %v", a.state.Favorites)
 	}
 	if a.favDrop != nil {
@@ -124,7 +124,7 @@ func TestPinFromTree(t *testing.T) {
 	if err := tt.ChooseMenuItem("从收藏中移除"); err != nil {
 		t.Fatalf("%v: %q", err, tt.Menu())
 	}
-	if a.state.IsFavorite(sp.ID, "Journal/Ideas.arcmd") {
+	if a.state.IsFavorite(sp.ID, "Journal/Ideas.md") {
 		t.Fatal("still pinned")
 	}
 }
@@ -208,13 +208,13 @@ func TestFavoritesLeaveTheList(t *testing.T) {
 	a, tt := newTestApp(t)
 	sp := a.state.ActiveSpace()
 	tt.Frame()
-	if hasRow(a, "Welcome.arcmd") {
+	if hasRow(a, "Welcome.md") {
 		t.Fatal("the pinned Welcome has a row")
 	}
-	a.state.ToggleFavorite(sp.ID, "Welcome.arcmd")
+	a.state.ToggleFavorite(sp.ID, "Welcome.md")
 	tt.Frame()
 	tt.Frame()
-	if !hasRow(a, "Welcome.arcmd") {
+	if !hasRow(a, "Welcome.md") {
 		t.Fatal("unpinned, Welcome has no row")
 	}
 }
@@ -227,7 +227,7 @@ func TestFavoriteDraggedToList(t *testing.T) {
 	tile, _ := tt.Find("Welcome")
 	var ideas ui.Rect
 	for _, r := range a.rows {
-		if r.rel == "Journal/Ideas.arcmd" {
+		if r.rel == "Journal/Ideas.md" {
 			ideas = r.r
 		}
 	}
@@ -241,10 +241,10 @@ func TestFavoriteDraggedToList(t *testing.T) {
 	}
 	tt.Release(x1, y1)
 	tt.Frame()
-	if a.state.IsFavorite(sp.ID, "Welcome.arcmd") {
+	if a.state.IsFavorite(sp.ID, "Welcome.md") {
 		t.Fatal("still pinned")
 	}
-	if _, err := os.Stat(filepath.Join(sp.Root, "Journal", "Welcome.arcmd")); err != nil {
+	if _, err := os.Stat(filepath.Join(sp.Root, "Journal", "Welcome.md")); err != nil {
 		t.Fatalf("not placed in Journal: %v", err)
 	}
 }
@@ -313,12 +313,12 @@ func TestRenameFavorite(t *testing.T) {
 	a, tt := newTestApp(t)
 	home := a.state.ActiveSpace()
 	work := a.state.Add("Work", t.TempDir())
-	a.open("Welcome.arcmd")
+	a.open("Welcome.md")
 	tt.Frame()
 	if !a.switchSpaceOnly(work.ID) {
 		t.Fatal("did not switch to Work")
 	}
-	a.openIn(home, "Welcome.arcmd") // from its tile, in Work
+	a.openIn(home, "Welcome.md") // from its tile, in Work
 	tt.Advance(time.Second)
 	if err := tt.RightClick("Welcome"); err != nil {
 		t.Fatal(err)
@@ -334,10 +334,10 @@ func TestRenameFavorite(t *testing.T) {
 	tt.Type("Hello")
 	tt.Key(0, ui.KeyEnter)
 	tt.Advance(time.Second)
-	if _, err := os.Stat(filepath.Join(home.Root, "Hello.arcmd")); err != nil {
+	if _, err := os.Stat(filepath.Join(home.Root, "Hello.md")); err != nil {
 		t.Fatal(err)
 	}
-	if !a.state.IsFavorite(home.ID, "Hello.arcmd") || a.doc.rel != "Hello.arcmd" || a.state.ActiveSpace() != work {
+	if !a.state.IsFavorite(home.ID, "Hello.md") || a.doc.rel != "Hello.md" || a.state.ActiveSpace() != work {
 		t.Fatalf("after rename: favorites %v, doc %q", a.state.Favorites, a.doc.rel)
 	}
 	// The command bar renames the open favorite under its tile too.
@@ -352,7 +352,7 @@ func TestRenameFavorite(t *testing.T) {
 	tt.Type("Bye")
 	tt.Key(0, ui.KeyEnter)
 	tt.Advance(time.Second)
-	if _, err := os.Stat(filepath.Join(home.Root, "Bye.arcmd")); err != nil {
+	if _, err := os.Stat(filepath.Join(home.Root, "Bye.md")); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -6,12 +6,13 @@ package editor
 
 import (
 	"fmt"
-	"github.com/Ciao1019/ArcMD/internal/document"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
+	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
@@ -32,6 +33,9 @@ type finder struct {
 	matcher  textMatcher
 	// focus asks the query field for the keyboard.
 	focus bool
+	// pulsePending and pulseAt briefly accent the active match after stepping.
+	pulsePending bool
+	pulseAt      time.Time
 }
 
 // findIn finds query in text case-insensitively, without overlaps; the
@@ -184,6 +188,8 @@ func (e *Editor) showMatch() {
 		e.sync()
 	}
 	e.revealAt = &m
+	f.pulsePending = true
+	f.pulseAt = time.Time{}
 }
 
 // replaceCurrent replaces the current match and moves on to the next.
@@ -270,10 +276,29 @@ func (e *Editor) findBox(c *ui.Context) {
 	}
 	// Not e.popover: its fields must take the keyboard.
 	box := ui.Column(c.Key("find-box")).Absolute().Right(16).Top(12).Width(404).Padding(8).Gap(8).
-		Background(pg.Popover).Border(1, t.Border).Radius(6).Shadow(0, 4, 16, 0, t.Text.Alpha(.12))
+		Background(pg.Popover).Border(1, t.Border).Radius(8).Shadow(0, 4, 16, 0, t.Text.Alpha(.12)).
+		Transition(ui.ElementTransition{
+			Duration: 120 * time.Millisecond,
+			Colors:   true,
+			Enter:    &ui.Motion{Opacity: 0, Scale: 0.98, Y: -3},
+		})
 	box.Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			if button("find-toggle", i18n.T("切换替换 (⇧⌘H)"), iconChevronRight, f.replace).Disabled(e.ReadOnly).Clicked() {
+			toggleBtn := ui.ButtonBase(c.Key("find-toggle")).Size(24, 24).Radius(4).Center().
+				Label(i18n.T("切换替换 (⇧⌘H)")).Tooltip(i18n.T("切换替换 (⇧⌘H)")).KeepFocus().Cursor(ui.CursorPointer).Disabled(e.ReadOnly)
+			if f.replace || toggleBtn.Hovered() {
+				toggleBtn.Background(pg.Hover)
+			}
+			rot := float32(0)
+			if f.replace {
+				rot = 90
+			}
+			toggleBtn.Children(func() {
+				ui.Box(c.Key("chev")).Size(16, 16).Center().AnimatePose(ui.Pose{Rotate: rot}, ui.Snappy).Children(func() {
+					ui.Icon(c, iconChevronRight).FontSize(16).TextColor(pg.CodeText)
+				})
+			})
+			if toggleBtn.Clicked() {
 				f.replace = !f.replace
 			}
 			query := field("find-query", i18n.T("查找"), &f.query, f.focus)
@@ -302,7 +327,11 @@ func (e *Editor) findBox(c *ui.Context) {
 		if !f.replace {
 			return
 		}
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(0, 0, 0, 30).Children(func() {
+		ui.Row(c.Key("replace-row")).Gap(6).AlignItems(ui.Center).Padding(0, 0, 0, 30).
+			Transition(ui.ElementTransition{
+				Duration: 120 * time.Millisecond,
+				Enter:    &ui.Motion{Opacity: 0, Y: -3},
+			}).Children(func() {
 			with := field("find-with", i18n.T("替换为"), &f.with, false)
 			if with.Submitted() {
 				e.replaceCurrent()
@@ -332,23 +361,46 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 	if !f.open || len(f.matches) == 0 {
 		return
 	}
+	pulseU := float32(-1)
+	if f.pulsePending {
+		f.pulsePending = false
+		if !e.printing && !e.reduceMotion {
+			f.pulseAt = p.Now()
+		}
+	}
+	if !e.printing && !e.reduceMotion && !f.pulseAt.IsZero() {
+		const pulseDur = 160 * time.Millisecond
+		if elapsed := p.Now().Sub(f.pulseAt); elapsed >= 0 && elapsed < pulseDur {
+			pulseU = float32(elapsed) / float32(pulseDur)
+			p.AnimationFrame()
+		} else {
+			f.pulseAt = time.Time{}
+		}
+	}
 	for ri := range e.visibleRows(40) {
 		r := *e.indexedRow(ri)
 		if r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
 			continue
 		}
+		dx, dy := e.visualOffset(r)
 		start := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].End > r.leaf.Start })
 		for i := start; i < len(f.matches) && f.matches[i].Start < r.leaf.End+1; i++ {
 			m := f.matches[i]
 			local := ui.TextInputRange{Start: max(0, m.Start-r.leaf.Start), End: min(r.leaf.End, m.End) - r.leaf.Start}
 			color := e.page.FindMatch
-			if i == f.current {
+			isCurrent := i == f.current
+			if isCurrent {
 				color = e.page.FindCurrent
 			}
 			for _, rect := range r.layout.SelectionRects(local) {
-				rect.X += bounds.X + r.x
-				rect.Y += bounds.Y + r.y
-				p.Fill(rect, color, 2)
+				rect.X += bounds.X + r.x + dx
+				rect.Y += bounds.Y + r.y + dy
+				p.Fill(rect, color, 2.5)
+				if isCurrent && pulseU >= 0 {
+					pad := 1.5 + 4*(1-(1-pulseU)*(1-pulseU))
+					ring := ui.Rect{X: rect.X - pad, Y: rect.Y - pad*0.7, W: rect.W + 2*pad, H: rect.H + 1.4*pad}
+					p.Stroke(ring, p.Theme().Accent.Alpha(0.75*(1-pulseU)), 4, 1.5)
+				}
 			}
 		}
 	}
