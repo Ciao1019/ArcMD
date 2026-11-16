@@ -12,6 +12,9 @@ func (e *Editor) RelocateImages(urls map[string]string) {
 			return url
 		})
 	}
+	if e.leafComp != nil {
+		e.leafComp.committedDoc = nil
+	}
 	clear(e.images)
 	e.ready = false
 	e.sync()

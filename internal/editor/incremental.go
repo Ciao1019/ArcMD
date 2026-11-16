@@ -33,7 +33,7 @@ func (e *Editor) relayoutText(o Options) bool {
 	}
 	rows, decorations := e.rows, e.decorations
 	e.rows, e.decorations = nil, nil
-	layout := e.blockLayouter(o, map[string]document.Leaf{b.ID: leaf}, nil, make(map[string]bool))
+	layout := e.blockLayouter(o, func(string) document.Leaf { return leaf }, nil, true)
 	layout(b, e.padding, old.rect.Y, max(80, o.Width-2*e.padding))
 	updated, decorated := e.rows[0], e.decorations
 	e.rows, e.decorations = rows, decorations
@@ -109,7 +109,7 @@ func (e *Editor) relayoutTable(o Options, change document.TextChange, rowIndex i
 	}
 	rows, decorations, resizers := e.rows, e.decorations, e.resizers
 	e.rows, e.decorations, e.resizers = nil, nil, nil
-	layout := e.blockLayouter(o, leaves, nil, make(map[string]bool))
+	layout := e.blockLayouter(o, func(id string) document.Leaf { return leaves[id] }, nil, true)
 	start := oldTable.rect.Y - 22
 	height := layout(table, oldTable.rect.X, start, oldTable.rect.W)
 	updated, decorated, handles := e.rows, e.decorations, e.resizers

@@ -158,7 +158,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		NoAutoPair:      a.prefs.NoAutoPair,
 		AutoSpace:       a.prefs.AutoSpace,
 		EmojiSuggest:    suggestEmoji,
-		Resizing:        a.splitResizing,
+		Resizing:        a.splitResizing || a.qa.resizing,
 		Width:           width,
 		Theme:           c.Theme(),
 		Page:            pageStyle(a.paperDark),
@@ -187,7 +187,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 			a.toggleBookmark(d, id)
 		},
 		LabelBookmark: func(id, label string) { a.labelBookmark(d.space.ID, d.rel, id, label) },
-		BookmarkKey:   a.shortKey("bookmark"),
+		BookmarkKey:   a.cachedBookmarkShortKey(),
 		Reserved:      a.reservedKeys(),
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/egoist/mygo/ui"
 )
@@ -26,7 +27,7 @@ const (
 	outlineRow = 28
 	// outlineAll is how many headings the outline builds every row for;
 	// a longer one builds those in view and outlineSpare on either side.
-	outlineAll   = 120
+	outlineAll   = 36
 	outlineSpare = 12
 	// outlineIndent is how far each heading level steps in.
 	outlineIndent = 12
@@ -62,6 +63,11 @@ type outlineState struct {
 	// the drag goes on (outlineList).
 	list     ui.ScrollState
 	dragging string
+
+	headingsDoc   *document.Document
+	headingsRev   uint64
+	headingsKnown bool
+	headingsHas   bool
 }
 
 // outlineSlideState moves the outline's room from one width to another.
@@ -80,12 +86,28 @@ type outlineJump struct {
 // hasHeadings reports whether the outline has more than the page title to
 // list.
 func (e *Editor) hasHeadings() bool {
-	for i, b := range e.Doc.Blocks {
-		if i > 0 && b.Kind == "heading" && b.Text() != "" {
-			return true
+	s := &e.outlineState
+	rev := e.Revision()
+	if s.headingsKnown && s.headingsDoc == e.Doc {
+		if s.headingsRev == rev {
+			return s.headingsHas
+		}
+		if change, ok := e.TextChangeSince(s.headingsRev); ok {
+			if leaf, exists := e.Engine.LeafByID(change.ID); exists && leaf.Block.Kind != "heading" {
+				s.headingsRev = rev
+				return s.headingsHas
+			}
 		}
 	}
-	return false
+	has := false
+	for i, b := range e.Doc.Blocks {
+		if i > 0 && b.Kind == "heading" && b.Text() != "" {
+			has = true
+			break
+		}
+	}
+	s.headingsDoc, s.headingsRev, s.headingsKnown, s.headingsHas = e.Doc, rev, true, has
+	return has
 }
 
 // hasBookmarks reports whether the outline has bookmarks to list.

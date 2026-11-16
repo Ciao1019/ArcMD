@@ -1,7 +1,13 @@
 package app
 
 import (
+	"fmt"
+	"runtime"
+	"slices"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
@@ -111,4 +117,153 @@ func TestSaveDuringCompositionRefreshesCommittedBaseline(t *testing.T) {
 	if !d.dirty() {
 		t.Fatal("redo composition lost dirty state")
 	}
+}
+
+func TestMillionCharDocumentMemoryAndDirtyTracking(t *testing.T) {
+	var b strings.Builder
+	b.Grow(2_400_000)
+	for sec := 1; utf8.RuneCountInString(b.String()) < 1_000_000; sec++ {
+		fmt.Fprintf(&b, "## Section %d 百万字符测试\n\n", sec)
+		for p := 0; p < 6; p++ {
+			fmt.Fprintf(&b, "第 %d 节第 %d 段内容：验证 **加粗**、`code`、[[Welcome]] 链接以及百万字文档打开与增量保存的内存表现。\n\n", sec, p+1)
+		}
+	}
+	md := b.String()
+	b.Reset()
+
+	a, tt := newTestApp(t)
+	if err := vault.Write(root(a), "Million.md", md); err != nil {
+		t.Fatal(err)
+	}
+	md = ""
+	a.refreshTree()
+	a.refreshSearch()
+	tt.Frame()
+	runtime.GC()
+	var m0 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+
+	a.open("Million.md")
+	tt.Frame()
+	d := a.doc
+	if d.loadErr != nil {
+		t.Fatalf("failed to load million-char doc: %v", d.loadErr)
+	}
+	if d.dirty() || d.changed() {
+		t.Fatal("newly opened million-char doc reported dirty")
+	}
+
+	runtime.GC()
+	var m1 runtime.MemStats
+	runtime.ReadMemStats(&m1)
+	if m1.HeapAlloc > m0.HeapAlloc && m1.HeapAlloc-m0.HeapAlloc > 50<<20 {
+		t.Fatalf("app heap delta too high for 1M-char document: %.1f MB", float64(m1.HeapAlloc-m0.HeapAlloc)/(1024*1024))
+	}
+
+	focusDocument(a, tt)
+	d.ed.SetSelection(0, 0)
+	tt.Type("Pre ")
+	if !d.dirty() || !d.changed() {
+		t.Fatal("typing did not mark million-char document dirty")
+	}
+	if err := d.save(); err != nil {
+		t.Fatal(err)
+	}
+	if d.dirty() || d.changed() {
+		t.Fatal("saving did not clear dirty baseline on million-char document")
+	}
+	tt.Key(ui.Cmd, ui.KeyZ)
+	if !d.dirty() || !d.changed() {
+		t.Fatal("undo after save did not mark million-char document dirty")
+	}
+	tt.Key(ui.Cmd|ui.Shift, ui.KeyZ)
+	if d.dirty() || d.changed() {
+		t.Fatal("redo back to saved state did not restore clean baseline")
+	}
+	runtime.KeepAlive(tt)
+}
+
+func TestLarge200kDocumentEditingFooterDeferralAndAsyncSave(t *testing.T) {
+	var b strings.Builder
+	b.Grow(650_000)
+	b.WriteString("# Large Document #toptag\n\n")
+	for sec := 1; utf8.RuneCountInString(b.String()) < 210_000; sec++ {
+		fmt.Fprintf(&b, "## Section %d 长文编辑测试\n\n", sec)
+		for p := 0; p < 5; p++ {
+			fmt.Fprintf(&b, "第 %d 节第 %d 段：验证 **加粗**、*斜体*、`code`、中文输入法与结构编辑在二十万字规模下的响应速度。\n\n", sec, p+1)
+		}
+	}
+	md := b.String()
+
+	a, tt := newTestApp(t)
+	if err := vault.Write(root(a), "Huge200k.md", md); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.refreshSearch()
+	posted := make(chan func(), 8)
+	a.search.async = true
+	a.runAsync = func(fn func()) { posted <- fn }
+	a.open("Huge200k.md")
+	// Drain the background refreshSearch callback kicked off by showIn when search.async is enabled.
+	(<-posted)()
+	focusDocument(a, tt)
+	tt.Frame()
+
+	d := a.doc
+	if d.loadErr != nil {
+		t.Fatalf("loadErr = %v", d.loadErr)
+	}
+	if d.dirty() || d.changed() {
+		t.Fatal("newly opened 200k doc reported dirty")
+	}
+	if d.plainKnown {
+		t.Fatal("clean indexed 200k doc unexpectedly flattened plainText on open")
+	}
+
+	// Active typing (ASCII + Chinese IME + structural Enter) must keep d.plainKnown == false
+	// via footerSettle and maintain O(1) dirty tracking via skeletonDirty.
+	pLeaf := d.ed.Doc.Leaves()[2]
+	d.ed.SetSelection(pLeaf.End, pLeaf.End)
+	tt.Type(" #newtag ")
+	tt.Compose("zhongwen", 8)
+	tt.Type("中文")
+	if !d.dirty() || d.plainKnown {
+		t.Fatalf("expected dirty=true and plainKnown=false during typing, got dirty=%v plainKnown=%v", d.dirty(), d.plainKnown)
+	}
+	tt.Key(0, ui.KeyEnter)
+	if !d.dirty() || !d.skeletonDirty {
+		t.Fatalf("expected skeletonDirty=true after Enter, got dirty=%v skeletonDirty=%v", d.dirty(), d.skeletonDirty)
+	}
+	tt.Type("after enter ")
+	tt.Compose("shurufa", 7)
+	tt.Type("输入法")
+	if !d.dirty() || !d.skeletonDirty || d.plainKnown {
+		t.Fatalf("post-Enter typing failed O(1) dirty/deferral invariants: dirty=%v skeletonDirty=%v plainKnown=%v", d.dirty(), d.skeletonDirty, d.plainKnown)
+	}
+
+	// Pausing for footerSettle refreshes footer tags on the 200k doc.
+	tt.Advance(footerSettle)
+	tt.Frame()
+	tt.Frame()
+	if !slices.Contains(d.footer.tags, "toptag") || !slices.Contains(d.footer.tags, "newtag") {
+		t.Fatalf("expected footer tags to include toptag and newtag after settle, got %v", d.footer.tags)
+	}
+
+	// Trigger async autosave off-thread and apply completion on the UI thread.
+	if len(posted) != 0 {
+		t.Fatalf("unexpected pre-autosave async callbacks: %d", len(posted))
+	}
+	tt.Advance(autosaveDelay + 100*time.Millisecond)
+	if !d.saving {
+		t.Fatal("expected async autosave to start after autosaveDelay")
+	}
+	fn := <-posted
+	fn()
+	if d.saving || d.dirty() || d.changed() || d.skeletonDirty || !d.textDirtyKnown {
+		dig, derr := d.ed.Committed().Digest()
+		t.Fatalf("async autosave did not restore clean O(1) baseline: saving=%v dirty=%v changed=%v derr=%v digEq=%v saveErr=%v conflict=%v missing=%v",
+			d.saving, d.dirty(), d.changed(), derr, dig == d.baseline, d.saveErr, d.conflict, d.missing)
+	}
+	runtime.KeepAlive(tt)
 }

@@ -152,7 +152,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		d.live.ed.RelocateImages(d.urls)
 		text, _ := relocateText(d.rel, d.original, d.urls)
 		d.live.diskText = text
-		d.live.baseline, _ = d.live.ed.Committed().Encode()
+		d.live.baseline, _ = d.live.ed.Committed().Digest()
 		d.live.rememberBaseline(d.live.ed.Committed())
 		if d.live.source {
 			d.live.preview = d.live.text()

@@ -9,7 +9,10 @@ func (e *Editor) paintDim(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 		return
 	}
 	owner := e.Engine.LeafAt(e.Caret).Owner
-	for j, h := range e.handles {
+	winTop, winBottom := e.motionWindow()
+	hs, he := e.visibleHandleRange(winTop, winBottom)
+	for offset, h := range e.handles[hs:he] {
+		j := hs + offset
 		if h.id == owner {
 			continue
 		}

@@ -33,7 +33,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -131,6 +131,8 @@ type App struct {
 	renameSpace string
 
 	palette palette
+	// qa is the panel of questions about the space (qa.go).
+	qa qaState
 	// pager is the strip of spaces the sidebar pages along (spaceswitch.go),
 	// and pageTrees the folders of the spaces it shows beside the active
 	// one; now and reduceMotion are this frame's clock and the system's
@@ -234,9 +236,17 @@ type App struct {
 	// tour introduces the sidebar on the first run (tour.go).
 	tour tour
 
-	runAsync func(func())
-	navDir   int
-	navAt    time.Time
+	runAsync             func(func())
+	navDir               int
+	navAt                time.Time
+	keyGen               uint64
+	keysCacheGen         uint64
+	keysCachePrefs       *prefs.Prefs
+	keysCacheLen         int
+	keysCacheValid       bool
+	cachedEditorBindings map[string]editor.Combo
+	cachedReserved       []editor.Combo
+	cachedBookmarkKey    string
 }
 
 // trashItem moves the file or folder at p to the system's trash.
@@ -258,6 +268,7 @@ func New(cfg Config) (*App, error) {
 		openDocs:  make(map[place]*document),
 		prefStore: prefs.Store{Path: filepath.Join(cfg.ConfigDir, "prefs.json")},
 		bin:       trashbin.Bin{Dir: filepath.Join(cfg.ConfigDir, "trash")},
+		qa:        qaState{secrets: prefs.Secrets{Dir: filepath.Join(cfg.ConfigDir, "credentials")}},
 		// The spaces fade in on coming back from the library, not at start.
 		library:    library{frames: 1},
 		insertSeam: insertSeam{index: -1},

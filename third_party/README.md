@@ -63,3 +63,27 @@ included. Formula parsing and layout remain in ArcMD's `internal/tex` package.
 Icons are Lucide, under the ISC License. Attribution appears in
 `internal/app/icons.go`; `internal/app/spacesymbols.go` is generated from
 Lucide 1.70.0.
+
+The Q&A ghost avatar (`internal/app/qabot*.go`) ports the default 32px
+`ghost` from [bot-avatars](https://github.com/Jakubantalik/Libraries.dev/tree/387b049ca8fe97b5d72999b5bf61a19ab1ccff81/packages/bot-avatars),
+Copyright (c) 2026 Jakub Antalik, MIT. Its motion engine is translated to
+Go; the original fabric renderer supplies view-dependent material images.
+Head orientation selects and interpolates those views in real time. Eyes,
+blinks, pointer tracking, jumps, squash and state transitions remain live
+native behavior, with no JavaScript or webview at runtime. The full notice
+is in `bot-avatars/LICENSE`; source and generation details are in
+`bot-avatars/README.md`.
+
+The Q&A Markdown stream ports Lobe UI's `StreamingPlayground` and LobeHub
+Streamdown's balanced smoother and per-character fade into native Go.
+Pinned source links, adaptation details and both MIT notices are in
+`lobe-streaming/`.
+
+The Q&A inline source chips, supporting claim highlights, gliding preview
+card and collapsible stacked-monogram sources list (`internal/app/qacitations.go`,
+`internal/app/qamarkdown.go`, `internal/app/qamarkdownview.go`,
+`internal/app/qaview.go`) port Kokonut UI's `ai-citations` component into
+native Go, under the MIT License, Copyright (c) 2025 kokonutUI. The full
+MIT notice is in `kokonutui/LICENSE`.
+
+[Kokonut UI source](https://github.com/kokonut-labs/kokonutui)

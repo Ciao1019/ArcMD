@@ -284,6 +284,17 @@ func (ix *Index) Icon(space, path string) string {
 	return ""
 }
 
+// TextOf returns the indexed plain text of the document at path in space, if present.
+func (ix *Index) TextOf(space, path string) (string, bool) {
+	if ix == nil {
+		return "", false
+	}
+	if e, ok := ix.entries[key{space, path}]; ok {
+		return e.text, true
+	}
+	return "", false
+}
+
 // Backlinks are the documents linking to the document named name with a
 // [[name]], but for the one at self (its own space and path). Each hit's
 // snippet is the line of the first link, Match the link in it.

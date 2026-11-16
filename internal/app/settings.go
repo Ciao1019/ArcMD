@@ -15,6 +15,7 @@ const (
 	tabAppearance = "appearance"
 	tabSpaces     = "spaces"
 	tabShortcuts  = "shortcuts"
+	tabAI         = "ai"
 	tabAbout      = "about"
 )
 
@@ -98,6 +99,7 @@ func (a *App) settingsView(c *ui.Context) {
 					{tabGeneral, i18n.T("通用"), "settings"},
 					{tabAppearance, i18n.T("外观"), "type"},
 					{tabSpaces, i18n.T("空间"), "layers"},
+					{tabAI, i18n.T("AI 问答"), "ask"},
 					{tabShortcuts, i18n.T("快捷键"), "keyboard"},
 					{tabAbout, i18n.T("关于"), "info"},
 				} {
@@ -135,6 +137,8 @@ func (a *App) settingsView(c *ui.Context) {
 					a.settingsSpaces(c)
 				case tabShortcuts:
 					a.settingsShortcuts(c)
+				case tabAI:
+					a.settingsAI(c)
 				case tabAbout:
 					a.settingsAbout(c)
 				default:

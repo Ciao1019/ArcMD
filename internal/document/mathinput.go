@@ -2,6 +2,40 @@ package document
 
 import "strings"
 
+// SingleLineDisplayMath extracts the formula from a single-line paragraph
+// fenced by $$ ... $$ on both sides (with at most 3 CommonMark leading spaces).
+func SingleLineDisplayMath(b *Block) (string, bool) {
+	if b == nil || b.Kind != "paragraph" {
+		return "", false
+	}
+	for _, r := range b.Runs {
+		if r.Style.Code || r.Style.Link != "" || r.Style.NoMath {
+			return "", false
+		}
+	}
+	raw := b.Text()
+	if strings.ContainsAny(raw, "\r\n\u2028") {
+		return "", false
+	}
+	lead := len(raw) - len(strings.TrimLeft(raw, " "))
+	if lead > 3 || (lead < len(raw) && raw[lead] == '\t') {
+		return "", false
+	}
+	trimmed := strings.Trim(raw[lead:], " \t")
+	if len(trimmed) <= 4 || !strings.HasPrefix(trimmed, "$$") || !strings.HasSuffix(trimmed, "$$") {
+		return "", false
+	}
+	body := trimmed[2 : len(trimmed)-2]
+	if strings.Contains(body, "$$") || strings.HasSuffix(body, `\`) {
+		return "", false
+	}
+	formula := strings.TrimSpace(body)
+	if formula == "" {
+		return "", false
+	}
+	return formula, true
+}
+
 // enterMath recognizes display fences and trailing double-Enter exits without
 // reparsing the document or changing ordinary Enter inside multiline TeX.
 func (e *Engine) enterMath(leaf Leaf) bool {
@@ -10,24 +44,45 @@ func (e *Engine) enterMath(leaf Leaf) bool {
 	}
 	b := leaf.Block
 	source := b.Text()
-	if b.Kind == "paragraph" && source == "$$" {
-		e.Edit(func() {
-			b.Kind, b.Runs = "math", nil
-			e.Anchor, e.Caret = leaf.Start, leaf.Start
-			e.Typing, e.Explicit = Style{}, false
-		})
-		return true
+	if b.Kind == "paragraph" {
+		lead := len(source) - len(strings.TrimLeft(source, " "))
+		if lead <= 3 && strings.TrimRight(source[lead:], " \t") == "$$" {
+			e.Edit(func() {
+				b.Kind, b.Runs = "math", nil
+				e.Anchor, e.Caret = leaf.Start, leaf.Start
+				e.Typing, e.Explicit = Style{}, false
+			})
+			return true
+		}
+		if leaf.Parent != nil {
+			if formula, ok := SingleLineDisplayMath(b); ok {
+				e.Edit(func() {
+					b.Kind = "math"
+					b.Runs = []Run{{Text: formula}}
+					next := NewBlock("paragraph", "")
+					next.Indent = b.Indent
+					parent, index := leaf.Parent, leaf.Index+1
+					*parent = append(append(append([]*Block(nil), (*parent)[:index]...), next), (*parent)[index:]...)
+					e.FocusBlock(next.ID)
+				})
+				return true
+			}
+		}
+		return false
 	}
-	fenceExit := strings.HasSuffix(source, "\n$$") || source == "$$"
+	fenceExit := strings.HasSuffix(source, "$$") && !strings.HasSuffix(source, `\$$`)
 	doubleEnterExit := strings.HasSuffix(source, "\n")
 	if b.Kind != "math" || !fenceExit && !doubleEnterExit {
 		return false
 	}
 	e.Edit(func() {
 		body := source
-		if fenceExit {
+		switch {
+		case strings.HasSuffix(source, "\n$$") || source == "$$":
 			body = strings.TrimSuffix(strings.TrimSuffix(source, "$$"), "\n")
-		} else {
+		case fenceExit:
+			body = strings.TrimRight(strings.TrimSuffix(source, "$$"), " \t")
+		default:
 			body = strings.TrimSuffix(source, "\n")
 		}
 		b.Runs = SliceRuns(b.Runs, 0, Len(body))

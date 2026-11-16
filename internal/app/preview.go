@@ -304,7 +304,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 		if p.thumbs == nil {
 			p.thumbs = map[string]thumb{}
 		}
-		d := &document{space: sp, rel: rel, ed: editor.FromDocument(cloned)}
+		d := &document{space: sp, rel: rel, ed: editor.FromOwnedDocument(cloned)}
 		p.thumbs[key] = thumb{d, rev}
 		return d
 	}
@@ -340,7 +340,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	if len(doc.Blocks) > previewMaxBlocks {
 		doc.Blocks = doc.Blocks[:previewMaxBlocks]
 	}
-	d := &document{space: sp, rel: rel, diskText: text, ed: editor.FromDocument(doc), loadErr: loadErr}
+	d := &document{space: sp, rel: rel, ed: editor.FromOwnedDocument(doc), loadErr: loadErr}
 	p.thumbs[key] = thumb{d, info.ModTime()}
 	return d
 }

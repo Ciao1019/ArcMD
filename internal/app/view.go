@@ -33,6 +33,7 @@ func (a *App) View(c *ui.Context) {
 		a.narrowTick(winW)
 	}
 	a.splitResizing = false
+	a.qa.resizing = false
 	a.carried, a.carrying = a.carrying, nil
 	a.syncOpen()
 	a.overClosed, a.overClose = a.overClose, place{}
@@ -213,6 +214,8 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.stepBookmark(1)
 	case a.pressed(c, "history"):
 		a.openVersions()
+	case a.pressed(c, "ask"):
+		a.toggleQA()
 	case a.pressed(c, "export-pdf"):
 		a.exportPDF()
 	}
@@ -284,22 +287,43 @@ func (a *App) peekSidebar(c *ui.Context) {
 // main is the toolbar over the card holding the open document.
 func (a *App) main(c *ui.Context, docked float32) {
 	t := c.Theme()
+	main := ui.Row(c.Key("main")).Grow(1).MinWidth(0).AlignItems(ui.Stretch)
+	target := float32(0)
+	if a.qa.open && a.state.ActiveSpace() != nil && (!a.spaceForm.open || a.spaceForm.id != "") {
+		target = qaWidth
+	}
+	// Resolve the panel before the document: both must use this frame's
+	// width, and offscreen paragraphs can keep their shaping while it moves.
+	a.qa.shown = main.Animate("qa-width", target, slide)
+	a.qa.resizing = a.qa.shown != target
 	left := float32(8)
 	if docked > 0.5 {
 		left = 0
 	}
-	ui.Column(c).Grow(1).MinWidth(0).Padding(0, 8, 8, left).Children(func() {
-		if a.split != nil && !(a.spaceForm.open && a.spaceForm.id == "") {
-			a.splitView(c)
-			return
+	// The question panel, when open, stands right of the document and its
+	// toolbar, which then leaves the window buttons' room to it.
+	panel := a.qa.shown
+	right := float32(8)
+	if panel > 0.5 {
+		right = 0
+	}
+	main.Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Padding(0, right, 8, left).Children(func() {
+			if a.split != nil && !(a.spaceForm.open && a.spaceForm.id == "") {
+				a.splitView(c)
+				return
+			}
+			a.toolbar(c)
+			card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
+				Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
+			w, _ := c.Size()
+			a.splitDropTarget(c, card)
+			a.tourMark("bookmarks", card)
+			card.Children(func() { a.documentContent(c, a.doc, w-docked-right-left-2-panel) })
+		})
+		if !a.spaceForm.open || a.spaceForm.id != "" {
+			a.qaPanel(c)
 		}
-		a.toolbar(c)
-		card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
-			Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
-		w, _ := c.Size()
-		a.splitDropTarget(c, card)
-		a.tourMark("bookmarks", card)
-		card.Children(func() { a.documentContent(c, a.doc, w-docked-8-left-2) })
 	})
 }
 
@@ -398,7 +422,17 @@ func (a *App) toolbar(c *ui.Context) {
 	bar := c.TitleBar()
 	// The sidebar reserves the left controls; Windows and Linux can keep
 	// their window buttons on the right, over this toolbar instead.
-	ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, bar.Right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
+	right := bar.Right
+	if a.qa.shown > 0.5 {
+		right = 0 // the question panel's header holds the window buttons' room
+	}
+	toolbar := ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow()
+	if a.qa.shown > 0.5 {
+		// A narrow document's controls must not paint or receive clicks over
+		// the question panel while it takes room beside the document.
+		toolbar.Clip()
+	}
+	toolbar.Children(func() {
 		if a.folded() {
 			ui.Box(c).Width(bar.Left + 4)
 			if iconButton(c, "show-sidebar", iconSidebar, i18n.T("展开侧边栏"), a.withKey(i18n.T("展开侧边栏"), "sidebar"), false).Clicked() {
@@ -419,6 +453,13 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Box(c).Width(8)
 		if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
 			a.doc.ed.Corner(c)
+		}
+		ask := iconButton(c, "ask", iconAsk, i18n.T("问答"), a.withKey(i18n.T("向当前空间提问"), "ask"), a.state.ActiveSpace() == nil)
+		if a.qa.open {
+			ask.Background(glass(c.Theme()))
+		}
+		if ask.Clicked() {
+			a.toggleQA()
 		}
 		a.moreMenu(c)
 	})

@@ -40,6 +40,8 @@ type completion struct {
 	index     int
 	dismissed int
 	items     []completeItem
+	reveal    bool
+	scroll    ui.ScrollState
 }
 
 // triggerBefore finds a trigger the caret is completing in before (the
@@ -77,6 +79,7 @@ func triggerBefore(before string) (trigger rune, at int, typed string, ok bool) 
 // a collapsed caret.
 func (e *Editor) watchComplete(now time.Time, emoji func(string) []EmojiItem, docs func(string) []WikiItem) {
 	m := &e.complete
+	wasOpen := m.open
 	m.open = false
 	if !e.focused || e.Anchor != e.Caret || e.mark != nil || e.slashOpen || e.wiki.open || e.ReadOnly {
 		return
@@ -132,8 +135,14 @@ func (e *Editor) watchComplete(now time.Time, emoji func(string) []EmojiItem, do
 			}
 		}
 		m.index = 0
+		m.reveal = true
+		m.scroll = ui.ScrollState{}
 	}
 	m.trigger, m.start, m.typed, m.open = trigger, start, typed, len(m.items) > 0
+	if m.open && !wasOpen {
+		m.reveal = true
+		m.scroll = ui.ScrollState{}
+	}
 	m.index = max(0, min(m.index, len(m.items)-1))
 }
 
@@ -177,8 +186,10 @@ func (e *Editor) completeKeys(ev ui.InputEvent) bool {
 		m.open, m.dismissed = false, m.start
 	case ui.KeyDown:
 		m.index = min(len(m.items)-1, m.index+1)
+		m.reveal = true
 	case ui.KeyUp:
 		m.index = max(0, m.index-1)
+		m.reveal = true
 	case ui.KeyEnter, ui.KeyTab:
 		if len(m.items) > 0 {
 			e.pick(m.items[m.index])
@@ -198,49 +209,68 @@ func (e *Editor) completeMenu(c *ui.Context, surface ui.Element) {
 		return
 	}
 	t := c.Theme()
-	bounds := surface.Bounds()
+	bounds := e.surfaceBounds(surface)
 	caret, _, _ := e.BoundsForRange(e.Selection().Range)
 	windowW, windowH := c.Size()
 	const width, rowH = 280, 34
-	height := float32(min(len(m.items), 8))*rowH + 18
-	x := min(bounds.X+caret.X, windowW-width-12)
-	y := bounds.Y + caret.Y + caret.H + 4
-	if y+height > windowH-12 && bounds.Y+caret.Y-height-4 > 8 {
-		y = bounds.Y + caret.Y - height - 4
-	}
+	height := float32(min(len(m.items), 8))*rowH + 40
+	anchor := ui.Rect{X: bounds.X + caret.X, Y: bounds.Y + caret.Y, W: caret.W, H: caret.H}
+	x, y, maxH := placeMenu(anchor, width, height, 4, windowW, windowH)
 	title := i18n.T("表情")
 	if m.trigger == '@' {
 		title = i18n.T("提及日期或文档")
 	}
 	ui.Overlay(c, func() {
-		menu := ui.Column(c.Key("complete-menu")).Absolute().Left(max(8, x)).Top(y).Width(width).Padding(1)
+		menu := ui.Column(c.Key("complete-menu")).Absolute().Left(x).Top(y).Width(width).Padding(1)
 		e.popover(c, menu).Children(func() {
 			ui.Text(c, title).FontSize(12).TextColor(e.page.Caption).Padding(8, 12, 2, 12).AlignSelf(ui.Start)
-			ui.Column(c).Padding(4, 6, 6, 6).Children(func() {
-				for i, it := range m.items {
-					selected := i == m.index
-					row := ui.ButtonBase(c.Key("complete-row:" + it.label + it.hint)).Height(rowH).PaddingX(8).Gap(8).Radius(4).
-						KeepFocus().Label(it.label).Cursor(ui.CursorPointer).AlignItems(ui.Center)
-					if !selected && row.Hovered() {
-						row.Background(e.page.Hover)
-					}
-					row.Children(func() {
+			ui.Scroll(c.Key("complete-scroll")).MaxHeight(min(8*rowH+10, max(rowH, maxH-30))).TrackScroll(&m.scroll).Children(func() {
+				topAnchor := ui.Box(c.Key("complete-top")).Height(0)
+				var selectedEl ui.Element
+				var hasSelected bool
+				ui.Column(c).Padding(4, 6, 6, 6).Children(func() {
+					for i, it := range m.items {
+						selected := i == m.index
+						row := ui.ButtonBase(c.Key("complete-row:" + it.label + it.hint)).Height(rowH).PaddingX(8).Gap(8).Radius(4).
+							KeepFocus().Label(it.label).Cursor(ui.CursorPointer).AlignItems(ui.Center)
+						if !selected && row.Hovered() {
+							row.Background(e.page.Hover)
+						}
+						row.Children(func() {
+							if selected {
+								slidingPill(c, completePillMatch{e}, e.page.Hover, 4)
+							}
+							if it.icon != "" {
+								ui.Text(c, it.icon).FontSize(16).Width(20).NoWrap()
+							} else {
+								ui.Box(c).Width(20).Center().Children(func() { ui.Icon(c, iconLink).FontSize(15).TextColor(e.page.Caption) })
+							}
+							ui.Text(c, it.label).FontSize(14).TextColor(t.Text).SingleLine().Grow(1).MinWidth(0)
+							if it.hint != "" {
+								ui.Text(c, it.hint).FontSize(12).TextColor(e.page.Caption).SingleLine().Shrink(1).MinWidth(0)
+							}
+						})
 						if selected {
-							slidingPill(c, completePillMatch{e}, e.page.Hover, 4)
+							selectedEl, hasSelected = row, true
 						}
-						if it.icon != "" {
-							ui.Text(c, it.icon).FontSize(16).Width(20).NoWrap()
-						} else {
-							ui.Box(c).Width(20).Center().Children(func() { ui.Icon(c, iconLink).FontSize(15).TextColor(e.page.Caption) })
+						if row.Clicked() {
+							e.pick(it)
+							e.RequestFocus = true
 						}
-						ui.Text(c, it.label).FontSize(14).TextColor(t.Text).SingleLine().Grow(1).MinWidth(0)
-						if it.hint != "" {
-							ui.Text(c, it.hint).FontSize(12).TextColor(e.page.Caption).SingleLine().Shrink(1).MinWidth(0)
+					}
+				})
+				bottomAnchor := ui.Box(c.Key("complete-bottom")).Height(0)
+				if m.reveal {
+					m.reveal = false
+					if len(m.items) > 0 {
+						if m.index == 0 {
+							topAnchor.ScrollIntoView()
+						} else if m.index == len(m.items)-1 {
+							bottomAnchor.ScrollIntoView()
 						}
-					})
-					if row.Clicked() {
-						e.pick(it)
-						e.RequestFocus = true
+						if hasSelected {
+							selectedEl.ScrollIntoView()
+						}
 					}
 				}
 			})

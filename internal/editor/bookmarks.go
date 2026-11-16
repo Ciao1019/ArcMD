@@ -269,10 +269,16 @@ func (e *Editor) bookmarkMarks(c *ui.Context) {
 		b.ghost = ""
 		return
 	}
+	if len(b.marks) == 0 && e.hoverID == "" && b.ghost == "" {
+		return
+	}
 	t := c.Theme()
 	x := e.width - e.padding + 12
 	ghost := ""
-	for _, h := range e.handles {
+	winTop := e.Scroll.Y - 1200
+	winBottom := e.Scroll.Y + max(e.viewport, 900) + 64
+	hs, he := e.visibleHandleRange(winTop, winBottom)
+	for _, h := range e.handles[hs:he] {
 		_, marked := b.marks[h.id]
 		// The hollow mark stays while the pointer is on it, though the
 		// pointer has left the block for the margin.

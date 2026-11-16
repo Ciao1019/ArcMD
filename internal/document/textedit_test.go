@@ -3,6 +3,8 @@ package document
 import (
 	"math/rand"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"unicode/utf16"
 )
@@ -104,4 +106,156 @@ func TestUTF16LengthAndBatchFoldControls(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestSameDocumentAndSkeletonDigest(t *testing.T) {
+	a := New()
+	a.Blocks = []*Block{
+		NewBlock("heading", "Title"),
+		NewBlock("paragraph", "body text"),
+		Table(2, 2),
+	}
+	a.Blocks[0].Level = 1
+	b := a.Clone()
+	if !SameDocument(a, b) {
+		t.Fatal("SameDocument returned false for exact clone")
+	}
+	da, err := a.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if db, err := b.Digest(); err != nil || da != db {
+		t.Fatalf("Digest mismatch on clone: %v", err)
+	}
+	if a.SkeletonDigest() != b.SkeletonDigest() {
+		t.Fatal("SkeletonDigest mismatch on clone")
+	}
+
+	// Mutating leaf runs preserves SkeletonDigest while failing SameDocument.
+	b.Blocks[1].Runs = []Run{{Text: "modified body", Style: Style{Bold: true}}}
+	if SameDocument(a, b) {
+		t.Fatal("SameDocument missed leaf run change")
+	}
+	if a.SkeletonDigest() != b.SkeletonDigest() {
+		t.Fatal("SkeletonDigest changed on leaf-only run edit")
+	}
+
+	// Structural or metadata changes invalidate SkeletonDigest.
+	c := a.Clone()
+	c.Blocks = append(c.Blocks, NewBlock("paragraph", "extra"))
+	if c.SkeletonDigest() == a.SkeletonDigest() {
+		t.Fatal("SkeletonDigest did not change after adding a block")
+	}
+}
+
+func TestSplitRunsByNewlineMatchesSliceRuns(t *testing.T) {
+	runs := Compact([]Run{
+		{Text: "first 😀\nsecond ", Style: Style{Bold: true}},
+		{Text: "styled\n\ntrailing", Style: Style{Italic: true}},
+		{Text: "\n"},
+	})
+	got := splitRunsByNewline(runs)
+	plain := (&Block{Runs: runs}).Text()
+	parts := strings.Split(plain, "\n")
+	if len(got) != len(parts) {
+		t.Fatalf("line count = %d, want %d", len(got), len(parts))
+	}
+	offset := 0
+	for i, part := range parts {
+		want := SliceRuns(runs, offset, offset+Len(part))
+		if !slices.Equal(got[i], want) {
+			t.Fatalf("line %d mismatch: got %+v, want %+v", i, got[i], want)
+		}
+		offset += Len(part) + 1
+	}
+}
+
+func TestSingleLeafIMECompositionAndFormatting(t *testing.T) {
+	doc := New()
+	doc.Blocks = []*Block{NewBlock("paragraph", "hello world"), NewBlock("paragraph", "second")}
+	fast, full := NewEngine(doc), NewEngine(doc)
+
+	// Single-leaf preedit -> candidate updates -> commit matches Snapshot path.
+	fast.SetSelection(6, 11)
+	full.SetSelection(6, 11)
+	ls, ok := fast.CaptureLeaf(6, 11)
+	if !ok {
+		t.Fatal("expected single-leaf CaptureLeaf to succeed")
+	}
+	fullSnap := full.Capture()
+
+	if !fast.PreviewLeafReplace(6, 11, "ni") {
+		t.Fatal("PreviewLeafReplace failed")
+	}
+	full.PreviewReplace(6, 11, "ni")
+	if !fast.PreviewLeafReplace(6, 8, "ni'hao") {
+		t.Fatal("second PreviewLeafReplace failed")
+	}
+	full.PreviewReplace(6, 8, "ni'hao")
+
+	revBeforeCommit := fast.Revision()
+	if !fast.CommitLeaf(ls, 6, 12, "你好") {
+		t.Fatal("CommitLeaf failed")
+	}
+	if ch, ok := fast.TextChangeSince(revBeforeCommit); !ok || ch.After != "hello 你好" {
+		t.Fatalf("CommitLeaf did not publish incremental TextChange: ok=%v ch=%+v", ok, ch)
+	}
+	fullPreview := full.Capture()
+	full.Restore(fullSnap)
+	full.Edit(func() {
+		full.Restore(fullPreview)
+		full.Replace(6, 12, "你好")
+	})
+	if !SameDocument(fast.Doc, full.Doc) || fast.Anchor != full.Anchor || fast.Caret != full.Caret {
+		t.Fatalf("IME commit diverged: fast=%q(%d,%d) full=%q(%d,%d)", fast.Doc.PlainText(), fast.Anchor, fast.Caret, full.Doc.PlainText(), full.Anchor, full.Caret)
+	}
+
+	// Single-leaf formatting publishes TextChange and undoes cleanly.
+	revFmt := fast.Revision()
+	fast.SetSelection(0, 5)
+	full.SetSelection(0, 5)
+	fast.Toggle("bold")
+	full.Toggle("bold")
+	if ch, ok := fast.TextChangeSince(revFmt); !ok || ch.Before != ch.After {
+		t.Fatalf("single-leaf Toggle did not publish style-only TextChange: ok=%v ch=%+v", ok, ch)
+	}
+	if !SameDocument(fast.Doc, full.Doc) {
+		t.Fatal("single-leaf Toggle diverged")
+	}
+	fast.Undo()
+	fast.Undo()
+	full.Undo()
+	full.Undo()
+	if !SameDocument(fast.Doc, doc) {
+		t.Fatalf("undo sequence did not restore original document: got %q", fast.Doc.PlainText())
+	}
+
+	// UnmarkText pattern: commit identical preview text must still advance version and revision.
+	fast.SetSelection(0, 0)
+	ls2, ok := fast.CaptureLeaf(0, 0)
+	if !ok || !fast.PreviewLeafReplace(0, 0, "中文") {
+		t.Fatal("preedit failed before UnmarkText test")
+	}
+	verBefore := fast.Version()
+	revBefore := fast.Revision()
+	if !fast.CommitLeaf(ls2, 0, 2, "中文") {
+		t.Fatal("CommitLeaf on identical preview text failed")
+	}
+	if fast.Version() != verBefore+1 {
+		t.Fatalf("version did not increment on UnmarkText-style commit")
+	}
+	if _, ok := fast.TextChangeSince(revBefore); !ok {
+		t.Fatal("revision/TextChange did not publish on UnmarkText-style commit")
+	}
+
+	// Markdown prefix at start of block defers to structural replacement.
+	fast.SetSelection(0, 0)
+	ls3, ok := fast.CaptureLeaf(0, 0)
+	if !ok || !fast.PreviewLeafReplace(0, 0, "#") {
+		t.Fatal("prefix preedit failed")
+	}
+	if fast.CommitLeaf(ls3, 0, 1, " ") {
+		t.Fatal("CommitLeaf unexpectedly swallowed start-of-block space prefix")
+	}
+	fast.RestoreLeaf(ls3)
 }

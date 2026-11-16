@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,24 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
+
+type layoutPageKey struct {
+	has                          bool
+	page                         Page
+	fontSize, lineHeight, column float32
+	fontFamily                   string
+	noteKey                      string
+}
+
+func sameLayoutPageKey(a, b layoutPageKey) bool {
+	return a.has == b.has &&
+		a.fontSize == b.fontSize &&
+		a.lineHeight == b.lineHeight &&
+		a.fontFamily == b.fontFamily &&
+		a.column == b.column &&
+		a.noteKey == b.noteKey &&
+		samePage(a.page, b.page)
+}
 
 type Editor struct {
 	notesDoc      *document.Document
@@ -40,6 +59,8 @@ type Editor struct {
 	handles                          []blockHandle
 	resizers                         []columnHandle
 	cache                            map[string]cachedShape
+	cacheClock                       uint64
+	heightHints                      map[string]heightHint
 	images                           map[string]ImageResource
 	imageCaptionID                   string
 	imageViewer                      imageViewer
@@ -51,7 +72,6 @@ type Editor struct {
 	resizeBatch                      bool
 	resizeRemaining                  int
 	layoutInputs                     layoutInputs
-	layoutSeen                       map[string]bool
 	cacheTheme                       ui.Theme
 	ready, focused, dragging, reveal bool
 	selectionDrag                    selectionDrag
@@ -65,6 +85,7 @@ type Editor struct {
 	menuOpen                         bool
 	menuID                           string
 	menuSub                          string
+	menuScroll                       ui.ScrollState
 	tableSel                         tableSelection
 	cellFillOpen, cellFillOpened     bool
 	foldButtons                      []foldButton
@@ -98,6 +119,8 @@ type Editor struct {
 	slashQuery                string
 	slashIndex                int
 	slashDismissed            bool
+	slashReveal               bool
+	slashScroll               ui.ScrollState
 	linkOpen                  bool
 	linkURL                   string
 	linkText                  string
@@ -110,6 +133,7 @@ type Editor struct {
 	noteOriginID              string
 	noteOriginOffset          int
 	readingSize, readingLine  float32
+	fontFamily                string
 	openLink                  func(string)
 	outline                   []outlineItem
 	outlineState              outlineState
@@ -118,7 +142,7 @@ type Editor struct {
 	copiedID                  string
 	copiedAt                  time.Time
 	page                      Page
-	pageKey                   string
+	laidPage                  layoutPageKey
 	colorOpen                 bool
 	colorID                   string
 	langOpen                  bool
@@ -128,6 +152,12 @@ type Editor struct {
 	words                     int
 	wordsRevision             uint64
 	wordsReady                bool
+	wordCache                 map[string]cachedWordCount
+	accessDoc                 *document.Document
+	accessRev                 uint64
+	accessStart               int
+	accessEnd                 int
+	accessVal                 string
 	// wiki completes the [[link]] being typed (wikilinks.go).
 	wiki wikiState
 	// footerH is the height the host's footer took the last frame.
@@ -180,6 +210,7 @@ type Editor struct {
 	inlinePopStart  int
 	inlinePopLen    int
 	smartBack       smartRollback
+	mathFence       mathFenceRollback
 	tableDrag       tableRowDrag
 	tableColDrag    tableColDrag
 	resizeMoved     bool
@@ -188,6 +219,8 @@ type Editor struct {
 	taskAnim        map[string]time.Time
 	imageEnter      imageEnterState
 	captionedImages map[string]bool
+	scrollBounds    ui.Rect
+	surfaceReserve  float32
 }
 
 type row struct {
@@ -200,7 +233,8 @@ type row struct {
 	// number is the position of a numbered item in its list, from 1.
 	number int
 	// size is the font size, which sizes the row's hand-drawn marks.
-	size float32
+	size        float32
+	tableHeader bool
 	// emptyColumn uses its outline as the hint, keeping the writing area clear.
 	emptyColumn bool
 	// Math geometry is relative to rect, so moving preceding paragraphs
@@ -397,10 +431,11 @@ type shapeStyle struct {
 }
 
 type cachedShape struct {
-	key    shapeStyle
-	runs   []document.Run
-	width  float32
-	layout *textLayout
+	key      shapeStyle
+	runs     []document.Run
+	width    float32
+	layout   *textLayout
+	lastUsed uint64
 }
 
 type Options struct {
@@ -485,10 +520,20 @@ type Options struct {
 	Reserved []Combo
 }
 
-func New(markdown string) *Editor { return FromDocument(ImportMarkdown(markdown)) }
+func New(markdown string) *Editor { return FromOwnedDocument(ImportMarkdown(markdown)) }
 func FromDocument(doc *document.Document) *Editor {
+	return newEditorWithBuffer(newBuffer(doc))
+}
+
+// FromOwnedDocument creates an Editor that takes ownership of doc without cloning
+// it. Callers must not mutate or reuse doc elsewhere.
+func FromOwnedDocument(doc *document.Document) *Editor {
+	return newEditorWithBuffer(newOwnedBuffer(doc))
+}
+
+func newEditorWithBuffer(buf *Buffer) *Editor {
 	// The color button starts out as a yellow highlighter.
-	return &Editor{Buffer: newBuffer(doc), cache: make(map[string]cachedShape), images: make(map[string]ImageResource), dropIndex: -1, lastAnnotation: "wavy",
+	return &Editor{Buffer: buf, cache: make(map[string]cachedShape), images: make(map[string]ImageResource), dropIndex: -1, lastAnnotation: "wavy",
 		wiki: wikiState{dismissed: -1}, complete: completion{dismissed: -1}}
 }
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
@@ -618,6 +663,8 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		if e.viewport <= 0 {
 			_, e.viewport = c.Size()
 		}
+		e.scrollBounds = scroll.Bounds()
+		e.surfaceReserve = reserve
 		e.stepSelectionDrag(c, scroll, reserve)
 		scroll.TrackScroll(&e.Scroll)
 		scroll.Children(func() {
@@ -641,7 +688,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 			content.Children(func() {
 				surface = ui.Box(c.Key("writing-surface")).Width(o.Width).Height(max(height, e.viewport)).Shrink(0).
 					HandleTextInput(e).Role(ui.RoleTextField).Label(i18n.T("文档")).FocusRing(false)
-				accessTextValue(surface.Access, e.displayText)
+				accessTextValue(surface.Access, e.accessText)
 				if e.RequestFocus {
 					surface.Focus()
 					e.lastInput = c.Now()
@@ -732,18 +779,43 @@ func (e *Editor) footerTop() float32 {
 	return top
 }
 
+// surfaceBounds returns the writing surface's window-space bounds adjusted for
+// the current frame's Scroll.Y and outline reserve, avoiding a one-frame lag
+// when popovers open or reposition on the same frame the editor scrolls.
+func (e *Editor) surfaceBounds(surface ui.Element) ui.Rect {
+	b := surface.Bounds()
+	if e.scrollBounds.H > 0 {
+		sy := min(max(0, e.Scroll.Y), e.outlineState.scrollMax)
+		b.X = e.scrollBounds.X + e.surfaceReserve
+		b.Y = e.scrollBounds.Y - sy
+		if b.W == 0 {
+			b.W = e.width
+		}
+	}
+	return b
+}
+
 func (e *Editor) layout(o Options) {
 	e.collectNotes()
-	e.readingSize, e.readingLine = o.FontSize, o.LineHeight
+	e.readingSize, e.readingLine, e.fontFamily = o.FontSize, o.LineHeight, o.FontFamily
 	defer func() { e.laidInline = e.inlineEditing }()
-	pageKey := fmt.Sprint(e.page, o.FontSize, o.LineHeight, o.FontFamily, o.Column, e.noteKey())
+	pageKey := layoutPageKey{
+		has:        true,
+		page:       e.page,
+		fontSize:   o.FontSize,
+		lineHeight: o.LineHeight,
+		fontFamily: o.FontFamily,
+		column:     o.Column,
+		noteKey:    e.noteKey(),
+	}
 	finishResize := e.resizePending && (!o.Resizing || e.resizeBatch)
 	refreshResize := e.resizePending && e.resizeScroll != e.Scroll.Y
 	anchor := resizeAnchor{}
 	if e.resizePending || o.Resizing {
 		anchor = e.resizeAnchor()
 	}
-	same := !finishResize && !refreshResize && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && e.pageKey == pageKey && e.laidMath == e.mathEditing && e.laidInline == e.inlineEditing
+	pageSame := sameLayoutPageKey(e.laidPage, pageKey)
+	same := !finishResize && !refreshResize && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidInline == e.inlineEditing
 	if same && e.cacheRevision == e.Revision() {
 		return
 	}
@@ -751,16 +823,23 @@ func (e *Editor) layout(o Options) {
 		e.cacheRevision = e.Revision()
 		return
 	}
-	if e.cacheTheme != *o.Theme || e.pageKey != pageKey {
+	if e.cacheTheme != *o.Theme || !pageSame {
 		clear(e.cache)
+		clear(e.heightHints)
 		clear(e.mathGlyphs)
 		clear(e.maths)
+		pageKey.page = clonePage(e.page)
+	} else {
+		pageKey.page = e.laidPage.page
+	}
+	if !e.ready {
+		e.Engine.InvalidateIndex()
 	}
 	inputs := &e.layoutInputs
 	inputs.refresh(e.Doc, e.Revision(), e.ready)
 	e.resizePending = false
 	e.resizeScroll = e.Scroll.Y
-	e.ready, e.width, e.cacheRevision, e.cacheTheme, e.pageKey = true, o.Width, e.Revision(), *o.Theme, pageKey
+	e.ready, e.width, e.cacheRevision, e.cacheTheme, e.laidPage = true, o.Width, e.Revision(), *o.Theme, pageKey
 	e.laidMath = e.mathEditing
 	// The text column is 820 wide unless the reader picked another.
 	e.column = columnWidth(o.Column)
@@ -774,13 +853,8 @@ func (e *Editor) layout(o Options) {
 	e.decorations = e.decorations[:0]
 	e.handles = e.handles[:0]
 	e.resizers = e.resizers[:0]
-	if e.layoutSeen == nil {
-		e.layoutSeen = make(map[string]bool)
-	}
-	seen := e.layoutSeen
-	clear(seen)
 	hidden, foldable := inputs.hidden, inputs.foldable
-	blockLayout := e.blockLayouter(o, inputs.leaves, hidden, seen)
+	blockLayout := e.blockLayouter(o, func(id string) document.Leaf { l, _ := e.Engine.LeafByID(id); return l }, hidden, false)
 	y := e.layoutHeader(o)
 	anchorPlaced := false
 	e.outline = e.outline[:0]
@@ -836,11 +910,6 @@ func (e *Editor) layout(o Options) {
 		}
 		y += h
 	}
-	for id := range e.cache {
-		if !seen[id] {
-			delete(e.cache, id)
-		}
-	}
 	if e.handleIDs == nil {
 		e.handleIDs = make(map[string]int, len(e.handles))
 	}
@@ -862,6 +931,18 @@ func (e *Editor) layout(o Options) {
 	for i, r := range e.rows {
 		e.rowIDs[r.leaf.Block.ID] = i
 	}
+	for id := range e.cache {
+		if _, ok := e.rowIDs[id]; !ok {
+			delete(e.cache, id)
+		}
+	}
+	if len(e.heightHints) > len(e.rows)+cacheTrimHysteresis {
+		for id := range e.heightHints {
+			if !e.Engine.HasLeaf(id) {
+				delete(e.heightHints, id)
+			}
+		}
+	}
 	e.rowSpace.reset(len(e.rows), func(i int) ui.Rect { return e.rows[i].rect })
 	e.decorationSpace.reset(len(e.decorations), func(i int) ui.Rect { return e.decorations[i].rect })
 	e.restoreResizeAnchor(anchor)
@@ -876,8 +957,7 @@ func (e *Editor) layout(o Options) {
 	}
 }
 
-func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidden map[string]string, seen map[string]bool) func(*document.Block, float32, float32, float32) float32 {
-	pg := e.page
+func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hidden map[string]string, forceShape bool) func(*document.Block, float32, float32, float32) float32 {
 	// counters numbers the items of numbered lists by indent; any other
 	// block ends the list.
 	var counters []int
@@ -886,6 +966,13 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 	// out at y 0 and moved afterwards, so resize deferral needs the real
 	// position to tell whether a cell is on screen.
 	cellTop := float32(0)
+	virtualize := !forceShape && e.shouldVirtualize()
+	var winTop, winBottom float32
+	var caretID, anchorID, revealID string
+	if virtualize {
+		winTop, winBottom = e.virtualWindow()
+		caretID, anchorID, revealID = e.activeBlockIDs()
+	}
 	var blockLayout func(*document.Block, float32, float32, float32) float32
 	blockLayout = func(b *document.Block, x, y, w float32) float32 {
 		if b.Kind == "columns" {
@@ -994,22 +1081,9 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 			x += indent
 			w -= indent
 		}
-		// Body text is 16 on 26 with 8 between blocks; table
-		// cells are 14 on 22.
-		font := ui.Font{Family: bodyFamily(o.FontFamily), Size: 16, LineHeight: 26.0 / 16}
-		if o.FontSize >= 12 && o.FontSize <= 28 {
-			font.Size = o.FontSize
-		}
-		if o.LineHeight >= 1.2 && o.LineHeight <= 2.2 {
-			font.LineHeight = o.LineHeight
-		}
-		if b.Kind == "cell" {
-			font.Size, font.LineHeight = 14, 22.0/14
-		}
-		left, right := float32(0), float32(0)
-		top, bottom := float32(0), float32(8)
-		// gap is the space below a block's decoration, outside its fill.
-		gap := float32(8)
+		m := e.blockMetrics(b, w, header)
+		font := m.font
+		left, top, bottom, gap, shapeWidth := m.left, m.top, m.bottom, m.gap, m.shapeWidth
 		number := 0
 		switch b.Kind {
 		case "bullet", "task":
@@ -1024,136 +1098,74 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 		default:
 			counters = nil
 		}
-		switch b.Kind {
-		case "heading":
-			level := max(1, b.Level)
-			// Feishu heading metrics: size, line height, space above
-			// and below.
-			level = min(level, 6)
-			font.Size = []float32{26, 22, 20, 18, 16, 16}[level-1]
-			font.LineHeight = []float32{36.4, 30.8, 28, 25.2, 26, 26}[level-1] / font.Size
-			font.Weight = 500
-			top, bottom = []float32{26, 22, 20, 18, 18, 16}[level-1], []float32{10, 8, 8, 8, 8, 8}[level-1]
-			if len(e.Doc.Blocks) > 0 && e.Doc.Blocks[0].ID == b.ID {
-				// The first heading is the page title: 34 on 55.25.
-				font.Size, font.Weight, font.LineHeight = 34, 500, 55.25/34
-				top, bottom = 0, 22
-			}
-		case "code", "raw", "math":
-			// Code blocks: 14 on 22, line numbers right-aligned
-			// in the first 36, text from 60, the header in the top 32.
-			font.Family, font.Size, font.LineHeight = "monospace", 14, 22.0/14
-			gap = 8
-			left, right, top, bottom = 20, 20, 16, 16+gap
-			if b.Kind == "code" {
-				left, top, bottom = 60, 40, 26+gap
-			}
-			if b.Kind == "math" {
-				font.Size, font.LineHeight = 14.4, 22.0/14.4
-				left, right = mathPaddingX, mathPaddingX
-			}
-		case "quote":
-			// A 2px bar and 14 of indent; caption-colored text.
-			left, top, bottom, gap = 14, 0, 8, 8
-		case "callout":
-			// 16 of padding, a 24 icon and 8 after it.
-			gap = 8
-			left, right, top, bottom = 48, 16, 16, 16+gap
-		case "bullet", "numbered", "task":
-			// The marker takes 24 (a task's box 24 too) per level.
-			left = 24 + float32(b.Indent)*24
-			bottom = 8
-		case "toggle":
-			// The triangle takes the marker's place.
-			left = 20 + float32(b.Indent)*20
-		}
-		if b.Kind == "footnote" {
-			left, top = 36, 12
-		}
-		revealed := ""
-		if strings.HasPrefix(e.inlineEditing, b.ID+":") {
-			revealed = e.inlineEditing
-		}
-		key := shapeStyle{font, b.Align, b.Kind, revealed, e.noteKey(), b.Checked, header}
+		leaf := leafOf(b.ID)
+		key := e.blockShapeKey(b, font, header)
 		cached, ok := e.cache[b.ID]
 		sameShape := ok && cached.key == key && slices.Equal(cached.runs, b.Runs)
-		shapeWidth := max(24, w-left-right)
-		keepOffscreen := false
-		if sameShape && cached.width != shapeWidth {
-			_, oldHeight := cached.layout.Size()
-			keepOffscreen = e.deferResizeShape(o, cellTop+y, oldHeight+top+bottom)
-			if keepOffscreen {
-				e.resizePending = true
-			}
-		}
-		if !sameShape || cached.width != shapeWidth && !keepOffscreen {
-			var spans []ui.Span
-			for _, run := range b.Runs {
-				style := run.Style
-				span := ui.Span{Text: run.Text, Italic: style.Italic, Underline: style.Underline, Strikethrough: style.Strike}
-				if style.Script != "" {
-					span.Size = font.Size * .72
-					span.BaselineShift = font.Size * .35
-					if style.Script == "sub" {
-						span.BaselineShift = -font.Size * .18
+		active := virtualize && (b.ID == caretID || b.ID == anchorID || b.ID == revealID || b.ID == e.dragID || b.ID == e.mathEditing || strings.HasPrefix(e.inlineEditing, b.ID+":"))
+		deferShape := virtualize && !active && leaf.Owner == b.ID && canDeferKind(b.Kind)
+
+		var laid *textLayout
+		var h float32
+		if sameShape {
+			if cached.width == shapeWidth {
+				cached.lastUsed = e.nextCacheClock()
+				e.cache[b.ID] = cached
+				laid = cached.layout
+			} else if deferShape {
+				_, oldHeight := cached.layout.Size()
+				offscreen := y+top+oldHeight+bottom < winTop || y > winBottom
+				if offscreen {
+					if o.Resizing {
+						e.resizePending = true
+						laid = cached.layout
+					} else {
+						delete(e.cache, b.ID)
 					}
 				}
-				if style.Bold {
-					span.Weight = 600
+			} else {
+				_, oldHeight := cached.layout.Size()
+				if e.deferResizeShape(o, cellTop+y, oldHeight+top+bottom) {
+					e.resizePending = true
+					laid = cached.layout
 				}
-				if style.Code {
-					span.Font, span.Size, span.Background, span.Radius = "monospace", font.Size*.875, pg.InlineFill, 4
-					span.Color = pg.InlineText
-				}
-				if style.Link != "" {
-					span.Color, span.Underline, span.DecorationColor = o.Theme.Accent, style.Underline, o.Theme.Accent.Alpha(.35)
-				}
-				if c, ok := pg.TextColors[style.Color]; ok {
-					span.Color, span.DecorationColor = c, c
-				}
-				if c, ok := pg.Highlights[style.Highlight]; ok {
-					span.Background, span.Radius = c, 2
-				}
-				switch {
-				case header:
-					span.Weight = max(span.Weight, 500)
-				case b.Kind == "quote":
-					span.Color = pg.Caption
-				case b.Kind == "task" && b.Checked:
-					span.Color, span.Strikethrough, span.DecorationColor = pg.TaskDone, true, pg.TaskDone
-				}
-				if style.Link == "" {
-					spans = append(spans, e.wikiSpans(span, run, b.Kind, o.Theme)...)
-					continue
-				}
-				spans = append(spans, span)
 			}
-			if b.Kind == "code" {
-				spans = codeSpans(b.Text(), pg)
-			} else if b.Kind != "math" && b.Kind != "raw" {
-				spans = padAnnotations(spans, b.Runs, font.Size)
-			}
-			if len(spans) == 0 {
-				spans = []ui.Span{{Text: ""}}
-			}
-			align := ui.Start
-			if b.Align == "center" {
-				align = ui.Center
-			}
-			if b.Align == "right" {
-				align = ui.End
-			}
-			if b.Kind == "math" || b.Kind == "image" {
-				align = ui.Center
-			}
-			cached = cachedShape{key: key, runs: slices.Clone(b.Runs), width: shapeWidth, layout: e.shapeInline(b, spans, font, ui.TextShape{Width: shapeWidth, Align: align})}
-			e.cache[b.ID] = cached
 		}
-		seen[b.ID] = true
-		_, h := cached.layout.Size()
+		if laid == nil && deferShape {
+			estH := e.estimateBlockHeight(b, font, shapeWidth)
+			if y+top+estH+bottom < winTop || y > winBottom {
+				if ok {
+					delete(e.cache, b.ID)
+				}
+				h = max(estH, font.Size*font.LineHeight)
+				total := top + h + bottom
+				row := row{leafRevision: e.Revision(), leaf: leaf, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size, tableHeader: header}
+				e.rows = append(e.rows, row)
+				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "quote" || b.Kind == "callout" {
+					d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
+					if b.Kind == "code" {
+						d.label, d.id = b.Language, b.ID
+					}
+					if b.Kind == "callout" {
+						d.tone, d.id, d.label = b.Color, b.ID, b.Emoji
+					}
+					e.decorations = append(e.decorations, d)
+				}
+				return total
+			}
+		}
+		if laid == nil {
+			cached = e.shapeBlock(b, key, shapeWidth, o.Theme)
+			e.cache[b.ID] = cached
+			laid = cached.layout
+		}
+		_, h = laid.Size()
 		h = max(h, font.Size*font.LineHeight)
+		if virtualize && leaf.Owner == b.ID && canDeferKind(b.Kind) {
+			e.recordExactHeight(b.ID, shapeWidth, h, font, b.Runs)
+		}
 		total := top + h + bottom
-		row := row{leafRevision: e.Revision(), leaf: leaves[b.ID], layout: cached.layout, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size}
+		row := row{leafRevision: e.Revision(), leaf: leaf, layout: laid, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size, tableHeader: header}
 		if b.Kind == "image" {
 			total = e.layoutImage(&row, o)
 		}
@@ -1167,7 +1179,7 @@ func (e *Editor) blockLayouter(o Options, leaves map[string]document.Leaf, hidde
 		}
 		e.rows = append(e.rows, row)
 		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" {
-			d := decoration{kind: b.Kind, id: b.ID, ownerID: leaves[b.ID].Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
+			d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
 			if b.Kind == "code" {
 				d.label, d.id = b.Language, b.ID
 			}
@@ -1193,24 +1205,33 @@ func (e *Editor) indexedRow(i int) *row {
 	}
 	return r
 }
-func (e *Editor) rowAt(at int) *row {
+func (e *Editor) rowIndexAt(at int) int {
 	if len(e.rows) == 0 {
-		return nil
+		return -1
 	}
 	leaf := e.Engine.LeafAt(at)
 	if i, ok := e.rowIDs[leaf.Block.ID]; ok {
-		return e.indexedRow(i)
+		return i
 	}
 	// A folded leaf has no row: retain the previous next-visible-row behavior.
 	i := sort.Search(len(e.rows), func(i int) bool { return at <= e.indexedRow(i).leaf.End })
-	return e.indexedRow(min(i, len(e.rows)-1))
+	return min(i, len(e.rows)-1)
+}
+
+func (e *Editor) rowAt(at int) *row {
+	i := e.rowIndexAt(at)
+	if i < 0 {
+		return nil
+	}
+	return e.indexedRow(i)
 }
 
 func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange, bool) {
-	row := e.rowAt(r.Start)
-	if row == nil {
+	idx := e.rowIndexAt(r.Start)
+	if idx < 0 {
 		return ui.Rect{}, r, false
 	}
+	row := e.ensureRow(idx)
 	local := max(0, min(r.Start-row.leaf.Start, row.leaf.End-row.leaf.Start))
 	if row.picture != nil && !e.captionVisible(row.leaf.Block) {
 		rect := row.picture.bounds
@@ -1227,7 +1248,7 @@ func (e *Editor) IndexForPoint(point ui.Point) (int, bool) {
 	if len(e.rows) == 0 {
 		return 0, false
 	}
-	best := e.indexedRow(e.rowSpace.nearest(point))
+	best := e.ensureRow(e.rowSpace.nearest(point))
 	if best.picture != nil && !e.captionVisible(best.leaf.Block) {
 		return best.leaf.Start, true
 	}
@@ -1264,6 +1285,13 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	offset := func(r ui.Rect) ui.Rect { r.X += bounds.X; r.Y += bounds.Y; return r }
 	e.paintHeader(p, bounds)
 	plan := e.currentDragPlan()
+	if !e.printing {
+		rowSlack := float32(40)
+		if e.motion.moving || plan.active || e.tableDrag.active || e.tableColDrag.active {
+			rowSlack = 200
+		}
+		e.ensureVisibleShaped(rowSlack, t)
+	}
 	if plan.active && !e.printing {
 		slot := ui.Rect{
 			X: bounds.X + e.padding,
@@ -1776,20 +1804,40 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 // paintLineNumbers numbers a code block's lines in its left 36; a
 // wrapped line keeps one number.
 func (e *Editor) paintLineNumbers(p *ui.Painter, bounds ui.Rect, d decoration) {
-	for _, r := range e.rows {
-		if r.leaf.Block.ID != d.id {
-			continue
-		}
-		text := r.leaf.Block.Text()
-		at := 0
-		for i, line := range strings.Split(text, "\n") {
-			caret := r.layout.Caret(at)
-			span := ui.Span{Text: fmt.Sprint(i + 1), Font: "monospace", Size: 14, Color: e.page.Caption, Features: "tnum"}
-			w, h := p.MeasureText(0, span)
-			p.RichText(bounds.X+d.rect.X+36-w, bounds.Y+r.y+caret.Y+(22-h)/2, 0, span)
-			at += document.Len(line) + 1
-		}
+	idx, ok := e.rowIDs[d.id]
+	if !ok {
 		return
+	}
+	r := e.ensureRow(idx)
+	text := r.leaf.Block.Text()
+	clip := !e.printing && e.viewport > 0
+	visTop := e.Scroll.Y - 40
+	visBot := e.Scroll.Y + e.viewport + 40
+	pos := 0
+	at := 0
+	for i := 0; ; i++ {
+		nl := strings.IndexByte(text[pos:], '\n')
+		var line string
+		if nl < 0 {
+			line = text[pos:]
+		} else {
+			line = text[pos : pos+nl]
+		}
+		caret := r.layout.Caret(at)
+		lineY := r.y + caret.Y
+		if clip && lineY > visBot {
+			break
+		}
+		if !clip || lineY+max(caret.H, 22) >= visTop {
+			span := ui.Span{Text: strconv.Itoa(i + 1), Font: "monospace", Size: 14, Color: e.page.Caption, Features: "tnum"}
+			w, h := p.MeasureText(0, span)
+			p.RichText(bounds.X+d.rect.X+36-w, bounds.Y+lineY+(22-h)/2, 0, span)
+		}
+		if nl < 0 {
+			break
+		}
+		pos += nl + 1
+		at += document.Len(line) + 1
 	}
 }
 
@@ -1938,7 +1986,8 @@ func (e *Editor) structuralPointer(ev ui.InputEvent) bool {
 			}
 			switch {
 			case !e.dragActive && old == e.dropIndex:
-				e.menuOpen, e.menuID = true, e.dragID
+				e.menuOpen, e.menuID, e.menuSub = true, e.dragID, ""
+				e.menuScroll = ui.ScrollState{}
 			case old == e.dropIndex:
 				e.commitBlockDragMotion()
 			case len(e.blocks.ids) > 1 && e.blockSelected(e.dragID):

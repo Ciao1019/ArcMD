@@ -1,12 +1,14 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/agent"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -23,6 +25,9 @@ func newTestApp(t testing.TB) (*App, *ui.Tester) {
 	// again (tour_test.go).
 	a.tour = tour{}
 	a.tourSeen()
+	// Tests never reach a model service: listing models fails unless a
+	// test lists them itself.
+	a.qa.listModels = func(agent.Settings) ([]string, error) { return nil, errors.New("offline") }
 	tt := ui.NewTester(a.View, 1200, 760)
 	tt.SetLocale("zh-Hans")
 	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 78})

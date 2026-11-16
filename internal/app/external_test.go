@@ -73,6 +73,14 @@ func TestExternalCollectionDoesNotImportFolders(t *testing.T) {
 	if len(a.textHits("unique content")) != 1 || len(a.textHits("secret sibling")) != 0 {
 		t.Fatal("search escaped collection")
 	}
+	fs := a.qaSpace(sp.ID)
+	docs, err := fs.Docs()
+	if err != nil || len(docs) != 2 {
+		t.Fatalf("QA docs %v: %v", docs, err)
+	}
+	if _, err := fs.Page("Unopened.md"); err == nil {
+		t.Fatal("QA read an unopened sibling")
+	}
 	if _, err := resolveFile(sp, "Unopened.md"); err == nil {
 		t.Fatal("unregistered file resolved")
 	}

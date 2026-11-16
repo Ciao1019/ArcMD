@@ -37,6 +37,7 @@ func (e *Editor) layoutForView(c *ui.Context, o Options) {
 	if o.Resizing && e.resizePending && e.resizeScroll != e.Scroll.Y {
 		e.layout(o)
 	}
+	e.materializeViewport(o)
 	if !e.resizePending {
 		e.windowResize.pending = false
 	} else if batch {

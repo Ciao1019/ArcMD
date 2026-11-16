@@ -509,77 +509,80 @@ func (e *Editor) paintInlineMathPopover(p *ui.Painter, bounds ui.Rect, t *ui.The
 	if e.printing || e.ReadOnly || !e.focused || e.inlineMath.blockID == "" {
 		return ui.Rect{}, false
 	}
-	for _, r := range e.rows {
-		if r.leaf.Block.ID != e.inlineMath.blockID || r.layout == nil {
+	idx, ok := e.rowIDs[e.inlineMath.blockID]
+	if !ok {
+		return ui.Rect{}, false
+	}
+	r := *e.ensureRow(idx)
+	if r.layout == nil {
+		return ui.Rect{}, false
+	}
+	for _, o := range r.layout.objects {
+		if !o.editing {
 			continue
 		}
-		for _, o := range r.layout.objects {
-			if !o.editing {
-				continue
-			}
-			dx, dy := e.visualOffset(r)
-			anchorX := bounds.X + r.x + dx + o.rect.X
-			anchorY := bounds.Y + r.y + dy + o.rect.Y + o.rect.H + 6
-			delim := ui.ShapeText("$", ui.Font{Family: "monospace", Size: 12.5}, 0)
-			dw, dh := delim.Size()
-			srcLayout := ui.ShapeText(o.source, ui.Font{Family: "monospace", Size: 13}, 0)
-			sw, sh := srcLayout.Size()
-			sh = max(sh, 18)
-			hint := ui.ShapeText(i18n.T("输入公式"), ui.Font{Family: "system-ui", Size: 12}, 0)
-			hw, hh := hint.Size()
-			innerW := sw
-			if o.source == "" {
-				innerW = max(innerW, hw+4)
-			}
-			popW := max(116, min(max(116, bounds.W-28), dw*2+innerW+30))
-			popH := max(30, sh+12)
-			popX := min(max(bounds.X+14, anchorX), max(bounds.X+14, bounds.X+bounds.W-14-popW))
-			pop := ui.Rect{X: popX, Y: anchorY, W: popW, H: popH}
-
-			p.Shadow(pop, 8, 0, 4, 14, 0, e.page.MathShadow)
-			p.Fill(pop, e.page.Popover, 8)
-			border := e.page.MathBorder
-			if o.hasErr && strings.TrimSpace(o.source) != "" {
-				border = t.Danger.Alpha(0.55)
-			}
-			p.Stroke(pop, border, 8, 1)
-
-			textX := pop.X + 10 + dw + 6
-			textY := pop.Y + (pop.H-sh)/2
-			p.TextLayout(delim, pop.X+10, pop.Y+(pop.H-dh)/2, e.page.Caption)
-			p.TextLayout(delim, pop.X+pop.W-10-dw, pop.Y+(pop.H-dh)/2, e.page.Caption)
-
-			srcStart := r.leaf.Start + o.start + 1
-			srcLen := document.Len(o.source)
-			e.inlinePopRect = ui.Rect{X: pop.X - bounds.X, Y: pop.Y - bounds.Y, W: pop.W, H: pop.H}
-			e.inlinePopTextX = textX - bounds.X
-			e.inlinePopTextY = textY - bounds.Y
-			e.inlinePopLayout = srcLayout
-			e.inlinePopStart = srcStart
-			e.inlinePopLen = srcLen
-
-			if e.Anchor != e.Caret {
-				selLo := max(0, min(srcLen, min(e.Anchor, e.Caret)-srcStart))
-				selHi := max(0, min(srcLen, max(e.Anchor, e.Caret)-srcStart))
-				for _, sr := range srcLayout.SelectionRects(ui.TextInputRange{Start: selLo, End: selHi}) {
-					p.Fill(ui.Rect{X: textX + sr.X, Y: textY + sr.Y, W: sr.W, H: sr.H}, t.Selection, 2)
-				}
-			}
-			if o.source == "" {
-				p.TextLayout(hint, textX+2, pop.Y+(pop.H-hh)/2, e.page.Placeholder)
-			} else {
-				p.TextLayout(srcLayout, textX, textY, t.Text)
-			}
-			localCaret := max(0, min(srcLen, e.Caret-srcStart))
-			cr := srcLayout.Caret(localCaret)
-			caretDoc := ui.Rect{
-				X: (textX - bounds.X) + cr.X,
-				Y: (textY - bounds.Y) + cr.Y,
-				W: 2,
-				H: max(16, sh),
-			}
-			return caretDoc, true
+		dx, dy := e.visualOffset(r)
+		anchorX := bounds.X + r.x + dx + o.rect.X
+		anchorY := bounds.Y + r.y + dy + o.rect.Y + o.rect.H + 6
+		delim := ui.ShapeText("$", ui.Font{Family: "monospace", Size: 12.5}, 0)
+		dw, dh := delim.Size()
+		srcLayout := ui.ShapeText(o.source, ui.Font{Family: "monospace", Size: 13}, 0)
+		sw, sh := srcLayout.Size()
+		sh = max(sh, 18)
+		hint := ui.ShapeText(i18n.T("输入公式"), ui.Font{Family: "system-ui", Size: 12}, 0)
+		hw, hh := hint.Size()
+		innerW := sw
+		if o.source == "" {
+			innerW = max(innerW, hw+4)
 		}
+		popW := max(116, min(max(116, bounds.W-28), dw*2+innerW+30))
+		popH := max(30, sh+12)
+		popX := min(max(bounds.X+14, anchorX), max(bounds.X+14, bounds.X+bounds.W-14-popW))
+		pop := ui.Rect{X: popX, Y: anchorY, W: popW, H: popH}
+
+		p.Shadow(pop, 8, 0, 4, 14, 0, e.page.MathShadow)
+		p.Fill(pop, e.page.Popover, 8)
+		border := e.page.MathBorder
+		if o.hasErr && strings.TrimSpace(o.source) != "" {
+			border = t.Danger.Alpha(0.55)
+		}
+		p.Stroke(pop, border, 8, 1)
+
+		textX := pop.X + 10 + dw + 6
+		textY := pop.Y + (pop.H-sh)/2
+		p.TextLayout(delim, pop.X+10, pop.Y+(pop.H-dh)/2, e.page.Caption)
+		p.TextLayout(delim, pop.X+pop.W-10-dw, pop.Y+(pop.H-dh)/2, e.page.Caption)
+
+		srcStart := r.leaf.Start + o.start + 1
+		srcLen := document.Len(o.source)
+		e.inlinePopRect = ui.Rect{X: pop.X - bounds.X, Y: pop.Y - bounds.Y, W: pop.W, H: pop.H}
+		e.inlinePopTextX = textX - bounds.X
+		e.inlinePopTextY = textY - bounds.Y
+		e.inlinePopLayout = srcLayout
+		e.inlinePopStart = srcStart
+		e.inlinePopLen = srcLen
+
+		if e.Anchor != e.Caret {
+			selLo := max(0, min(srcLen, min(e.Anchor, e.Caret)-srcStart))
+			selHi := max(0, min(srcLen, max(e.Anchor, e.Caret)-srcStart))
+			for _, sr := range srcLayout.SelectionRects(ui.TextInputRange{Start: selLo, End: selHi}) {
+				p.Fill(ui.Rect{X: textX + sr.X, Y: textY + sr.Y, W: sr.W, H: sr.H}, t.Selection, 2)
+			}
+		}
+		if o.source == "" {
+			p.TextLayout(hint, textX+2, pop.Y+(pop.H-hh)/2, e.page.Placeholder)
+		} else {
+			p.TextLayout(srcLayout, textX, textY, t.Text)
+		}
+		localCaret := max(0, min(srcLen, e.Caret-srcStart))
+		cr := srcLayout.Caret(localCaret)
+		caretDoc := ui.Rect{
+			X: (textX - bounds.X) + cr.X,
+			Y: (textY - bounds.Y) + cr.Y,
+			W: 2,
+			H: max(16, sh),
+		}
+		return caretDoc, true
 	}
 	return ui.Rect{}, false
 }

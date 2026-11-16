@@ -221,7 +221,7 @@ runs also accept document paths. The deepest matching Space owns an opened file;
 external files belong to a single built-in External space, created on first use
 and retained even when empty. State version 9 stores an explicit local-name to
 absolute-file map. This collection never scans parent directories: sidebar,
-library and search see only registered files. Duplicate basenames
+library, search and agent tools see only registered files. Duplicate basenames
 receive distinct list names. A single-file watcher follows each entry; file
 reads, in-place saves, images and exports use the original location.
 Private version history lives under the configuration directory. Removing an

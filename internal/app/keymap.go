@@ -49,6 +49,7 @@ var bindings = []binding{
 	{id: "bookmarks", label: "书签列表", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyD)}},
 	{id: "prev-bookmark", label: "上一个书签", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyUp)}},
 	{id: "next-bookmark", label: "下一个书签", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyDown)}},
+	{id: "ask", label: "问答", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyJ)}},
 	{id: "history", label: "版本历史", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyY)}},
 	{id: "export-pdf", label: "导出 PDF", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyE)}},
 	{id: "bold", label: "粗体", editor: true},
@@ -144,26 +145,54 @@ func (a *App) menuKey(item *ui.MenuItem, id string) *ui.MenuItem {
 	return item
 }
 
-// editorBindings are the editor's commands rebound by the user.
-func (a *App) editorBindings() map[string]editor.Combo {
-	if a.prefs == nil || len(a.prefs.Keys) == 0 {
-		return nil
+func (a *App) ensureKeyCache() {
+	n := 0
+	if a.prefs != nil {
+		n = len(a.prefs.Keys)
 	}
-	out := map[string]editor.Combo{}
-	for _, b := range bindings {
-		if !b.editor {
-			continue
-		}
-		if _, ok := a.prefs.Keys[b.id]; ok {
-			ks := a.combos(b.id)
-			if len(ks) == 0 {
-				out[b.id] = editor.Combo{} // matches no key
+	if a.keysCacheValid && a.keysCachePrefs == a.prefs && a.keysCacheGen == a.keyGen && a.keysCacheLen == n {
+		return
+	}
+	var eb map[string]editor.Combo
+	if a.prefs != nil && len(a.prefs.Keys) > 0 {
+		eb = map[string]editor.Combo{}
+		for _, b := range bindings {
+			if !b.editor {
 				continue
 			}
-			out[b.id] = ks[0]
+			if _, ok := a.prefs.Keys[b.id]; ok {
+				ks := a.combos(b.id)
+				if len(ks) == 0 {
+					eb[b.id] = editor.Combo{} // matches no key
+					continue
+				}
+				eb[b.id] = ks[0]
+			}
 		}
 	}
-	return out
+	var res []editor.Combo
+	for _, id := range bookmarkKeys {
+		res = append(res, a.combos(id)...)
+	}
+	res = append(res, a.combos("ask")...)
+	a.cachedEditorBindings = eb
+	a.cachedReserved = res
+	a.cachedBookmarkKey = a.shortKey("bookmark")
+	a.keysCachePrefs = a.prefs
+	a.keysCacheGen = a.keyGen
+	a.keysCacheLen = n
+	a.keysCacheValid = true
+}
+
+// editorBindings are the editor's commands rebound by the user.
+func (a *App) editorBindings() map[string]editor.Combo {
+	a.ensureKeyCache()
+	return a.cachedEditorBindings
+}
+
+func (a *App) cachedBookmarkShortKey() string {
+	a.ensureKeyCache()
+	return a.cachedBookmarkKey
 }
 
 // rebind gives the command with the ID the key, or none, after checking no
@@ -206,6 +235,7 @@ func (a *App) rebind(id string, k *editor.Combo) bool {
 	default:
 		a.prefs.Keys[id] = k.String()
 	}
+	a.keyGen++
 	a.savePrefs()
 	return true
 }
@@ -220,6 +250,7 @@ func (a *App) resetKeys(id string) {
 	} else {
 		delete(a.prefs.Keys, id)
 	}
+	a.keyGen++
 	a.savePrefs()
 }
 

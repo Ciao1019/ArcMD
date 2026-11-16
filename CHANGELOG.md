@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.0
+
+This release introduces **Space Q&A**—a built-in, read-only AI research agent that searches and reads a Space's notes directly without a vector database—alongside viewport-aware floating menus, smarter live Markdown and display-math input, and large-document virtualization.
+
+### Space Q&A
+
+- **Zero-index agentic search and reading**: Press `⌘J` (or click the toolbar Q&A icon) to open a per-Space side panel. Instead of building a vector index, the agent explores a live, line-numbered Markdown projection of the Space—including unsaved edits in open documents and registered External space files—using parallel read-only tools (`glob`, case-insensitive and regex `grep`, `read`, `outline`, and `links` for wiki-links, backlinks, and `#tags`) within a bounded 16-step budget, treating note content strictly as untrusted data rather than instructions.
+- **Interactive inline citations and gliding previews**: Answers cite exact `[path#L12-L18]` ranges rendered as inline monogram source chips with `+N` multi-source badges. Hovering or focusing a chip highlights the supporting claim in the answer and floats a gliding preview card beside the panel with the document icon, section heading, line range, and recalled excerpt; expanding the stacked-monogram **Sources** footer syncs hover highlights bidirectionally with inline claims, and clicking any chip or source jumps straight to the cited block in the editor with a highlight glow.
+- **Paced streaming, exploration timeline, and native polish**: Streamed Markdown answers (headings, lists, blockquotes, code blocks, tables, and inline marks) use adaptive balanced pacing and per-character fade-in, paired with a collapsible step-by-step search/read timeline, a `Jump to latest` pill while reading earlier passages, localized error states with one-click retry (plus automatic retries on transient 429/5xx/stream cutoffs before text starts), and a pointer-tracking ghost avatar.
+- **Bring-your-own Chat Completions model and CLI runner**: Configure **Settings › AI Q&A** with presets for **OpenAI**, **DeepSeek** (with automatic `reasoning_content` replay across tool calls), **OpenRouter**, local **Ollama** (keyless `localhost` HTTP supported; remote endpoints require `https://`), or any custom Chat Completions service, including one-click `/models` fetching and a searchable model picker. API keys are stored atomically outside `prefs.json` and Space folders in `credentials/ai-api-key` (`0600`). Run `arcmd ask` in the terminal to inspect tool traces and verify citations from the command line.
+
+### Fixes and editor improvements
+
+- **Viewport-aware floating menus and submenus**: Flip block-handle menus, `/`, `[[`, and `:`/`@` completion menus, callout color/icon pickers, and code-language pickers above the anchor when bottom viewport space is tight, clamp height with inner scrolling when neither side fits full height, keep side submenus (`Indent and Alignment`, `Color`) inside horizontal and vertical window bounds, and keep `/`, completion, and command-bar selections scrolled into view during arrow-key navigation ([#2](https://github.com/Ciao1019/ArcMD/issues/2)).
+- **Reverse live Markdown and predictive display math**: Prepending block prefixes (`#`–`###### `, `> `, `- `, `1. `, `- [ ] `) or opening inline delimiters (`**`, `*`, `~~`, `` ` ``) before existing text now compiles in place while preserving trailing content, with single-Backspace rollback to literal syntax. Typing `$$` in an empty paragraph immediately opens a display-math card (`Backspace` or `Esc` restores literal `$$`), single-line `$$ … $$` compiles live, and `$$ ` opens display math even when auto-pairing is off.
+- **Large-document virtualization and O(1) dirty tracking**: Virtualize offscreen paragraph shaping on documents exceeding 800 leaves or 120,000 characters with pointer-free 128-bit run fingerprints and bounded LRU caches; replace full-document JSON baseline clones with streaming digests and leaf-level dirty tracking; keep single-leaf IME composition and inline formatting clone-free; extract plain text directly from Markdown when indexing search; defer backlink/tag footer recomputation while actively typing in long documents; and ignore atomic-save temp-dotfile overwrites in the directory watcher.
+
+### Documentation
+
+- Refresh `README.md`, `README.en.md`, `AGENTS.md`, `docs/architecture.md`, `docs/plugins.md`, and `third_party/` notices for Space Q&A and version 0.2.0.
+
+### Data compatibility
+
+Document (`.md` and legacy `.arcmd` format **8**) and Space configuration (`spaces.json` format **9**) formats are unchanged from 0.1.0. Preferences (`prefs.json` v1) add optional `ai` service fields (`provider`, `baseURL`, `model`), while the API key is stored separately in `credentials/ai-api-key`. Older releases ignore unknown preference fields.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates. The plugin marketplace and plugin execution runtimes remain unavailable.
+
 ## 0.1.0
 
 This release makes standard `.md` Markdown the primary document format, adds a built-in External space for standalone files, and brings fluid motion and tactile micro-interactions across typing, math, tables, images, and the sidebar.

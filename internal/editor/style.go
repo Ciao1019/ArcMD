@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"maps"
+
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/egoist/mygo/ui"
 )
@@ -149,5 +151,58 @@ func pageOf(p Page, t *ui.Theme) Page {
 			p.Callouts[tone] = Callout{Fill: hue.Alpha(.08), Border: hue.Alpha(.25), Icon: hue}
 		}
 	}
+	return p
+}
+
+func samePage(a, b Page) bool {
+	return a.Marker == b.Marker &&
+		a.Caption == b.Caption &&
+		a.Placeholder == b.Placeholder &&
+		a.TaskBorder == b.TaskBorder &&
+		a.TaskDone == b.TaskDone &&
+		a.QuoteBar == b.QuoteBar &&
+		a.Rule == b.Rule &&
+		a.CodeFill == b.CodeFill &&
+		a.CodeBorder == b.CodeBorder &&
+		a.CodeText == b.CodeText &&
+		a.CodeHover == b.CodeHover &&
+		a.InlineFill == b.InlineFill &&
+		a.InlineText == b.InlineText &&
+		a.TableLine == b.TableLine &&
+		a.TableHeader == b.TableHeader &&
+		a.Hover == b.Hover &&
+		a.TurnActive == b.TurnActive &&
+		a.BarFill == b.BarFill &&
+		a.BarHover == b.BarHover &&
+		a.BarSelected == b.BarSelected &&
+		a.CellSelected == b.CellSelected &&
+		a.Danger == b.Danger &&
+		a.DangerCell == b.DangerCell &&
+		a.FindMatch == b.FindMatch &&
+		a.FindCurrent == b.FindCurrent &&
+		a.OnMarker == b.OnMarker &&
+		a.Popover == b.Popover &&
+		a.TagFill == b.TagFill &&
+		a.Scrim == b.Scrim &&
+		a.OnScrim == b.OnScrim &&
+		a.ImageShadow == b.ImageShadow &&
+		a.MathBorder == b.MathBorder &&
+		a.MathShadow == b.MathShadow &&
+		a.Tokens == b.Tokens &&
+		maps.Equal(a.Tints, b.Tints) &&
+		maps.Equal(a.TextColors, b.TextColors) &&
+		maps.Equal(a.Highlights, b.Highlights) &&
+		maps.Equal(a.CellFills, b.CellFills) &&
+		maps.Equal(a.Covers, b.Covers) &&
+		maps.Equal(a.Callouts, b.Callouts)
+}
+
+func clonePage(p Page) Page {
+	p.Tints = maps.Clone(p.Tints)
+	p.TextColors = maps.Clone(p.TextColors)
+	p.Highlights = maps.Clone(p.Highlights)
+	p.CellFills = maps.Clone(p.CellFills)
+	p.Covers = maps.Clone(p.Covers)
+	p.Callouts = maps.Clone(p.Callouts)
 	return p
 }

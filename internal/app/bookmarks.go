@@ -62,6 +62,10 @@ func (a *App) marksOf(d *document) map[string]string {
 	if mk.known && mk.rev == rev && mk.gen == a.bookmarkGen {
 		return mk.m
 	}
+	if len(a.state.Bookmarks) == 0 {
+		mk.rev, mk.gen, mk.known, mk.bound, mk.m = rev, a.bookmarkGen, true, true, nil
+		return nil
+	}
 	m := map[string]string{}
 	rebound := false
 	for i := range a.state.Bookmarks {
@@ -93,7 +97,7 @@ func (a *App) marksOf(d *document) map[string]string {
 // to their bookmarks once the document is saved, so lists show what the
 // block says now.
 func (a *App) syncExcerpts(d *document) {
-	if d == nil || d.loadErr != nil {
+	if d == nil || d.loadErr != nil || len(a.state.Bookmarks) == 0 {
 		return
 	}
 	mk := &d.marks
@@ -217,11 +221,8 @@ func (a *App) firstKey(id string) string {
 // reservedKeys are the keys of the bookmark commands, which the page must
 // not take for itself.
 func (a *App) reservedKeys() []editor.Combo {
-	var out []editor.Combo
-	for _, id := range bookmarkKeys {
-		out = append(out, a.combos(id)...)
-	}
-	return out
+	a.ensureKeyCache()
+	return a.cachedReserved
 }
 
 // sameBookmark reports whether two bookmarks are the same one, though its

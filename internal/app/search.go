@@ -55,8 +55,8 @@ func extractText(name, content string) (search.Extracted, error) {
 		}
 		return search.Extracted{Text: doc.PlainText(), Icon: doc.Icon}, nil
 	}
-	doc := editor.ImportMarkdown(content)
-	return search.Extracted{Text: doc.PlainText(), Icon: doc.Icon}, nil
+	text, icon := editor.ExtractMarkdownText(content)
+	return search.Extracted{Text: text, Icon: icon}, nil
 }
 
 // refreshSearch reads the spaces' documents into the index again, only
@@ -207,7 +207,11 @@ func (a *App) liveIndex() *search.Index {
 	var docs []*document
 	unchanged := s.overlayReady && s.liveBase == s.index
 	for _, d := range a.residentDocuments() {
-		if d.loadErr != nil || !visible[d] && !d.dirty() {
+		if d.loadErr != nil {
+			continue
+		}
+		_, indexed := s.index.TextOf(d.space.ID, d.rel)
+		if !d.dirty() && (indexed || !visible[d]) {
 			continue
 		}
 		docs = append(docs, d)

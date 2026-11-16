@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/agent"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 )
 
@@ -156,4 +157,67 @@ func TestSplitSmoothFactors(t *testing.T) {
 	if added.shownFactor != added.factor {
 		t.Fatalf("split pane factor did not settle: shown=%v target=%v", added.shownFactor, added.factor)
 	}
+}
+
+func TestQAJumpLatestAndCitationPreview(t *testing.T) {
+	a, tt := newTestApp(t)
+	if err := vault.Write(root(a), "Design.md", "# Design\n\n## Latency Budget\n\nFrame time stays below 4ms under load.\n"); err != nil {
+		t.Fatal(err)
+	}
+	var ans strings.Builder
+	for i := range 90 {
+		fmt.Fprintf(&ans, "Line %02d of streamed answer.\n\n", i)
+	}
+	ans.WriteString("Final conclusion with citation [Design.md#L5-L5].\n")
+
+	s := a.qaSession(a.state.ActiveSpace().ID)
+	turn := &qaTurn{question: "What is the latency budget?", answer: ans.String(), running: true}
+	s.turns = []*qaTurn{turn}
+	s.cancel = func() {}
+	a.toggleQA()
+	tt.Frame()
+	qaAdvance(tt, 500*time.Millisecond)
+	tt.Frame()
+
+	if tt.HasText("回到最新") {
+		t.Fatal("jump-to-latest pill should be hidden when already at the bottom")
+	}
+	if tt.HasText("Latency Budget") {
+		t.Fatal("citation preview should not appear before hovering chip")
+	}
+	// Hover the inline citation chip: after the 120ms open delay, floating preview
+	// card shows the section heading and recalled excerpt.
+	citeBounds, ok := tt.Find("来源：Design")
+	if !ok {
+		t.Fatal("inline citation chip not found")
+	}
+	tt.Move(citeBounds.X+citeBounds.W/2, citeBounds.Y+citeBounds.H/2)
+	tt.Advance(140 * time.Millisecond)
+	if !s.preview.open || s.preview.part != 1 {
+		t.Fatalf("hovering inline citation at %+v did not open preview: %+v", citeBounds, s.preview)
+	}
+	if !tt.HasText("Latency Budget") || !tt.HasText("Frame time stays below 4ms under load.") {
+		t.Fatalf("inline citation hover preview card did not display section and excerpt: %v", tt.Texts())
+	}
+	tt.Move(10, 10)
+	tt.Advance(110 * time.Millisecond)
+	if tt.HasText("Latency Budget") {
+		t.Fatal("citation preview did not dismiss after moving pointer off chip")
+	}
+
+	// Scroll up inside QA list: "回到最新" pill appears without shifting paragraph anchors, and clicking it jumps back to end.
+	tt.Scroll(1050, 350, 0, -900)
+	tt.Frame()
+	if !tt.HasText("回到最新") {
+		t.Fatal("scrolling up in QA did not surface 回到最新 pill")
+	}
+	if err := tt.Click("回到最新"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Frame()
+	if !s.list.AtEnd() || tt.HasText("回到最新") {
+		t.Fatalf("clicking 回到最新 did not return list to end: atEnd=%v", s.list.AtEnd())
+	}
+	_ = agent.ToolRead
 }

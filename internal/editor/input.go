@@ -200,6 +200,9 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 			return true
 		}
 	}
+	if _, composing := e.MarkedRange(); !composing && key == ui.KeyEscape && mods == 0 && e.focused && e.rollbackMathFence() {
+		return true
+	}
 	if _, composing := e.MarkedRange(); !composing && key == ui.KeyEscape && mods == 0 && e.focused && e.escapeInlineMath() {
 		return true
 	}
@@ -337,7 +340,7 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		e.UnmarkText()
 		e.refused = e.refused || e.ReadOnly
 		if !shift && mods == 0 && !e.ReadOnly {
-			if e.exitInlineMath() || e.cellEnter() {
+			if e.consumeMathFenceEnter() || e.exitInlineMath() || e.cellEnter() {
 				e.vertical = false
 				return true
 			}

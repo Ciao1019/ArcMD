@@ -284,7 +284,7 @@ func (a *App) settledFooter(c *ui.Context, d *document) *pageFooterCache {
 func (a *App) liveTyping(c *ui.Context) time.Duration {
 	var wait time.Duration
 	for _, d := range a.residentDocuments() {
-		if d.loadErr != nil || len(d.plain) < footerLong {
+		if d.loadErr != nil || d.ed.ByteLen() < footerLong {
 			continue
 		}
 		rev := d.ed.Revision()
@@ -304,8 +304,12 @@ func (a *App) footerData(d *document) *pageFooterCache {
 	location := place{d.space.ID, d.rel}
 	cache := &d.footer
 	if !cache.ready || cache.index != ix || cache.location != location {
+		text, ok := ix.TextOf(location.space, location.rel)
+		if !ok || d.dirty() {
+			text = d.plainText()
+		}
 		*cache = pageFooterCache{ready: true, index: ix, location: location,
-			tags: wiki.TagNames(d.plainText()),
+			tags: wiki.TagNames(text),
 			hits: ix.Backlinks(d.title(), search.Live{Space: location.space, Path: location.rel}, nil)}
 	}
 	return cache

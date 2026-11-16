@@ -31,11 +31,7 @@ func (x offsetIndex) containing(at int) int {
 	}
 	return min(i, len(x)-2)
 }
-func (e *Engine) ensureIndex() {
-	// Transactions can query intermediate mutations before publishing a revision.
-	if e.depth == 0 && e.indexDoc == e.Doc && e.indexRevision == e.revision {
-		return
-	}
+func (e *Engine) rebuildIndex() {
 	e.leaves = e.Doc.Leaves()
 	e.leafIDs = make(map[string]int, len(e.leaves))
 	e.unitIndex, e.byteIndex = make(offsetIndex, len(e.leaves)+1), make(offsetIndex, len(e.leaves)+1)
@@ -49,6 +45,14 @@ func (e *Engine) ensureIndex() {
 		}
 	}
 	e.indexDoc, e.indexRevision = e.Doc, e.revision
+}
+
+func (e *Engine) ensureIndex() {
+	// Transactions can query intermediate mutations before publishing a revision.
+	if e.depth == 0 && e.indexDoc == e.Doc && e.indexRevision == e.revision {
+		return
+	}
+	e.rebuildIndex()
 }
 func (e *Engine) leafAtIndex(i int) Leaf {
 	l := e.leaves[i]
@@ -80,10 +84,41 @@ func (e *Engine) LeafByID(id string) (Leaf, bool) {
 	return e.leafAtIndex(i), true
 }
 
+// LeafCount returns the number of leaf blocks in the indexed document.
+func (e *Engine) LeafCount() int {
+	e.ensureIndex()
+	return len(e.leaves)
+}
+
+// LeafAtIndex returns the leaf at zero-based index i with current offsets.
+func (e *Engine) LeafAtIndex(i int) Leaf {
+	e.ensureIndex()
+	return e.leafAtIndex(i)
+}
+
+// HasLeaf reports whether id currently exists in the indexed leaf set.
+func (e *Engine) HasLeaf(id string) bool {
+	e.ensureIndex()
+	_, ok := e.leafIDs[id]
+	return ok
+}
+
+// InvalidateIndex marks the cached leaf index stale so the next query rebuilds
+// it, including after callers mutate Doc directly outside Engine methods.
+func (e *Engine) InvalidateIndex() {
+	e.indexDoc = nil
+}
+
 // TextLength is the flattened document's UTF-16 length, including separators.
 func (e *Engine) TextLength() int {
 	e.ensureIndex()
 	return max(0, e.unitIndex.prefix(len(e.leaves))-1)
+}
+
+// TextByteLength is the flattened document's UTF-8 byte length, including separators.
+func (e *Engine) TextByteLength() int {
+	e.ensureIndex()
+	return max(0, e.byteIndex.prefix(len(e.leaves))-1)
 }
 
 // TextRange reads only the intersected leaves. Native offsets inside surrogate

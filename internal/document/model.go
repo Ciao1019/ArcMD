@@ -5,12 +5,18 @@ package document
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
+	"math"
+	"slices"
 	"strings"
+	"sync"
 )
 
 // CurrentVersion is the format this ArcMD writes. Version 2 added the color
@@ -136,12 +142,28 @@ type Document struct {
 	ImportSource string `json:"importSource,omitempty"`
 }
 
+var (
+	idMu   sync.Mutex
+	idPool [4080]byte
+	idUsed = len(idPool)
+)
+
 func NewID() string {
-	var value [12]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		panic(err)
+	var raw [12]byte
+	idMu.Lock()
+	if idUsed+len(raw) > len(idPool) {
+		if _, err := rand.Read(idPool[:]); err != nil {
+			idMu.Unlock()
+			panic(err)
+		}
+		idUsed = 0
 	}
-	return hex.EncodeToString(value[:])
+	copy(raw[:], idPool[idUsed:idUsed+len(raw)])
+	idUsed += len(raw)
+	idMu.Unlock()
+	var encoded [24]byte
+	hex.Encode(encoded[:], raw[:])
+	return string(encoded[:])
 }
 
 func NewBlock(kind, text string) *Block {
@@ -354,6 +376,216 @@ func (d *Document) Encode() (string, error) {
 	return out.String(), err
 }
 
+// RunsDigest returns a 128-bit fingerprint of a block's styled runs without
+// allocating or cloning run slices.
+func RunsDigest(runs []Run) [16]byte {
+	var h [32]byte
+	d := sha256.New()
+	var buf [64]byte
+	hashRuns(d, &buf, runs)
+	sum := d.Sum(h[:0])
+	var out [16]byte
+	copy(out[:], sum[:16])
+	return out
+}
+
+// Digest validates the document and computes a SHA-256 fingerprint over all
+// persisted document, block, and run fields without serializing JSON.
+func (d *Document) Digest() ([32]byte, error) {
+	if err := d.Validate(); err != nil {
+		return [32]byte{}, err
+	}
+	h := sha256.New()
+	var buf [64]byte
+	hashDocHeader(h, &buf, d)
+	for _, b := range d.Blocks {
+		hashBlock(h, &buf, b)
+	}
+	var out [32]byte
+	h.Sum(out[:0])
+	return out, nil
+}
+
+// SkeletonDigest hashes the document's structure and metadata while omitting
+// leaf blocks' Runs, matching the exact subset of fields that text-only edits
+// cannot change. Thus Digest(a) == Digest(b) implies identical SkeletonDigests.
+func (d *Document) SkeletonDigest() [32]byte {
+	h := sha256.New()
+	var buf [64]byte
+	hashDocHeader(h, &buf, d)
+	for _, b := range d.Blocks {
+		hashBlockSkeleton(h, &buf, b)
+	}
+	var out [32]byte
+	h.Sum(out[:0])
+	return out
+}
+
+func hashDocHeader(h hash.Hash, buf *[64]byte, d *Document) {
+	hashString(h, buf, d.Format)
+	hashUint64(h, buf, uint64(d.Version))
+	hashString(h, buf, d.Icon)
+	hashString(h, buf, d.Cover)
+	hashFloat64(h, buf, d.CoverY)
+	hashUint64(h, buf, uint64(d.Goal))
+	hashString(h, buf, d.Frontmatter)
+	hashString(h, buf, d.ImportSource)
+	hashUint64(h, buf, uint64(len(d.Blocks)))
+}
+
+func hashUint64(h hash.Hash, buf *[64]byte, v uint64) {
+	binary.LittleEndian.PutUint64(buf[:8], v)
+	_, _ = h.Write(buf[:8])
+}
+
+func hashFloat32(h hash.Hash, buf *[64]byte, v float32) {
+	if v == 0 {
+		v = 0
+	}
+	binary.LittleEndian.PutUint32(buf[:4], math.Float32bits(v))
+	_, _ = h.Write(buf[:4])
+}
+
+func hashFloat64(h hash.Hash, buf *[64]byte, v float64) {
+	if v == 0 {
+		v = 0
+	}
+	binary.LittleEndian.PutUint64(buf[:8], math.Float64bits(v))
+	_, _ = h.Write(buf[:8])
+}
+
+func hashBool(h hash.Hash, buf *[64]byte, v bool) {
+	if v {
+		buf[0] = 1
+	} else {
+		buf[0] = 0
+	}
+	_, _ = h.Write(buf[:1])
+}
+
+func hashString(h hash.Hash, buf *[64]byte, s string) {
+	hashUint64(h, buf, uint64(len(s)))
+	_, _ = io.WriteString(h, s)
+}
+
+func hashRuns(h hash.Hash, buf *[64]byte, runs []Run) {
+	hashUint64(h, buf, uint64(len(runs)))
+	for i := range runs {
+		r := &runs[i]
+		hashString(h, buf, r.Text)
+		st := &r.Style
+		hashBool(h, buf, st.NoMath)
+		hashString(h, buf, st.Script)
+		hashBool(h, buf, st.Bold)
+		hashBool(h, buf, st.Italic)
+		hashBool(h, buf, st.Underline)
+		hashBool(h, buf, st.Strike)
+		hashBool(h, buf, st.Code)
+		hashString(h, buf, st.Link)
+		hashString(h, buf, st.Color)
+		hashString(h, buf, st.Highlight)
+		hashString(h, buf, st.Annotation)
+		hashString(h, buf, st.AnnotationColor)
+	}
+}
+
+func hashBlock(h hash.Hash, buf *[64]byte, b *Block) {
+	hashBlockWithRuns(h, buf, b, true)
+}
+
+func hashBlockSkeleton(h hash.Hash, buf *[64]byte, b *Block) {
+	hashBlockWithRuns(h, buf, b, false)
+}
+
+func hashBlockWithRuns(h hash.Hash, buf *[64]byte, b *Block, includeLeafRuns bool) {
+	if b == nil {
+		hashBool(h, buf, false)
+		return
+	}
+	hashBool(h, buf, true)
+	hashFloat32(h, buf, b.ImageWidth)
+	hashString(h, buf, b.NoteLabel)
+	hashString(h, buf, b.ID)
+	hashString(h, buf, b.Kind)
+	if includeLeafRuns || len(b.Children) > 0 {
+		hashRuns(h, buf, b.Runs)
+	}
+	hashUint64(h, buf, uint64(b.Level))
+	hashUint64(h, buf, uint64(b.Indent))
+	hashBool(h, buf, b.Checked)
+	hashString(h, buf, b.Language)
+	hashString(h, buf, b.URL)
+	hashString(h, buf, b.Align)
+	hashUint64(h, buf, uint64(len(b.Widths)))
+	for _, w := range b.Widths {
+		hashFloat32(h, buf, w)
+	}
+	hashString(h, buf, b.Color)
+	hashBool(h, buf, b.Folded)
+	hashString(h, buf, b.Background)
+	hashUint64(h, buf, uint64(b.ColSpan))
+	hashUint64(h, buf, uint64(b.RowSpan))
+	hashString(h, buf, b.Emoji)
+	hashUint64(h, buf, uint64(len(b.Children)))
+	for _, child := range b.Children {
+		hashBlockWithRuns(h, buf, child, includeLeafRuns)
+	}
+}
+
+// SameDocument reports whether a and b hold identical document metadata and
+// block trees without reflection or allocations.
+func SameDocument(a, b *Document) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Format != b.Format || a.Version != b.Version || a.Icon != b.Icon ||
+		a.Cover != b.Cover || a.CoverY != b.CoverY || a.Goal != b.Goal ||
+		a.Frontmatter != b.Frontmatter || a.ImportSource != b.ImportSource ||
+		len(a.Blocks) != len(b.Blocks) {
+		return false
+	}
+	for i := range a.Blocks {
+		if !SameBlock(a.Blocks[i], b.Blocks[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// SameBlock reports whether two blocks and their descendants match exactly.
+func SameBlock(a, b *Block) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.ImageWidth != b.ImageWidth || a.NoteLabel != b.NoteLabel ||
+		a.ID != b.ID || a.Kind != b.Kind ||
+		a.Level != b.Level || a.Indent != b.Indent ||
+		a.Checked != b.Checked || a.Language != b.Language ||
+		a.URL != b.URL || a.Align != b.Align ||
+		a.Color != b.Color || a.Folded != b.Folded ||
+		a.Background != b.Background || a.ColSpan != b.ColSpan ||
+		a.RowSpan != b.RowSpan || a.Emoji != b.Emoji ||
+		len(a.Widths) != len(b.Widths) || len(a.Runs) != len(b.Runs) ||
+		len(a.Children) != len(b.Children) {
+		return false
+	}
+	if !slices.Equal(a.Widths, b.Widths) || !slices.Equal(a.Runs, b.Runs) {
+		return false
+	}
+	for i := range a.Children {
+		if !SameBlock(a.Children[i], b.Children[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (d *Document) Validate() error {
 	if d.Format != "arcmd" || d.Version != CurrentVersion {
 		return fmt.Errorf("document: unsupported format %q version %d", d.Format, d.Version)
@@ -562,16 +794,49 @@ func SliceRuns(runs []Run, start, end int) []Run {
 }
 
 func Compact(runs []Run) []Run {
+	if len(runs) == 0 {
+		return nil
+	}
+	clean := true
+	for i, run := range runs {
+		if run.Text == "" || (i > 0 && runs[i-1].Style == run.Style) {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return slices.Clone(runs)
+	}
 	var out []Run
-	for _, run := range runs {
-		if run.Text == "" {
+	for i := 0; i < len(runs); {
+		if runs[i].Text == "" {
+			i++
 			continue
 		}
-		if len(out) > 0 && out[len(out)-1].Style == run.Style {
-			out[len(out)-1].Text += run.Text
-		} else {
-			out = append(out, run)
+		style := runs[i].Style
+		j := i + 1
+		nonEmpty := 1
+		for j < len(runs) && (runs[j].Text == "" || runs[j].Style == style) {
+			if runs[j].Text != "" {
+				nonEmpty++
+			}
+			j++
 		}
+		if nonEmpty == 1 {
+			out = append(out, Run{Text: runs[i].Text, Style: style})
+		} else {
+			var sb strings.Builder
+			total := 0
+			for k := i; k < j; k++ {
+				total += len(runs[k].Text)
+			}
+			sb.Grow(total)
+			for k := i; k < j; k++ {
+				sb.WriteString(runs[k].Text)
+			}
+			out = append(out, Run{Text: sb.String(), Style: style})
+		}
+		i = j
 	}
 	return out
 }
@@ -587,7 +852,7 @@ type Leaf struct {
 }
 
 func (d *Document) Leaves() []Leaf {
-	var out []Leaf
+	out := make([]Leaf, 0, len(d.Blocks))
 	position, bytePosition := 0, 0
 	var walk func(*[]*Block, string, map[*Block]bool)
 	walk = func(blocks *[]*Block, owner string, covered map[*Block]bool) {

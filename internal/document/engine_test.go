@@ -655,3 +655,115 @@ func TestInsertAt(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestPrependMarkdownPrefixPreservesExistingContent(t *testing.T) {
+	prepend := func(e *Engine, prefix string) {
+		for _, r := range prefix {
+			e.Replace(e.Caret, e.Caret, string(r))
+		}
+	}
+	roundTrip := func(t *testing.T, e *Engine) {
+		t.Helper()
+		encoded := mustEncode(t, e.Doc)
+		decoded, err := Decode(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(e.Doc, decoded) {
+			t.Fatalf("round-trip mismatch:\n got: %+v\nwant: %+v", decoded.Blocks, e.Doc.Blocks)
+		}
+	}
+
+	// Heading "## " before styled text preserves inline runs and undoes/redoes cleanly.
+	e := textEngine("我要变二级标题")
+	e.SetSelection(3, 7)
+	e.Toggle("bold")
+	e.SetSelection(0, 0)
+	prepend(e, "## ")
+	b := e.Doc.Blocks[0]
+	if b.Kind != "heading" || b.Level != 2 || b.Text() != "我要变二级标题" || e.Caret != 0 {
+		t.Fatalf("prepend ## failed: kind=%s level=%d text=%q caret=%d", b.Kind, b.Level, b.Text(), e.Caret)
+	}
+	if len(b.Runs) != 2 || b.Runs[0].Text != "我要变" || !b.Runs[1].Style.Bold || b.Runs[1].Text != "二级标题" {
+		t.Fatalf("prepend ## lost inline runs: %+v", b.Runs)
+	}
+	roundTrip(t, e)
+	e.Undo()
+	if e.Doc.Blocks[0].Kind != "paragraph" || e.Doc.Blocks[0].Text() != "##我要变二级标题" {
+		t.Fatalf("undo heading autoformat: %+v", e.Doc.Blocks[0])
+	}
+	e.Redo()
+	if e.Doc.Blocks[0].Kind != "heading" || e.Doc.Blocks[0].Level != 2 || e.Doc.Blocks[0].Text() != "我要变二级标题" {
+		t.Fatalf("redo heading autoformat: %+v", e.Doc.Blocks[0])
+	}
+
+	// Quote with 1-3 CommonMark leading spaces.
+	q := textEngine("我要变引用")
+	q.SetSelection(0, 0)
+	prepend(q, " > ")
+	if q.Doc.Blocks[0].Kind != "quote" || q.Doc.Blocks[0].Text() != "我要变引用" {
+		t.Fatalf("prepend leading-space > failed: %+v", q.Doc.Blocks[0])
+	}
+	roundTrip(t, q)
+
+	// Bullet "- " then "[ ] " into unchecked task, and "- [x] " into checked task.
+	task := textEngine("待办事项")
+	task.SetSelection(0, 0)
+	prepend(task, "- ")
+	if task.Doc.Blocks[0].Kind != "bullet" || task.Doc.Blocks[0].Text() != "待办事项" {
+		t.Fatalf("prepend - failed: %+v", task.Doc.Blocks[0])
+	}
+	prepend(task, "[ ] ")
+	if task.Doc.Blocks[0].Kind != "task" || task.Doc.Blocks[0].Checked || task.Doc.Blocks[0].Text() != "待办事项" {
+		t.Fatalf("prepend [ ] in bullet failed: %+v", task.Doc.Blocks[0])
+	}
+	roundTrip(t, task)
+
+	doneTask := textEngine("已完成")
+	doneTask.SetSelection(0, 0)
+	prepend(doneTask, "- [x] ")
+	if doneTask.Doc.Blocks[0].Kind != "task" || !doneTask.Doc.Blocks[0].Checked || doneTask.Doc.Blocks[0].Text() != "已完成" {
+		t.Fatalf("prepend - [x] failed: %+v", doneTask.Doc.Blocks[0])
+	}
+	roundTrip(t, doneTask)
+
+	// Ordered list with non-1 number "2. ".
+	ord := textEngine("第二条")
+	ord.SetSelection(0, 0)
+	prepend(ord, "2. ")
+	if ord.Doc.Blocks[0].Kind != "numbered" || ord.Doc.Blocks[0].Text() != "第二条" {
+		t.Fatalf("prepend 2. failed: %+v", ord.Doc.Blocks[0])
+	}
+	roundTrip(t, ord)
+
+	// Verbatim code "``` " and math "$$ " strip inline marks from trailing text.
+	code := textEngine("fmt.Println(1)")
+	code.SetSelection(0, 3)
+	code.Toggle("bold")
+	code.SetSelection(0, 0)
+	prepend(code, "``` ")
+	cb := code.Doc.Blocks[0]
+	if cb.Kind != "code" || cb.Text() != "fmt.Println(1)" || len(cb.Runs) != 1 || cb.Runs[0].Style != (Style{}) {
+		t.Fatalf("prepend ``` failed: %+v", cb)
+	}
+	roundTrip(t, code)
+
+	math := textEngine("a_x=b_y")
+	math.SetSelection(0, 3)
+	math.Toggle("italic")
+	math.SetSelection(0, 0)
+	prepend(math, "$$ ")
+	mb := math.Doc.Blocks[0]
+	if mb.Kind != "math" || mb.Text() != "a_x=b_y" || len(mb.Runs) != 1 || mb.Runs[0].Style != (Style{}) {
+		t.Fatalf("prepend $$ failed: %+v", mb)
+	}
+	roundTrip(t, math)
+
+	// 4 leading spaces must NOT autoformat.
+	indented := textEngine("保持正文")
+	indented.SetSelection(0, 0)
+	prepend(indented, "    ## ")
+	if indented.Doc.Blocks[0].Kind != "paragraph" || indented.Doc.Blocks[0].Text() != "    ## 保持正文" {
+		t.Fatalf("4 leading spaces should not autoformat: %+v", indented.Doc.Blocks[0])
+	}
+}
