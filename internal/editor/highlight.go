@@ -17,6 +17,9 @@ func init() {
 
 // Code spans change only paint. Their text and font metrics match the buffer.
 func codeSpans(text string, pg Page) []ui.Span {
+	if len(text) > 64<<10 {
+		return []ui.Span{{Text: text, Color: pg.CodeText}}
+	}
 	var out []ui.Span
 	start := 0
 	for _, match := range codeToken.FindAllStringIndex(text, -1) {

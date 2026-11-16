@@ -231,8 +231,12 @@ func (e *Editor) inlineClick(x, y float32) bool {
 	}
 	// A footnote's return target stays 26 DIP high even with small fonts;
 	// include its overhang before applying the original exact hit tests.
+	var candidates []int
 	for i := range e.rowSpace.between(y-26, y+26) {
-		r := e.indexedRow(i)
+		candidates = append(candidates, i)
+	}
+	for _, i := range candidates {
+		r := e.ensureRow(i)
 		if r.leaf.Block.Kind == "footnote" && x >= r.rect.X && x < r.x && y >= r.y && y < r.y+26 {
 			return e.ReturnFootnote()
 		}

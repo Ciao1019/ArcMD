@@ -1,7 +1,7 @@
 package document
 
 import (
-	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -34,12 +34,16 @@ type Engine struct {
 	textChange           TextChange
 }
 
-func NewEngine(doc *Document) *Engine   { return &Engine{Doc: doc.Clone()} }
-func (e *Engine) Version() uint64       { return e.version }
-func (e *Engine) Revision() uint64      { return e.revision }
-func (e *Engine) CanUndo() bool         { return len(e.undo) > 0 }
-func (e *Engine) CanRedo() bool         { return len(e.redo) > 0 }
-func (e *Engine) Positions() (int, int) { return e.Anchor, e.Caret }
+func NewEngine(doc *Document) *Engine { return &Engine{Doc: doc.Clone()} }
+
+// NewEngineOwned takes exclusive ownership of doc without cloning it. Callers
+// must not alias or mutate doc outside the returned Engine.
+func NewEngineOwned(doc *Document) *Engine { return &Engine{Doc: doc} }
+func (e *Engine) Version() uint64          { return e.version }
+func (e *Engine) Revision() uint64         { return e.revision }
+func (e *Engine) CanUndo() bool            { return len(e.undo) > 0 }
+func (e *Engine) CanRedo() bool            { return len(e.redo) > 0 }
+func (e *Engine) Positions() (int, int)    { return e.Anchor, e.Caret }
 func (e *Engine) Capture() Snapshot {
 	return Snapshot{e.Doc.Clone(), e.Anchor, e.Caret, e.Typing, e.Explicit}
 }
@@ -73,7 +77,7 @@ func (e *Engine) Edit(change func()) {
 	before := e.Capture()
 	change()
 	dropStrayColors(e.Doc.Blocks)
-	if reflect.DeepEqual(before.Doc, e.Doc) {
+	if SameDocument(before.Doc, e.Doc) {
 		return
 	}
 	e.recordUndo(historyEntry{state: before})
@@ -191,6 +195,18 @@ func (e *Engine) Replace(a, z int, text string) {
 	e.Edit(func() { e.replace(a, z, text); e.autoformat(text) })
 }
 
+// ReplaceLiteral replaces [a, z) with text without running Markdown prefix
+// autoformatting, preserving literal prefixes after an explicit rollback.
+func (e *Engine) ReplaceLiteral(a, z int, text string) {
+	if e.ReadOnly {
+		return
+	}
+	if e.replaceTextLiteral(a, z, text) {
+		return
+	}
+	e.Edit(func() { e.replace(a, z, text) })
+}
+
 // PreviewReplace updates the display document during IME composition. The
 // input adapter retains the committed snapshot and creates history on commit.
 func (e *Engine) PreviewReplace(a, z int, text string) {
@@ -204,24 +220,42 @@ func (e *Engine) PreviewReplace(a, z int, text string) {
 	e.revision++
 }
 
+func (e *Engine) currentStyleIn(leaf Leaf, a, z int) Style {
+	if e.Explicit {
+		return e.Typing
+	}
+	at := min(a, z)
+	position := leaf.Start
+	for _, run := range leaf.Block.Runs {
+		position += Len(run.Text)
+		if position > at || a == z && position == z {
+			return run.Style
+		}
+	}
+	return Style{}
+}
+
 func (e *Engine) replace(a, z int, text string) {
 	a, z = max(0, min(a, z)), max(0, max(a, z))
-	first, last := e.LeafAt(a), e.LeafAt(z)
+	e.rebuildIndex()
+	first := e.leafAtIndex(e.unitIndex.containing(a))
+	last := e.leafAtIndex(e.unitIndex.containing(z))
 	left, right := first.Block.Text(), last.Block.Text()
 	a = first.Start + Len(left[:ByteOffset(left, a-first.Start)])
 	z = last.Start + Len(right[:ByteOffset(right, z-last.Start)])
-	style := e.CurrentStyle()
+	style := e.currentStyleIn(first, a, z)
 	style.NoMath = false
+	normText := strings.ReplaceAll(text, "\r\n", "\n")
 	before := SliceRuns(first.Block.Runs, 0, a-first.Start)
 	after := SliceRuns(last.Block.Runs, z-last.Start, last.End-last.Start)
-	runs := Compact(append(append(before, Run{Text: strings.ReplaceAll(text, "\r\n", "\n"), Style: style}), after...))
+	runs := Compact(append(append(before, Run{Text: normText, Style: style}), after...))
 	if first.Parent != last.Parent || first.Block != last.Block && first.Block.Kind == "cell" {
-		if a == 0 && z == e.TextLength() {
+		if a == 0 && z == max(0, e.unitIndex.prefix(len(e.leaves))-1) {
 			e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
 			first = e.Doc.Leaves()[0]
 			first.Block.Runs = runs
 		} else {
-			e.replaceAcross(a, z, strings.ReplaceAll(text, "\r\n", "\n"), style)
+			e.replaceAcross(a, z, normText, style)
 			return
 		}
 	} else {
@@ -236,11 +270,10 @@ func (e *Engine) replace(a, z int, text string) {
 	// Code, preserved source and cells retain internal newlines. Paragraph
 	// separators split blocks and carry the marks on each side of the caret.
 	if first.Block.Kind != "code" && first.Block.Kind != "cell" && first.Block.Kind != "raw" && first.Block.Kind != "math" {
-		parts := strings.Split(first.Block.Text(), "\n")
-		if len(parts) > 1 {
-			var blocks []*Block
-			offset := 0
-			for i, part := range parts {
+		split := splitRunsByNewline(runs)
+		if len(split) > 1 {
+			blocks := make([]*Block, 0, len(split))
+			for i, lineRuns := range split {
 				block := first.Block.Clone()
 				if i > 0 {
 					block.ID = NewID()
@@ -249,9 +282,8 @@ func (e *Engine) replace(a, z int, text string) {
 						block.Kind, block.Level = "paragraph", 0
 					}
 				}
-				block.Runs = SliceRuns(runs, offset, offset+Len(part))
+				block.Runs = lineRuns
 				blocks = append(blocks, block)
-				offset += Len(part) + 1
 			}
 			parent, index := e.find(first.Block.ID)
 			if parent != nil {
@@ -259,39 +291,127 @@ func (e *Engine) replace(a, z int, text string) {
 			}
 		}
 	}
-	e.Anchor, e.Caret = a+Len(strings.ReplaceAll(text, "\r\n", "\n")), a+Len(strings.ReplaceAll(text, "\r\n", "\n"))
+	caret := a + Len(normText)
+	e.Anchor, e.Caret = caret, caret
 	e.Typing, e.Explicit = style, true
 }
 
+// splitRunsByNewline splits a compacted run slice on '\n' in a single O(N) pass,
+// matching repeated SliceRuns over newline-delimited ranges.
+func splitRunsByNewline(runs []Run) [][]Run {
+	var out [][]Run
+	var cur []Run
+	for _, run := range runs {
+		rest := run.Text
+		for {
+			idx := strings.IndexByte(rest, '\n')
+			if idx < 0 {
+				if rest != "" {
+					cur = append(cur, Run{Text: rest, Style: run.Style})
+				}
+				break
+			}
+			if idx > 0 {
+				cur = append(cur, Run{Text: rest[:idx], Style: run.Style})
+			}
+			out = append(out, Compact(cur))
+			cur = nil
+			rest = rest[idx+1:]
+		}
+	}
+	out = append(out, Compact(cur))
+	return out
+}
+
+func isOrderedListPrefix(s string) bool {
+	if len(s) < 3 || len(s) > 5 || !strings.HasSuffix(s, ". ") {
+		return false
+	}
+	for i := 0; i < len(s)-2; i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (e *Engine) autoformat(inserted string) {
-	if inserted != " " {
+	if inserted != " " || e.Anchor != e.Caret {
 		return
 	}
 	leaf := e.LeafAt(e.Caret)
 	b := leaf.Block
-	if b.Kind != "paragraph" {
+	if b.Kind != "paragraph" && b.Kind != "bullet" {
 		return
 	}
-	prefix := b.Text()
-	kind, level := "", 0
-	switch prefix {
-	case "# ", "## ", "### ", "#### ", "##### ", "###### ":
-		kind, level = "heading", len(prefix)-1
-	case "- ", "* ", "+ ":
-		kind = "bullet"
-	case "1. ":
-		kind = "numbered"
-	case "> ":
-		kind = "quote"
-	case "[] ", "[ ] ":
-		kind = "task"
-	case "``` ":
-		kind = "code"
+	prefixUnits := e.Caret - leaf.Start
+	if prefixUnits <= 0 || prefixUnits > 10 {
+		return
 	}
-	if kind != "" {
-		b.Kind, b.Level, b.Runs = kind, level, nil
-		e.Anchor, e.Caret = leaf.Start, leaf.Start
+	for _, r := range SliceRuns(b.Runs, 0, prefixUnits) {
+		if r.Style.Code || r.Style.Link != "" {
+			return
+		}
 	}
+	full := b.Text()
+	rawPrefix := full[:ByteOffset(full, prefixUnits)]
+	lead := len(rawPrefix) - len(strings.TrimLeft(rawPrefix, " "))
+	if lead > 3 {
+		return
+	}
+	prefix := rawPrefix[lead:]
+	kind, level, checked := "", 0, false
+	if b.Kind == "bullet" {
+		switch prefix {
+		case "[] ", "[ ] ":
+			kind = "task"
+		case "[x] ", "[X] ":
+			kind, checked = "task", true
+		}
+	} else {
+		switch prefix {
+		case "# ", "## ", "### ", "#### ", "##### ", "###### ":
+			kind, level = "heading", len(prefix)-1
+		case "- ", "* ", "+ ":
+			kind = "bullet"
+		case "> ":
+			kind = "quote"
+		case "[] ", "[ ] ":
+			kind = "task"
+		case "[x] ", "[X] ":
+			kind, checked = "task", true
+		case "``` ":
+			kind = "code"
+		case "$$ ":
+			kind = "math"
+		default:
+			if isOrderedListPrefix(prefix) {
+				kind = "numbered"
+			}
+		}
+	}
+	if kind == "" {
+		return
+	}
+	rest := SliceRuns(b.Runs, prefixUnits, leaf.End-leaf.Start)
+	if kind == "code" || kind == "math" {
+		var plain strings.Builder
+		for _, r := range rest {
+			plain.WriteString(r.Text)
+		}
+		if s := plain.String(); s != "" {
+			rest = []Run{{Text: s}}
+		} else {
+			rest = nil
+		}
+	} else {
+		rest = Compact(rest)
+		if len(rest) == 0 {
+			rest = nil
+		}
+	}
+	b.Kind, b.Level, b.Checked, b.Runs = kind, level, checked, rest
+	e.Anchor, e.Caret = leaf.Start, leaf.Start
 }
 
 func (e *Engine) Enter(soft bool) {
@@ -522,7 +642,7 @@ func (e *Engine) Toggle(mark string) {
 		e.Typing, e.Explicit = style, true
 		return
 	}
-	e.Edit(func() { e.format(func(s *Style) { *get(s) = on }) })
+	e.applyFormat(func(s *Style) { *get(s) = on })
 }
 
 // SetTextColor colors the selection's text, or what is typed next at a
@@ -546,7 +666,7 @@ func (e *Engine) SetTextColor(color, highlight *string) {
 		e.Typing, e.Explicit = style, true
 		return
 	}
-	e.Edit(func() { e.format(change) })
+	e.applyFormat(change)
 }
 
 // SetAnnotation draws a hand-drawn mark on the selection, or on what is
@@ -567,11 +687,43 @@ func (e *Engine) SetAnnotation(variant, color string) {
 		e.Typing, e.Explicit = style, true
 		return
 	}
-	e.Edit(func() { e.format(change) })
+	e.applyFormat(change)
 }
 
 func (e *Engine) SetLink(url string) {
-	e.Edit(func() { e.format(func(s *Style) { s.Link = url }) })
+	e.applyFormat(func(s *Style) { s.Link = url })
+}
+
+func (e *Engine) applyFormat(change func(*Style)) {
+	if e.ReadOnly {
+		return
+	}
+	if e.depth == 0 {
+		a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+		first := e.LeafAt(a)
+		if z <= first.End && a >= first.Start {
+			if z > a {
+				runs := first.Block.Runs
+				localA, localZ := a-first.Start, z-first.Start
+				middle := SliceRuns(runs, localA, localZ)
+				for i := range middle {
+					change(&middle[i].Style)
+				}
+				next := Compact(append(append(SliceRuns(runs, 0, localA), middle...), SliceRuns(runs, localZ, first.End-first.Start)...))
+				if !slices.Equal(runs, next) {
+					i := e.leafIDs[first.Block.ID]
+					entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, first.Block.ID, slices.Clone(runs)}
+					first.Block.Runs = next
+					e.recordUndo(entry)
+					e.version++
+					txt := first.Block.Text()
+					e.publishTextChange(i, txt, txt)
+				}
+			}
+			return
+		}
+	}
+	e.Edit(func() { e.format(change) })
 }
 
 func (e *Engine) format(change func(*Style)) {

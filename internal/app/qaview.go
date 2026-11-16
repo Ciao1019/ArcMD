@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -34,20 +33,6 @@ var qaExamples = []string{
 	"总结一下最近修改的几篇笔记",
 	"有没有前后矛盾的记录？",
 }
-
-// citeRef is a cited range, numbered in the order the answer first cites it,
-// enriched with its document title, folder breadcrumb, enclosing section and
-// recalled plain-text excerpt.
-type citeRef struct {
-	n       int
-	cite    agent.Citation
-	title   string
-	folder  string
-	section string
-	excerpt string
-}
-
-func citeKey(c agent.Citation) string { return fmt.Sprintf("%s#%d-%d", c.Path, c.From, c.To) }
 
 // qaPanel is the question panel right of the document: its header level
 // with the toolbar, a card with the conversation and the question field.
@@ -84,17 +69,8 @@ func (a *App) qaPanel(c *ui.Context) {
 
 func (a *App) qaBody(c *ui.Context, spaceID, name string, s *qaSession) {
 	t := c.Theme()
-	prevHover := make([]int, len(s.turns))
-	prevInline := make([]bool, len(s.turns))
-	for i, turn := range s.turns {
-		prevHover[i] = turn.hoverCite
-		prevInline[i] = turn.hoverInline
-		turn.hoverCite = turn.nextHoverCite
-		turn.hoverInline = turn.nextHoverInline
-		turn.citeAnchor = turn.nextCiteAnchor
-		turn.nextHoverCite = 0
-		turn.nextHoverInline = false
-		turn.nextCiteAnchor = ui.Rect{}
+	s.beginCitationFrame(c)
+	for _, turn := range s.turns {
 		turn.prepareStream(c)
 	}
 	rows := s.visibleRowsWith(func() *spacefs.FS {
@@ -114,7 +90,11 @@ func (a *App) qaBody(c *ui.Context, spaceID, name string, s *qaSession) {
 		}
 	}
 	s.list.FollowEnd = follow
-	ui.Column(c.Key("qa-list-wrap")).Grow(1).MinHeight(0).Children(func() {
+	wrap := ui.Column(c.Key("qa-list-wrap")).Grow(1).MinHeight(0)
+	wrap.Draw(func(_ *ui.Painter, r ui.Rect) {
+		s.preview.panelRect = r
+	})
+	wrap.Children(func() {
 		list := ui.List(c.Key("qa-scroll-"+spaceID), &s.list, len(rows)).Grow(1).MinHeight(0).Padding(14).
 			Label(i18n.T("问答")).ItemKey(func(i int) any { return rows[i] })
 		list.Rows(func(row ui.ListRow) {
@@ -133,11 +113,9 @@ func (a *App) qaBody(c *ui.Context, spaceID, name string, s *qaSession) {
 				case qaStepsRow:
 					a.qaSteps(c, spaceID, r.turn)
 				case qaAnswerRow:
-					a.qaAnswerBlock(c, spaceID, r.turn, &r.turn.view.blocks[r.index])
+					a.qaAnswerBlock(c, spaceID, s, r.turn, &r.turn.view.blocks[r.index])
 				case qaSourcesRow:
-					qaSourcesHeader(c, r.turn)
-				case qaSourceRow:
-					a.qaSourceGroup(c, spaceID, r.turn, r.turn.view.groups[r.index])
+					a.qaSources(c, spaceID, r.turn)
 				case qaStatusRow:
 					a.qaStatus(c, spaceID, r.turn)
 				}
@@ -175,16 +153,8 @@ func (a *App) qaBody(c *ui.Context, spaceID, name string, s *qaSession) {
 			})
 		}
 	})
+	s.finishCitationFrame(c)
 	a.qaCitationPreview(c, s)
-	// Request one follow-up frame when hover synchronization between an inline
-	// citation pill and a recalled source passage changes.
-	for i, turn := range s.turns {
-		if turn.nextHoverCite != turn.hoverCite || turn.hoverCite != prevHover[i] ||
-			turn.nextHoverInline != turn.hoverInline || turn.hoverInline != prevInline[i] {
-			c.After(time.Millisecond)
-			break
-		}
-	}
 
 	ui.Box(c).Height(1).Background(separator(t))
 	ui.Row(c.Key("qa-input")).Padding(10).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -537,14 +507,15 @@ func (a *App) qaStepItem(c *ui.Context, spaceID string, st *qaStep, index, total
 				if st.failed {
 					verbInk, subjInk = t.Danger, t.Danger
 				}
-				ui.Text(c, meta.verb).FontSize(11.5).TextColor(verbInk).NoWrap()
+				ui.Text(c, meta.verb).FontSize(11.5).TextColor(verbInk).NoWrap().Shrink(0)
 				if meta.subject != "" {
 					ui.Text(c, docName(meta.subject)).FontSize(12).FontWeight(550).TextColor(subjInk).
 						SingleLine().Shrink(1).MinWidth(0).Tooltip(meta.subject)
 				}
 				if meta.scope != "" {
-					ui.Box(c.Key("scope")).Padding(1, 5).Radius(4).Background(t.Text.Alpha(0.055)).Shrink(0).Children(func() {
-						ui.Text(c, meta.scope).FontSize(10.5).TextColor(t.TextMuted).NoWrap()
+					ui.Box(c.Key("scope")).Padding(1, 5).Radius(4).Background(t.Text.Alpha(0.055)).
+						Shrink(2).MinWidth(0).MaxWidth(96).Clip().Children(func() {
+						ui.Text(c, meta.scope).FontSize(10.5).TextColor(t.TextMuted).SingleLine().Tooltip(meta.scope)
 					})
 				}
 				ui.Spacer(c)
@@ -572,7 +543,7 @@ func (a *App) qaStepItem(c *ui.Context, spaceID string, st *qaStep, index, total
 						ui.Icon(c, iconChevronRight).FontSize(11).TextColor(t.TextMuted)
 					})
 				} else if canJump && hovered {
-					ui.Icon(c, iconArrowUpRight).FontSize(11).TextColor(t.Accent)
+					ui.Icon(c, iconArrowUpRight).FontSize(11).TextColor(t.Accent).Shrink(0)
 				}
 			})
 
@@ -609,11 +580,11 @@ func (a *App) qaStepItem(c *ui.Context, spaceID string, st *qaStep, index, total
 									SingleLine().Shrink(1).MinWidth(0)
 								ui.Spacer(c)
 								if h.loc != "" {
-									ui.Text(c, h.loc).FontSize(10.5).TextColor(t.TextMuted).NoWrap()
+									ui.Text(c, h.loc).FontSize(10.5).TextColor(t.TextMuted).NoWrap().Shrink(0)
 								}
 							})
 							if h.text != "" {
-								ui.Text(c, h.text).FontSize(11).TextColor(t.TextMuted).SingleLine().Padding(0, 0, 0, 18)
+								ui.Text(c, h.text).FontSize(11).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0).Padding(0, 0, 0, 18)
 							}
 						})
 						if hRow.Clicked() && h.path != "" {
@@ -659,209 +630,4 @@ func qaStepNode(c *ui.Context, st *qaStep, meta qaStepMeta) {
 			ui.Icon(c, icon).FontSize(10.5).TextColor(t.TextMuted)
 		})
 	}
-}
-
-func qaSourcesHeader(c *ui.Context, turn *qaTurn) {
-	t := c.Theme()
-	ui.Row(c.Key("sources-head")).Padding(6, 2, 0, 2).Gap(6).AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, iconSparkles).FontSize(12).TextColor(t.Accent.Alpha(0.85))
-		ui.Text(c, i18n.T("引用来源")).FontSize(12).FontWeight(600).TextColor(t.TextMuted)
-		ui.Spacer(c)
-		ui.Text(c, fmt.Sprintf(i18n.T("%d 篇文档 · %d 处原文"), len(turn.view.groups), len(turn.view.refs))).
-			FontSize(11).TextColor(t.TextMuted.Alpha(0.75)).NoWrap()
-	})
-}
-
-// qaSourceGroup renders one cited document and all of its recalled passages,
-// with clean folder breadcrumbs, section headings, human line numbers and
-// plain-text excerpts synced on hover with inline [n] pills.
-func (a *App) qaSourceGroup(c *ui.Context, spaceID string, turn *qaTurn, g citeGroup) {
-	t := c.Theme()
-	groupLit := false
-	for _, it := range g.items {
-		if turn.hoverCite == it.n {
-			groupLit = true
-			break
-		}
-	}
-	borderCol := t.Border.Alpha(0.35)
-	if groupLit {
-		borderCol = t.Accent.Alpha(0.38)
-	}
-
-	ui.Column(c.Key("source-group")).Radius(10).
-		Background(t.Text.Alpha(0.032)).Border(1, borderCol).Clip().
-		Transition(ui.ElementTransition{
-			Duration: 180 * time.Millisecond,
-			Colors:   true,
-			Enter:    &ui.Motion{Y: 5, Opacity: 0},
-		}).Children(func() {
-		// Document header bar.
-		docHead := ui.Row(c.Key("doc-head")).Gap(7).Padding(7, 10).AlignItems(ui.Center).
-			Cursor(ui.CursorPointer).Focusable().Role(ui.RoleLink).Label(g.title)
-		if docHead.Hovered() {
-			docHead.Background(hoverFill(t).Alpha(0.65))
-		}
-		headHover := docHead.Hovered()
-		docHead.Children(func() {
-			docIcon(c, g.title, 16)
-			ui.Text(c, docName(g.title)).FontSize(12.5).FontWeight(600).TextColor(t.Text).
-				SingleLine().Shrink(1).MinWidth(0)
-			if g.folder != "" {
-				ui.Text(c, g.folder).FontSize(11).TextColor(t.TextMuted).SingleLine().Shrink(2).MinWidth(0)
-			}
-			ui.Spacer(c)
-			jumpColor := t.TextMuted.Alpha(0.65)
-			if headHover || groupLit {
-				jumpColor = t.Accent
-			}
-			ui.Icon(c, iconArrowUpRight).FontSize(12).TextColor(jumpColor)
-		})
-		if docHead.Clicked() && len(g.items) > 0 {
-			a.openCitation(spaceID, g.items[0].cite)
-		}
-
-		ui.Box(c).Height(1).Background(separator(t))
-
-		// Recalled passages within this document.
-		ui.Column(c.Key("passages")).Padding(4).Gap(2).Children(func() {
-			for idx, item := range g.items {
-				pRow := ui.Column(c.Key(fmt.Sprintf("p-%d", idx))).Gap(3).Padding(5, 7).Radius(7).
-					Cursor(ui.CursorPointer).Focusable().Role(ui.RoleLink).
-					Label(fmt.Sprintf("%s %s", g.title, humanLines(item.cite.From, item.cite.To)))
-				active := pRow.Hovered() || turn.hoverCite == item.n
-				if pRow.Hovered() {
-					turn.nextHoverCite = item.n
-					if turn.hoverCite != item.n {
-						c.AnimationFrame()
-					}
-				}
-				if active {
-					pRow.Background(t.Accent.Alpha(0.08))
-				}
-				pRow.Children(func() {
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						citeChip(c, "n", item.n, active)
-						if item.section != "" {
-							ui.Text(c, "§ "+item.section).FontSize(11.5).FontWeight(500).
-								TextColor(t.Text.Alpha(0.78)).SingleLine().Shrink(1).MinWidth(0)
-						} else if item.excerpt == "" {
-							ui.Text(c, docName(g.title)).FontSize(11.5).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
-						}
-						ui.Spacer(c)
-						coordBg := t.Text.Alpha(0.055)
-						coordInk := t.TextMuted
-						if active {
-							coordBg = t.Accent.Alpha(0.14)
-							coordInk = t.Accent
-						}
-						ui.Box(c.Key("loc")).Padding(1, 6).Radius(5).Background(coordBg).Shrink(0).Children(func() {
-							ui.Text(c, humanLines(item.cite.From, item.cite.To)).FontSize(10.5).FontWeight(500).TextColor(coordInk).NoWrap()
-						})
-					})
-					if item.excerpt != "" {
-						barCol := t.Border.Alpha(0.85)
-						exInk := t.TextMuted
-						if active {
-							barCol = t.Accent.Alpha(0.6)
-							exInk = t.Text.Alpha(0.84)
-						}
-						ui.Row(c).Gap(7).Padding(1, 2, 1, 4).AlignItems(ui.Stretch).Children(func() {
-							ui.Box(c).Width(2).Radius(1).Background(barCol).Shrink(0)
-							ui.Text(c, item.excerpt).FontSize(12).LineHeight(1.45).TextColor(exInk).MaxLines(2).Shrink(1).MinWidth(0)
-						})
-					}
-				})
-				if pRow.Clicked() {
-					a.openCitation(spaceID, item.cite)
-				}
-			}
-		})
-	})
-}
-
-// citeChip is a citation's number, a small accent pill that lights up solid
-// when hovered or synced with an inline citation.
-func citeChip(c *ui.Context, key string, n int, active bool) ui.Element {
-	t := c.Theme()
-	bg := t.Accent.Alpha(0.14)
-	fg := t.Accent
-	if active {
-		bg = t.Accent
-		fg = t.AccentText
-	}
-	return ui.Box(c.Key(key)).Height(16).MinWidth(16).PaddingX(4.5).Radius(5).Center().Background(bg).Shrink(0).
-		Children(func() { ui.Text(c, strconv.Itoa(n)).FontSize(10).FontWeight(650).TextColor(fg).NoWrap() })
-}
-
-// qaCitationPreview renders a floating preview card above (or below) an inline
-// [n] citation pill under the pointer, showing the document header, line range,
-// section and recalled plain-text excerpt without scrolling to the sources list.
-func (a *App) qaCitationPreview(c *ui.Context, s *qaSession) {
-	var (
-		ref    citeRef
-		anchor ui.Rect
-		found  bool
-	)
-	for _, turn := range s.turns {
-		if !turn.hoverInline || turn.hoverCite <= 0 || turn.citeAnchor.W <= 0 {
-			continue
-		}
-		if r, ok := turn.view.byNum[turn.hoverCite]; ok {
-			ref = r
-			anchor = turn.citeAnchor
-			found = true
-			break
-		}
-	}
-	if !found {
-		return
-	}
-	t := c.Theme()
-	col := previewColors(t, a.look)
-	winW, winH := c.Size()
-	const cardW = 288
-	x := max(min(anchor.X+anchor.W/2-cardW/2, winW-cardW-12), 12)
-	above := anchor.Y >= 140
-	ui.Overlay(c, func() {
-		card := ui.Column(c.Key(fmt.Sprintf("qa-cite-preview-%d", ref.n))).Absolute().Left(x).Width(cardW).
-			Padding(9, 11).Gap(5).Radius(10).Background(col.fill).
-			Border(1, col.outline).Shadow(0, 10, 26, 0, col.shadow).
-			IgnoreInput(true).Transition(ui.ElementTransition{
-			Duration: 120 * time.Millisecond,
-			Enter:    &ui.Motion{Y: 4, Opacity: 0},
-			Exit:     &ui.Motion{Opacity: 0},
-		})
-		if above {
-			card.Bottom(max(winH-anchor.Y+6, 8))
-		} else {
-			card.Top(min(anchor.Y+anchor.H+6, max(winH-130, 8)))
-		}
-		card.Children(func() {
-			title := ref.title
-			if title == "" {
-				title = vault.Title(ref.cite.Path)
-			}
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				citeChip(c, "chip", ref.n, true)
-				docIcon(c, title, 15)
-				ui.Text(c, docName(title)).FontSize(12).FontWeight(600).TextColor(col.title).
-					SingleLine().Shrink(1).MinWidth(0)
-				ui.Spacer(c)
-				ui.Box(c).Padding(1, 6).Radius(5).Background(t.Accent.Alpha(0.14)).Shrink(0).Children(func() {
-					ui.Text(c, humanLines(ref.cite.From, ref.cite.To)).FontSize(10).FontWeight(500).TextColor(t.Accent).NoWrap()
-				})
-			})
-			if ref.section != "" {
-				ui.Text(c, "§ "+ref.section).FontSize(11).FontWeight(500).TextColor(col.muted).SingleLine()
-			}
-			if ref.excerpt != "" {
-				ui.Row(c).Gap(7).Padding(2, 0, 0, 2).AlignItems(ui.Stretch).Children(func() {
-					ui.Box(c).Width(2).Radius(1).Background(t.Accent.Alpha(0.65)).Shrink(0)
-					ui.Text(c, ref.excerpt).FontSize(11.5).LineHeight(1.45).TextColor(col.title.Alpha(0.88)).
-						MaxLines(3).Shrink(1).MinWidth(0)
-				})
-			}
-		})
-	})
 }

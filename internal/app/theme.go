@@ -747,3 +747,46 @@ func tourColors(l spaceLook) tourLook {
 	}
 	return tl
 }
+
+// qaCitationLook holds the color tokens for Q&A inline source chips,
+// supporting claim highlights, the gliding preview card and the collapsible
+// sources list, ported from Kokonut UI's ai-citations component (MIT).
+type qaCitationLook struct {
+	chipFill, chipHoverFill, chipActiveFill ui.Color
+	chipInk, chipActiveInk                  ui.Color
+	monoFill, monoInk, stackRing            ui.Color
+	claimFill, claimLine                    ui.Color
+	cardFill, cardBorder, cardShadow        ui.Color
+	cardTitle, cardMuted                    ui.Color
+	toggleInk, toggleHover, chevInk         ui.Color
+	rowHover, rowTitle, rowMeta             ui.Color
+	arrowInk, arrowHover                    ui.Color
+}
+
+func qaCitationColors(t *ui.Theme) qaCitationLook {
+	return qaCitationLook{
+		chipFill:       pick(t, black.Alpha(0.055), white.Alpha(0.10)),
+		chipHoverFill:  pick(t, black.Alpha(0.10), white.Alpha(0.15)),
+		chipActiveFill: pick(t, ui.Hex("#18181B"), white),
+		chipInk:        pick(t, ui.Hex("#52525B"), ui.Hex("#D4D4D8")),
+		chipActiveInk:  pick(t, white, ui.Hex("#18181B")),
+		monoFill:       pick(t, ui.Hex("#E4E4E7"), ui.Hex("#3F3F46")),
+		monoInk:        pick(t, ui.Hex("#52525B"), ui.Hex("#E4E4E7")),
+		stackRing:      pick(t, white.Alpha(0.92), ui.Hex("#393B42")),
+		claimFill:      pick(t, ui.Hex("#E0F2FE").Alpha(0.85), ui.Hex("#38BDF8").Alpha(0.16)),
+		claimLine:      pick(t, ui.Hex("#38BDF8").Alpha(0.72), ui.Hex("#38BDF8").Alpha(0.52)),
+		cardFill:       pick(t, white, ui.Hex("#18181B")),
+		cardBorder:     pick(t, black.Alpha(0.10), white.Alpha(0.10)),
+		cardShadow:     pick(t, black.Alpha(0.18), black.Alpha(0.42)),
+		cardTitle:      pick(t, ui.Hex("#18181B"), ui.Hex("#F4F4F5")),
+		cardMuted:      pick(t, ui.Hex("#71717A"), ui.Hex("#A1A1AA")),
+		toggleInk:      pick(t, ui.Hex("#52525B"), ui.Hex("#D4D4D8")),
+		toggleHover:    pick(t, black.Alpha(0.055), white.Alpha(0.10)),
+		chevInk:        pick(t, ui.Hex("#71717A"), ui.Hex("#A1A1AA")),
+		rowHover:       pick(t, black.Alpha(0.05), white.Alpha(0.06)),
+		rowTitle:       pick(t, ui.Hex("#27272A"), ui.Hex("#E4E4E7")),
+		rowMeta:        pick(t, ui.Hex("#71717A"), ui.Hex("#A1A1AA")),
+		arrowInk:       pick(t, ui.Hex("#A1A1AA"), ui.Hex("#71717A")),
+		arrowHover:     pick(t, ui.Hex("#52525B"), ui.Hex("#E4E4E7")),
+	}
+}

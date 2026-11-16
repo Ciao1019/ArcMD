@@ -509,3 +509,66 @@ func TestTableColumnDragReorderAndEqualWidthSnap(t *testing.T) {
 		t.Fatalf("column resizer did not magnetically snap to equal widths: %v", w)
 	}
 }
+
+func TestLivePrependBlockAndInlineMarkdown(t *testing.T) {
+	e, tt := newTester("")
+	focus(e, tt)
+
+	// 1. Prepend "## " before existing text -> heading level 2.
+	typeKeys(tt, "我要变二级标题")
+	e.SetSelection(0, 0)
+	tt.Frame()
+	typeKeys(tt, "## ")
+	if b := e.Doc.Blocks[0]; b.Kind != "heading" || b.Level != 2 || b.Text() != "我要变二级标题" || e.Caret != 0 {
+		t.Fatalf("live prepend ## failed: kind=%s level=%d text=%q caret=%d", b.Kind, b.Level, b.Text(), e.Caret)
+	}
+
+	// 2. Prepend " > " before existing text -> quote.
+	e.SetSelection(e.Len(), e.Len())
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	typeKeys(tt, "我要变引用")
+	l := e.Engine.LeafAt(e.Caret)
+	e.SetSelection(l.Start, l.Start)
+	tt.Frame()
+	typeKeys(tt, " > ")
+	if b := e.Doc.Blocks[1]; b.Kind != "quote" || b.Text() != "我要变引用" {
+		t.Fatalf("live prepend > failed: kind=%s text=%q", b.Kind, b.Text())
+	}
+
+	// 3. Prepend "- [ ] " before existing text -> task.
+	e.SetSelection(e.Len(), e.Len())
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	// Empty quote block Enter drops quote style to a plain paragraph.
+	tt.Key(0, ui.KeyEnter)
+	typeKeys(tt, "我要变任务")
+	l = e.Engine.LeafAt(e.Caret)
+	e.SetSelection(l.Start, l.Start)
+	tt.Frame()
+	typeKeys(tt, "- [ ] ")
+	if b := e.Doc.Blocks[2]; b.Kind != "task" || b.Checked || b.Text() != "我要变任务" {
+		t.Fatalf("live prepend - [ ] failed: kind=%s checked=%v text=%q", b.Kind, b.Checked, b.Text())
+	}
+
+	// 4. Prepend opening "**" before text ending with "**文字" -> live bold + Backspace rollback.
+	e.SetSelection(e.Len(), e.Len())
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	// Empty task block Enter drops task style to a plain paragraph.
+	tt.Key(0, ui.KeyEnter)
+	typeKeys(tt, "这是一段重点**文字")
+	l = e.Engine.LeafAt(e.Caret)
+	beforeBold := l.Start + len([]rune("这是一段"))
+	e.SetSelection(beforeBold, beforeBold)
+	tt.Frame()
+	typeKeys(tt, "**")
+	b := e.Doc.Blocks[3]
+	if b.Text() != "这是一段重点文字" || len(b.Runs) != 3 || !b.Runs[1].Style.Bold || b.Runs[1].Text != "重点" {
+		t.Fatalf("live prepend ** failed: text=%q runs=%+v", b.Text(), b.Runs)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	if e.Doc.Blocks[3].Text() != "这是一段**重点**文字" {
+		t.Fatalf("backspace did not roll back reverse inline bold: %q", e.Doc.Blocks[3].Text())
+	}
+}

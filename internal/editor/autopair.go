@@ -49,6 +49,18 @@ func (e *Editor) inInlineMathAt(pos int) bool {
 	return off > e.inlineMath.start && off < e.inlineMath.end
 }
 
+func (e *Editor) upgradeEmptyDollarPair(l document.Leaf, pos int) bool {
+	if l.Block.Kind != "paragraph" || l.Parent == nil || pos != l.End-1 {
+		return false
+	}
+	raw := l.Block.Text()
+	if !strings.HasSuffix(raw, "$$") || len(raw) > 5 || strings.TrimLeft(raw[:len(raw)-2], " ") != "" {
+		return false
+	}
+	e.promoteParagraphToMath(l, "", raw)
+	return true
+}
+
 func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
 	if e.noAutoPair || e.ReadOnly {
 		e.pairs = nil
@@ -77,15 +89,25 @@ func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
 			p := e.pairs[i]
 			clLen := document.Len(p.close)
 			if p.end == target.Start && pairCloserMatches(p.close, text) && e.slice(p.end, p.end+clLen) == p.close {
+				if text == "$" && e.upgradeEmptyDollarPair(l, target.Start) {
+					return true
+				}
 				e.SetSelection(p.end+clLen, p.end+clLen)
 				e.pairs = append(e.pairs[:i], e.pairs[i+1:]...)
 				e.smartBack = smartRollback{}
+				if text == "$" {
+					e.tryCompileDisplayMathParagraph()
+				}
 				return true
 			}
 		}
 		if text == "$" && inMath && l.Start+e.inlineMath.end-1 == target.Start {
+			if e.upgradeEmptyDollarPair(l, target.Start) {
+				return true
+			}
 			e.SetSelection(target.Start+1, target.Start+1)
 			e.smartBack = smartRollback{}
+			e.tryCompileDisplayMathParagraph()
 			return true
 		}
 	}
@@ -101,6 +123,14 @@ func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
 			return true
 		}
 		e.smartBack = smartRollback{}
+		if text == " " && r == nil && e.mark == nil && e.mathFence.dismissed && e.mathFence.rev == e.Revision() && l.Block.ID == e.mathFence.blockID {
+			e.mathFence = mathFenceRollback{}
+			e.shiftPairs(target, document.Len(text))
+			e.Engine.ReplaceLiteral(target.Start, target.End, text)
+			e.sync()
+			e.pairRevision = e.Revision()
+			return true
+		}
 		e.shiftPairs(target, document.Len(text))
 		e.Buffer.ReplaceText(r, text)
 		e.pairRevision = e.Revision()
@@ -110,6 +140,13 @@ func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
 	if target.Start > l.Start {
 		before := e.slice(l.Start, target.Start)
 		prev, _ := utf8.DecodeLastRuneInString(before)
+		if text == "$" && prev == '$' && e.mark == nil && r == nil && target.Start == target.End && target.Start == l.End && l.Block.Kind == "paragraph" && l.Parent != nil {
+			e.smartBack = smartRollback{}
+			e.Buffer.ReplaceText(r, text)
+			e.pairRevision = e.Revision()
+			e.tryCompileDisplayMathParagraph()
+			return true
+		}
 		if prev == '\\' || (text == "'" || text == "\"") && (unicode.IsLetter(prev) || unicode.IsDigit(prev)) || text == "$" && prev == '$' || strings.Contains(before, "://") {
 			e.pairs = nil
 			return false
@@ -236,30 +273,32 @@ func (e *Editor) paintActivePair(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 		return
 	}
 	nClose := document.Len(ap.close)
-	for _, r := range e.rows {
-		if r.layout == nil || ap.start < r.leaf.Start || ap.end+nClose > r.leaf.End {
-			continue
-		}
-		rects := r.layout.SelectionRects(ui.TextInputRange{
-			Start: ap.start - r.leaf.Start,
-			End:   ap.end + nClose - r.leaf.Start,
-		})
-		if len(rects) == 0 {
-			return
-		}
-		dx, dy := e.visualOffset(r)
-		ox, oy := bounds.X+r.x+dx, bounds.Y+r.y+dy
-		for _, sr := range rects {
-			if sr.W <= 0 || sr.H <= 0 {
-				continue
-			}
-			box := ui.Rect{X: ox + sr.X - 1.5, Y: oy + sr.Y + 1, W: sr.W + 3, H: max(16, sr.H-2)}
-			p.Fill(box, t.Accent.Alpha(0.055), 5)
-			p.Stroke(box, t.Accent.Alpha(0.28), 5, 1)
-		}
-		last := rects[len(rects)-1]
-		lastBox := ui.Rect{X: ox + last.X - 1.5, Y: oy + last.Y + 1, W: last.W + 3, H: max(16, last.H-2)}
-		e.paintTabOutBadge(p, lastBox, t)
+	idx := e.rowIndexAt(ap.start)
+	if idx < 0 {
 		return
 	}
+	r := *e.ensureRow(idx)
+	if r.layout == nil || ap.start < r.leaf.Start || ap.end+nClose > r.leaf.End {
+		return
+	}
+	rects := r.layout.SelectionRects(ui.TextInputRange{
+		Start: ap.start - r.leaf.Start,
+		End:   ap.end + nClose - r.leaf.Start,
+	})
+	if len(rects) == 0 {
+		return
+	}
+	dx, dy := e.visualOffset(r)
+	ox, oy := bounds.X+r.x+dx, bounds.Y+r.y+dy
+	for _, sr := range rects {
+		if sr.W <= 0 || sr.H <= 0 {
+			continue
+		}
+		box := ui.Rect{X: ox + sr.X - 1.5, Y: oy + sr.Y + 1, W: sr.W + 3, H: max(16, sr.H-2)}
+		p.Fill(box, t.Accent.Alpha(0.055), 5)
+		p.Stroke(box, t.Accent.Alpha(0.28), 5, 1)
+	}
+	last := rects[len(rects)-1]
+	lastBox := ui.Rect{X: ox + last.X - 1.5, Y: oy + last.Y + 1, W: last.W + 3, H: max(16, last.H-2)}
+	e.paintTabOutBadge(p, lastBox, t)
 }

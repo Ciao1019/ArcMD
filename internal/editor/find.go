@@ -379,7 +379,7 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 	}
 	for ri := range e.visibleRows(40) {
 		r := *e.indexedRow(ri)
-		if r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
+		if r.layout == nil || r.rect.Y+r.rect.H < e.Scroll.Y || r.rect.Y > e.Scroll.Y+e.viewport+40 {
 			continue
 		}
 		dx, dy := e.visualOffset(r)

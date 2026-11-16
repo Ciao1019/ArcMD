@@ -88,6 +88,7 @@ type qaSession struct {
 	list     ui.ListState
 	rows     []qaRow
 	rowState []qaRowsState
+	preview  qaPreviewState
 }
 
 func (s *qaSession) running() bool {
@@ -115,12 +116,9 @@ type qaTurn struct {
 	// expanded and userToggled control whether the exploration timeline is open.
 	expanded        bool
 	userToggled     bool
-	hoverCite       int
-	nextHoverCite   int
-	hoverInline     bool
-	nextHoverInline bool
-	citeAnchor      ui.Rect
-	nextCiteAnchor  ui.Rect
+	sourcesOpen     bool
+	hoverSource     int
+	nextHoverSource int
 	view            qaTurnView
 	stream          qaStream
 }
@@ -435,6 +433,9 @@ func (a *App) retryQA(spaceID string, t *qaTurn) {
 	s := a.qaSession(spaceID)
 	if s.running() || len(s.turns) == 0 || s.turns[len(s.turns)-1] != t {
 		return
+	}
+	if s.preview.turn == t || s.preview.pendingTurn == t {
+		s.preview = qaPreviewState{}
 	}
 	s.turns = s.turns[:len(s.turns)-1]
 	s.history = s.history[:t.start]

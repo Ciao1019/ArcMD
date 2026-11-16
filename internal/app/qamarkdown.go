@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +19,9 @@ type qaRun struct {
 	italic, strike, code bool
 	url                  string
 	pending              bool
-	cite                 *agent.Citation
+	cites                []agent.Citation
+	partID               int
+	claimID              int
 }
 
 type qaCell struct {
@@ -55,7 +58,7 @@ func (v *qaTurnView) parse(answer string, streaming bool) {
 			}
 		}
 	}
-	v.numbers, v.refs = map[string]int{}, nil
+	v.numbers, v.refs, v.byNum, v.enrichedFor = map[string]int{}, nil, nil, ""
 	for _, ci := range agent.Citations(answer) {
 		key := citeKey(ci)
 		if v.numbers[key] == 0 {
@@ -115,8 +118,12 @@ func (v *qaTurnView) parse(answer string, streaming bool) {
 				}
 				if prev, ok := old[b.start]; ok && prev.revision == b.revision && prev.kind == b.kind && prev.text == b.text {
 					b.runs = prev.runs
+					b.partBase = prev.partBase
+					b.partCount = prev.partCount
+					b.reused = true
 				} else {
-					b.runs = qaMarkdownRuns(in)
+					b.runs, b.partCount = qaMarkdownRuns(in)
+					b.partBase = 1
 				}
 			case parser.CodeBlock, parser.HTMLBlock:
 				b.kind, b.language = qaCodeBlock, node.Language()
@@ -129,13 +136,18 @@ func (v *qaTurnView) parse(answer string, streaming bool) {
 			case parser.Table:
 				for row := range v.doc.Children(index) {
 					rn := v.doc.Block(row)
-					tr := qaBlock{kind: qaTableRow, start: rn.Start, end: rn.End, header: rn.Header}
+					tr := qaBlock{kind: qaTableRow, start: rn.Start, end: rn.End, header: rn.Header, partBase: 1}
 					for cell := range v.doc.Children(row) {
 						align := parser.AlignNone
 						if len(tr.cells) < len(node.Align) {
 							align = node.Align[len(tr.cells)]
 						}
-						tr.cells = append(tr.cells, qaCell{qaMarkdownRuns(v.doc.Inlines(cell)), align})
+						cRuns, cParts := qaMarkdownRuns(v.doc.Inlines(cell))
+						if cParts > 0 && tr.partCount > 0 {
+							cRuns = offsetRunCitationIDs(cRuns, tr.partCount, false)
+						}
+						tr.partCount += cParts
+						tr.cells = append(tr.cells, qaCell{cRuns, align})
 					}
 					tr.text = answer[tr.start:tr.end]
 					tr.raw = tr.text
@@ -158,10 +170,46 @@ func (v *qaTurnView) parse(answer string, streaming bool) {
 		}
 	}
 	walk(0, 0, false, "")
+	nextPart := 1
+	for i := range blocks {
+		b := &blocks[i]
+		if b.partCount == 0 {
+			continue
+		}
+		if delta := nextPart - b.partBase; delta != 0 {
+			if len(b.runs) > 0 {
+				b.runs = offsetRunCitationIDs(b.runs, delta, b.reused)
+			}
+			for ci := range b.cells {
+				b.cells[ci].runs = offsetRunCitationIDs(b.cells[ci].runs, delta, b.reused)
+			}
+			b.partBase = nextPart
+		}
+		nextPart += b.partCount
+	}
 	v.blocks = blocks
 }
 
-func qaMarkdownRuns(in []parser.Inline) []qaRun {
+func offsetRunCitationIDs(runs []qaRun, delta int, clone bool) []qaRun {
+	if delta == 0 {
+		return runs
+	}
+	out := runs
+	if clone {
+		out = slices.Clone(runs)
+	}
+	for i := range out {
+		if out[i].partID > 0 {
+			out[i].partID += delta
+		}
+		if out[i].claimID > 0 {
+			out[i].claimID += delta
+		}
+	}
+	return out
+}
+
+func qaMarkdownRuns(in []parser.Inline) ([]qaRun, int) {
 	var out []qaRun
 	add := func(text string, style qaRun) {
 		if text == "" {
@@ -178,7 +226,7 @@ func qaMarkdownRuns(in []parser.Inline) []qaRun {
 					out = append(out, run)
 				}
 				run := style
-				run.text, run.cite = text[ci.Start:ci.End], &ci
+				run.text, run.cites = text[ci.Start:ci.End], []agent.Citation{ci}
 				out = append(out, run)
 				pos = ci.End
 			}
@@ -222,14 +270,256 @@ func qaMarkdownRuns(in []parser.Inline) []qaRun {
 		}
 	}
 	walk(0, len(in), qaRun{})
-	return out
+	return finalizeCitationRuns(out)
+}
+
+func isCitationSeparator(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', ',', '，', '、', ';', '；':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func appendUniqueCitations(dst, src []agent.Citation) []agent.Citation {
+	for _, ci := range src {
+		k := citeKey(ci)
+		dup := false
+		for _, ex := range dst {
+			if citeKey(ex) == k {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			dst = append(dst, ci)
+		}
+	}
+	return dst
+}
+
+// finalizeCitationRuns merges adjacent/comma-separated citations into one chip,
+// trims horizontal whitespace directly before a chip, and tags the supporting
+// sentence or clause before each chip with a local 1-based partID/claimID.
+func finalizeCitationRuns(in []qaRun) ([]qaRun, int) {
+	if len(in) == 0 {
+		return nil, 0
+	}
+	// 1. Merge adjacent citations (including "[A], [B]" / "[A] [B]").
+	merged := make([]qaRun, 0, len(in))
+	for i := 0; i < len(in); i++ {
+		r := in[i]
+		if len(r.cites) == 0 {
+			if i+1 < len(in) && len(in[i+1].cites) > 0 && len(merged) > 0 && len(merged[len(merged)-1].cites) > 0 &&
+				!r.code && r.url == "" && isCitationSeparator(r.text) {
+				// Skip separator between two citation chips.
+				continue
+			}
+			merged = append(merged, r)
+			continue
+		}
+		if len(merged) > 0 && len(merged[len(merged)-1].cites) > 0 {
+			last := &merged[len(merged)-1]
+			last.cites = appendUniqueCitations(last.cites, r.cites)
+			continue
+		}
+		r.cites = slices.Clone(r.cites)
+		merged = append(merged, r)
+	}
+
+	// 2. Trim trailing horizontal spaces immediately before any citation chip.
+	cleaned := make([]qaRun, 0, len(merged))
+	for i := 0; i < len(merged); i++ {
+		r := merged[i]
+		if len(r.cites) > 0 {
+			for len(cleaned) > 0 {
+				prev := &cleaned[len(cleaned)-1]
+				if len(prev.cites) > 0 || prev.code {
+					break
+				}
+				prev.text = strings.TrimRight(prev.text, " \t")
+				if prev.text == "" {
+					cleaned = cleaned[:len(cleaned)-1]
+					continue
+				}
+				break
+			}
+		}
+		cleaned = append(cleaned, r)
+	}
+
+	// 3. Assign local partIDs and split/tag the supporting claim before each chip.
+	out := make([]qaRun, 0, len(cleaned)+4)
+	partID := 0
+	segStart := 0
+	afterPrevCite := false
+	for _, r := range cleaned {
+		if len(r.cites) == 0 {
+			out = append(out, r)
+			continue
+		}
+		partID++
+		claimStart := segStart
+		// Skip leading whitespace and, right after a previous chip, leading
+		// clause/sentence punctuation so it stays un-highlighted.
+		for claimStart < len(out) {
+			txt := out[claimStart].text
+			if out[claimStart].code || out[claimStart].url != "" {
+				break
+			}
+			cut := leadingNonClaimOffset(txt, afterPrevCite)
+			if cut == 0 {
+				break
+			}
+			if cut == len(txt) {
+				// Keep the leading delimiter run un-highlighted and continue.
+				claimStart++
+				continue
+			}
+			prefix := out[claimStart]
+			prefix.text = txt[:cut]
+			rest := out[claimStart]
+			rest.text = txt[cut:]
+			out = slices.Insert(out, claimStart+1, rest)
+			out[claimStart] = prefix
+			claimStart++
+			break
+		}
+
+		// Split at the last sentence boundary inside [claimStart, len(out))
+		// so prior sentences in the same paragraph do not light up.
+		splitIdx, splitByte := findLastSentenceBoundary(out[claimStart:])
+		if splitIdx >= 0 {
+			absIdx := claimStart + splitIdx
+			txt := out[absIdx].text
+			if splitByte == len(txt) {
+				claimStart = absIdx + 1
+			} else if splitByte > 0 {
+				prefix := out[absIdx]
+				prefix.text = txt[:splitByte]
+				rest := out[absIdx]
+				rest.text = txt[splitByte:]
+				out = slices.Insert(out, absIdx+1, rest)
+				out[absIdx] = prefix
+				claimStart = absIdx + 1
+			}
+		}
+
+		for j := claimStart; j < len(out); j++ {
+			if len(out[j].cites) == 0 {
+				out[j].claimID = partID
+			}
+		}
+
+		r.partID = partID
+		out = append(out, r)
+		segStart = len(out)
+		afterPrevCite = true
+	}
+	return out, partID
+}
+
+func leadingNonClaimOffset(s string, stripPunct bool) int {
+	i := 0
+	for i < len(s) {
+		r, n := utf8.DecodeRuneInString(s[i:])
+		if r == ' ' || r == '\t' {
+			i += n
+			continue
+		}
+		if stripPunct && isClaimLeadingPunct(r) {
+			i += n
+			continue
+		}
+		break
+	}
+	return i
+}
+
+func isClaimLeadingPunct(r rune) bool {
+	switch r {
+	case ',', '，', '.', '。', ';', '；', ':', '：', '!', '！', '?', '？', '、',
+		')', '）', '」', '』', '”', '’', '"', '\'':
+		return true
+	}
+	return false
+}
+
+// findLastSentenceBoundary returns the run index and byte offset right after the
+// last sentence boundary (including trailing closing quotes and horizontal
+// whitespace) within runs, or (-1, 0) if none exists.
+func findLastSentenceBoundary(runs []qaRun) (int, int) {
+	bestRun, bestByte := -1, 0
+	for ri, r := range runs {
+		if r.code || r.url != "" || len(r.cites) > 0 {
+			continue
+		}
+		s := r.text
+		for i := 0; i < len(s); {
+			ch, n := utf8.DecodeRuneInString(s[i:])
+			next := i + n
+			switch ch {
+			case '\n':
+				cut := consumeHorizontalSpace(s, next)
+				bestRun, bestByte = ri, cut
+			case '。', '！', '？':
+				cut := consumeClosingQuotesAndSpace(s, next)
+				bestRun, bestByte = ri, cut
+			case '.', '!', '?':
+				followedBySpace := false
+				if next < len(s) {
+					nr, _ := utf8.DecodeRuneInString(s[next:])
+					followedBySpace = nr == ' ' || nr == '\t' || nr == '\n'
+				} else if ri+1 < len(runs) && len(runs[ri+1].text) > 0 {
+					nr, _ := utf8.DecodeRuneInString(runs[ri+1].text)
+					followedBySpace = nr == ' ' || nr == '\t' || nr == '\n'
+				}
+				if followedBySpace {
+					cut := consumeClosingQuotesAndSpace(s, next)
+					bestRun, bestByte = ri, cut
+				}
+			}
+			i = next
+		}
+	}
+	return bestRun, bestByte
+}
+
+func consumeHorizontalSpace(s string, pos int) int {
+	for pos < len(s) {
+		r, n := utf8.DecodeRuneInString(s[pos:])
+		if r == ' ' || r == '\t' {
+			pos += n
+			continue
+		}
+		break
+	}
+	return pos
+}
+
+func consumeClosingQuotesAndSpace(s string, pos int) int {
+	for pos < len(s) {
+		r, n := utf8.DecodeRuneInString(s[pos:])
+		if r == '”' || r == '’' || r == '」' || r == '』' || r == '"' || r == '\'' || r == ')' || r == '）' {
+			pos += n
+			continue
+		}
+		break
+	}
+	return consumeHorizontalSpace(s, pos)
 }
 
 func qaRunChars(r qaRun) int {
 	if r.code {
 		return 0
 	} // upstream skips pre/code/svg/math
-	if r.cite != nil {
+	if len(r.cites) > 0 {
 		return 1
 	}
 	return utf8.RuneCountInString(r.text)
@@ -258,16 +548,13 @@ func (v *qaTurnView) animate(now time.Time, enabled bool) {
 }
 
 // enrich resolves clean document titles, folder breadcrumbs, enclosing section
-// headings and recalled plain-text excerpts once per answer revision, grouping
-// passages under their parent document.
+// headings and recalled plain-text excerpts once per answer revision.
 func (v *qaTurnView) enrich(fs *spacefs.FS) {
-	if v.enrichedFor == v.source && len(v.groups) > 0 {
+	if v.enrichedFor == v.source && (len(v.refs) == 0 || len(v.byNum) == len(v.refs)) {
 		return
 	}
 	v.enrichedFor = v.source
-	v.groups = v.groups[:0]
 	v.byNum = make(map[int]citeRef, len(v.refs))
-	groupIdx := map[string]int{}
 
 	for i := range v.refs {
 		r := &v.refs[i]
@@ -288,16 +575,5 @@ func (v *qaTurnView) enrich(fs *spacefs.FS) {
 			}
 		}
 		v.byNum[r.n] = *r
-		idx, ok := groupIdx[r.cite.Path]
-		if !ok {
-			idx = len(v.groups)
-			groupIdx[r.cite.Path] = idx
-			v.groups = append(v.groups, citeGroup{
-				path:   r.cite.Path,
-				title:  r.title,
-				folder: r.folder,
-			})
-		}
-		v.groups[idx].items = append(v.groups[idx].items, *r)
 	}
 }

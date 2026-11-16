@@ -15,7 +15,6 @@ const (
 	qaStepsRow
 	qaAnswerRow
 	qaSourcesRow
-	qaSourceRow
 	qaStatusRow
 )
 
@@ -35,9 +34,7 @@ func (r qaRow) gap() float32 {
 		}
 		return 7
 	case qaSourcesRow:
-		return 6
-	case qaSourceRow:
-		return 6
+		return 10
 	default:
 		return 10
 	}
@@ -69,13 +66,9 @@ type qaBlock struct {
 	cells      []qaCell
 	header     bool
 	fade       *qaFade
-}
-
-type citeGroup struct {
-	path   string
-	title  string
-	folder string
-	items  []citeRef
+	partBase   int
+	partCount  int
+	reused     bool
 }
 
 type qaTurnView struct {
@@ -84,9 +77,9 @@ type qaTurnView struct {
 	enrichedFor                string
 	blocks                     []qaBlock
 	refs                       []citeRef
-	groups                     []citeGroup
 	byNum                      map[int]citeRef
 	numbers                    map[string]int
+	chipWidths                 map[string]float32
 	doc                        *parser.Document
 	streaming                  bool
 	tailUnits                  int
@@ -176,11 +169,8 @@ func (s *qaSession) visibleRowsWith(fs func() *spacefs.FS) []qaRow {
 		for i := range turn.view.blocks {
 			s.rows = append(s.rows, qaRow{turn: turn, kind: qaAnswerRow, index: i})
 		}
-		if !active && len(turn.view.groups) > 0 {
+		if !active && len(turn.view.refs) > 0 {
 			s.rows = append(s.rows, qaRow{turn: turn, kind: qaSourcesRow})
-			for i := range turn.view.groups {
-				s.rows = append(s.rows, qaRow{turn: turn, kind: qaSourceRow, index: i})
-			}
 		}
 		if turn.stopped || turn.err != nil {
 			s.rows = append(s.rows, qaRow{turn: turn, kind: qaStatusRow})

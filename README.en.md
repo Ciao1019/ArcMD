@@ -6,7 +6,7 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.0.11-F21158" alt="Version 0.0.11"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.2.0-F21158" alt="Version 0.2.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.0.11. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.2.0. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
@@ -115,8 +115,9 @@ ArcMD edits and autosaves standard **`.md` Markdown** files (`.md`, `.markdown`,
 | **Tables, Columns & Media** | CSV/TSV paste-to-table, row/column drag reorder, cell merge/split, 16 cell fills, natural column sort; adjustable two-column layouts; non-destructive image crop (keeping originals) & inline GIF playback; multi-block marquee selection & outline section drag. |
 | **Splits, Command Bar & Templates** | Up to four side-by-side split panes or dedicated native windows; zero-blocking <kbd>⌘K</kbd> command bar (full-text search, undoable <kbd>⇧⌘R</kbd> cross-document replace); Space templates (`{{date}}`, `{{time}}`, `{{weekday}}`, `{{title}}`) & <kbd>⌥⌘T</kbd> Daily Notes. |
 | **Links, Focus & Safety** | `[[Wiki links]]` autocomplete across spaces, backlinks footer & rename sync, workspace `#tags`; <kbd>⇧⌘F</kbd> Focus Mode, paragraph afterglow dimming, typewriter scroll, word goals & per-pane reading lock; <kbd>⇧⌘M</kbd> synced Markdown preview, selectable-text PDF & standalone HTML export; `.arcmd/history` diff restore & live external-edit protection. |
+| **Space Q&A Agent** | Press <kbd>⌘J</kbd> for a read-only Space research panel: zero vector index—the agent searches, inspects outlines and links, and reads notes (including unsaved edits and External space files), streaming cited answers with inline monogram chips, claim highlights, gliding source previews, one-click block jumps, OpenAI / DeepSeek / OpenRouter / local Ollama presets, and `arcmd ask` in the terminal. |
 
-**Small core, extensible by design**: AI writing, translation, and sync are designed as optional plugins so the core editor stays fast and lean. Plugin manifests, verified installers, and host contracts are in place; sandboxed runtimes and the marketplace are in active development. See the [plugin roadmap](docs/plugins.md).
+**Small core, extensible by design**: ArcMD builds in a read-only Space Q&A agent while keeping AI writing, translation, and sync as optional plugins (which can also contribute tools to the agent) so the core editor stays fast and lean. Plugin manifests, verified installers, and host contracts are in place; sandboxed runtimes and the marketplace are in active development. See the [plugin roadmap](docs/plugins.md).
 
 ---
 
@@ -132,6 +133,7 @@ Every action is reachable from the <kbd>⌘K</kbd> command bar, and shortcuts ca
 | <kbd>⇧⌘M</kbd> | Rich text ⇄ Markdown preview (synced) | <kbd>⇧⌘F</kbd> | Toggle Focus Mode |
 | <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | Find & replace / Replace across space | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | Toggle bookmark / All bookmarks |
 | <kbd>⌥⌘T</kbd> | Open or create Today's Note | <kbd>⌥⌘Y</kbd> | Version history & diff restore |
+| <kbd>⌘J</kbd> | Ask current Space (Space Q&A) | <kbd>⇧⌘E</kbd> | Export selectable-text PDF |
 
 ---
 

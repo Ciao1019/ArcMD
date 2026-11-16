@@ -219,3 +219,64 @@ func TestWikilinksTagsAndBracketsRoundTripCleanly(t *testing.T) {
 		t.Fatalf("round-trip text mismatch:\n got: %q\nwant: %q\n  md: %q", got, text, md)
 	}
 }
+
+func TestBlockSemanticHashMatchesSemanticsAndLargeExport(t *testing.T) {
+	pairs := [][2]*document.Block{
+		{
+			{Kind: "paragraph", Runs: []document.Run{{Text: "hello world", Style: document.Style{NoMath: true}}}},
+			{Kind: "paragraph", Runs: []document.Run{{Text: "hello "}, {Text: "world"}}},
+		},
+		{
+			{Kind: "paragraph", Runs: []document.Run{{Text: "price $5 + $6", Style: document.Style{NoMath: true}}}},
+			{Kind: "paragraph", Runs: []document.Run{{Text: "price "}, {Text: "$", Style: document.Style{NoMath: true}}, {Text: "5 + "}, {Text: "$", Style: document.Style{NoMath: true}}, {Text: "6"}}},
+		},
+		{
+			{Kind: "paragraph", Align: "left", Folded: true, Runs: []document.Run{{Text: "aligned"}}},
+			{Kind: "paragraph", Align: "", Folded: false, Runs: []document.Run{{Text: "aligned"}}},
+		},
+		{
+			func() *document.Block {
+				b := document.NewBlock("toggle", "toggle title")
+				b.Folded = true
+				return b
+			}(),
+			func() *document.Block {
+				b := document.NewBlock("toggle", "toggle title")
+				b.Folded = true
+				return b
+			}(),
+		},
+		{document.Table(2, 2), document.Table(2, 2)},
+	}
+	for idx, pair := range pairs {
+		if !sameBlockSemantics(pair[0], pair[1]) {
+			t.Fatalf("pair %d expected sameBlockSemantics == true", idx)
+		}
+		if blockSemanticHash(pair[0]) != blockSemanticHash(pair[1]) {
+			t.Fatalf("pair %d semantic hash mismatch: %x vs %x", idx, blockSemanticHash(pair[0]), blockSemanticHash(pair[1]))
+		}
+	}
+
+	var b strings.Builder
+	b.Grow(280_000)
+	for i := 0; i < 2000; i++ {
+		b.WriteString("* duplicate author bullet with _underscore_\n\n")
+		b.WriteString("Unedited author paragraph _kept verbatim_ across **many** sections.\n\n")
+	}
+	src := b.String()
+	doc := ImportMarkdown(src)
+	if len(doc.Blocks) < 4000 {
+		t.Fatalf("expected >= 4000 blocks, got %d", len(doc.Blocks))
+	}
+	doc.Blocks[1].Runs = []document.Run{{Text: "Edited first paragraph cleanly."}}
+	mid := len(doc.Blocks) / 2
+	doc.Blocks[mid].Runs = []document.Run{{Text: "Edited middle block cleanly."}}
+
+	out := ExportMarkdown(doc)
+	if !strings.Contains(out, "Edited first paragraph cleanly.") || !strings.Contains(out, "Edited middle block cleanly.") {
+		t.Fatal("ExportMarkdown dropped edited blocks")
+	}
+	if !strings.Contains(out, "* duplicate author bullet with _underscore_") || !strings.Contains(out, "Unedited author paragraph _kept verbatim_ across **many** sections.") {
+		t.Fatal("ExportMarkdown failed to preserve unedited author-formatted chunks")
+	}
+}

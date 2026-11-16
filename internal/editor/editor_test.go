@@ -976,3 +976,289 @@ func TestClickingAGapAddsAParagraph(t *testing.T) {
 		t.Fatal("a read-only page offers gaps")
 	}
 }
+
+func TestBlockMenuFitsShortViewport(t *testing.T) {
+	var paras []string
+	for i := 1; i <= 24; i++ {
+		paras = append(paras, fmt.Sprintf("Paragraph %d with enough text to scroll.", i))
+	}
+	e := New(strings.Join(paras, "\n\n"))
+	marks := map[string]string{}
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{
+			Width:          w,
+			Theme:          c.Theme(),
+			Bookmarks:      marks,
+			ToggleBookmark: func(string) {},
+			BookmarkKey:    "⌘D",
+		})
+	}, 900, 650)
+	tt.Frame()
+	focus(e, tt)
+
+	assertWithin := func(label string, minH, w, h float32) ui.Rect {
+		t.Helper()
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("missing %q", label)
+		}
+		if r.W <= 0 || r.H < minH || r.X < 0 || r.Y < 0 || r.X+r.W > w || r.Y+r.H > h {
+			t.Fatalf("%q rect %+v overflows or clips in viewport %gx%g (want H>=%g)", label, r, w, h, minH)
+		}
+		return r
+	}
+
+	// Single-frame scroll putting the last block near the bottom edge of a 640x620 viewport:
+	// menu flips above immediately without 1-frame lag, and every item including bookmark and
+	// add-below stays completely visible without clipping or inner scrolling.
+	tt.SetSize(640, 620)
+	tt.Frame()
+	lastBlock := e.Doc.Blocks[len(e.Doc.Blocks)-1]
+	lastID := lastBlock.ID
+	lastEnd := e.Len()
+	lastCaret, _, ok := e.BoundsForRange(ui.TextInputRange{Start: lastEnd, End: lastEnd})
+	if !ok {
+		t.Fatal("missing bounds for last block")
+	}
+	e.Scroll.Y = max(0, lastCaret.Y-(620-44))
+	beforeCount := len(e.Doc.Blocks)
+	e.OpenBlockMenu(lastID, "")
+	tt.Frame()
+	for _, label := range []string{"一级标题", "缩进和对齐", "剪切", "复制", "创建副本", "删除", "上移", "下移", "添加书签", "在下方添加"} {
+		minH := float32(32)
+		if label == "一级标题" {
+			minH = 24
+		}
+		assertWithin(label, minH, 640, 620)
+	}
+	if err := tt.Click("创建副本"); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Doc.Blocks) != beforeCount+1 || e.menuOpen {
+		t.Fatalf("duplicate from flipped menu failed: len=%d menuOpen=%v", len(e.Doc.Blocks), e.menuOpen)
+	}
+
+	// Scrolled all the way to the bottom (pageBottom leaves ~434px above):
+	// menu still flips above immediately on a single frame without overlapping the handle,
+	// and inner scroll reaches the bottom item.
+	e.Scroll.Y = 1e6
+	lastID = e.Doc.Blocks[len(e.Doc.Blocks)-1].ID
+	e.OpenBlockMenu(lastID, "")
+	tt.Frame()
+	assertWithin("一级标题", 24, 640, 620)
+	e.menuScroll.Y = 1e6
+	tt.Frame()
+	assertWithin("在下方添加", 32, 640, 620)
+	tt.Key(0, ui.KeyEscape)
+
+	// Open with the indent side submenu at the bottom of a narrow and short viewport,
+	// and verify every submenu item including 减少缩进 is reachable and clickable.
+	tt.Move(0, 0)
+	tt.SetSize(500, 620)
+	tt.Frame()
+	e.Scroll.Y = 1e6
+	lastID = e.Doc.Blocks[len(e.Doc.Blocks)-1].ID
+	e.Engine.FocusBlock(lastID)
+	e.Engine.Indent(1)
+	e.sync()
+	e.OpenBlockMenu(lastID, "indent")
+	tt.Frame()
+	for _, label := range []string{"左对齐", "居中对齐", "右对齐", "增加缩进", "减少缩进"} {
+		assertWithin(label, 32, 500, 620)
+	}
+	if err := tt.Click("减少缩进"); err != nil {
+		t.Fatal(err)
+	}
+	if e.Doc.Blocks[len(e.Doc.Blocks)-1].Indent != 0 || e.menuOpen {
+		t.Fatalf("outdent from side menu failed: indent=%d menuOpen=%v", e.Doc.Blocks[len(e.Doc.Blocks)-1].Indent, e.menuOpen)
+	}
+
+	// Medium-height viewport (720px) with the handle near the vertical middle:
+	// neither side fits the full 446px menu, so the menu stays strictly on the
+	// larger side without overlapping the handle, and scrolls internally.
+	tt.SetSize(640, 720)
+	tt.Frame()
+	midHandle := e.handles[len(e.handles)/2]
+	e.Scroll.Y = midHandle.rect.Y - 350
+	tt.Frame()
+	bounds, _ := tt.Find("文档")
+	handleWin := ui.Rect{
+		X: bounds.X + midHandle.rect.X,
+		Y: bounds.Y + midHandle.rect.Y,
+		W: midHandle.rect.W,
+		H: midHandle.rect.H,
+	}
+	e.OpenBlockMenu(midHandle.id, "")
+	tt.Frame()
+	topCell := assertWithin("一级标题", 24, 640, 720)
+	if !(topCell.Y+topCell.H <= handleWin.Y || topCell.Y >= handleWin.Y+handleWin.H) {
+		t.Fatalf("menu overlaps handle rect %+v: top cell at %+v", handleWin, topCell)
+	}
+	e.menuScroll.Y = 1e6
+	tt.Frame()
+	addRow := assertWithin("在下方添加", 32, 640, 720)
+	if !(addRow.Y+addRow.H <= handleWin.Y || addRow.Y >= handleWin.Y+handleWin.H) {
+		t.Fatalf("scrolled menu overlaps handle rect %+v: bottom row at %+v", handleWin, addRow)
+	}
+	if err := tt.Click("在下方添加"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !e.slashOpen {
+		t.Fatal("expected slash menu after clicking 在下方添加 in medium viewport")
+	}
+	tt.Key(0, ui.KeyEscape)
+
+	// Ultra-short viewport shorter than the menu itself: scrolling reaches bottom items.
+	tt.SetSize(640, 300)
+	tt.Frame()
+	e.Scroll.Y = 1e6
+	lastID = e.Doc.Blocks[len(e.Doc.Blocks)-1].ID
+	e.OpenBlockMenu(lastID, "")
+	tt.Frame()
+	e.menuScroll.Y = 1e6
+	tt.Frame()
+	assertWithin("在下方添加", 32, 640, 300)
+	if err := tt.Click("在下方添加"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(150 * time.Millisecond)
+	if !e.slashOpen {
+		t.Fatal("expected slash menu after clicking 在下方添加")
+	}
+	assertWithin("一级标题", 24, 640, 300)
+	tt.Key(0, ui.KeyEscape)
+
+	// Multi-block selection menu at the bottom of a short viewport.
+	tt.SetSize(640, 620)
+	tt.Frame()
+	e.Scroll.Y = 1e6
+	n := len(e.Doc.Blocks)
+	e.SelectBlocks(e.Doc.Blocks[n-2].ID, e.Doc.Blocks[n-1].ID)
+	e.OpenBlockMenu(e.Doc.Blocks[n-2].ID, "")
+	tt.Frame()
+	assertWithin("下移", 32, 640, 620)
+	if err := tt.Click("下移"); err != nil {
+		t.Fatal(err)
+	}
+	if e.menuOpen {
+		t.Fatal("expected multi-block menu to close after clicking 下移")
+	}
+}
+
+func TestSlashAndCompletionMenusFollowArrowKeys(t *testing.T) {
+	e := New("")
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{
+			Width:  w,
+			Theme:  c.Theme(),
+			Attach: func() {},
+			WikiSuggest: func(string) []WikiItem {
+				var out []WikiItem
+				for i := 1; i <= 8; i++ {
+					out = append(out, WikiItem{Name: fmt.Sprintf("Doc %d", i), Hint: "Space"})
+				}
+				return out
+			},
+			EmojiSuggest: func(string) []EmojiItem {
+				var out []EmojiItem
+				for i := 1; i <= 8; i++ {
+					out = append(out, EmojiItem{Emoji: "😀", Name: fmt.Sprintf("sm%d", i)})
+				}
+				return out
+			},
+		})
+	}, 900, 650)
+	tt.Frame()
+	focus(e, tt)
+
+	assertRowVisible := func(label string, minH, winW, winH float32) {
+		t.Helper()
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("missing %q", label)
+		}
+		if r.W <= 0 || r.H < minH || r.X < 0 || r.Y < 0 || r.X+r.W > winW || r.Y+r.H > winH {
+			t.Fatalf("%q rect %+v not fully visible in %gx%g (want H>=%g)", label, r, winW, winH, minH)
+		}
+	}
+
+	// 1. Slash menu: arrow down to bottom items ("公式", "链接到文档") scrolls them into full view,
+	// arrow up back to index 0 returns to the top ("基础", "一级标题"), and manual scroll stays put.
+	tt.Type("/")
+	tt.Advance(150 * time.Millisecond)
+	if !e.slashOpen {
+		t.Fatal("slash menu did not open")
+	}
+	if r, ok := tt.Find("链接到文档"); ok && r.H >= 32 {
+		t.Fatalf("expected 链接到文档 to initially start clipped below slash scroll, got %+v", r)
+	}
+	entries := e.slashEntries()
+	for i := 0; i < len(entries)-1; i++ {
+		tt.Key(0, ui.KeyDown)
+		if entries[e.slashIndex].item.name == "公式" {
+			assertRowVisible("公式", 32, 900, 650)
+		}
+	}
+	if e.slashScroll.Y <= 0 {
+		t.Fatalf("expected slash menu to scroll down, got scroll.Y=%v", e.slashScroll.Y)
+	}
+	assertRowVisible("链接到文档", 32, 900, 650)
+
+	for i := 0; i < len(entries)-1; i++ {
+		tt.Key(0, ui.KeyUp)
+	}
+	if e.slashIndex != 0 {
+		t.Fatalf("expected slashIndex 0 after arrowing back up, got %d", e.slashIndex)
+	}
+	if e.slashScroll.Y != 0 {
+		t.Fatalf("expected slashScroll.Y=0 at top, got %v", e.slashScroll.Y)
+	}
+	assertRowVisible("基础", 14, 900, 650)
+	assertRowVisible("一级标题", 24, 900, 650)
+
+	e.slashScroll.Y = 40
+	tt.Frame()
+	if e.slashScroll.Y <= 0 {
+		t.Fatalf("expected manual slash scroll to persist, got %v", e.slashScroll.Y)
+	}
+
+	tt.Key(0, ui.KeyEscape)
+	tt.Key(0, ui.KeyBackspace)
+
+	// 2. Wiki completion menu: 9 items (8 suggestions + 新建文档) inside an 8-row scroll area.
+	tt.Type("[[new")
+	tt.Advance(150 * time.Millisecond)
+	if !e.wiki.open || len(e.wiki.items) != 9 {
+		t.Fatalf("expected 9 wiki items, open=%v len=%d", e.wiki.open, len(e.wiki.items))
+	}
+	for range 8 {
+		tt.Key(0, ui.KeyDown)
+	}
+	if e.wiki.scroll.Y <= 0 {
+		t.Fatalf("expected wiki menu to scroll down, got %v", e.wiki.scroll.Y)
+	}
+	assertRowVisible("链接到 new", 36, 900, 650)
+
+	tt.Key(0, ui.KeyEscape)
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+
+	// 3. Emoji/mention completion menu in a short viewport (640x220).
+	tt.SetSize(640, 220)
+	tt.Frame()
+	tt.Type(":sm")
+	tt.Advance(150 * time.Millisecond)
+	if !e.complete.open || len(e.complete.items) != 8 {
+		t.Fatalf("expected 8 emoji items, open=%v len=%d", e.complete.open, len(e.complete.items))
+	}
+	for range 7 {
+		tt.Key(0, ui.KeyDown)
+	}
+	if e.complete.scroll.Y <= 0 {
+		t.Fatalf("expected complete menu to scroll down, got %v", e.complete.scroll.Y)
+	}
+	assertRowVisible(":sm8:", 34, 640, 220)
+}

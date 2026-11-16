@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,24 +28,26 @@ type document struct {
 	rel   string
 	// named is the name this session gave the file from its title; the file
 	// keeps following the title while it has that name or 未命名's.
-	named         string
-	namedFor      string // the title it was named for
-	diskText      string
-	source        bool
-	ed            *editor.Editor
-	version       uint64
-	edited        time.Time
-	saveErr       error
-	failedVersion uint64
-	baseline      string
+	named            string
+	namedFor         string // the title it was named for
+	diskText         string
+	source           bool
+	ed               *editor.Editor
+	version          uint64
+	edited           time.Time
+	saveErr          error
+	failedVersion    uint64
+	baseline         [32]byte
+	baselineSkeleton [32]byte
 	// dirtyRev, dirtyKnown and dirtyNow remember dirty for a revision.
 	dirtyRev            uint64
 	dirtyVersion        uint64
 	dirtyKnown          bool
 	dirtyNow            bool
 	textDirtyKnown      bool
+	skeletonDirty       bool
 	textDirty           map[string]bool
-	baselineRuns        map[string][]model.Run
+	baselineRuns        map[string][16]byte
 	loadErr             error
 	preview             string
 	previewScroll       ui.ScrollState
@@ -98,11 +99,11 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 	} else {
 		doc = editor.ImportMarkdown(text)
 	}
-	d.ed = editor.FromDocument(doc)
-	d.baseline, _ = doc.Encode()
-	d.rememberBaseline(doc)
+	d.ed = editor.FromOwnedDocument(doc)
+	d.baseline, _ = d.ed.Doc.Digest()
+	d.rememberBaseline(d.ed.Doc)
 	if preferSource {
-		d.preview = editor.ExportMarkdown(doc)
+		d.preview = editor.ExportMarkdown(d.ed.Doc)
 	}
 	return d
 }
@@ -114,15 +115,15 @@ func (d *document) text() string  { return editor.ExportMarkdown(d.ed.Committed(
 func (d *document) ensureBodyParagraph() {
 	if len(d.ed.Doc.Blocks) == 1 && d.ed.Doc.Blocks[0].Kind == "heading" {
 		d.ed.Doc.Blocks = append(d.ed.Doc.Blocks, model.NewBlock("paragraph", ""))
-		d.baseline, _ = d.ed.Doc.Encode()
+		d.baseline, _ = d.ed.Doc.Digest()
 		d.rememberBaseline(d.ed.Doc)
 	}
 }
 
 // dirty reports whether the document differs from what was saved. Text-only
-// revisions compare the affected runs; other changes compare the full committed
-// model. The sidebar, address field and autosave share the result per revision.
-// Saving always checks the full model afresh (changed).
+// revisions compare only the affected leaf (or stay O(1) when the skeleton is
+// already dirty); other changes re-evaluate against the baseline once and
+// re-arm leaf-level tracking when the skeleton matches.
 func (d *document) dirty() bool {
 	if d.loadErr != nil {
 		return false
@@ -131,23 +132,32 @@ func (d *document) dirty() bool {
 		// Preedit revisions update display indexes but leave committed content
 		// unchanged. In particular, saving during composition establishes a
 		// clean baseline that subsequent candidate updates must preserve.
-		composing := d.ed.Committed() != d.ed.Doc
+		composing := d.ed.Composing()
 		if composing && d.dirtyKnown && d.dirtyVersion == d.ed.Version() {
 			d.dirtyRev = rev
 			return d.dirtyNow
 		}
-		if change, ok := d.ed.TextChangeSince(d.dirtyRev); ok && !composing && d.dirtyKnown && d.textDirtyKnown {
-			current := d.ed.Engine.LeafAt(change.Start).Block
-			if saved, exists := d.baselineRuns[change.ID]; exists && slices.Equal(saved, current.Runs) {
-				delete(d.textDirty, change.ID)
+		if change, ok := d.ed.TextChangeSince(d.dirtyRev); ok && !composing && d.dirtyKnown {
+			if d.skeletonDirty {
+				// Text-only edits cannot restore a modified document skeleton,
+				// so dirtyNow remains true without re-hashing the document.
+				d.dirtyNow = true
+			} else if d.textDirtyKnown {
+				current := d.ed.Engine.LeafAt(change.Start).Block
+				if saved, exists := d.baselineRuns[change.ID]; exists && saved == model.RunsDigest(current.Runs) {
+					delete(d.textDirty, change.ID)
+				} else {
+					if d.textDirty == nil {
+						d.textDirty = make(map[string]bool)
+					}
+					d.textDirty[change.ID] = true
+				}
+				d.dirtyNow = len(d.textDirty) != 0
 			} else {
-				d.textDirty[change.ID] = true
+				d.recomputeDirtySlow()
 			}
-			d.dirtyNow = len(d.textDirty) != 0
 		} else {
-			d.dirtyNow = d.changed()
-			d.textDirtyKnown = !d.dirtyNow
-			clear(d.textDirty)
+			d.recomputeDirtySlow()
 		}
 		d.dirtyRev, d.dirtyKnown = rev, true
 		d.dirtyVersion = d.ed.Version()
@@ -155,30 +165,112 @@ func (d *document) dirty() bool {
 	return d.dirtyNow
 }
 
+func (d *document) recomputeDirtySlow() {
+	committed := d.ed.Committed()
+	digest, err := committed.Digest()
+	d.dirtyNow = err != nil || digest != d.baseline
+	clear(d.textDirty)
+	if !d.dirtyNow {
+		d.skeletonDirty = false
+		d.textDirtyKnown = true
+		return
+	}
+	if err == nil && committed.SkeletonDigest() == d.baselineSkeleton {
+		d.rebuildTextDirty(committed)
+		d.skeletonDirty = false
+		d.textDirtyKnown = true
+		return
+	}
+	d.skeletonDirty = true
+	d.textDirtyKnown = false
+}
+
+func (d *document) rebuildTextDirty(doc *model.Document) {
+	if d.textDirty == nil {
+		d.textDirty = make(map[string]bool)
+	} else {
+		clear(d.textDirty)
+	}
+	var walk func([]*model.Block, map[*model.Block]bool)
+	walk = func(blocks []*model.Block, covered map[*model.Block]bool) {
+		for _, block := range blocks {
+			if covered[block] {
+				continue
+			}
+			if len(block.Children) > 0 {
+				inner := covered
+				if block.Kind == "table" {
+					inner = model.CoveredCells(block)
+				}
+				walk(block.Children, inner)
+				continue
+			}
+			if saved, ok := d.baselineRuns[block.ID]; !ok || saved != model.RunsDigest(block.Runs) {
+				d.textDirty[block.ID] = true
+			}
+		}
+	}
+	walk(doc.Blocks, nil)
+}
+
+func computeBaselineRuns(doc *model.Document, dst map[string][16]byte) map[string][16]byte {
+	if dst == nil {
+		dst = make(map[string][16]byte, len(doc.Blocks))
+	} else {
+		clear(dst)
+	}
+	var walk func([]*model.Block, map[*model.Block]bool)
+	walk = func(blocks []*model.Block, covered map[*model.Block]bool) {
+		for _, block := range blocks {
+			if covered[block] {
+				continue
+			}
+			if len(block.Children) > 0 {
+				inner := covered
+				if block.Kind == "table" {
+					inner = model.CoveredCells(block)
+				}
+				walk(block.Children, inner)
+				continue
+			}
+			dst[block.ID] = model.RunsDigest(block.Runs)
+		}
+	}
+	walk(doc.Blocks, nil)
+	return dst
+}
+
 // A run comparison is exact for a sequence of text-only edits. Structural
 // edits still take the full comparison; saving always verifies the whole model.
 func (d *document) rememberBaseline(doc *model.Document) {
-	d.baselineRuns = make(map[string][]model.Run)
-	for _, leaf := range doc.Leaves() {
-		d.baselineRuns[leaf.Block.ID] = slices.Clone(leaf.Block.Runs)
-	}
-	d.textDirty = make(map[string]bool)
+	d.applyBaselineState(computeBaselineRuns(doc, d.baselineRuns), doc.SkeletonDigest())
+}
+
+func (d *document) applyBaselineState(runs map[string][16]byte, skeleton [32]byte) {
+	d.baselineRuns = runs
+	d.baselineSkeleton = skeleton
+	d.skeletonDirty = false
+	clear(d.textDirty)
 	d.textDirtyKnown = true
 	d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.ed.Revision(), true, false
 	d.dirtyVersion = d.ed.Version()
 }
 
 type asyncSaveResult struct {
-	text            string
-	baseline        string
-	committed       *model.Document
-	arcmd           bool
-	historyRecorded bool
-	missing         bool
-	conflict        bool
-	diskNow         string
-	err             error
-	version         uint64
+	text             string
+	baseline         [32]byte
+	baselineSkeleton [32]byte
+	baselineRuns     map[string][16]byte
+	committed        *model.Document
+	unchanged        bool
+	arcmd            bool
+	historyRecorded  bool
+	missing          bool
+	conflict         bool
+	diskNow          string
+	err              error
+	version          uint64
+	revision         uint64
 }
 
 type cachedImage struct {
@@ -188,10 +280,10 @@ type cachedImage struct {
 	resource editor.ImageResource
 }
 
-// changed encodes the document and compares it with the saved baseline.
+// changed hashes the document and compares it with the saved baseline.
 func (d *document) changed() bool {
-	text, err := d.ed.Committed().Encode()
-	return err != nil || text != d.baseline
+	digest, err := d.ed.Committed().Digest()
+	return err != nil || digest != d.baseline
 }
 
 func (d *document) toggleMode() {
@@ -318,6 +410,19 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 	d.saving = false
 	d.saveDone = nil
 	switch {
+	case res.unchanged:
+		d.saveErr = nil
+		if res.baselineRuns != nil {
+			d.baselineRuns = res.baselineRuns
+			d.baselineSkeleton = res.baselineSkeleton
+		}
+		if d.ed.Committed() == res.committed && d.ed.Version() == res.version && d.ed.Revision() == res.revision {
+			d.applyBaselineState(d.baselineRuns, d.baselineSkeleton)
+		} else {
+			d.dirtyKnown = false
+			d.textDirtyKnown = false
+			d.skeletonDirty = false
+		}
 	case res.missing:
 		d.missing = true
 		d.failedVersion = res.version
@@ -333,17 +438,25 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 			if d.ed.Doc != res.committed {
 				d.ed.Doc.ImportSource = res.text
 			}
+			if cur := d.ed.Committed(); cur != res.committed && cur != d.ed.Doc && d.ed.Version() == res.version && d.ed.Revision() == res.revision {
+				cur.ImportSource = res.text
+			}
 		}
 		d.diskText, d.baseline, d.saveErr = res.text, res.baseline, nil
+		if res.baselineRuns != nil {
+			d.baselineRuns = res.baselineRuns
+			d.baselineSkeleton = res.baselineSkeleton
+		}
 		if res.historyRecorded {
 			d.historyStarted = true
 		}
 		d.conflict, d.missing, d.diskNow = false, false, ""
-		if d.ed.Committed() == res.committed && d.ed.Version() == res.version {
-			d.rememberBaseline(res.committed)
+		if d.ed.Committed() == res.committed && d.ed.Version() == res.version && d.ed.Revision() == res.revision {
+			d.applyBaselineState(d.baselineRuns, d.baselineSkeleton)
 		} else {
 			d.dirtyKnown = false
 			d.textDirtyKnown = false
+			d.skeletonDirty = false
 		}
 		if d.source {
 			d.preview = d.text()
@@ -370,11 +483,11 @@ func (d *document) write(force bool) error {
 			return errMissing
 		}
 	}
-	// Encode the committed model once and reuse it for both baseline check
-	// and persistence, avoiding duplicate JSON serialization on every save.
+	// Fingerprint the committed model without full JSON serialization on clean
+	// checks; only .arcmd saves serialize JSON.
 	committed := d.ed.Committed()
-	encodedBaseline, encErr := committed.Encode()
-	changed := encErr != nil || encodedBaseline != d.baseline
+	baseline, digErr := committed.Digest()
+	changed := digErr != nil || baseline != d.baseline
 	if !changed && !force {
 		d.saveErr = nil
 		return nil
@@ -397,7 +510,7 @@ func (d *document) write(force bool) error {
 	var err error
 	arcmd := strings.EqualFold(path.Ext(d.rel), ".arcmd")
 	if arcmd {
-		text, err = encodedBaseline, encErr
+		text, err = committed.Encode()
 	} else {
 		err = committed.Validate()
 		if err == nil {
@@ -417,9 +530,9 @@ func (d *document) write(force bool) error {
 		if d.ed.Doc != committed {
 			d.ed.Doc.ImportSource = text
 		}
-		encodedBaseline, _ = committed.Encode()
+		baseline, _ = committed.Digest()
 	}
-	d.diskText, d.baseline, d.saveErr = text, encodedBaseline, nil
+	d.diskText, d.baseline, d.saveErr = text, baseline, nil
 	if d.source {
 		d.preview = d.text()
 	}
@@ -464,30 +577,8 @@ func (d *document) startAsyncAutosave(post func(func())) {
 	}
 	committed := d.ed.Committed()
 	snapshot := committed.Clone()
-	encodedBaseline, encErr := snapshot.Encode()
-	if encErr == nil && encodedBaseline == d.baseline {
-		d.saveErr = nil
-		d.rememberBaseline(committed)
-		return
-	}
 	arcmd := strings.EqualFold(path.Ext(d.rel), ".arcmd")
-	var outText string
-	var prepErr error
-	if arcmd {
-		outText, prepErr = encodedBaseline, encErr
-	} else {
-		prepErr = snapshot.Validate()
-		if prepErr == nil {
-			outText = editor.ExportMarkdown(snapshot)
-			snapshot.ImportSource = outText
-			encodedBaseline, _ = snapshot.Encode()
-		}
-	}
-	if prepErr != nil {
-		d.saveErr = prepErr
-		d.failedVersion = d.version
-		return
-	}
+	prevBaseline := d.baseline
 
 	spClone := *d.space
 	if d.space.ExternalFiles != nil {
@@ -502,17 +593,54 @@ func (d *document) startAsyncAutosave(post func(func())) {
 	needInitialHistory := !d.historyOff && !d.historyStarted && expectedDisk != ""
 	fullPath := d.fullPath()
 	ver := d.version
+	rev := d.ed.Revision()
 	ch := make(chan asyncSaveResult, 1)
 	d.saving = true
 	d.saveDone = ch
 
 	go func() {
+		// Run Digest, Validate, ExportMarkdown, disk I/O and baseline hashing off the UI thread.
+		preBaseline, digErr := snapshot.Digest()
+		if digErr == nil && preBaseline == prevBaseline {
+			ch <- asyncSaveResult{
+				unchanged:        true,
+				baseline:         preBaseline,
+				baselineRuns:     computeBaselineRuns(snapshot, nil),
+				baselineSkeleton: snapshot.SkeletonDigest(),
+				committed:        committed,
+				version:          ver,
+				revision:         rev,
+			}
+			post(func() { d.pollAsyncSave() })
+			return
+		}
+		var outText string
+		var baseline [32]byte
+		var prepErr error
+		if arcmd {
+			outText, prepErr = snapshot.Encode()
+			baseline = preBaseline
+		} else {
+			prepErr = snapshot.Validate()
+			if prepErr == nil {
+				outText = editor.ExportMarkdown(snapshot)
+				snapshot.ImportSource = outText
+				baseline, _ = snapshot.Digest()
+			}
+		}
 		res := asyncSaveResult{
 			text:      outText,
-			baseline:  encodedBaseline,
+			baseline:  baseline,
 			committed: committed,
 			arcmd:     arcmd,
 			version:   ver,
+			revision:  rev,
+		}
+		if prepErr != nil {
+			res.err = prepErr
+			ch <- res
+			post(func() { d.pollAsyncSave() })
+			return
 		}
 		disk, err := readFile(&spClone, rel)
 		switch {
@@ -532,12 +660,16 @@ func (d *document) startAsyncAutosave(post func(func())) {
 			}
 			if wErr := writeFile(&spClone, rel, outText); wErr != nil {
 				res.err = wErr
-			} else if !historyOff {
-				if needInitialHistory {
-					_ = history.Record(spClone.Root, rel, expectedDisk, initialAt, true)
+			} else {
+				res.baselineRuns = computeBaselineRuns(snapshot, nil)
+				res.baselineSkeleton = snapshot.SkeletonDigest()
+				if !historyOff {
+					if needInitialHistory {
+						_ = history.Record(spClone.Root, rel, expectedDisk, initialAt, true)
+					}
+					_ = history.Record(spClone.Root, rel, outText, time.Now(), false)
+					res.historyRecorded = true
 				}
-				_ = history.Record(spClone.Root, rel, outText, time.Now(), false)
-				res.historyRecorded = true
 			}
 		}
 		ch <- res

@@ -200,3 +200,76 @@ func TestCopySingleMathBlock(t *testing.T) {
 		t.Fatalf("copy lost the math block: %+v", blocks)
 	}
 }
+
+func TestDoubleDollarPredictsDisplayMath(t *testing.T) {
+	e, tt := newTester("")
+	focus(e, tt)
+
+	// 1. Typing a single "$" on an empty paragraph predicts inline math.
+	typeKeys(tt, "$")
+	if e.Doc.Blocks[0].Kind != "paragraph" || e.inlineMath.blockID == "" || e.Text() != "$$" {
+		t.Fatalf("single $ did not predict inline math: kind=%s inline=%+v text=%q", e.Doc.Blocks[0].Kind, e.inlineMath, e.Text())
+	}
+
+	// 2. Typing the second "$" immediately promotes to a display math card.
+	typeKeys(tt, "$")
+	if e.Doc.Blocks[0].Kind != "math" || e.Doc.Blocks[0].Text() != "" || e.rows[0].mathHidden || e.rows[0].mathPanel == 0 {
+		t.Fatalf("second $ did not open display math card: kind=%s text=%q row=%+v", e.Doc.Blocks[0].Kind, e.Doc.Blocks[0].Text(), e.rows[0])
+	}
+
+	// 3. Typing TeX updates the live preview, and Tab exits to a paragraph below.
+	typeKeys(tt, "a_x=b_y")
+	if e.rows[0].math == nil || e.rows[0].mathErr != "" {
+		t.Fatalf("display math preview failed: err=%q math=%v", e.rows[0].mathErr, e.rows[0].math)
+	}
+	tt.Key(0, ui.KeyTab)
+	if !e.rows[0].mathHidden || len(e.Doc.Blocks) != 2 || e.Doc.Blocks[1].Kind != "paragraph" {
+		t.Fatalf("Tab did not exit display math to a new paragraph: blocks=%+v hidden=%v", e.Doc.Blocks, e.rows[0].mathHidden)
+	}
+
+	// 4. Typing "$$" then Backspace rolls back to literal "$$", and typing "$" makes "$$$".
+	typeKeys(tt, "$$")
+	if e.Doc.Blocks[1].Kind != "math" {
+		t.Fatalf("expected second paragraph to promote to math: %+v", e.Doc.Blocks[1])
+	}
+	tt.Key(0, ui.KeyBackspace)
+	if e.Doc.Blocks[1].Kind != "paragraph" || e.Doc.Blocks[1].Text() != "$$" {
+		t.Fatalf("Backspace did not roll back $$ fence: kind=%s text=%q", e.Doc.Blocks[1].Kind, e.Doc.Blocks[1].Text())
+	}
+	typeKeys(tt, "$")
+	if e.Doc.Blocks[1].Kind != "paragraph" || e.Doc.Blocks[1].Text() != "$$$" {
+		t.Fatalf("typing $ after rollback did not stay literal: kind=%s text=%q", e.Doc.Blocks[1].Kind, e.Doc.Blocks[1].Text())
+	}
+
+	// 5. Escape rolls back "$$" to literal "$$"; completing " a_x=b_y $$" compiles live and Enter exits below.
+	tt.Key(0, ui.KeyEnter)
+	typeKeys(tt, "$$")
+	if e.Doc.Blocks[2].Kind != "math" {
+		t.Fatalf("expected third paragraph to promote to math: %+v", e.Doc.Blocks[2])
+	}
+	tt.Key(0, ui.KeyEscape)
+	if e.Doc.Blocks[2].Kind != "paragraph" || e.Doc.Blocks[2].Text() != "$$" {
+		t.Fatalf("Escape did not roll back $$ fence: kind=%s text=%q", e.Doc.Blocks[2].Kind, e.Doc.Blocks[2].Text())
+	}
+	typeKeys(tt, " a_x=b_y $$")
+	if e.Doc.Blocks[2].Kind != "math" || e.Doc.Blocks[2].Text() != "a_x=b_y" || e.rows[2].math == nil {
+		t.Fatalf("single-line $$ a_x=b_y $$ did not live compile: block=%+v row=%+v", e.Doc.Blocks[2], e.rows[2])
+	}
+	tt.Key(0, ui.KeyEnter)
+	if len(e.Doc.Blocks) != 4 || e.Doc.Blocks[3].Kind != "paragraph" || e.Engine.LeafAt(e.Caret).Block.ID != e.Doc.Blocks[3].ID {
+		t.Fatalf("Enter after single-line math compile did not move caret below: blocks=%+v caret=%d", e.Doc.Blocks, e.Caret)
+	}
+
+	// 6. With NoAutoPair enabled, typing "$$ " still opens a display math block.
+	e2 := New("")
+	tt2 := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e2, Options{Width: w, Theme: c.Theme(), NoAutoPair: true})
+	}, 900, 650)
+	tt2.Frame()
+	focus(e2, tt2)
+	typeKeys(tt2, "$$ ")
+	if e2.Doc.Blocks[0].Kind != "math" || e2.rows[0].mathHidden {
+		t.Fatalf("NoAutoPair $$ + space did not open display math: kind=%s row=%+v", e2.Doc.Blocks[0].Kind, e2.rows[0])
+	}
+}

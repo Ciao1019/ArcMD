@@ -26,6 +26,7 @@ type palette struct {
 	query     string
 	lastQuery string
 	index     int
+	reveal    bool
 	pane      *splitPane // document picker for one split pane
 	// bookmarks lists the bookmarks instead (bookmarks.go); renaming is
 	// the one being named while renameOn, newLabel what is typed.
@@ -483,13 +484,15 @@ func (a *App) paletteView(c *ui.Context) {
 	panel := ui.Modal(c.Key("palette"), &p.open, func() {
 		res := a.results()
 		if p.query != p.lastQuery {
-			p.lastQuery, p.index, p.confirm = p.query, 0, ""
+			p.lastQuery, p.index, p.confirm, p.reveal = p.query, 0, "", true
 		}
 		if c.Shortcut(0, ui.KeyDown) {
 			p.index++
+			p.reveal = true
 		}
 		if c.Shortcut(0, ui.KeyUp) {
 			p.index--
+			p.reveal = true
 		}
 		p.index = max(0, min(p.index, len(res)-1))
 		run := func(act action) {
@@ -534,6 +537,9 @@ func (a *App) paletteView(c *ui.Context) {
 					}
 					if act.faded {
 						row.Opacity(.55)
+					}
+					if i == p.index && p.reveal {
+						row.ScrollIntoView()
 					}
 					if act.bookmark != nil && a.bookmarkRow(c, row, act) {
 						continue
@@ -582,6 +588,7 @@ func (a *App) paletteView(c *ui.Context) {
 					}
 				}
 			})
+			p.reveal = false
 		})
 	})
 	if bounds.W > 0 {

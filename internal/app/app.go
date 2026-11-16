@@ -33,7 +33,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.0.11"
+const Version = "0.2.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -236,9 +236,17 @@ type App struct {
 	// tour introduces the sidebar on the first run (tour.go).
 	tour tour
 
-	runAsync func(func())
-	navDir   int
-	navAt    time.Time
+	runAsync             func(func())
+	navDir               int
+	navAt                time.Time
+	keyGen               uint64
+	keysCacheGen         uint64
+	keysCachePrefs       *prefs.Prefs
+	keysCacheLen         int
+	keysCacheValid       bool
+	cachedEditorBindings map[string]editor.Combo
+	cachedReserved       []editor.Combo
+	cachedBookmarkKey    string
 }
 
 // trashItem moves the file or folder at p to the system's trash.

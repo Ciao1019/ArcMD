@@ -182,26 +182,27 @@ func TestQAJumpLatestAndCitationPreview(t *testing.T) {
 	if tt.HasText("回到最新") {
 		t.Fatal("jump-to-latest pill should be hidden when already at the bottom")
 	}
-	if tt.HasText("§ Latency Budget") {
-		t.Fatal("citation preview should not appear before hovering [1]")
+	if tt.HasText("Latency Budget") {
+		t.Fatal("citation preview should not appear before hovering chip")
 	}
-	// Hover the inline citation [1] pill: floating preview card shows the recalled excerpt!
-	citeBounds, ok := tt.Find("来源 1：Design")
+	// Hover the inline citation chip: after the 120ms open delay, floating preview
+	// card shows the section heading and recalled excerpt.
+	citeBounds, ok := tt.Find("来源：Design")
 	if !ok {
-		t.Fatal("inline citation [1] not found")
+		t.Fatal("inline citation chip not found")
 	}
 	tt.Move(citeBounds.X+citeBounds.W/2, citeBounds.Y+citeBounds.H/2)
-	tt.Advance(24 * time.Millisecond)
-	if !turn.hoverInline || turn.hoverCite != 1 {
-		t.Fatalf("hovering inline citation at %+v did not record inline hover state: inline=%v cite=%d", citeBounds, turn.hoverInline, turn.hoverCite)
+	tt.Advance(140 * time.Millisecond)
+	if !s.preview.open || s.preview.part != 1 {
+		t.Fatalf("hovering inline citation at %+v did not open preview: %+v", citeBounds, s.preview)
 	}
-	if !tt.HasText("§ Latency Budget") || !tt.HasText("Frame time stays below 4ms under load.") {
+	if !tt.HasText("Latency Budget") || !tt.HasText("Frame time stays below 4ms under load.") {
 		t.Fatalf("inline citation hover preview card did not display section and excerpt: %v", tt.Texts())
 	}
 	tt.Move(10, 10)
-	tt.Advance(24 * time.Millisecond)
-	if tt.HasText("§ Latency Budget") {
-		t.Fatal("citation preview did not dismiss after moving pointer off [1]")
+	tt.Advance(110 * time.Millisecond)
+	if tt.HasText("Latency Budget") {
+		t.Fatal("citation preview did not dismiss after moving pointer off chip")
 	}
 
 	// Scroll up inside QA list: "回到最新" pill appears without shifting paragraph anchors, and clicking it jumps back to end.

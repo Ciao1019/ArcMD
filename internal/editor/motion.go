@@ -2,6 +2,7 @@ package editor
 
 import (
 	"math"
+	"sort"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -42,6 +43,7 @@ type motionState struct {
 	foldFade   map[string]float32
 	dimGlow    map[string]float32
 	callouts   map[string]calloutMotion
+	seen       map[string]bool
 	dimOwner   string
 	wasDim     bool
 	at         time.Time
@@ -50,6 +52,68 @@ type motionState struct {
 	resizing   bool
 	ready      bool
 	moving     bool
+}
+
+func (e *Editor) motionWindow() (top, bottom float32) {
+	vp := e.viewport
+	if vp <= 0 {
+		vp = 900
+	}
+	return e.Scroll.Y - 1200, e.Scroll.Y + vp + 1200
+}
+
+func (e *Editor) visibleHandleRange(top, bottom float32) (int, int) {
+	if len(e.handles) == 0 {
+		return 0, 0
+	}
+	if !e.shouldVirtualize() {
+		return 0, len(e.handles)
+	}
+	start := sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top >= top })
+	if start > 0 {
+		start--
+	}
+	end := sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top > bottom })
+	return start, end
+}
+
+func (e *Editor) visibleFoldRange(top, bottom float32) (int, int) {
+	if len(e.foldButtons) == 0 {
+		return 0, 0
+	}
+	if !e.shouldVirtualize() {
+		return 0, len(e.foldButtons)
+	}
+	start := sort.Search(len(e.foldButtons), func(i int) bool { return e.foldButtons[i].rect.Y+16 >= top })
+	if start > 0 {
+		start--
+	}
+	end := sort.Search(len(e.foldButtons), func(i int) bool { return e.foldButtons[i].rect.Y > bottom })
+	return start, end
+}
+
+func (e *Editor) visibleRowRange(fn func(int)) {
+	if !e.shouldVirtualize() {
+		for i := range e.rows {
+			fn(i)
+		}
+		return
+	}
+	for i := range e.visibleRows(1200) {
+		fn(i)
+	}
+}
+
+func (e *Editor) visibleDecRange(fn func(int)) {
+	if !e.shouldVirtualize() {
+		for i := range e.decorations {
+			fn(i)
+		}
+		return
+	}
+	for i := range e.visibleDecorations(1200) {
+		fn(i)
+	}
 }
 
 // reset clears transient offsets when switching documents, printing, or resizing.
@@ -63,6 +127,7 @@ func (m *motionState) reset(doc *document.Document, width float32, now time.Time
 	clear(m.foldFade)
 	clear(m.dimGlow)
 	clear(m.callouts)
+	clear(m.seen)
 	m.dimOwner = ""
 	m.wasDim = false
 	m.doc = doc
@@ -85,23 +150,27 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 		m.foldFade = make(map[string]float32, 16)
 		m.dimGlow = make(map[string]float32, 8)
 		m.callouts = make(map[string]calloutMotion, 8)
+		m.seen = make(map[string]bool, 64)
 	}
+	winTop, winBottom := e.motionWindow()
+	hs, he := e.visibleHandleRange(winTop, winBottom)
+	fs, fe := e.visibleFoldRange(winTop, winBottom)
 	resizing := o.Resizing || e.resizePending
 	if e.printing || e.reduceMotion || !m.ready || m.doc != e.Doc || m.width != e.width || resizing || m.resizing {
 		e.unfoldPending = false
 		m.reset(e.Doc, e.width, now)
 		m.resizing = resizing
 		m.ready = true
-		for _, h := range e.handles {
+		for _, h := range e.handles[hs:he] {
 			m.blocks[h.id] = blockSlide{laidY: h.top}
 		}
-		for i := range e.rows {
+		e.visibleRowRange(func(i int) {
 			r := &e.rows[i]
 			if r.leaf.Block.Kind != "cell" {
 				m.indents[r.leaf.Block.ID] = blockSlide{laidX: r.x}
 			}
-		}
-		for _, f := range e.foldButtons {
+		})
+		for _, f := range e.foldButtons[fs:fe] {
 			if f.folded {
 				m.foldAngles[f.id] = -90
 			} else {
@@ -139,9 +208,9 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 	unfold := e.unfoldPending
 	e.unfoldPending = false
 
-	seenBlocks := make(map[string]bool, len(e.handles))
-	for _, h := range e.handles {
-		seenBlocks[h.id] = true
+	clear(m.seen)
+	for _, h := range e.handles[hs:he] {
+		m.seen[h.id] = true
 		prev, ok := m.blocks[h.id]
 		var dy float32
 		if ok {
@@ -162,13 +231,31 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 		}
 		m.blocks[h.id] = blockSlide{laidY: h.top, dy: dy}
 	}
-	for id := range m.blocks {
-		if !seenBlocks[id] {
-			delete(m.blocks, id)
+	if e.dragID != "" && !m.seen[e.dragID] {
+		if hi := e.handleIndex(e.dragID); hi >= 0 {
+			h := e.handles[hi]
+			m.seen[h.id] = true
+			m.blocks[h.id] = blockSlide{laidY: h.top}
 		}
 	}
+	for id, prev := range m.blocks {
+		if m.seen[id] {
+			continue
+		}
+		if prev.dy != 0 {
+			dy := prev.dy * decay
+			if math.Abs(float64(dy)) >= motionEpsilon {
+				m.moving = true
+				prev.dy = dy
+				m.blocks[id] = prev
+				m.seen[id] = true
+				continue
+			}
+		}
+		delete(m.blocks, id)
+	}
 	for id, op := range m.foldFade {
-		if !seenBlocks[id] {
+		if !m.seen[id] {
 			delete(m.foldFade, id)
 			continue
 		}
@@ -183,13 +270,48 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 		}
 	}
 
-	seenFolds := make(map[string]bool, len(e.foldButtons))
+	dimSeen := false
+	if e.dim && len(e.handles) > 0 {
+		owner := e.Engine.LeafAt(e.Caret).Owner
+		dimSeen = m.seen[owner]
+		_ = dimSeen
+		if m.wasDim && owner != m.dimOwner && m.dimOwner != "" && m.seen[m.dimOwner] {
+			m.dimGlow[m.dimOwner] = max(m.dimGlow[m.dimOwner], 0.85)
+			m.moving = true
+		}
+		delete(m.dimGlow, owner)
+		m.dimOwner = owner
+		m.wasDim = true
+		glowDecay := float32(1)
+		if dt > 0 {
+			glowDecay = float32(math.Exp(-dt / 0.065))
+		}
+		for id, g := range m.dimGlow {
+			if !m.seen[id] {
+				delete(m.dimGlow, id)
+				continue
+			}
+			g *= glowDecay
+			if g < 0.02 {
+				delete(m.dimGlow, id)
+			} else {
+				m.dimGlow[id] = g
+				m.moving = true
+			}
+		}
+	} else {
+		m.wasDim = false
+		m.dimOwner = ""
+		clear(m.dimGlow)
+	}
+
+	clear(m.seen)
 	foldAlpha := float32(0)
 	if dt > 0 {
 		foldAlpha = 1 - float32(math.Exp(-dt/0.038))
 	}
-	for _, f := range e.foldButtons {
-		seenFolds[f.id] = true
+	for _, f := range e.foldButtons[fs:fe] {
+		m.seen[f.id] = true
 		target := float32(0)
 		if f.folded {
 			target = -90
@@ -210,51 +332,19 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 		m.foldAngles[f.id] = cur
 	}
 	for id := range m.foldAngles {
-		if !seenFolds[id] {
+		if !m.seen[id] {
 			delete(m.foldAngles, id)
 		}
 	}
 
-	if e.dim && len(e.handles) > 0 {
-		owner := e.Engine.LeafAt(e.Caret).Owner
-		if m.wasDim && owner != m.dimOwner && m.dimOwner != "" && seenBlocks[m.dimOwner] {
-			m.dimGlow[m.dimOwner] = max(m.dimGlow[m.dimOwner], 0.85)
-			m.moving = true
-		}
-		delete(m.dimGlow, owner)
-		m.dimOwner = owner
-		m.wasDim = true
-		glowDecay := float32(1)
-		if dt > 0 {
-			glowDecay = float32(math.Exp(-dt / 0.065))
-		}
-		for id, g := range m.dimGlow {
-			if !seenBlocks[id] {
-				delete(m.dimGlow, id)
-				continue
-			}
-			g *= glowDecay
-			if g < 0.02 {
-				delete(m.dimGlow, id)
-			} else {
-				m.dimGlow[id] = g
-				m.moving = true
-			}
-		}
-	} else {
-		m.wasDim = false
-		m.dimOwner = ""
-		clear(m.dimGlow)
-	}
-
-	seenIndents := make(map[string]bool, len(e.rows))
-	for i := range e.rows {
+	clear(m.seen)
+	e.visibleRowRange(func(i int) {
 		r := &e.rows[i]
 		if r.leaf.Block == nil || r.leaf.Block.Kind == "cell" {
-			continue
+			return
 		}
 		id := r.leaf.Block.ID
-		seenIndents[id] = true
+		m.seen[id] = true
 		prev, ok := m.indents[id]
 		var dx float32
 		if ok {
@@ -270,11 +360,21 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 			m.moving = true
 		}
 		m.indents[id] = blockSlide{laidX: r.x, dx: dx}
-	}
-	for id := range m.indents {
-		if !seenIndents[id] {
-			delete(m.indents, id)
+	})
+	for id, prev := range m.indents {
+		if m.seen[id] {
+			continue
 		}
+		if prev.dx != 0 {
+			dx := prev.dx * decay
+			if math.Abs(float64(dx)) >= motionEpsilon {
+				m.moving = true
+				prev.dx = dx
+				m.indents[id] = prev
+				continue
+			}
+		}
+		delete(m.indents, id)
 	}
 
 	calloutAlpha := float32(0)
@@ -353,8 +453,10 @@ func (e *Editor) stepMotion(now time.Time) {
 			m.tableCols[id] = tc
 		}
 	}
+	winTop, winBottom := e.motionWindow()
+	fs, fe := e.visibleFoldRange(winTop, winBottom)
 	foldAlpha := 1 - float32(math.Exp(-dt/0.038))
-	for _, f := range e.foldButtons {
+	for _, f := range e.foldButtons[fs:fe] {
 		target := float32(0)
 		if f.folded {
 			target = -90
@@ -406,18 +508,18 @@ func colorClose(a, b ui.Color) bool {
 
 func (e *Editor) recordCalloutColors(snap bool, alpha float32) {
 	m := &e.motion
-	seen := make(map[string]bool)
-	for i := range e.decorations {
+	clear(m.seen)
+	e.visibleDecRange(func(i int) {
 		d := &e.decorations[i]
 		if d.kind != "callout" || d.id == "" {
-			continue
+			return
 		}
-		seen[d.id] = true
+		m.seen[d.id] = true
 		target := e.page.Callouts[d.tone]
 		cur, ok := m.callouts[d.id]
 		if snap || !ok {
 			m.callouts[d.id] = calloutMotion{fill: target.Fill, border: target.Border, icon: target.Icon}
-			continue
+			return
 		}
 		if alpha > 0 {
 			cur.fill = cur.fill.Mix(target.Fill, alpha)
@@ -430,9 +532,9 @@ func (e *Editor) recordCalloutColors(snap bool, alpha float32) {
 			m.moving = true
 		}
 		m.callouts[d.id] = cur
-	}
+	})
 	for id := range m.callouts {
-		if !seen[id] {
+		if !m.seen[id] {
 			delete(m.callouts, id)
 		}
 	}
@@ -440,18 +542,18 @@ func (e *Editor) recordCalloutColors(snap bool, alpha float32) {
 
 func (e *Editor) recordTableRowAnchors(snap bool, decay float32) {
 	m := &e.motion
-	seen := make(map[string]bool)
-	for i := range e.decorations {
+	clear(m.seen)
+	e.visibleDecRange(func(i int) {
 		d := &e.decorations[i]
 		if d.kind != "table" || d.id == "" {
-			continue
+			return
 		}
 		b := e.blockByID(d.id)
 		if b == nil || len(b.Children)+1 != len(d.rows) {
-			continue
+			return
 		}
 		for ri, tr := range b.Children {
-			seen[tr.ID] = true
+			m.seen[tr.ID] = true
 			y := d.rows[ri]
 			if snap {
 				m.tableRows[tr.ID] = blockSlide{laidY: y}
@@ -474,9 +576,9 @@ func (e *Editor) recordTableRowAnchors(snap bool, decay float32) {
 			}
 			m.tableRows[tr.ID] = blockSlide{laidY: y, dy: dy}
 		}
-	}
+	})
 	for id := range m.tableRows {
-		if !seen[id] {
+		if !m.seen[id] {
 			delete(m.tableRows, id)
 		}
 	}
@@ -484,18 +586,18 @@ func (e *Editor) recordTableRowAnchors(snap bool, decay float32) {
 
 func (e *Editor) recordTableColAnchors(snap bool, decay float32) {
 	m := &e.motion
-	seen := make(map[string]bool)
-	for i := range e.decorations {
+	clear(m.seen)
+	e.visibleDecRange(func(i int) {
 		d := &e.decorations[i]
 		if d.kind != "table" || d.id == "" {
-			continue
+			return
 		}
 		b := e.blockByID(d.id)
 		if b == nil || len(b.Children) == 0 || len(b.Children[0].Children)+1 != len(d.cols) {
-			continue
+			return
 		}
 		for ci, cell := range b.Children[0].Children {
-			seen[cell.ID] = true
+			m.seen[cell.ID] = true
 			x := d.cols[ci]
 			if snap {
 				m.tableCols[cell.ID] = blockSlide{laidX: x}
@@ -517,9 +619,9 @@ func (e *Editor) recordTableColAnchors(snap bool, decay float32) {
 			}
 			m.tableCols[cell.ID] = blockSlide{laidX: x, dx: dx}
 		}
-	}
+	})
 	for id := range m.tableCols {
-		if !seen[id] {
+		if !m.seen[id] {
 			delete(m.tableCols, id)
 		}
 	}

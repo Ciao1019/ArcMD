@@ -12,12 +12,24 @@ import (
 // smartRollback remembers the most recent automatic typography or inline
 // Markdown compilation so an immediate Backspace restores the literal text.
 type smartRollback struct {
+	rev          uint64
+	blockID      string
+	start        int
+	end          int
+	caret        int
+	restoreCaret int
+	literal      string
+	clearMark    string
+}
+
+// mathFenceRollback remembers an automatic promotion from a paragraph to a
+// display math block so an immediate Backspace or Escape restores the literal
+// "$$" or "$$ ... $$" source.
+type mathFenceRollback struct {
 	rev       uint64
 	blockID   string
-	start     int
-	end       int
 	literal   string
-	clearMark string
+	dismissed bool
 }
 
 // trySmartInput applies smart typography (-- → —, --- → divider, ... → …) and
@@ -96,11 +108,13 @@ func (e *Editor) trySmartDash(l document.Leaf, lineBefore string) bool {
 	e.Buffer.ReplaceText(&rep, "—")
 	e.pairRevision = e.Revision()
 	e.smartBack = smartRollback{
-		rev:     e.Revision(),
-		blockID: l.Block.ID,
-		start:   rep.Start,
-		end:     rep.Start + document.Len("—"),
-		literal: "--",
+		rev:          e.Revision(),
+		blockID:      l.Block.ID,
+		start:        rep.Start,
+		end:          rep.Start + document.Len("—"),
+		caret:        rep.Start + document.Len("—"),
+		restoreCaret: rep.Start + document.Len("--"),
+		literal:      "--",
 	}
 	return true
 }
@@ -117,22 +131,34 @@ func (e *Editor) trySmartEllipsis(l document.Leaf, lineBefore string) bool {
 	e.Buffer.ReplaceText(&rep, "…")
 	e.pairRevision = e.Revision()
 	e.smartBack = smartRollback{
-		rev:     e.Revision(),
-		blockID: l.Block.ID,
-		start:   rep.Start,
-		end:     rep.Start + document.Len("…"),
-		literal: "...",
+		rev:          e.Revision(),
+		blockID:      l.Block.ID,
+		start:        rep.Start,
+		end:          rep.Start + document.Len("…"),
+		caret:        rep.Start + document.Len("…"),
+		restoreCaret: rep.Start + document.Len("..."),
+		literal:      "...",
 	}
 	return true
 }
 
 func (e *Editor) tryLiveInlineMarkdown(l document.Leaf, raw string, lineStartByte, caretByte int, ch string) bool {
+	if idx := strings.LastIndex(raw[:caretByte], "\u2028"); idx >= 0 && idx+len("\u2028") > lineStartByte {
+		lineStartByte = idx + len("\u2028")
+	}
+	lineEndByte := len(raw)
+	if idx := strings.IndexByte(raw[caretByte:], '\n'); idx >= 0 {
+		lineEndByte = caretByte + idx
+	}
+	if idx := strings.Index(raw[caretByte:lineEndByte], "\u2028"); idx >= 0 {
+		lineEndByte = caretByte + idx
+	}
 	line := raw[lineStartByte:caretByte]
 	if strings.HasSuffix(line, `\`) {
 		return false
 	}
 	var delim, mark string
-	var openIdx int = -1
+	openIdx := -1
 
 	switch ch {
 	case "`":
@@ -141,14 +167,14 @@ func (e *Editor) tryLiveInlineMarkdown(l document.Leaf, raw string, lineStartByt
 			return false
 		}
 		openIdx = findInlineOpener(line, "`")
-		if openIdx < 0 {
-			return false
+		if openIdx >= 0 {
+			inner := line[openIdx+1:]
+			if inner == "" || strings.Contains(inner, "`") {
+				openIdx = -1
+			} else {
+				delim, mark = "`", "code"
+			}
 		}
-		inner := line[openIdx+1:]
-		if inner == "" || strings.Contains(inner, "`") {
-			return false
-		}
-		delim, mark = "`", "code"
 
 	case "*":
 		switch {
@@ -186,12 +212,60 @@ func (e *Editor) tryLiveInlineMarkdown(l document.Leaf, raw string, lineStartByt
 		}
 	}
 
-	if openIdx < 0 || delim == "" {
-		return false
+	forward := false
+	var openStartByte, innerStartByte, innerEndByte, closeEndByte int
+	if openIdx >= 0 && delim != "" {
+		closeAlready := len(delim) - 1
+		openStartByte = lineStartByte + openIdx
+		innerStartByte = openStartByte + len(delim)
+		innerEndByte = caretByte - closeAlready
+		closeEndByte = caretByte
+	} else {
+		delim, mark = "", ""
+		after := raw[caretByte:lineEndByte]
+		var closeOff int
+		switch ch {
+		case "`":
+			if !strings.HasSuffix(line, "`") && !strings.HasPrefix(after, "`") {
+				if c := findInlineCloser(after, "`"); c > 0 && !strings.Contains(after[:c], "`") {
+					delim, mark, openStartByte, closeOff, forward = "`", "code", caretByte, c, true
+				}
+			}
+		case "*":
+			switch {
+			case strings.HasSuffix(line, "**") && !strings.HasSuffix(line, "***"):
+				delim, mark, openStartByte = "***", "bold+italic", caretByte-2
+			case strings.HasSuffix(line, "*") && !strings.HasSuffix(line, "**"):
+				delim, mark, openStartByte = "**", "bold", caretByte-1
+			case !strings.HasSuffix(line, "*"):
+				delim, mark, openStartByte = "*", "italic", caretByte
+			}
+			if delim != "" && !strings.HasPrefix(after, "*") && !(openStartByte > lineStartByte && (raw[openStartByte-1] == '*' || raw[openStartByte-1] == '\\')) {
+				if c := findInlineCloser(after, delim); c > 0 {
+					closeOff, forward = c, true
+				}
+			}
+		case "~":
+			switch {
+			case strings.HasSuffix(line, "~") && !strings.HasSuffix(line, "~~"):
+				delim, mark, openStartByte = "~~", "strike", caretByte-1
+			case !strings.HasSuffix(line, "~"):
+				delim, mark, openStartByte = "~", "strike", caretByte
+			}
+			if delim != "" && !strings.HasPrefix(after, "~") && !(openStartByte > lineStartByte && (raw[openStartByte-1] == '~' || raw[openStartByte-1] == '\\')) {
+				if c := findInlineCloser(after, delim); c > 0 {
+					closeOff, forward = c, true
+				}
+			}
+		}
+		if !forward || delim == "" {
+			return false
+		}
+		innerStartByte = caretByte
+		innerEndByte = caretByte + closeOff
+		closeEndByte = innerEndByte + len(delim)
 	}
-	closeAlready := len(delim) - 1
-	innerStartByte := lineStartByte + openIdx + len(delim)
-	innerEndByte := caretByte - closeAlready
+
 	if innerEndByte <= innerStartByte {
 		return false
 	}
@@ -204,81 +278,112 @@ func (e *Editor) tryLiveInlineMarkdown(l document.Leaf, raw string, lineStartByt
 		}
 	}
 
-	blockOpenU16 := document.Len(raw[:lineStartByte+openIdx])
+	blockOpenU16 := document.Len(raw[:openStartByte])
 	blockInnerStartU16 := document.Len(raw[:innerStartByte])
 	blockInnerEndU16 := document.Len(raw[:innerEndByte])
-	blockCaretU16 := document.Len(raw[:caretByte])
+	blockCloseEndU16 := document.Len(raw[:closeEndByte])
 
 	// Ensure no part of the delimiter or content sits inside an existing code or math span.
-	for _, run := range document.SliceRuns(l.Block.Runs, blockOpenU16, blockCaretU16) {
+	for _, run := range document.SliceRuns(l.Block.Runs, blockOpenU16, blockCloseEndU16) {
 		if run.Style.Code || run.Style.Link != "" {
 			return false
 		}
 	}
 	for _, tok := range inlineTokens(raw) {
 		ta, tz := document.Len(raw[:tok.start]), document.Len(raw[:tok.end])
-		if blockOpenU16 < tz && blockCaretU16 > ta {
+		if blockOpenU16 < tz && blockCloseEndU16 > ta {
 			return false
 		}
 	}
 
 	docStart := l.Start + blockOpenU16
-	docCaret := l.Start + blockCaretU16
+	docCloseEnd := l.Start + blockCloseEndU16
 	innerLen := blockInnerEndU16 - blockInnerStartU16
 	literal := delim + inner + delim
 
+	newCaret := docStart + innerLen
+	restoreCaret := docStart + document.Len(literal)
+	if forward {
+		newCaret = docStart
+		restoreCaret = docStart + document.Len(delim)
+	}
+
 	baseTyping := e.CurrentStyle()
-	e.shiftPairs(ui.TextInputRange{Start: docStart, End: docCaret}, innerLen)
-	e.Engine.Edit(func() {
-		runs := l.Block.Runs
-		totalU16 := l.End - l.Start
-		prefix := document.SliceRuns(runs, 0, blockOpenU16)
-		middle := document.SliceRuns(runs, blockInnerStartU16, blockInnerEndU16)
-		suffix := document.SliceRuns(runs, blockCaretU16, totalU16)
-		for i := range middle {
-			switch mark {
-			case "bold":
-				middle[i].Style.Bold = true
-			case "italic":
-				middle[i].Style.Italic = true
-			case "bold+italic":
-				middle[i].Style.Bold = true
-				middle[i].Style.Italic = true
-			case "strike":
-				middle[i].Style.Strike = true
-			case "code":
-				middle[i].Style.Code = true
-			}
-		}
-		l.Block.Runs = document.Compact(append(append(prefix, middle...), suffix...))
-		newCaret := docStart + innerLen
-		e.Engine.Anchor, e.Engine.Caret = newCaret, newCaret
-		nextStyle := baseTyping
+	e.shiftPairs(ui.TextInputRange{Start: docStart, End: docCloseEnd}, innerLen)
+	totalU16 := l.End - l.Start
+	runs := l.Block.Runs
+	prefix := document.SliceRuns(runs, 0, blockOpenU16)
+	middle := document.SliceRuns(runs, blockInnerStartU16, blockInnerEndU16)
+	suffix := document.SliceRuns(runs, blockCloseEndU16, totalU16)
+	for i := range middle {
 		switch mark {
 		case "bold":
-			nextStyle.Bold = false
+			middle[i].Style.Bold = true
 		case "italic":
-			nextStyle.Italic = false
+			middle[i].Style.Italic = true
 		case "bold+italic":
-			nextStyle.Bold, nextStyle.Italic = false, false
+			middle[i].Style.Bold = true
+			middle[i].Style.Italic = true
 		case "strike":
-			nextStyle.Strike = false
+			middle[i].Style.Strike = true
 		case "code":
-			nextStyle.Code = false
+			middle[i].Style.Code = true
 		}
-		e.Engine.Typing, e.Engine.Explicit = nextStyle, true
-	})
+	}
+	nextStyle := baseTyping
+	switch mark {
+	case "bold":
+		nextStyle.Bold = false
+	case "italic":
+		nextStyle.Italic = false
+	case "bold+italic":
+		nextStyle.Bold, nextStyle.Italic = false, false
+	case "strike":
+		nextStyle.Strike = false
+	case "code":
+		nextStyle.Code = false
+	}
+	nextRuns := append(append(prefix, middle...), suffix...)
+	e.Engine.ReplaceBlockRuns(l.Block.ID, nextRuns, newCaret, newCaret, nextStyle, true)
 	e.sync()
 	e.pairRevision = e.Revision()
 	e.smartBack = smartRollback{
-		rev:       e.Revision(),
-		blockID:   l.Block.ID,
-		start:     docStart,
-		end:       docStart + innerLen,
-		literal:   literal,
-		clearMark: mark,
+		rev:          e.Revision(),
+		blockID:      l.Block.ID,
+		start:        docStart,
+		end:          docStart + innerLen,
+		caret:        newCaret,
+		restoreCaret: restoreCaret,
+		literal:      literal,
+		clearMark:    mark,
 	}
 	return true
+}
+
+// findInlineCloser locates the leftmost exact delimiter run of delim in s
+// that is neither escaped nor part of a longer run of the same character.
+func findInlineCloser(s, delim string) int {
+	ch := delim[0]
+	n := len(delim)
+	for i := 1; i+n <= len(s); i++ {
+		if s[i:i+n] != delim {
+			continue
+		}
+		if s[i-1] == ch || s[i-1] == '\\' {
+			continue
+		}
+		if i+n < len(s) && s[i+n] == ch {
+			continue
+		}
+		if ch != '`' {
+			prev, _ := utf8.DecodeLastRuneInString(s[:i])
+			if unicode.IsSpace(prev) {
+				continue
+			}
+		}
+		return i
+	}
+	return -1
 }
 
 // findInlineOpener locates the rightmost exact delimiter run of delim in s
@@ -310,9 +415,104 @@ func findInlineOpener(s, delim string) int {
 	return -1
 }
 
+func (e *Editor) promoteParagraphToMath(l document.Leaf, formula, literal string) {
+	e.pairs = nil
+	e.smartBack = smartRollback{}
+	e.Engine.Edit(func() {
+		l.Block.Kind = "math"
+		if formula == "" {
+			l.Block.Runs = nil
+		} else {
+			l.Block.Runs = []document.Run{{Text: formula}}
+		}
+		caret := l.Start + document.Len(formula)
+		e.Engine.Anchor, e.Engine.Caret = caret, caret
+		e.Engine.Typing, e.Engine.Explicit = document.Style{}, false
+	})
+	e.sync()
+	e.pairRevision = e.Revision()
+	e.mathFence = mathFenceRollback{
+		rev:     e.Revision(),
+		blockID: l.Block.ID,
+		literal: literal,
+	}
+}
+
+func (e *Editor) tryCompileDisplayMathParagraph() bool {
+	if e.Anchor != e.Caret {
+		return false
+	}
+	l := e.LeafAt(e.Caret)
+	if l.Block.Kind != "paragraph" || l.Parent == nil || e.Caret != l.End {
+		return false
+	}
+	raw := l.Block.Text()
+	if !strings.HasSuffix(raw, "$$") {
+		return false
+	}
+	formula, ok := document.SingleLineDisplayMath(l.Block)
+	if !ok {
+		return false
+	}
+	e.promoteParagraphToMath(l, formula, raw)
+	return true
+}
+
+func (e *Editor) rollbackMathFence() bool {
+	mf := e.mathFence
+	if mf.dismissed || mf.rev == 0 || mf.rev != e.Revision() || e.Anchor != e.Caret {
+		e.mathFence = mathFenceRollback{}
+		return false
+	}
+	l := e.LeafAt(e.Caret)
+	if l.Block.ID != mf.blockID || l.Block.Kind != "math" || e.Caret != l.End {
+		e.mathFence = mathFenceRollback{}
+		return false
+	}
+	e.mathFence = mathFenceRollback{}
+	e.pairs = nil
+	e.Engine.Edit(func() {
+		l.Block.Kind = "paragraph"
+		l.Block.Runs = []document.Run{{Text: mf.literal}}
+		pos := l.Start + document.Len(mf.literal)
+		e.Engine.Anchor, e.Engine.Caret = pos, pos
+		e.Engine.Typing, e.Engine.Explicit = document.Style{}, true
+	})
+	e.sync()
+	e.pairRevision = e.Revision()
+	e.mathFence = mathFenceRollback{
+		rev:       e.Revision(),
+		blockID:   l.Block.ID,
+		dismissed: true,
+	}
+	return true
+}
+
+func (e *Editor) consumeMathFenceEnter() bool {
+	mf := e.mathFence
+	e.mathFence = mathFenceRollback{}
+	if mf.dismissed || mf.rev == 0 || mf.rev != e.Revision() || e.Anchor != e.Caret {
+		return false
+	}
+	l := e.LeafAt(e.Caret)
+	if l.Block.ID != mf.blockID || l.Block.Kind != "math" {
+		return false
+	}
+	if l.Block.Text() == "" && e.Caret == l.Start {
+		return true
+	}
+	if l.Block.Text() != "" && e.Caret == l.End {
+		return e.exitDisplayMath()
+	}
+	return false
+}
+
 func (e *Editor) rollbackSmartInput() bool {
+	if e.rollbackMathFence() {
+		return true
+	}
 	sb := e.smartBack
-	if sb.rev == 0 || sb.rev != e.Revision() || e.Anchor != e.Caret || e.Caret != sb.end {
+	if sb.rev == 0 || sb.rev != e.Revision() || e.Anchor != e.Caret || e.Caret != sb.caret {
 		e.smartBack = smartRollback{}
 		return false
 	}
@@ -325,19 +525,17 @@ func (e *Editor) rollbackSmartInput() bool {
 	rep := ui.TextInputRange{Start: sb.start, End: sb.end}
 	e.shiftPairs(rep, document.Len(sb.literal))
 	if sb.clearMark != "" {
-		e.Engine.Edit(func() {
-			runs := l.Block.Runs
-			a, z := sb.start-l.Start, sb.end-l.Start
-			total := l.End - l.Start
-			plain := document.Style{}
-			l.Block.Runs = document.Compact(append(append(document.SliceRuns(runs, 0, a), document.Run{Text: sb.literal, Style: plain}), document.SliceRuns(runs, z, total)...))
-			pos := sb.start + document.Len(sb.literal)
-			e.Engine.Anchor, e.Engine.Caret = pos, pos
-			e.Engine.Typing, e.Engine.Explicit = plain, true
-		})
+		runs := l.Block.Runs
+		a, z := sb.start-l.Start, sb.end-l.Start
+		total := l.End - l.Start
+		plain := document.Style{}
+		nextRuns := append(append(document.SliceRuns(runs, 0, a), document.Run{Text: sb.literal, Style: plain}), document.SliceRuns(runs, z, total)...)
+		pos := sb.restoreCaret
+		e.Engine.ReplaceBlockRuns(l.Block.ID, nextRuns, pos, pos, plain, true)
 		e.sync()
 	} else {
 		e.Buffer.ReplaceText(&rep, sb.literal)
+		e.SetSelection(sb.restoreCaret, sb.restoreCaret)
 	}
 	e.pairRevision = e.Revision()
 	return true

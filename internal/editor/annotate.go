@@ -153,15 +153,28 @@ type annotationReveal struct {
 // character each get that much letter spacing, which follows a character,
 // so the stretch's text sits between two gaps its decoration fills.
 func padAnnotations(spans []ui.Span, runs []document.Run, size float32) []ui.Span {
+	needsPad := false
+	for i := range runs {
+		if v := runs[i].Style.Annotation; v != "" {
+			if look, ok := lookOf(v); ok && look.pad != 0 {
+				needsPad = true
+				break
+			}
+		}
+	}
+	if !needsPad {
+		return spans
+	}
 	type gap struct {
 		at  int // The character ending at at gets the spacing.
 		pad float32
 	}
 	var gaps []gap
-	text := ""
+	var sb strings.Builder
 	for _, r := range runs {
-		text += r.Text
+		sb.WriteString(r.Text)
 	}
+	text := sb.String()
 	for _, run := range annotationRuns(runs) {
 		look, ok := lookOf(run.variant)
 		if !ok || look.pad == 0 {

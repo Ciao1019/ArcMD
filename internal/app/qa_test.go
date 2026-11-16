@@ -136,16 +136,28 @@ func TestQAAnswersWithCitationsThatOpenTheBlock(t *testing.T) {
 		"查找了 2 步 · 阅读 1 处",
 		"延期",
 		"是因为支付联调",
-		"引用来源",
-		"1 篇文档 · 2 处原文",
-		"§ 决定",
-		"第 5 行",
-		"决定延期发布，原因是支付联调。",
-		"第 7 行",
-		"证书还没下来。",
+		"2 个来源",
 	} {
 		if !tt.HasText(want) {
 			t.Errorf("no %q in %q", want, tt.Texts())
+		}
+	}
+	if tt.HasText("第 5 行") {
+		t.Fatalf("sources list should start collapsed: %q", tt.Texts())
+	}
+	if err := tt.Click("2 个来源"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Advance(240 * time.Millisecond)
+	tt.Frame()
+	for _, want := range []string{
+		"计划 · 决定",
+		"第 5 行",
+		"第 7 行",
+	} {
+		if !tt.HasText(want) {
+			t.Errorf("no %q in expanded sources: %q", want, tt.Texts())
 		}
 	}
 	if a.qa.input != "" || len(a.qaSession(a.state.ActiveSpace().ID).history) != 6 {
@@ -167,12 +179,10 @@ func TestQAAnswersWithCitationsThatOpenTheBlock(t *testing.T) {
 	if !tt.HasText("决定延期发布，原因是支付联调。") {
 		t.Fatalf("search step preview did not unfold: %q", tt.Texts())
 	}
-	// A recalled source passage opens the document at the cited block.
-	r, ok := tt.Find("第 7 行")
-	if !ok {
-		t.Fatal("no source row")
+	// A source row opens the document at the cited block.
+	if err := tt.Click("2 计划 · 决定 第 7 行"); err != nil {
+		t.Fatal(err)
 	}
-	tt.ClickAt(r.X, r.Y+r.H/2)
 	tt.Frame()
 	tt.Advance(slide)
 	if a.doc == nil || a.doc.rel != "计划.md" {
@@ -234,9 +244,18 @@ func TestQASearchToolStepJumpAndLiveToggle(t *testing.T) {
 	a.qa.input = "证书有什么风险？"
 	a.askQA()
 	qaSettle(t, tt, a.qaSession(sp).turns[0])
-	for _, want := range []string{"2 篇文档 · 2 处原文", "项目", "发布计划", "§ 风险", "安全证书审批延迟。", "周报", "已同步证书进度。"} {
+	if !tt.HasText("2 个来源") {
+		t.Fatalf("missing collapsed sources toggle: %q", tt.Texts())
+	}
+	if err := tt.Click("2 个来源"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Advance(240 * time.Millisecond)
+	tt.Frame()
+	for _, want := range []string{"发布计划 · 风险", "项目", "第 5 行", "周报", "第 3 行"} {
 		if !tt.HasText(want) {
-			t.Errorf("missing %q in grouped sources: %q", want, tt.Texts())
+			t.Errorf("missing %q in expanded sources: %q", want, tt.Texts())
 		}
 	}
 	// Unfold timeline and click the read step directly to open 发布计划.md.

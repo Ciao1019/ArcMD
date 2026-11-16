@@ -129,7 +129,7 @@ func TestQARowsRefreshAfterStreamReset(t *testing.T) {
 	}
 	turn.running, turn.revealing = false, false
 	rows := s.visibleRows()
-	if rows[len(rows)-1].kind != qaSourceRow {
+	if rows[len(rows)-1].kind != qaSourcesRow {
 		t.Fatal("finishing did not append sources")
 	}
 	// Thinking aloud is cleared on a tool call; cached blocks and references

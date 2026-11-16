@@ -250,6 +250,7 @@ func (e *Editor) colorSwatches(c *ui.Context, id string, done func()) {
 // handle does, with the side panel sub ("indent", "color" or "") open.
 func (e *Editor) OpenBlockMenu(id, sub string) {
 	e.menuOpen, e.menuID, e.menuSub = true, id, sub
+	e.menuScroll = ui.ScrollState{}
 }
 
 func (e *Editor) OpenColorPicker(id string) {
@@ -279,7 +280,7 @@ func (e *Editor) blockByID(id string) *document.Block {
 
 // wordCount counts the document as Chinese writers do: each Han
 // character, kana or hangul is a word, as is each run of other letters and
-// digits. It is recounted only when the document changes.
+// digits. It streams over leaf blocks without flattening the full document text.
 func (e *Editor) wordCount() int {
 	if e.wordsReady && e.wordsRevision == e.Revision() {
 		return e.words
@@ -288,29 +289,85 @@ func (e *Editor) wordCount() int {
 		e.words += countWords(change.After) - countWords(change.Before)
 	} else {
 		e.sync()
-		e.words = countWords(e.displayText())
+		han, words := e.countEngineWordStats()
+		e.words = han + words
 	}
 	e.wordsRevision, e.wordsReady = e.Revision(), true
 	return e.words
 }
 
-func countWords(text string) int {
-	n, inWord := 0, false
-	for _, r := range text {
-		switch {
-		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
-			n++
-			inWord = false
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			if !inWord {
-				n++
+type cachedWordCount struct {
+	stamp runsStamp
+	han   int
+	words int
+}
+
+func (e *Editor) countEngineWordStats() (han, words int) {
+	n := e.Engine.LeafCount()
+	if e.wordCache == nil {
+		e.wordCache = make(map[string]cachedWordCount, n)
+	}
+	for i := 0; i < n; i++ {
+		leaf := e.Engine.LeafAtIndex(i)
+		b := leaf.Block
+		stamp := makeRunsStamp(b.Runs)
+		if c, ok := e.wordCache[b.ID]; ok && c.stamp == stamp {
+			han += c.han
+			words += c.words
+			continue
+		}
+		inWord := false
+		bh, bw := 0, 0
+		for j := range b.Runs {
+			scanWordStats(b.Runs[j].Text, &bh, &bw, &inWord)
+		}
+		e.wordCache[b.ID] = cachedWordCount{stamp: stamp, han: bh, words: bw}
+		han += bh
+		words += bw
+	}
+	if len(e.wordCache) > n+cacheTrimHysteresis {
+		for id := range e.wordCache {
+			if !e.Engine.HasLeaf(id) {
+				delete(e.wordCache, id)
 			}
-			inWord = true
-		default:
-			inWord = false
 		}
 	}
-	return n
+	return han, words
+}
+
+func scanWordStats(text string, han, words *int, inWord *bool) {
+	for _, r := range text {
+		switch {
+		case r < 0x80:
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				if !*inWord {
+					*words++
+				}
+				*inWord = true
+			} else {
+				*inWord = false
+			}
+		case (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3400 && r <= 0x4DBF) || (r >= 0x3040 && r <= 0x30FF) || (r >= 0xAC00 && r <= 0xD7A3):
+			*han++
+			*inWord = false
+		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
+			*han++
+			*inWord = false
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			if !*inWord {
+				*words++
+			}
+			*inWord = true
+		default:
+			*inWord = false
+		}
+	}
+}
+
+func countWords(text string) int {
+	han, words, inWord := 0, 0, false
+	scanWordStats(text, &han, &words, &inWord)
+	return han + words
 }
 
 // toolButton is a square icon button; on marks a format
@@ -337,6 +394,7 @@ func toolSeparator(c *ui.Context) {
 }
 
 func (e *Editor) watchSlash() {
+	wasOpen := e.slashOpen
 	leaf := e.Engine.LeafAt(e.Caret)
 	text := leaf.Block.Text()
 	show := !e.ReadOnly && !e.slashDismissed && e.Anchor == e.Caret && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
@@ -345,8 +403,10 @@ func (e *Editor) watchSlash() {
 		return
 	}
 	query := strings.TrimPrefix(text, "/")
-	if query != e.slashQuery {
+	if !wasOpen || query != e.slashQuery {
 		e.slashIndex = 0
+		e.slashReveal = true
+		e.slashScroll = ui.ScrollState{}
 	}
 	e.slashQuery, e.slashOpen = query, true
 }
@@ -356,27 +416,47 @@ func (e *Editor) popups(c *ui.Context, surface ui.Element) {
 	e.selectionBar(c, surface)
 	e.markBar(c, surface)
 	if e.colorOpen && e.colorID != "" {
-		bounds := surface.Bounds()
+		bounds := e.surfaceBounds(surface)
+		windowW, windowH := c.Size()
+		anchor := ui.Rect{
+			X: bounds.X + e.colorAt.X - 6,
+			Y: bounds.Y + e.colorAt.Y + e.ownerVisualDY(e.colorID),
+			W: e.colorAt.W,
+			H: e.colorAt.H,
+		}
+		x, y, maxH := placeMenu(anchor, 230, 220, 6, windowW, windowH)
 		ui.Overlay(c, func() {
-			panel := ui.Column(c.Key("callout-colors")).Absolute().Left(bounds.X + e.colorAt.X - 6).Top(bounds.Y + e.colorAt.Y + e.colorAt.H + 6).Width(230).Padding(10).Gap(6)
+			panel := ui.Column(c.Key("callout-colors")).Absolute().Left(x).Top(y).Width(230)
 			e.popover(c, panel).Children(func() {
-				ui.Text(c, i18n.T("高亮块颜色")).FontSize(12).TextColor(t.Text)
-				e.colorSwatches(c, e.colorID, func() { e.colorOpen = false })
-				ui.Text(c, i18n.T("图标")).FontSize(12).TextColor(t.Text).Margin(6, 0, 0, 0)
-				e.emojiGrid(c, e.colorID, func() { e.colorOpen = false })
+				ui.Scroll(c.Key("callout-colors-scroll")).MaxHeight(max(72, maxH-2)).Children(func() {
+					ui.Column(c).Padding(10).Gap(6).Children(func() {
+						ui.Text(c, i18n.T("高亮块颜色")).FontSize(12).TextColor(t.Text)
+						e.colorSwatches(c, e.colorID, func() { e.colorOpen = false })
+						ui.Text(c, i18n.T("图标")).FontSize(12).TextColor(t.Text).Margin(6, 0, 0, 0)
+						e.emojiGrid(c, e.colorID, func() { e.colorOpen = false })
+					})
+				})
 			})
 		})
 	}
 	if e.langOpen && e.langID != "" {
-		bounds := surface.Bounds()
+		bounds := e.surfaceBounds(surface)
+		windowW, windowH := c.Size()
+		anchor := ui.Rect{
+			X: bounds.X + e.langAt.X,
+			Y: bounds.Y + e.langAt.Y + e.ownerVisualDY(e.langID),
+			W: e.langAt.W,
+			H: e.langAt.H,
+		}
+		x, y, maxH := placeMenu(anchor, 180, 294, 4, windowW, windowH)
 		current := ""
 		if b := e.blockByID(e.langID); b != nil {
 			current = b.Language
 		}
 		ui.Overlay(c, func() {
-			ui.Column(c.Key("code-languages")).Absolute().Left(bounds.X+e.langAt.X).Top(bounds.Y+e.langAt.Y+e.langAt.H+4).Width(180).
+			ui.Column(c.Key("code-languages")).Absolute().Left(x).Top(y).Width(180).
 				Padding(6).Radius(10).Background(t.Background).Border(1, t.Border).Shadow(0, 8, 24, 0, t.Text.Alpha(.14)).KeepFocus().Children(func() {
-				ui.Scroll(c).MaxHeight(280).Children(func() {
+				ui.Scroll(c).MaxHeight(min(280, maxH-14)).Children(func() {
 					for _, l := range codeLanguages {
 						row := ui.ButtonBase(c.Key("lang:" + l.name)).Height(30).PaddingX(8).Radius(6).KeepFocus().Label(i18n.T("代码语言：") + i18n.T(l.label)).Cursor(ui.CursorPointer)
 						if row.Hovered() {
@@ -450,21 +530,17 @@ var goalPresets = []int{500, 1000, 2000, 3000, 5000}
 // characters or 200 other words a minute, at least one.
 func readingMinutes(text string) int {
 	han, words, inWord := 0, 0, false
-	for _, r := range text {
-		switch {
-		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
-			han++
-			inWord = false
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			if !inWord {
-				words++
-			}
-			inWord = true
-		default:
-			inWord = false
-		}
-	}
+	scanWordStats(text, &han, &words, &inWord)
+	return minutesFromStats(han, words)
+}
+
+func minutesFromStats(han, words int) int {
 	return max(1, int(math.Ceil(float64(han)/400+float64(words)/200)))
+}
+
+func (e *Editor) readingMinutes() int {
+	han, words := e.countEngineWordStats()
+	return minutesFromStats(han, words)
 }
 
 // wordButton is the word count, with the goal and its progress under it
@@ -506,7 +582,7 @@ func (e *Editor) wordButton(c *ui.Context) {
 	})
 	b.Menu(func(m *ui.Menu) {
 		e.sync()
-		m.Item(fmt.Sprintf(i18n.T("约 %d 分钟读完"), readingMinutes(e.displayText()))).Disabled(true)
+		m.Item(fmt.Sprintf(i18n.T("约 %d 分钟读完"), e.readingMinutes())).Disabled(true)
 		if goal > 0 {
 			left := goal - words
 			if left > 0 {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -343,5 +344,129 @@ func TestRealtimeInPlaceMarkdownPreservesCustomStylesAndLegacyArcmd(t *testing.T
 	decodedLegacy, err := docpkg.Decode(legacySaved)
 	if err != nil || !strings.Contains(decodedLegacy.PlainText(), "Still works. Updated!") {
 		t.Fatalf("legacy .arcmd round-trip failed: %v", err)
+	}
+}
+
+func TestBottomBlockHandleMenuAndIndentSubmenu(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.SetSize(1100, 720)
+	var lines []string
+	lines = append(lines, "# Bottom Handle Test")
+	for i := 1; i <= 26; i++ {
+		lines = append(lines, fmt.Sprintf("Paragraph %d with enough text to fill the viewport.", i))
+	}
+	if err := vault.Write(root(a), "Bottom.md", strings.Join(lines, "\n\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	a.open("Bottom.md")
+	tt.Frame()
+
+	// Append a trailing empty block with Indent=1, matching Issue #2's trailing block scenario.
+	end := a.doc.ed.Len()
+	a.doc.ed.SetSelection(end, end)
+	a.doc.ed.Engine.Edit(func() {
+		a.doc.ed.Engine.Insert(docpkg.NewBlock("paragraph", ""))
+		a.doc.ed.Engine.Indent(1)
+	})
+	tt.Frame()
+
+	end = a.doc.ed.Len()
+	a.doc.ed.SetSelection(end, end)
+	a.doc.ed.RequestFocus = true
+	tt.Frame()
+
+	// Scroll so the trailing empty block sits near the bottom edge of the window.
+	caret, _, ok := a.doc.ed.BoundsForRange(ui.TextInputRange{Start: end, End: end})
+	if !ok {
+		t.Fatal("missing caret bounds for trailing block")
+	}
+	docBounds, ok := tt.Find("文档")
+	if !ok {
+		t.Fatal("missing 文档 surface")
+	}
+	a.doc.ed.Scroll.Y = max(0, caret.Y-(docBounds.H-44))
+	tt.Frame()
+	tt.Frame()
+
+	docBounds, ok = tt.Find("文档")
+	if !ok {
+		t.Fatal("missing 文档 surface after scroll")
+	}
+	caret, _, ok = a.doc.ed.BoundsForRange(ui.TextInputRange{Start: end, End: end})
+	if !ok {
+		t.Fatal("missing caret bounds after scroll")
+	}
+	// Paragraph with Indent=1 shifts text right by 20px; its 24x24 handle sits at padding - 30 = caret.X - 50.
+	handleWinX := docBounds.X + caret.X - 50 + 12
+	handleWinY := docBounds.Y - a.doc.ed.Scroll.Y + caret.Y + max(caret.H, 20)/2
+	tt.Move(docBounds.X+caret.X, handleWinY)
+	tt.ClickAt(handleWinX, handleWinY)
+	tt.Advance(150 * time.Millisecond)
+
+	assertWithin := func(label string, minH float32) ui.Rect {
+		t.Helper()
+		r, found := tt.Find(label)
+		if !found {
+			t.Fatalf("missing %q in menu", label)
+		}
+		if r.W <= 0 || r.H < minH || r.X < 0 || r.Y < 0 || r.X+r.W > 1100 || r.Y+r.H > 720 {
+			t.Fatalf("%q rect %+v clips outside 1100x720 (want H>=%g)", label, r, minH)
+		}
+		return r
+	}
+
+	for _, label := range []string{"正文", "一级标题", "五级标题", "缩进和对齐", "剪切", "复制", "创建副本", "删除", "上移", "下移", "⌘D", "在下方添加"} {
+		minH := float32(32)
+		switch label {
+		case "正文", "一级标题", "五级标题":
+			minH = 24
+		case "⌘D":
+			minH = 12
+		}
+		assertWithin(label, minH)
+	}
+
+	// Hover "缩进和对齐" to expand the side submenu and verify all items (including 减少缩进) stay visible and clickable.
+	indentRow := assertWithin("缩进和对齐", 32)
+	tt.Move(indentRow.X+indentRow.W/2, indentRow.Y+indentRow.H/2)
+	tt.Advance(150 * time.Millisecond)
+
+	for _, label := range []string{"左对齐", "居中对齐", "右对齐", "增加缩进", "减少缩进"} {
+		assertWithin(label, 32)
+	}
+	if err := tt.Click("减少缩进"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	last := a.doc.ed.Doc.Blocks[len(a.doc.ed.Doc.Blocks)-1]
+	if last.Indent != 0 {
+		t.Fatalf("expected trailing block indent to decrease to 0, got %d", last.Indent)
+	}
+}
+
+func TestPaletteFollowsArrowKeysInShortWindow(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.SetSize(900, 320)
+	tt.Frame()
+
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Advance(150 * time.Millisecond)
+	if !a.palette.open {
+		t.Fatal("expected command palette to open")
+	}
+	res := a.results()
+	if len(res) < 5 {
+		t.Fatalf("expected enough palette items to overflow 320px window, got %d", len(res))
+	}
+	for range len(res) - 1 {
+		tt.Key(0, ui.KeyDown)
+	}
+	lastTitle := res[len(res)-1].title
+	r, ok := tt.Find(lastTitle)
+	if !ok {
+		t.Fatalf("missing last palette item %q", lastTitle)
+	}
+	if r.W <= 0 || r.H < 28 || r.Y < 0 || r.Y+r.H > 320 {
+		t.Fatalf("last palette item %q rect %+v not visible in 900x320 (want H>=28)", lastTitle, r)
 	}
 }

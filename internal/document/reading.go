@@ -19,7 +19,7 @@ func (e *Engine) SetScript(script string) {
 		e.Typing, e.Explicit = s, true
 		return
 	}
-	e.Edit(func() { e.format(func(s *Style) { s.Script = script }) })
+	e.applyFormat(func(s *Style) { s.Script = script })
 }
 
 func (e *Engine) SetImageWidth(id string, width float32) {

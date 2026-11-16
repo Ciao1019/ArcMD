@@ -110,13 +110,17 @@ func TestQAWindowResizeSnapshot(t *testing.T) {
 
 func TestQASnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the question panel")
-	for _, name := range []string{"empty", "unset", "answer", "answer-dark", "answer-narrow", "answer-right", "steps", "steps-dark", "steps-hits", "error", "running", "running-dark", "running-narrow", "ghost", "ghost-dark", "ghost-narrow", "thinking", "settings", "settings-empty", "settings-models", "settings-models-narrow", "settings-models-dark", "settings-models-en"} {
+	for _, name := range []string{"empty", "unset", "answer", "answer-dark", "answer-narrow", "answer-right", "citations-hover", "citations-open", "citations-open-dark", "steps", "steps-dark", "steps-hits", "error", "running", "running-dark", "running-narrow", "ghost", "ghost-dark", "ghost-narrow", "thinking", "settings", "settings-empty", "settings-models", "settings-models-narrow", "settings-models-dark", "settings-models-en"} {
 		t.Run(name, func(t *testing.T) {
+			replyText := "发布**延期到 12 月 2 日**，主要有两个原因 [发布计划.md#L5]：\n\n- 支付联调需要排查回调 [发布计划.md#L7]，目前已在周报确认修复 [项目/周报.md#L5]\n- 证书审批还在走流程 [发布计划.md#L11]\n\n目前唯一的阻塞是证书，`payments` 模块已经修好。"
+			if strings.HasPrefix(name, "citations-") {
+				replyText = "发布**延期到 12 月 2 日**，主要有两个原因 [发布计划.md#L5]：\n\n- 支付联调已确认修复 [发布计划.md#L7], [项目/周报.md#L5]\n- 证书审批还在走流程 [发布计划.md#L11]\n\n目前唯一的阻塞是证书，`payments` 模块已经修好。"
+			}
 			model := &scripted{steps: []func(agent.Request) agent.Message{
 				call(agent.ToolSearch, `{"query":"发布延期 阻塞 证书"}`),
 				call(agent.ToolGrep, `{"pattern":"延期"}`),
 				call(agent.ToolRead, `{"path":"发布计划.md","start_line":1,"end_line":12}`),
-				reply("发布**延期到 12 月 2 日**，主要有两个原因 [发布计划.md#L5]：\n\n- 支付联调需要排查回调 [发布计划.md#L7]，目前已在周报确认修复 [项目/周报.md#L5]\n- 证书审批还在走流程 [发布计划.md#L11]\n\n目前唯一的阻塞是证书，`payments` 模块已经修好。"),
+				reply(replyText),
 			}}
 			a, tt := qaApp(t, model)
 			if strings.HasSuffix(name, "-dark") {
@@ -143,7 +147,7 @@ func TestQASnapshot(t *testing.T) {
 			tt.Advance(slide)
 			sp := a.state.ActiveSpace().ID
 			switch name {
-			case "answer", "answer-dark", "answer-narrow", "answer-right", "steps", "steps-dark", "steps-hits":
+			case "answer", "answer-dark", "answer-narrow", "answer-right", "citations-hover", "citations-open", "citations-open-dark", "steps", "steps-dark", "steps-hits":
 				a.qa.input = "为什么发布延期了？现在还卡在哪？"
 				a.askQA()
 				if strings.HasPrefix(name, "steps") {
@@ -184,7 +188,7 @@ func TestQASnapshot(t *testing.T) {
 			tt.Frame()
 			tt.Advance(slide)
 			tt.Frame()
-			if strings.HasPrefix(name, "answer") || strings.HasPrefix(name, "steps") {
+			if strings.HasPrefix(name, "answer") || strings.HasPrefix(name, "steps") || strings.HasPrefix(name, "citations-") {
 				qaSettle(t, tt, a.qaSession(sp).turns[0])
 				if strings.HasPrefix(name, "steps") {
 					turn := a.qaSession(sp).turns[0]
@@ -193,6 +197,23 @@ func TestQASnapshot(t *testing.T) {
 						turn.steps[0].open = true
 					}
 					tt.Frame()
+					tt.Advance(220 * time.Millisecond)
+					tt.Frame()
+				}
+				if name == "citations-open" || name == "citations-open-dark" {
+					if err := tt.Click("4 个来源"); err != nil {
+						t.Fatal(err)
+					}
+					tt.Frame()
+					tt.Advance(240 * time.Millisecond)
+					tt.Frame()
+				}
+				if name == "citations-hover" {
+					r, ok := tt.Find("来源：发布计划, 周报")
+					if !ok {
+						t.Fatalf("multi-source chip not found: %q", tt.Texts())
+					}
+					tt.Move(r.X+r.W/2, r.Y+r.H/2)
 					tt.Advance(220 * time.Millisecond)
 					tt.Frame()
 				}

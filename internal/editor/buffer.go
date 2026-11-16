@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -8,6 +9,12 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/egoist/mygo/ui"
 )
+
+type leafComposition struct {
+	state        document.LeafState
+	committedDoc *document.Document
+	committedRev uint64
+}
 
 type Buffer struct {
 	*document.Engine
@@ -18,6 +25,7 @@ type Buffer struct {
 	textKnown   bool
 	mark        *ui.TextInputRange
 	composition *document.Snapshot
+	leafComp    *leafComposition
 	// refused is set when typing reached a read-only document, so the page
 	// can say why nothing happened.
 	refused bool
@@ -25,6 +33,12 @@ type Buffer struct {
 
 func newBuffer(doc *document.Document) *Buffer {
 	b := &Buffer{Engine: document.NewEngine(doc)}
+	b.sync()
+	return b
+}
+
+func newOwnedBuffer(doc *document.Document) *Buffer {
+	b := &Buffer{Engine: document.NewEngineOwned(doc)}
 	b.sync()
 	return b
 }
@@ -36,9 +50,13 @@ func (b *Buffer) sync() {
 	b.text, b.textKnown = "", false
 	b.textDoc, b.textVersion = b.Doc, b.Revision()
 }
+func (b *Buffer) Composing() bool {
+	return b.composition != nil || b.leafComp != nil
+}
+
 func (b *Buffer) Text() string {
-	if b.composition != nil {
-		return b.composition.Doc.PlainText()
+	if b.composition != nil || b.leafComp != nil {
+		return b.Committed().PlainText()
 	}
 	return b.displayText()
 }
@@ -57,9 +75,34 @@ func (b *Buffer) Committed() *document.Document {
 	if b.composition != nil {
 		return b.composition.Doc
 	}
+	if b.leafComp != nil {
+		rev := b.Revision()
+		if b.leafComp.committedDoc == nil || b.leafComp.committedRev != rev {
+			clone := b.Doc.Clone()
+			replaceBlockRunsByID(clone.Blocks, b.leafComp.state.BlockID, b.leafComp.state.Runs)
+			b.leafComp.committedDoc = clone
+			b.leafComp.committedRev = rev
+		}
+		return b.leafComp.committedDoc
+	}
 	return b.Doc
 }
-func (b *Buffer) Len() int { b.sync(); return b.textLength }
+
+func replaceBlockRunsByID(blocks []*document.Block, id string, runs []document.Run) bool {
+	for _, blk := range blocks {
+		if blk.ID == id {
+			blk.Runs = slices.Clone(runs)
+			return true
+		}
+		if len(blk.Children) > 0 && replaceBlockRunsByID(blk.Children, id, runs) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Buffer) Len() int     { b.sync(); return b.textLength }
+func (b *Buffer) ByteLen() int { b.sync(); return b.Engine.TextByteLength() }
 func (b *Buffer) Selection() ui.TextInputSelection {
 	return ui.TextInputSelection{Range: ui.TextInputRange{Start: min(b.Anchor, b.Caret), End: max(b.Anchor, b.Caret)}, Reversed: b.Caret < b.Anchor}
 }
@@ -113,7 +156,19 @@ func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 	if r != nil {
 		target = b.validRange(*r)
 	}
-	if b.composition != nil {
+	switch {
+	case b.leafComp != nil:
+		ls := b.leafComp.state
+		b.leafComp, b.mark = nil, nil
+		if !b.Engine.CommitLeaf(ls, target.Start, target.End, text) {
+			preview := b.Engine.Capture()
+			b.Engine.RestoreLeaf(ls)
+			b.Engine.Edit(func() {
+				b.Engine.Restore(preview)
+				b.Engine.Replace(target.Start, target.End, text)
+			})
+		}
+	case b.composition != nil:
 		preview := b.Engine.Capture()
 		b.Engine.Restore(*b.composition)
 		b.composition, b.mark = nil, nil
@@ -121,7 +176,7 @@ func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 			b.Engine.Restore(preview)
 			b.Engine.Replace(target.Start, target.End, text)
 		})
-	} else {
+	default:
 		b.Engine.Replace(target.Start, target.End, text)
 	}
 	b.sync()
@@ -139,11 +194,35 @@ func (b *Buffer) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 	if r != nil {
 		target = b.validRange(*r)
 	}
+	handledInLeaf := false
 	if b.composition == nil {
-		before := b.Engine.Capture()
-		b.composition = &before
+		if b.leafComp == nil {
+			if state, ok := b.Engine.CaptureLeaf(target.Start, target.End); ok && b.Engine.PreviewLeafReplace(target.Start, target.End, text) {
+				b.leafComp = &leafComposition{state: state}
+				handledInLeaf = true
+			}
+		} else {
+			b.leafComp.committedDoc = nil
+			if b.Engine.PreviewLeafReplace(target.Start, target.End, text) {
+				handledInLeaf = true
+			} else {
+				preview := b.Engine.Capture()
+				ls := b.leafComp.state
+				b.leafComp = nil
+				b.Engine.RestoreLeaf(ls)
+				before := b.Engine.Capture()
+				b.composition = &before
+				b.Engine.Restore(preview)
+			}
+		}
+		if !handledInLeaf && b.composition == nil {
+			before := b.Engine.Capture()
+			b.composition = &before
+		}
 	}
-	b.Engine.PreviewReplace(target.Start, target.End, text)
+	if !handledInLeaf {
+		b.Engine.PreviewReplace(target.Start, target.End, text)
+	}
 	marked := ui.TextInputRange{Start: target.Start, End: target.Start + ui.UTF16Len(text)}
 	b.mark = &marked
 	b.Engine.SetSelection(marked.Start+max(0, min(selected.Start, ui.UTF16Len(text))), marked.Start+max(0, min(selected.End, ui.UTF16Len(text))))
@@ -156,14 +235,17 @@ func (b *Buffer) UnmarkText() {
 	}
 }
 func (b *Buffer) cancelComposition() {
-	if b.composition != nil {
+	if b.leafComp != nil {
+		b.Engine.RestoreLeaf(b.leafComp.state)
+		b.leafComp = nil
+	} else if b.composition != nil {
 		b.Engine.Restore(*b.composition)
 	}
 	b.composition, b.mark = nil, nil
 	b.sync()
 }
 func (b *Buffer) Undo() {
-	if b.composition != nil {
+	if b.Composing() {
 		b.cancelComposition()
 		return
 	}

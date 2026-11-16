@@ -162,9 +162,17 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 	docs := a.residentDocuments()
 	touched := map[*document]bool{}
 	structural := false
+	var treeNodes []*vault.Node
+	treeLoaded := false
 	for _, e := range events {
 		if e.Op != mygo.FileWrite {
-			structural = true
+			if !treeLoaded {
+				treeNodes, _ = a.treeOf(sp)
+				treeLoaded = true
+			}
+			if !knownWatcherOverwrite(treeNodes, e) {
+				structural = true
+			}
 		}
 		for _, d := range docs {
 			if d.space != sp {
@@ -190,6 +198,21 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 		}
 	}
 
+}
+
+// knownWatcherOverwrite reports whether an atomic save overwrite emitted as
+// FileCreate or temp-dotfile FileRename targets a document already in the tree.
+func knownWatcherOverwrite(nodes []*vault.Node, e mygo.FileEvent) bool {
+	switch e.Op {
+	case mygo.FileWrite:
+		return true
+	case mygo.FileCreate:
+		return nodes != nil && vault.Find(nodes, e.Path) != nil
+	case mygo.FileRename:
+		return nodes != nil && (e.OldPath == "" || strings.HasPrefix(path.Base(e.OldPath), ".")) && vault.Find(nodes, e.Path) != nil
+	default:
+		return false
+	}
 }
 
 // within reports whether rel is p or inside the folder p.

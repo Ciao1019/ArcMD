@@ -26,6 +26,8 @@ type wikiState struct {
 	index     int
 	dismissed int
 	items     []WikiItem
+	reveal    bool
+	scroll    ui.ScrollState
 }
 
 // wikiSpans splits a run's span where it holds [[links]] and #tags, which
@@ -146,6 +148,7 @@ func (e *Editor) tagAt(at int) string {
 // collapsed caret.
 func (e *Editor) watchWiki(suggest func(string) []WikiItem) {
 	w := &e.wiki
+	wasOpen := w.open
 	w.open = false
 	if suggest == nil || !e.focused || e.Anchor != e.Caret || e.mark != nil || e.slashOpen {
 		return
@@ -176,8 +179,14 @@ func (e *Editor) watchWiki(suggest func(string) []WikiItem) {
 			}
 		}
 		w.index = 0
+		w.reveal = true
+		w.scroll = ui.ScrollState{}
 	}
 	w.start, w.typed, w.open = start, typed, len(w.items) > 0
+	if w.open && !wasOpen {
+		w.reveal = true
+		w.scroll = ui.ScrollState{}
+	}
 	w.index = max(0, min(w.index, len(w.items)-1))
 }
 
@@ -209,8 +218,10 @@ func (e *Editor) wikiKeys(ev ui.InputEvent) bool {
 		w.open, w.dismissed = false, w.start
 	case ui.KeyDown:
 		w.index = min(len(w.items)-1, w.index+1)
+		w.reveal = true
 	case ui.KeyUp:
 		w.index = max(0, w.index-1)
+		w.reveal = true
 	case ui.KeyEnter, ui.KeyTab:
 		if len(w.items) > 0 {
 			e.completeWiki(w.items[w.index])
@@ -230,21 +241,21 @@ func (e *Editor) wikiMenu(c *ui.Context, surface ui.Element) {
 		return
 	}
 	t := c.Theme()
-	bounds := surface.Bounds()
+	bounds := e.surfaceBounds(surface)
 	caret, _, _ := e.BoundsForRange(e.Selection().Range)
 	windowW, windowH := c.Size()
 	const width, rowH = 280, 36
-	height := float32(min(len(w.items), 8))*rowH + 18
-	x := min(bounds.X+caret.X, windowW-width-12)
-	y := bounds.Y + caret.Y + caret.H + 4
-	if y+height > windowH-12 && bounds.Y+caret.Y-height-4 > 8 {
-		y = bounds.Y + caret.Y - height - 4
-	}
+	height := float32(min(len(w.items), 8))*rowH + 40
+	anchor := ui.Rect{X: bounds.X + caret.X, Y: bounds.Y + caret.Y, W: caret.W, H: caret.H}
+	x, y, maxH := placeMenu(anchor, width, height, 4, windowW, windowH)
 	ui.Overlay(c, func() {
-		menu := ui.Column(c.Key("wiki-menu")).Absolute().Left(max(8, x)).Top(y).Width(width).Padding(1)
+		menu := ui.Column(c.Key("wiki-menu")).Absolute().Left(x).Top(y).Width(width).Padding(1)
 		e.popover(c, menu).Children(func() {
 			ui.Text(c, i18n.T("链接到文档")).FontSize(12).TextColor(e.page.Caption).Padding(8, 12, 2, 12).AlignSelf(ui.Start)
-			ui.Scroll(c.Key("wiki-scroll")).MaxHeight(8 * rowH).Children(func() {
+			ui.Scroll(c.Key("wiki-scroll")).MaxHeight(min(8*rowH+10, max(rowH, maxH-30))).TrackScroll(&w.scroll).Children(func() {
+				topAnchor := ui.Box(c.Key("wiki-top")).Height(0)
+				var selectedEl ui.Element
+				var hasSelected bool
 				ui.Column(c).Padding(4, 6, 6, 6).Children(func() {
 					for i, it := range w.items {
 						selected := i == w.index
@@ -267,12 +278,29 @@ func (e *Editor) wikiMenu(c *ui.Context, surface ui.Element) {
 								ui.Text(c, it.Hint).FontSize(12).TextColor(e.page.Caption).SingleLine().Shrink(1).MinWidth(0)
 							}
 						})
+						if selected {
+							selectedEl, hasSelected = row, true
+						}
 						if row.Clicked() {
 							e.completeWiki(it)
 							e.RequestFocus = true
 						}
 					}
 				})
+				bottomAnchor := ui.Box(c.Key("wiki-bottom")).Height(0)
+				if w.reveal {
+					w.reveal = false
+					if len(w.items) > 0 {
+						if w.index == 0 {
+							topAnchor.ScrollIntoView()
+						} else if w.index == len(w.items)-1 {
+							bottomAnchor.ScrollIntoView()
+						}
+						if hasSelected {
+							selectedEl.ScrollIntoView()
+						}
+					}
+				}
 			})
 		})
 	})

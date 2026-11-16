@@ -78,3 +78,12 @@ The Q&A Markdown stream ports Lobe UI's `StreamingPlayground` and LobeHub
 Streamdown's balanced smoother and per-character fade into native Go.
 Pinned source links, adaptation details and both MIT notices are in
 `lobe-streaming/`.
+
+The Q&A inline source chips, supporting claim highlights, gliding preview
+card and collapsible stacked-monogram sources list (`internal/app/qacitations.go`,
+`internal/app/qamarkdown.go`, `internal/app/qamarkdownview.go`,
+`internal/app/qaview.go`) port Kokonut UI's `ai-citations` component into
+native Go, under the MIT License, Copyright (c) 2025 kokonutUI. The full
+MIT notice is in `kokonutui/LICENSE`.
+
+[Kokonut UI source](https://github.com/kokonut-labs/kokonutui)

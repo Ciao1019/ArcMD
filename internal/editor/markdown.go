@@ -3,10 +3,12 @@ package editor
 import (
 	"fmt"
 	"html"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -32,7 +34,14 @@ type parsedMarkdown struct {
 // semantic HTML extensions) to the native document tree. The original text is
 // retained in ImportSource so unedited blocks preserve their author formatting.
 func ImportMarkdown(source string) *document.Document {
-	return parseMarkdownSource(source).doc
+	return parseMarkdownSourceMode(source, false).doc
+}
+
+// ExtractMarkdownText extracts plain block text and the page icon for search
+// indexing without allocating unique block IDs, source chunks, or keeping ImportSource.
+func ExtractMarkdownText(source string) (text, icon string) {
+	doc := parseMarkdownSourceMode(source, true).doc
+	return doc.PlainText(), doc.Icon
 }
 
 type rawSpan struct {
@@ -42,9 +51,15 @@ type rawSpan struct {
 }
 
 func parseMarkdownSource(source string) parsedMarkdown {
+	return parseMarkdownSourceMode(source, false)
+}
+
+func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 	result := document.New()
 	result.Blocks = nil
-	result.ImportSource = source
+	if !forSearch {
+		result.ImportSource = source
+	}
 
 	text, rawFM, fm, icon, cover, coverY, goal := splitFrontmatter(source)
 	result.Frontmatter = fm
@@ -58,6 +73,13 @@ func parseMarkdownSource(source string) parsedMarkdown {
 	parsed := parser.New(parser.Default | parser.ExtDollarMath)
 	parsed.Set(text)
 
+	nextID := func() string {
+		if forSearch {
+			return ""
+		}
+		return document.NewID()
+	}
+
 	var topSpans []rawSpan
 
 	var blocks func(int, string, int) []*document.Block
@@ -66,15 +88,14 @@ func parseMarkdownSource(source string) parsedMarkdown {
 		for index := range parsed.Children(parent) {
 			node := parsed.Block(index)
 			startCount := len(out)
-			b := document.NewBlock("paragraph", "")
-			b.Indent = indent
+			b := &document.Block{ID: nextID(), Kind: "paragraph", Indent: indent}
 			switch node.Kind {
 			case parser.Paragraph, parser.Heading:
 				in := parsed.Inlines(index)
 				if node.Kind == parser.Paragraph && context == "" && indent == 0 {
 					if img, ok := tryImportInlineImageBlock(in); ok {
 						out = append(out, img)
-						if parent == 0 {
+						if !forSearch && parent == 0 {
 							topSpans = append(topSpans, rawSpan{img, node.Start, node.End})
 						}
 						continue
@@ -107,7 +128,7 @@ func parseMarkdownSource(source string) parsedMarkdown {
 					}
 				}
 				out = append(out, children...)
-				if parent == 0 && len(out) > startCount {
+				if !forSearch && parent == 0 && len(out) > startCount {
 					for k := startCount; k < len(out); k++ {
 						s, e := -1, -1
 						if k == startCount {
@@ -144,7 +165,7 @@ func parseMarkdownSource(source string) parsedMarkdown {
 					}
 					out = append(out, children...)
 				}
-				if parent == 0 && len(out) > startCount {
+				if !forSearch && parent == 0 && len(out) > startCount {
 					for k := startCount; k < len(out); k++ {
 						s, e := -1, -1
 						if k == startCount {
@@ -170,14 +191,18 @@ func parseMarkdownSource(source string) parsedMarkdown {
 				b.Runs = []document.Run{{Text: strings.TrimSuffix(parsed.Lines(index), "\n")}}
 			case parser.ThematicBreak:
 				b.Kind = "rule"
+				b.Runs = []document.Run{{Text: ""}}
 			case parser.Table:
 				b.Kind, b.Runs = "table", nil
 				for row := range parsed.Children(index) {
-					tr := &document.Block{ID: document.NewID(), Kind: "row"}
+					tr := &document.Block{ID: nextID(), Kind: "row"}
 					col := 0
 					for cell := range parsed.Children(row) {
-						td := document.NewBlock("cell", "")
-						td.Runs = importRuns(parsed.Inlines(cell), document.Style{})
+						td := &document.Block{
+							ID:   nextID(),
+							Kind: "cell",
+							Runs: importRuns(parsed.Inlines(cell), document.Style{}),
+						}
 						if col < len(node.Align) {
 							switch node.Align[col] {
 							case parser.AlignCenter:
@@ -204,7 +229,7 @@ func parseMarkdownSource(source string) parsedMarkdown {
 				}
 			}
 			out = append(out, b)
-			if parent == 0 {
+			if !forSearch && parent == 0 {
 				endOff := node.End
 				if node.Kind == parser.Heading && node.Start < len(text) && text[node.Start] != '#' {
 					endOff = extendSetextUnderline(text, endOff)
@@ -216,7 +241,7 @@ func parseMarkdownSource(source string) parsedMarkdown {
 	}
 
 	rawBlocks := blocks(0, "", 0)
-	structured, chunks := buildStructuredBlocks(rawBlocks, topSpans, text)
+	structured, chunks := buildStructuredBlocks(rawBlocks, topSpans, text, forSearch)
 	result.Blocks = structured
 	if len(result.Blocks) == 0 {
 		result.Blocks = []*document.Block{document.NewBlock("paragraph", strings.TrimRight(text, "\r\n"))}
@@ -227,18 +252,24 @@ func parseMarkdownSource(source string) parsedMarkdown {
 
 // buildStructuredBlocks resolves multi-block HTML wrappers (columns, details,
 // aligned containers) while tracking source byte ranges for top-level chunks.
-func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text string) ([]*document.Block, []importedChunk) {
-	spanStart := map[*document.Block]int{}
-	spanEnd := map[*document.Block]int{}
-	for _, s := range spans {
-		spanStart[s.block] = s.start
-		spanEnd[s.block] = s.end
+func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text string, forSearch bool) ([]*document.Block, []importedChunk) {
+	var spanStart, spanEnd map[*document.Block]int
+	if !forSearch {
+		spanStart = make(map[*document.Block]int, len(spans))
+		spanEnd = make(map[*document.Block]int, len(spans))
+		for _, s := range spans {
+			spanStart[s.block] = s.start
+			spanEnd[s.block] = s.end
+		}
 	}
 
 	blocks = importAlignedWrappers(blocks, spanStart, spanEnd)
 	blocks = importColumns(blocks, spanStart, spanEnd)
 	blocks = importDetails(blocks, spanStart, spanEnd)
 
+	if forSearch {
+		return blocks, nil
+	}
 	var chunks []importedChunk
 	for i := 0; i < len(blocks); {
 		s, ok := spanStart[blocks[i]]
@@ -575,10 +606,53 @@ func parseBlockIndent(el *xhtml.Node) (int, bool) {
 	return 0, false
 }
 
+type runAccumulator struct {
+	runs  []document.Run
+	has   bool
+	style document.Style
+	buf   strings.Builder
+}
+
+func (a *runAccumulator) add(text string, style document.Style) {
+	if text == "" {
+		return
+	}
+	if !a.has {
+		a.has = true
+		a.style = style
+		a.buf.WriteString(text)
+		return
+	}
+	if a.style == style {
+		a.buf.WriteString(text)
+		return
+	}
+	a.runs = append(a.runs, document.Run{Text: a.buf.String(), Style: a.style})
+	a.buf.Reset()
+	a.style = style
+	a.buf.WriteString(text)
+}
+
+func (a *runAccumulator) finish() []document.Run {
+	if a.has {
+		a.runs = append(a.runs, document.Run{Text: a.buf.String(), Style: a.style})
+		a.has = false
+		a.buf.Reset()
+	}
+	if len(a.runs) == 0 {
+		return nil
+	}
+	return slices.Clip(a.runs)
+}
+
 func importRuns(in []parser.Inline, base document.Style) []document.Run {
-	var walk func(int, int, document.Style) []document.Run
-	walk = func(start, stop int, initial document.Style) []document.Run {
-		var runs []document.Run
+	if len(in) == 0 {
+		return nil
+	}
+	var acc runAccumulator
+	acc.runs = make([]document.Run, 0, min(len(in), 8))
+	var walk func(int, int, document.Style)
+	walk = func(start, stop int, initial document.Style) {
 		style := initial
 		var stack []htmlStyleFrame
 		for i := start; i < stop; {
@@ -586,13 +660,11 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 			end := min(stop, max(i+1, node.Next))
 			if node.Kind == parser.HTML {
 				if handled, emit := applyInlineHTMLToken(node.Text, &stack, &style); handled {
-					if emit != "" {
-						runs = append(runs, document.Run{Text: emit, Style: style})
-					}
+					acc.add(emit, style)
 					i = end
 					continue
 				}
-				runs = append(runs, document.Run{Text: node.Text, Style: style})
+				acc.add(node.Text, style)
 				i = end
 				continue
 			}
@@ -612,9 +684,9 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 				next.NoMath = strings.Contains(node.Text, "$")
 			}
 			if end > i+1 && node.Kind != parser.Image {
-				runs = append(runs, walk(i+1, end, next)...)
+				walk(i+1, end, next)
 			} else if node.Kind == parser.Text && !next.Code {
-				runs = append(runs, splitHighlightSyntax(node.Text, next)...)
+				writeHighlightSyntax(&acc, node.Text, next)
 			} else {
 				text := node.Text
 				switch node.Kind {
@@ -627,22 +699,28 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 				case parser.Image:
 					text = "![" + parser.PlainText(in[i+1:end]) + "](" + node.Dest + ")"
 				}
-				runs = append(runs, document.Run{Text: text, Style: next})
+				acc.add(text, next)
 			}
 			i = end
 		}
-		return document.Compact(runs)
 	}
-	return walk(0, len(in), base)
+	walk(0, len(in), base)
+	return acc.finish()
 }
 
 // splitHighlightSyntax parses Obsidian/Textus ==highlight== spans in plain text
 // without touching equality comparisons like "a == b" or "===".
 func splitHighlightSyntax(s string, style document.Style) []document.Run {
+	var acc runAccumulator
+	writeHighlightSyntax(&acc, s, style)
+	return acc.finish()
+}
+
+func writeHighlightSyntax(acc *runAccumulator, s string, style document.Style) {
 	if !strings.Contains(s, "==") {
-		return []document.Run{{Text: s, Style: style}}
+		acc.add(s, style)
+		return
 	}
-	var out []document.Run
 	pos := 0
 	for i := 0; i+3 < len(s); i++ {
 		if s[i] != '=' || s[i+1] != '=' {
@@ -670,7 +748,7 @@ func splitHighlightSyntax(s string, style document.Style) []document.Run {
 		if i > pos {
 			plain := style
 			plain.NoMath = strings.Contains(s[pos:i], "$")
-			out = append(out, document.Run{Text: s[pos:i], Style: plain})
+			acc.add(s[pos:i], plain)
 		}
 		inner := s[i+2 : closeIdx]
 		hl := style
@@ -678,16 +756,68 @@ func splitHighlightSyntax(s string, style document.Style) []document.Run {
 			hl.Highlight = "light-yellow"
 		}
 		hl.NoMath = strings.Contains(inner, "$")
-		out = append(out, document.Run{Text: inner, Style: hl})
+		acc.add(inner, hl)
 		pos = closeIdx + 2
 		i = closeIdx + 1
 	}
 	if pos < len(s) {
 		plain := style
 		plain.NoMath = strings.Contains(s[pos:], "$")
-		out = append(out, document.Run{Text: s[pos:], Style: plain})
+		acc.add(s[pos:], plain)
 	}
-	return out
+}
+
+const maxCachedSourceBytes = 16 << 20
+
+type cachedSourceParse struct {
+	source  string
+	parsed  parsedMarkdown
+	buckets map[uint64][]int
+}
+
+var (
+	parsedSourceMu    sync.Mutex
+	parsedSourceCache [2]cachedSourceParse
+)
+
+func parseMarkdownForExport(source string) (parsedMarkdown, map[uint64][]int) {
+	if len(source) <= maxCachedSourceBytes {
+		parsedSourceMu.Lock()
+		for i := range parsedSourceCache {
+			if parsedSourceCache[i].source == source && parsedSourceCache[i].parsed.doc != nil {
+				entry := parsedSourceCache[i]
+				if i == 1 {
+					parsedSourceCache[0], parsedSourceCache[1] = parsedSourceCache[1], parsedSourceCache[0]
+				}
+				parsedSourceMu.Unlock()
+				return entry.parsed, entry.buckets
+			}
+		}
+		parsedSourceMu.Unlock()
+	}
+
+	orig := parseMarkdownSource(source)
+	buckets := buildChunkBuckets(orig)
+
+	if len(source) <= maxCachedSourceBytes {
+		parsedSourceMu.Lock()
+		parsedSourceCache[1] = parsedSourceCache[0]
+		parsedSourceCache[0] = cachedSourceParse{source: source, parsed: orig, buckets: buckets}
+		parsedSourceMu.Unlock()
+	}
+	return orig, buckets
+}
+
+func buildChunkBuckets(orig parsedMarkdown) map[uint64][]int {
+	buckets := make(map[uint64][]int, len(orig.chunks))
+	for ci, ch := range orig.chunks {
+		if ch.to <= ch.from || ch.from < 0 || ch.from >= len(orig.doc.Blocks) {
+			continue
+		}
+		h := blockSemanticHash(orig.doc.Blocks[ch.from])
+		buckets[h] = append(buckets[h], ci)
+	}
+	return buckets
 }
 
 // ExportMarkdown serializes a rich Document to standard Markdown, preserving
@@ -695,11 +825,11 @@ func splitHighlightSyntax(s string, style document.Style) []document.Run {
 // while keeping unedited blocks from ImportSource byte-for-byte intact.
 func ExportMarkdown(doc *document.Document) string {
 	if doc.ImportSource != "" {
-		orig := parseMarkdownSource(doc.ImportSource)
+		orig, buckets := parseMarkdownForExport(doc.ImportSource)
 		if sameDocumentSemantics(doc, orig.doc) {
 			return ensureTrailingNewline(doc.ImportSource)
 		}
-		return exportWithSourceChunks(doc, orig)
+		return exportWithSourceChunks(doc, orig, buckets)
 	}
 	return exportFreshMarkdown(doc)
 }
@@ -742,7 +872,7 @@ func exportFreshMarkdown(doc *document.Document) string {
 	return body + tail
 }
 
-func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown) string {
+func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets map[uint64][]int) string {
 	var fm string
 	if doc.Frontmatter == orig.doc.Frontmatter && doc.Icon == orig.doc.Icon &&
 		doc.Cover == orig.doc.Cover && doc.CoverY == orig.doc.CoverY && doc.Goal == orig.doc.Goal {
@@ -758,19 +888,29 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown) string 
 	}
 
 	used := make([]bool, len(orig.chunks))
+	cursors := make(map[uint64]int, len(buckets))
 	type emittedItem struct {
 		text   string
 		isList bool
 	}
-	var items []emittedItem
+	items := make([]emittedItem, 0, len(blocks))
 	numberedSeq := map[int]int{}
 
 	for i := 0; i < len(blocks); {
 		matched := -1
-		for ci, ch := range orig.chunks {
+		h := blockSemanticHash(blocks[i])
+		bucket := buckets[h]
+		start := cursors[h]
+		for start < len(bucket) && used[bucket[start]] {
+			start++
+		}
+		cursors[h] = start
+		for k := start; k < len(bucket); k++ {
+			ci := bucket[k]
 			if used[ci] {
 				continue
 			}
+			ch := orig.chunks[ci]
 			spanLen := ch.to - ch.from
 			if spanLen <= 0 || i+spanLen > len(blocks) {
 				continue
@@ -1476,8 +1616,10 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 				inner := blocks[i+1]
 				if inner.Kind != "raw" && inner.Kind != "table" && inner.Kind != "columns" {
 					inner.Align = strings.ToLower(m[1])
-					spanStart[inner] = spanStart[b]
-					spanEnd[inner] = spanEnd[blocks[i+2]]
+					if spanStart != nil {
+						spanStart[inner] = spanStart[b]
+						spanEnd[inner] = spanEnd[blocks[i+2]]
+					}
 					out = append(out, inner)
 					i += 2
 					continue
@@ -1604,8 +1746,10 @@ func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool,
 						Widths:   parseColumnsOpenWidths(blocks[start].Text(), len(columns)),
 						Children: columns,
 					}
-					spanStart[res] = spanStart[blocks[start]]
-					spanEnd[res] = spanEnd[b]
+					if spanStart != nil {
+						spanStart[res] = spanStart[blocks[start]]
+						spanEnd[res] = spanEnd[b]
+					}
 					return res, j + 1, true
 				}
 				return nil, 0, false
@@ -1631,8 +1775,10 @@ func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool,
 						Widths:   parseColumnsOpenWidths(blocks[start].Text(), len(columns)),
 						Children: columns,
 					}
-					spanStart[res] = spanStart[blocks[start]]
-					spanEnd[res] = spanEnd[b]
+					if spanStart != nil {
+						spanStart[res] = spanStart[blocks[start]]
+						spanEnd[res] = spanEnd[b]
+					}
 					return res, j + 1, true
 				}
 				return nil, 0, false
@@ -1735,8 +1881,148 @@ func sameBlockSemantics(a, b *document.Block) bool {
 }
 
 func sameRunsSemantics(a, b []document.Run) bool {
+	if slices.Equal(a, b) {
+		return true
+	}
 	ca, cb := normalizeRunsForCompare(a), normalizeRunsForCompare(b)
 	return slices.Equal(ca, cb)
+}
+
+func fnvMixByte(h uint64, b byte) uint64 {
+	return (h ^ uint64(b)) * 1099511628211
+}
+
+func fnvMixUint32(h uint64, v uint32) uint64 {
+	h = fnvMixByte(h, byte(v))
+	h = fnvMixByte(h, byte(v>>8))
+	h = fnvMixByte(h, byte(v>>16))
+	return fnvMixByte(h, byte(v>>24))
+}
+
+func fnvMixUint64(h uint64, v uint64) uint64 {
+	h = fnvMixUint32(h, uint32(v))
+	return fnvMixUint32(h, uint32(v>>32))
+}
+
+func fnvMixString(h uint64, s string) uint64 {
+	h = fnvMixUint64(h, uint64(len(s)))
+	for i := 0; i < len(s); i++ {
+		h = fnvMixByte(h, s[i])
+	}
+	return h
+}
+
+func fnvMixStyle(h uint64, st document.Style) uint64 {
+	var flags byte
+	if st.NoMath {
+		flags |= 1
+	}
+	if st.Bold {
+		flags |= 2
+	}
+	if st.Italic {
+		flags |= 4
+	}
+	if st.Underline {
+		flags |= 8
+	}
+	if st.Strike {
+		flags |= 16
+	}
+	if st.Code {
+		flags |= 32
+	}
+	h = fnvMixByte(h, flags)
+	h = fnvMixString(h, st.Script)
+	h = fnvMixString(h, st.Link)
+	h = fnvMixString(h, st.Color)
+	h = fnvMixString(h, st.Highlight)
+	h = fnvMixString(h, st.Annotation)
+	return fnvMixString(h, st.AnnotationColor)
+}
+
+// blockSemanticHash computes a canonical 64-bit hash guaranteed to be equal
+// whenever sameBlockSemantics(a, b) returns true.
+func blockSemanticHash(b *document.Block) uint64 {
+	h := uint64(14695981039346656037)
+	h = fnvMixString(h, b.Kind)
+	h = fnvMixUint64(h, uint64(b.Level))
+	h = fnvMixUint64(h, uint64(b.Indent))
+	if b.Checked {
+		h = fnvMixByte(h, 1)
+	} else {
+		h = fnvMixByte(h, 0)
+	}
+	h = fnvMixString(h, b.Language)
+	h = fnvMixString(h, b.URL)
+	h = fnvMixString(h, normCellAlign(b.Align))
+	h = fnvMixString(h, b.Color)
+	h = fnvMixString(h, b.Emoji)
+	h = fnvMixString(h, b.Background)
+	h = fnvMixUint64(h, uint64(b.ColSpan))
+	h = fnvMixUint64(h, uint64(b.RowSpan))
+	imgW := b.ImageWidth
+	if imgW == 0 {
+		imgW = 0
+	}
+	h = fnvMixUint32(h, math.Float32bits(imgW))
+	h = fnvMixString(h, b.NoteLabel)
+	if b.Kind == "toggle" && b.Folded {
+		h = fnvMixByte(h, 1)
+	} else {
+		h = fnvMixByte(h, 0)
+	}
+	h = fnvMixUint64(h, uint64(len(b.Widths)))
+	for _, w := range b.Widths {
+		if w == 0 {
+			w = 0
+		}
+		h = fnvMixUint32(h, math.Float32bits(w))
+	}
+	h = hashNormalizedRuns(h, b.Runs)
+	h = fnvMixUint64(h, uint64(len(b.Children)))
+	for _, child := range b.Children {
+		h = fnvMixUint64(h, blockSemanticHash(child))
+	}
+	return h
+}
+
+func hashNormalizedRuns(h uint64, rs []document.Run) uint64 {
+	hasCur := false
+	var curStyle document.Style
+	emit := func(txt string, st document.Style) {
+		if txt == "" {
+			return
+		}
+		if !hasCur || curStyle != st {
+			h = fnvMixByte(h, 0xff)
+			h = fnvMixStyle(h, st)
+			hasCur = true
+			curStyle = st
+		}
+		for i := 0; i < len(txt); i++ {
+			h = fnvMixByte(h, txt[i])
+		}
+	}
+	for i := range rs {
+		r := &rs[i]
+		if !r.Style.NoMath {
+			emit(r.Text, r.Style)
+			continue
+		}
+		plain := r.Style
+		plain.NoMath = false
+		pos := 0
+		for j := 0; j < len(r.Text); j++ {
+			if r.Text[j] == '$' {
+				emit(r.Text[pos:j], plain)
+				emit("$", r.Style)
+				pos = j + 1
+			}
+		}
+		emit(r.Text[pos:], plain)
+	}
+	return fnvMixByte(h, 0xfe)
 }
 
 func extendSetextUnderline(text string, end int) int {
