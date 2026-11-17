@@ -205,7 +205,7 @@ gofmt -l .                                           # 必须无输出
   | ⌘ 点击 | 打开链接、`[[双链]]` 或 `#标签` |
 
   新增编辑快捷键时检查 `internal/editor/input.go`，全局命令栏优先处理 ⌘K。
-  快捷键可自定义（`internal/app/keymap.go`）：`bindings` 列出可改的命令（ID、名称、默认键；编辑器的粗体等走 `editor.DefaultBindings` 与 `Options.Bindings`），改过的写入 prefs.json 的 `keys`（`"Cmd+Shift+K"`，`none` 为不设快捷键）。设置「快捷键」页点击快捷键后按下新组合键录制（Esc 取消、⌫ 清除），须含 ⌘/⌃/⌥（功能键除外），与其他命令或固定键（⌘Z、⌘C、⌘1… 等）冲突时提示并拒绝；每行可「恢复默认」，也可「全部恢复默认」。菜单、tooltip 与命令栏显示的都是当前快捷键。新增全局快捷键要加进 `bindings`，不要在 `shortcuts()` 里写死。
+  快捷键可自定义（`internal/app/keymap.go`）：`bindings` 列出可改的命令（ID、名称、默认键；编辑器的粗体等走 `editor.DefaultBindings` 与 `Options.Bindings`），改过的写入 prefs.json 的 `keys`（`"Cmd+Shift+K"`，`none` 为不设快捷键；菜单显示在非 macOS 平台上写作 `"Ctrl+Shift+K"`，且 `⌃⌘S`、`⌃⌘↑`、`⌃⌘↓` 在 Windows/Linux 上通过 `ctrlCmd()` 默认取 `Ctrl+Alt+S` / `Ctrl+Alt+Up` / `Ctrl+Alt+Down`）。设置「快捷键」页点击快捷键后按下新组合键录制（Esc 取消、⌫ 清除），须含 ⌘/⌃/⌥（功能键除外），与其他命令或固定键（⌘Z、⌘C、⌘1… 等）冲突时提示并拒绝；每行可「恢复默认」，也可「全部恢复默认」。菜单、tooltip 与命令栏显示的都是当前快捷键。新增全局快捷键要加进 `bindings`，不要在 `shortcuts()` 里写死。
 
 - **状态完整**：空 Space、读目录失败、保存失败、无插件等状态都要有界面；颜色以外还要有文字（无障碍）。动画走 MyGo 的 `Animate`，它已遵从系统"减少动态效果"。
 - 全局 `~/.claude/CLAUDE.md` 中的 Web 前端组件库（shadcn、React 等）**不适用**于本项目；其中通用原则（复用设计 token、覆盖各种状态、键盘可达、尊重 reduced-motion、完成后跑检查）仍然适用。
@@ -218,7 +218,7 @@ gofmt -l .                                           # 必须无输出
 - 「导出 Markdown 文件」生成新 `.md` 副本，重名编号。导出预览只读。
 - 应用内移动文档或文件夹统一走 `relocate.go`：图片与封面、内存撤销/重做和版本快照一起处理；共享原图保留，重名图片编号且改写引用（`.md` 与旧 `.arcmd` 均支持改写）；资源处理失败回滚移动。跨空间历史合并时不覆盖同名快照，完成后再清理原位置历史。
 - 系统文件关联通过 `mygo.App.OnOpenFile` 接入，后续进程转交现有窗口；开发运行也接受文档路径。优先匹配最深的已有 Space，外部文档集中在不可移除的内置「外部空间」（首次使用时出现，此后保留），仅记录逐个打开的文件，不扫描父文件夹；同名文件用独立列表名称区分。移除文档只移除引用，不删除原文件。外部 `.md` 编辑后直接原地保存到原文件，图片仍相对原目录读取；元数据与历史留在配置目录 `external/`。仅打开不修改或复制文档。
-- 本地图片相对实际文档目录解析（`localImageFile`），允许 Markdown 的 `../images/...` 指向 Space 外的同级资源目录，支持 URL 编码的文件名。此规则仅用于读取；移动资源仍经 `vault.Resolve` 限定在目标 Space 内，必要时复制到 `assets/` 并改写原生文档引用。GIF 当前显示首帧。
+- 本地图片相对实际文档目录解析（`localImageFile`），允许 Markdown 的 `../images/...` 指向 Space 外的同级资源目录，支持 URL 编码的文件名。普通 Space（非「外部空间」）另支持 Obsidian `![[图.png]]`、`![[图.png|360]]`、`![[图.png|360x240]]`、`![[图.png|说明|420]]` 嵌入语法（连续无空行混排的段落自动拆块，未编辑时经 `ImportSource` 原样保留 `![[...]]`，不被 `wiki.Links` 当作笔记双链）并在同目录未命中时按 Space 根目录和附件目录查找（`resolveSpaceImage`）；「外部空间」严格只按当前文件目录相对解析，不扫描旁路目录。此规则仅用于读取；移动资源仍经 `vault.Resolve` 限定在目标 Space 内，必要时复制到 `assets/` 并改写原生文档引用。GIF 当前显示首帧。
 - 写文件走 `vault.Write` / `fsutil.WriteFileAtomic`。新文件走 `vault.CreateFile` / `fsutil.CreateFileAtomic`，通过同目录临时文件与排他发布避免覆盖已有文件。
 - 输入法组合期间保存已提交的模型。保存失败保留脏状态，切文档、切 Space 和关闭窗口前保存成功才继续。
 - 外部修改（`watch.go`）：用 `mygo.WatchFiles` 递归监听当前 Space 与打开文档所在 Space 的文件夹（跳过隐藏目录与 `node_modules`），测试用 `App.watchFiles` 注入假监听。新建、删除、重命名刷新文件树；打开的文档被外部改写时，没有未保存修改就原地重载（保留滚动位置），有修改就在卡片顶部显示冲突条「使用磁盘上的版本 / 保留我的修改」，选择前暂停自动保存、切文档与关窗口也被拦下（⌘R 等于使用磁盘版本）；文件被外部删除时，无修改则关闭文档，有修改则提供「重新保存到原位置 / 放弃修改并关闭」；被外部重命名时文档、收藏、置顶和历史跟随。保存前总会比对磁盘内容与上次读写的内容（`document.write`），监听迟到或缺席也不会覆盖别人的修改。

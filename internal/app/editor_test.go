@@ -415,12 +415,13 @@ func TestBottomBlockHandleMenuAndIndentSubmenu(t *testing.T) {
 		return r
 	}
 
-	for _, label := range []string{"正文", "一级标题", "五级标题", "缩进和对齐", "剪切", "复制", "创建副本", "删除", "上移", "下移", "⌘D", "在下方添加"} {
+	bookmarkKey := a.shortKey("bookmark")
+	for _, label := range []string{"正文", "一级标题", "五级标题", "缩进和对齐", "剪切", "复制", "创建副本", "删除", "上移", "下移", bookmarkKey, "在下方添加"} {
 		minH := float32(32)
 		switch label {
 		case "正文", "一级标题", "五级标题":
 			minH = 24
-		case "⌘D":
+		case bookmarkKey:
 			minH = 12
 		}
 		assertWithin(label, minH)

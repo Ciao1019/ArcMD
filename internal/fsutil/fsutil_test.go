@@ -37,3 +37,28 @@ func TestExclusiveAtomicPublication(t *testing.T) {
 		t.Fatal("temporary files leaked")
 	}
 }
+
+func TestIsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.txt")
+	_, err := os.Stat(missing)
+	if !IsMissingFile(missing, err) {
+		t.Fatalf("expected missing file under directory to report true (err=%v)", err)
+	}
+	nestedMissing := filepath.Join(dir, "sub", "missing.txt")
+	_, err = os.Stat(nestedMissing)
+	if !IsMissingFile(nestedMissing, err) {
+		t.Fatalf("expected missing file under missing subdir to report true (err=%v)", err)
+	}
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(blocker, "nested", "secret")
+	if IsMissingFile(blocked, os.ErrNotExist) {
+		t.Fatal("expected regular-file ancestor to return false even for os.ErrNotExist")
+	}
+	if IsMissingFile(missing, nil) {
+		t.Fatal("expected nil error to return false")
+	}
+}

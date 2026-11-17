@@ -366,8 +366,13 @@ func TestRebindShortcuts(t *testing.T) {
 		t.Errorf("recorded %q", got)
 	}
 	a.resetKeys("")
-	if a.keyLabel("palette") != "⌘K / ⌘L / ⌘P" {
-		t.Errorf("reset: %q", a.keyLabel("palette"))
+	wantPalette := strings.Join([]string{
+		(editor.Combo{Mods: ui.Cmd, Key: ui.KeyK}).Label(),
+		(editor.Combo{Mods: ui.Cmd, Key: ui.KeyL}).Label(),
+		(editor.Combo{Mods: ui.Cmd, Key: ui.KeyP}).Label(),
+	}, " / ")
+	if a.keyLabel("palette") != wantPalette {
+		t.Errorf("reset: %q, want %q", a.keyLabel("palette"), wantPalette)
 	}
 }
 

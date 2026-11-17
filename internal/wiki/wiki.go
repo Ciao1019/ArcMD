@@ -41,6 +41,11 @@ func Links(text string) []Link {
 			i = start + 1
 			continue
 		}
+		if start > 0 && text[start-1] == '!' {
+			// Obsidian embeds ("![[...]]") attach files or blocks rather than linking notes.
+			i = start + 2 + end + 2
+			continue
+		}
 		target, label := Parse(inner)
 		if target != "" {
 			out = append(out, Link{Start: start, End: start + 2 + end + 2, Target: target, Label: label})
@@ -182,7 +187,7 @@ func TagNames(text string) []string {
 // documents to complete it with.
 func Open(text string) (start int, typed string, ok bool) {
 	at := strings.LastIndex(text, "[[")
-	if at < 0 {
+	if at < 0 || (at > 0 && text[at-1] == '!') {
 		return 0, "", false
 	}
 	typed = text[at+2:]

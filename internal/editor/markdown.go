@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -92,11 +93,27 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 			switch node.Kind {
 			case parser.Paragraph, parser.Heading:
 				in := parsed.Inlines(index)
-				if node.Kind == parser.Paragraph && context == "" && indent == 0 {
-					if img, ok := tryImportInlineImageBlock(in); ok {
+				if node.Kind == parser.Paragraph && context == "" {
+					if img, ok := tryImportInlineImageBlock(in); ok && indent == 0 {
 						out = append(out, img)
 						if !forSearch && parent == 0 {
 							topSpans = append(topSpans, rawSpan{img, node.Start, node.End})
+						}
+						continue
+					}
+					if split := splitObsidianImageParagraph(text, node.Start, node.End, in, indent, nextID); len(split) > 0 {
+						out = append(out, split...)
+						if !forSearch && parent == 0 && len(out) > startCount {
+							for k := startCount; k < len(out); k++ {
+								s, e := -1, -1
+								if k == startCount {
+									s = node.Start
+								}
+								if k == len(out)-1 {
+									e = node.End
+								}
+								topSpans = append(topSpans, rawSpan{out[k], s, e})
+							}
 						}
 						continue
 					}
@@ -445,6 +462,191 @@ func tryImportInlineImageBlock(in []parser.Inline) (*document.Block, bool) {
 		return nil, false
 	}
 	return parseSingleImgTag(in[0].Text, "")
+}
+
+func overlapsProtectedInline(in []parser.Inline, start, end int) bool {
+	for _, item := range in {
+		switch item.Kind {
+		case parser.Code, parser.Math, parser.HTML:
+			if item.End > start && item.Start < end {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isObsidianImageExt(target string) bool {
+	ext := strings.ToLower(path.Ext(target))
+	base := path.Base(target)
+	if base == "" || base == "." || base == ".." || len(base) <= len(ext) {
+		return false
+	}
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif", ".ico", ".tif", ".tiff":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseObsidianSizeSpec(s string) (float32, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	if idx := strings.IndexAny(s, "xX×"); idx >= 0 {
+		wStr := strings.TrimSpace(s[:idx])
+		_, sepLen := utf8.DecodeRuneInString(s[idx:])
+		hStr := strings.TrimSpace(s[idx+sepLen:])
+		w, wErr := strconv.Atoi(wStr)
+		h, hErr := strconv.Atoi(hStr)
+		if wErr != nil || hErr != nil || w <= 0 || w > 10000 || h <= 0 || h > 10000 {
+			return 0, false
+		}
+		return float32(w), true
+	}
+	w, err := strconv.Atoi(s)
+	if err != nil || w <= 0 || w > 10000 {
+		return 0, false
+	}
+	return float32(w), true
+}
+
+func parseObsidianImageEmbed(line string) (url, alt string, width float32, ok bool) {
+	s := strings.TrimSpace(line)
+	if !strings.HasPrefix(s, "![[") || !strings.HasSuffix(s, "]]") {
+		return "", "", 0, false
+	}
+	inner := s[3 : len(s)-2]
+	if inner == "" || strings.ContainsAny(inner, "[]\r\n") {
+		return "", "", 0, false
+	}
+	parts := strings.Split(inner, "|")
+	target, _, _ := strings.Cut(parts[0], "#")
+	target = strings.TrimSpace(target)
+	if target == "" || strings.ContainsAny(target, ":\x00") {
+		return "", "", 0, false
+	}
+	target = strings.ReplaceAll(target, `\`, "/")
+	target = strings.TrimLeft(target, "/")
+	if target == "" || !isObsidianImageExt(target) {
+		return "", "", 0, false
+	}
+	rest := parts[1:]
+	if len(rest) > 0 {
+		if w, isSize := parseObsidianSizeSpec(rest[len(rest)-1]); isSize {
+			width = w
+			rest = rest[:len(rest)-1]
+		}
+	}
+	alt = strings.TrimSpace(strings.Join(rest, "|"))
+	return target, alt, width, true
+}
+
+func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline, indent int, nextID func() string) []*document.Block {
+	raw := strings.TrimRight(text[start:end], "\r\n")
+	if !strings.Contains(raw, "![[") {
+		return nil
+	}
+	var blocks []*document.Block
+	var prose []string
+	matched := false
+	flushProse := func() {
+		if len(prose) == 0 {
+			return
+		}
+		snippet := strings.Join(prose, "\n")
+		prose = prose[:0]
+		sub := parser.New(parser.Default | parser.ExtDollarMath)
+		sub.Set(snippet)
+		for cIdx := range sub.Children(0) {
+			cNode := sub.Block(cIdx)
+			switch cNode.Kind {
+			case parser.Paragraph, parser.Heading:
+				cIn := sub.Inlines(cIdx)
+				if cNode.Kind == parser.Paragraph {
+					if img, ok := tryImportInlineImageBlock(cIn); ok && indent == 0 {
+						blocks = append(blocks, img)
+						continue
+					}
+					if len(cIn) > 0 && cIn[0].Kind == parser.Image && cIn[0].Next == len(cIn) {
+						alt, width := parseMarkdownImageAlt(parser.PlainText(cIn[1:]))
+						blocks = append(blocks, &document.Block{
+							ID:         nextID(),
+							Kind:       "image",
+							Indent:     indent,
+							URL:        cIn[0].Dest,
+							ImageWidth: width,
+							Runs:       []document.Run{{Text: alt}},
+						})
+						continue
+					}
+				}
+				b := &document.Block{
+					ID:     nextID(),
+					Kind:   "paragraph",
+					Indent: indent,
+					Runs:   importRuns(cIn, document.Style{}),
+				}
+				if cNode.Kind == parser.Heading {
+					b.Kind, b.Level = "heading", cNode.Level
+				}
+				blocks = append(blocks, b)
+			case parser.ThematicBreak:
+				blocks = append(blocks, &document.Block{ID: nextID(), Kind: "rule", Indent: indent, Runs: []document.Run{{Text: ""}}})
+			case parser.MathBlock:
+				blocks = append(blocks, &document.Block{ID: nextID(), Kind: "math", Indent: indent, Runs: []document.Run{{Text: strings.TrimSpace(sub.Lines(cIdx))}}})
+			default:
+				rawChunk := snippet[cNode.Start:cNode.End]
+				if hb, ok := tryImportHTMLBlock(rawChunk, indent); ok {
+					blocks = append(blocks, hb)
+				} else {
+					blocks = append(blocks, &document.Block{ID: nextID(), Kind: "raw", Indent: indent, Runs: []document.Run{{Text: rawChunk}}})
+				}
+			}
+		}
+	}
+
+	for pos := 0; pos <= len(raw); {
+		nl := strings.IndexByte(raw[pos:], '\n')
+		var line string
+		nextPos := len(raw) + 1
+		if nl >= 0 {
+			line = raw[pos : pos+nl]
+			nextPos = pos + nl + 1
+		} else {
+			line = raw[pos:]
+		}
+		trimmedRight := strings.TrimSuffix(line, "\r")
+		absStart, absEnd := start+pos, start+pos+len(trimmedRight)
+		if !overlapsProtectedInline(in, absStart, absEnd) {
+			if imgURL, alt, width, ok := parseObsidianImageEmbed(trimmedRight); ok {
+				flushProse()
+				matched = true
+				blocks = append(blocks, &document.Block{
+					ID:         nextID(),
+					Kind:       "image",
+					Indent:     indent,
+					URL:        imgURL,
+					ImageWidth: width,
+					Runs:       []document.Run{{Text: alt}},
+				})
+				pos = nextPos
+				continue
+			}
+		}
+		prose = append(prose, trimmedRight)
+		pos = nextPos
+		if nl < 0 {
+			break
+		}
+	}
+	if !matched {
+		return nil
+	}
+	flushProse()
+	return blocks
 }
 
 func parseSingleImgTag(raw, align string) (*document.Block, bool) {
@@ -1187,7 +1389,11 @@ func formatAlignedBlockHTML(tag, align string, indent int, inner string) string 
 
 func exportImageMarkdown(b *document.Block, align string) string {
 	if b.ImageWidth == 0 && align == "" && b.Indent == 0 {
-		return "![" + exportRuns(b.Runs) + "](" + b.URL + ")"
+		dest := b.URL
+		if strings.ContainsAny(dest, " ()\t") && !strings.ContainsAny(dest, "<>\r\n") {
+			dest = "<" + dest + ">"
+		}
+		return "![" + exportRuns(b.Runs) + "](" + dest + ")"
 	}
 	var img strings.Builder
 	img.WriteString(`<img src="` + html.EscapeString(b.URL) + `" alt="` + html.EscapeString(b.Text()) + `"`)

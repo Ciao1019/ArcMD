@@ -90,7 +90,7 @@ func TestBookmarkStepping(t *testing.T) {
 	caretOn(a, ids[2])
 	step := func(key ui.Key, want int) {
 		t.Helper()
-		tt.Key(ui.Ctrl|ui.Cmd, key)
+		tt.Key(ctrlCmd(), key)
 		tt.Frame()
 		if got := a.doc.ed.CaretBlock(); got != want {
 			t.Fatalf("caret in block %d, want %d", got, want)

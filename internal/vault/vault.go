@@ -125,6 +125,13 @@ func existingPath(name string) (string, error) {
 			if err != nil {
 				return "", err
 			}
+			if len(suffix) > 0 {
+				if info, err := os.Stat(base); err != nil {
+					return "", err
+				} else if !info.IsDir() {
+					return "", fmt.Errorf("vault: %s is not a directory", base)
+				}
+			}
 			for i := len(suffix) - 1; i >= 0; i-- {
 				base = filepath.Join(base, suffix[i])
 			}

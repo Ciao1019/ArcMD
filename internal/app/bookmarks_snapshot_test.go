@@ -38,7 +38,7 @@ func TestBookmarksSnapshot(t *testing.T) {
 			switch name {
 			case "flash":
 				caretOn(a, ids[0])
-				tt.Key(ui.Ctrl|ui.Cmd, ui.KeyDown)
+				tt.Key(ctrlCmd(), ui.KeyDown)
 				tt.Frame()
 				tt.Advance(100 * time.Millisecond)
 			case "list":

@@ -3,9 +3,35 @@
 package fsutil
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 )
+
+// IsMissingFile reports whether err indicates that path (or a missing
+// directory along path) does not exist, rather than a regular file blocking
+// directory traversal (which Windows reports as ERROR_PATH_NOT_FOUND and
+// matches os.ErrNotExist).
+func IsMissingFile(path string, err error) bool {
+	if !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	dir := filepath.Dir(path)
+	for {
+		info, statErr := os.Stat(dir)
+		if statErr == nil {
+			return info.IsDir()
+		}
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return true
+		}
+		dir = parent
+	}
+}
 
 // WriteFileAtomic writes data to path through a temporary file in the same
 // directory renamed over it, so that a crash never leaves half a file. It

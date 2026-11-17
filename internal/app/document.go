@@ -7,6 +7,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io/fs"
 	neturl "net/url"
 	"os"
 	"path"
@@ -17,6 +18,7 @@ import (
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/fsutil"
 	"github.com/Ciao1019/ArcMD/internal/history"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -537,7 +539,7 @@ func (d *document) write(force bool) error {
 	if !force {
 		disk, err := readFile(d.space, d.rel)
 		switch {
-		case errors.Is(err, os.ErrNotExist):
+		case isMissingDocFile(d.space, d.rel, err):
 			d.missing = true
 			return errMissing
 		case err != nil:
@@ -686,7 +688,7 @@ func (d *document) startAsyncAutosave(post func(func())) {
 		}
 		disk, err := readFile(&spClone, rel)
 		switch {
-		case errors.Is(err, os.ErrNotExist):
+		case isMissingDocFile(&spClone, rel, err):
 			res.missing = true
 		case err != nil:
 			res.err = err
@@ -834,6 +836,35 @@ func decodeLocalImageSync(full string) editor.ImageResource {
 	return res
 }
 
+// isMissingDocFile distinguishes a deleted document file from a non-directory
+// path blocker (which Windows reports as ERROR_PATH_NOT_FOUND == os.ErrNotExist).
+func isMissingDocFile(sp *space.Space, rel string, err error) bool {
+	if !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	root, name, locErr := fileLocation(sp, rel)
+	if locErr != nil {
+		return false
+	}
+	return fsutil.IsMissingFile(filepath.Join(root, filepath.FromSlash(name)), err)
+}
+
+func unescapeImagePath(raw string) string {
+	if decoded, err := neturl.PathUnescape(raw); err == nil {
+		return decoded
+	}
+	return raw
+}
+
+func hasParentSegment(rel string) bool {
+	for seg := range strings.SplitSeq(filepath.ToSlash(rel), "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // localImageFile resolves read-only resources against the document, not the
 // Space boundary. Imported Markdown often uses ../images beside its folder.
 // Writes still use vault.Resolve and may never escape the destination Space.
@@ -850,6 +881,87 @@ func localImageFile(root, rel, url string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(filepath.Dir(file), filepath.FromSlash(decoded)), nil
+}
+
+// resolveSpaceImage resolves local images relative to the document first, and
+// for non-external Spaces falls back to Obsidian-style vault-root and Space
+// attachment lookup when that path does not exist on disk.
+func resolveSpaceImage(sp *space.Space, rel, url string) (string, error) {
+	root, docRel, err := fileLocation(sp, rel)
+	if err != nil {
+		return "", err
+	}
+	direct, err := localImageFile(root, docRel, url)
+	if err != nil || sp == nil || sp.IsExternal() {
+		return direct, err
+	}
+	if info, stErr := os.Stat(direct); stErr == nil && !info.IsDir() {
+		return direct, nil
+	}
+	decoded := unescapeImagePath(url)
+	if hasParentSegment(decoded) {
+		return direct, nil
+	}
+	if cand, rErr := vault.Resolve(root, decoded); rErr == nil {
+		if info, stErr := os.Stat(cand); stErr == nil && !info.IsDir() {
+			return cand, nil
+		}
+	}
+	if !strings.Contains(decoded, "/") {
+		docDir := path.Dir(filepath.ToSlash(docRel))
+		for _, candRel := range []string{path.Join(docDir, "assets", decoded), path.Join("assets", decoded)} {
+			if cand, rErr := vault.Resolve(root, candRel); rErr == nil {
+				if info, stErr := os.Stat(cand); stErr == nil && !info.IsDir() {
+					return cand, nil
+				}
+			}
+		}
+		if found, ok := findSpaceAttachment(root, decoded); ok {
+			return found, nil
+		}
+	}
+	return direct, nil
+}
+
+func findSpaceAttachment(root, name string) (string, bool) {
+	var bestPath, bestRel string
+	bestExact := false
+	bestDepth := 0
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") || !strings.EqualFold(d.Name(), name) {
+			return nil
+		}
+		if info, stErr := os.Stat(p); stErr != nil || info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		resolved, resErr := vault.Resolve(root, rel)
+		if resErr != nil {
+			return nil
+		}
+		exact := d.Name() == name
+		depth := strings.Count(rel, "/")
+		if bestPath == "" ||
+			(exact && !bestExact) ||
+			(exact == bestExact && (depth < bestDepth || (depth == bestDepth && rel < bestRel))) {
+			bestPath, bestRel, bestExact, bestDepth = resolved, rel, exact, depth
+		}
+		return nil
+	})
+	return bestPath, bestPath != ""
 }
 
 // resolveLink returns the space path a link of the document points to,

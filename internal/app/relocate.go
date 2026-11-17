@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -86,12 +85,8 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	}()
 	for _, d := range docs {
 		target := to + d.rel[len(rel):]
-		imageRoot, imagePath, locationErr := fileLocation(src, d.rel)
-		if locationErr != nil {
-			return to, copied, locationErr
-		}
 		for old := range d.urls {
-			file, resolveErr := localImageFile(imageRoot, imagePath, old)
+			file, resolveErr := resolveSpaceImage(src, d.rel, old)
 			if resolveErr != nil {
 				continue
 			}
@@ -282,7 +277,7 @@ func relocateText(rel, text string, urls map[string]string) (string, error) {
 }
 
 func relocateImage(root, dir, original string, data []byte) (string, string, error) {
-	decoded, _ := url.PathUnescape(original)
+	decoded := unescapeImagePath(original)
 	stem := strings.TrimSuffix(assetName(path.Base(decoded)), path.Ext(decoded))
 	ext := path.Ext(decoded)
 	for i := 0; ; i++ {

@@ -25,6 +25,26 @@ func TestLinks(t *testing.T) {
 	}
 }
 
+func TestObsidianEmbedsIgnoredByWikiLinks(t *testing.T) {
+	text := "![[Pasted image 20261027110938.png]]\n![[chart.png|360]] and see [[Trip Plan]]"
+	var got []string
+	for _, l := range Links(text) {
+		got = append(got, l.Target)
+	}
+	if !slices.Equal(got, []string{"Trip Plan"}) {
+		t.Fatalf("Links = %q, want [Trip Plan]", got)
+	}
+	if LinksTo(text, "Pasted image 20261027110938.png") || LinksTo(text, "chart.png") {
+		t.Fatal("embed matched LinksTo")
+	}
+	if renamed, ok := Rename("![[chart.png]] and [[chart.png]]", "chart.png", "diagram.png"); !ok || renamed != "![[chart.png]] and [[diagram.png]]" {
+		t.Fatalf("Rename altered embed: %q (ok=%v)", renamed, ok)
+	}
+	if _, _, ok := Open("![[Pasted"); ok {
+		t.Fatal("Open triggered on Obsidian embed prefix ![[")
+	}
+}
+
 func TestRename(t *testing.T) {
 	got, ok := Rename("[[Old]], [[old|alias]], [[Old#h]] and [[Older]]", "Old", "New")
 	if !ok || got != "[[New]], [[New|alias]], [[New#h]] and [[Older]]" {

@@ -63,10 +63,10 @@ func TestLibrarySpaces(t *testing.T) {
 		t.Fatalf("open %v, space %v, doc %+v", a.library.open, a.state.ActiveSpace().Name, a.doc)
 	}
 
-	tt.Key(ui.Ctrl|ui.Cmd, ui.KeyS)
+	tt.Key(ctrlCmd(), ui.KeyS)
 	tt.Frame()
 	if !a.library.open || a.library.page != libSpaces {
-		t.Fatal("⌃⌘S did not open the spaces")
+		t.Fatal("overview shortcut did not open the spaces")
 	}
 	tt.Move(900, 700) // off the cards: a tooltip would take the first Escape
 	tt.Frame()
@@ -270,7 +270,7 @@ func TestPaperFollowsSpaceAppearance(t *testing.T) {
 // grip move a space by keyboard.
 func TestLibraryCardDrag(t *testing.T) {
 	a, tt := libraryApp(t)
-	tt.Key(ui.Ctrl|ui.Cmd, ui.KeyS)
+	tt.Key(ctrlCmd(), ui.KeyS)
 	settle(tt)
 	names := func() []string {
 		var out []string

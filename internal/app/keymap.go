@@ -21,6 +21,15 @@ type binding struct {
 
 func combo(mods ui.Modifiers, key ui.Key) editor.Combo { return editor.Combo{Mods: mods, Key: key} }
 
+// ctrlCmd is Control+Command on macOS (where Cmd is Super) and Ctrl+Alt
+// elsewhere (where Cmd is already Ctrl, so Ctrl|Cmd would collapse to Ctrl).
+func ctrlCmd() ui.Modifiers {
+	if ui.Cmd == ui.Super {
+		return ui.Ctrl | ui.Cmd
+	}
+	return ui.Ctrl | ui.Alt
+}
+
 // bindings are the commands that can be rebound, in the order the
 // settings list them.
 var bindings = []binding{
@@ -39,7 +48,7 @@ var bindings = []binding{
 	{id: "prev-space", label: "上一个空间", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyLeft)}},
 	{id: "next-space", label: "下一个空间", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyRight)}},
 	{id: "library", label: "资料库", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyL)}},
-	{id: "overview", label: "所有空间", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyS)}},
+	{id: "overview", label: "所有空间", defaults: []editor.Combo{combo(ctrlCmd(), ui.KeyS)}},
 	{id: "split-add", label: "添加分屏", defaults: []editor.Combo{combo(ui.Ctrl|ui.Shift, ui.KeyEqual)}},
 	{id: "split-close", label: "关闭此分屏", defaults: []editor.Combo{combo(ui.Ctrl|ui.Shift, ui.KeyMinus)}},
 	{id: "split-next", label: "下一个分屏", defaults: []editor.Combo{combo(ui.Ctrl|ui.Shift, ui.KeyTab)}},
@@ -47,8 +56,8 @@ var bindings = []binding{
 	{id: "outline", label: "展开/收起目录", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyO)}},
 	{id: "bookmark", label: "添加/移除书签", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyD)}},
 	{id: "bookmarks", label: "书签列表", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyD)}},
-	{id: "prev-bookmark", label: "上一个书签", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyUp)}},
-	{id: "next-bookmark", label: "下一个书签", defaults: []editor.Combo{combo(ui.Ctrl|ui.Cmd, ui.KeyDown)}},
+	{id: "prev-bookmark", label: "上一个书签", defaults: []editor.Combo{combo(ctrlCmd(), ui.KeyUp)}},
+	{id: "next-bookmark", label: "下一个书签", defaults: []editor.Combo{combo(ctrlCmd(), ui.KeyDown)}},
 	{id: "ask", label: "问答", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyJ)}},
 	{id: "history", label: "版本历史", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyY)}},
 	{id: "export-pdf", label: "导出 PDF", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyE)}},

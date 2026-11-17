@@ -62,11 +62,7 @@ func renameFile(sp *space.Space, rel, name string) (string, error) {
 }
 
 func (d *document) localImage(url string) (string, error) {
-	root, rel, err := fileLocation(d.space, d.rel)
-	if err != nil {
-		return "", err
-	}
-	return localImageFile(root, rel, url)
+	return resolveSpaceImage(d.space, d.rel, url)
 }
 
 // forgetExternal removes only the reference. Saving and conflict handling are

@@ -280,3 +280,82 @@ func TestBlockSemanticHashMatchesSemanticsAndLargeExport(t *testing.T) {
 		t.Fatal("ExportMarkdown failed to preserve unedited author-formatted chunks")
 	}
 }
+
+func TestObsidianImageEmbedsImportAndRoundTrip(t *testing.T) {
+	src := "# Notes\n\n" +
+		"![[Pasted image 20261027110938.png]]\n" +
+		"![[Pasted image 20261027111017.png]]\n" +
+		"The line chart entitled \"Percentage of households\" shows trends.\n\n" +
+		"![[attachments/diagram.png|360]]\n\n" +
+		"![[charts/summary.webp|360x240]]\n\n" +
+		"![[shots/overview.png|Overview caption|420]]\n\n" +
+		"Edited later.\n\n" +
+		"See [[Meeting Notes]] and `inline code\n![[literal-not-image.png]]\nstill code`.\n"
+
+	doc := ImportMarkdown(src)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("imported Obsidian doc invalid: %v", err)
+	}
+	if ExportMarkdown(doc) != src {
+		t.Fatalf("unedited Obsidian Markdown changed:\n got: %q\nwant: %q", ExportMarkdown(doc), src)
+	}
+
+	var imgs []*document.Block
+	for _, b := range doc.Blocks {
+		if b.Kind == "image" {
+			imgs = append(imgs, b)
+		}
+	}
+	if len(imgs) != 5 {
+		t.Fatalf("imported %d image blocks, want 5: %+v", len(imgs), doc.Blocks)
+	}
+	if imgs[0].URL != "Pasted image 20261027110938.png" || imgs[0].ImageWidth != 0 || imgs[0].Text() != "" {
+		t.Fatalf("img[0] = %+v", imgs[0])
+	}
+	if imgs[1].URL != "Pasted image 20261027111017.png" || imgs[2].URL != "attachments/diagram.png" || imgs[2].ImageWidth != 360 {
+		t.Fatalf("img[1..2] = %+v, %+v", imgs[1], imgs[2])
+	}
+	if imgs[3].URL != "charts/summary.webp" || imgs[3].ImageWidth != 360 || imgs[3].Text() != "" {
+		t.Fatalf("img[3] = %+v", imgs[3])
+	}
+	if imgs[4].URL != "shots/overview.png" || imgs[4].ImageWidth != 420 || imgs[4].Text() != "Overview caption" {
+		t.Fatalf("img[4] = %+v", imgs[4])
+	}
+
+	// Ensure prose immediately after consecutive ![[...]] lines became a normal paragraph.
+	if len(doc.Blocks) < 5 || doc.Blocks[3].Kind != "paragraph" || !strings.HasPrefix(doc.Blocks[3].Text(), "The line chart") {
+		t.Fatalf("expected paragraph after consecutive Obsidian images, got blocks[3]=%+v", doc.Blocks[3])
+	}
+
+	// Ensure multi-line inline code containing ![[...]] remained a paragraph with code runs, not an image block.
+	last := doc.Blocks[len(doc.Blocks)-1]
+	if last.Kind != "paragraph" || !strings.Contains(last.Text(), "![[literal-not-image.png]]") {
+		t.Fatalf("code span embed was unexpectedly split: %+v", last)
+	}
+
+	// Editing an unrelated block preserves untouched ![[...]] syntax verbatim.
+	e := document.NewEngine(doc)
+	for _, leaf := range e.Doc.Leaves() {
+		if leaf.Block.Kind == "paragraph" && leaf.Block.Text() == "Edited later." {
+			e.Replace(leaf.Start, leaf.End, "Updated separately.")
+			break
+		}
+	}
+	partial := ExportMarkdown(e.Doc)
+	if !strings.Contains(partial, "![[Pasted image 20261027110938.png]]\n![[Pasted image 20261027111017.png]]") ||
+		!strings.Contains(partial, "Updated separately.") {
+		t.Fatalf("partial edit lost Obsidian embeds:\n%s", partial)
+	}
+
+	// Editing an image block (or its chunk) still exports valid CommonMark with spaces safely wrapped in <...>.
+	rework := ImportMarkdown("![[Pasted image 20261027110938.png]]\n\nText\n")
+	rework.Blocks[0].Runs = []document.Run{{Text: "Pasted chart"}}
+	exported := ExportMarkdown(rework)
+	if !strings.Contains(exported, "![Pasted chart](<Pasted image 20261027110938.png>)") {
+		t.Fatalf("expected angle-bracketed space URL on re-export, got:\n%s", exported)
+	}
+	reimported := ImportMarkdown(exported)
+	if reimported.Blocks[0].Kind != "image" || reimported.Blocks[0].URL != "Pasted image 20261027110938.png" || reimported.Blocks[0].Text() != "Pasted chart" {
+		t.Fatalf("re-import of space URL failed: %+v", reimported.Blocks[0])
+	}
+}

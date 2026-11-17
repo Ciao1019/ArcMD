@@ -169,3 +169,114 @@ func TestImageComponentSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func encodeTestPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, color.RGBA{uint8(30 + x), uint8(60 + y), 180, 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestObsidianImageReferencesInSpaceAndExternalIsolation(t *testing.T) {
+	a, tt := newTestApp(t)
+	src := a.state.ActiveSpace()
+	pngData := string(encodeTestPNG(t, 120, 80))
+
+	for _, rel := range []string{
+		"attachments/Pasted image 20261027110938.png",
+		"attachments/Pasted image 20261027111017.png",
+		"notes/2026/local.png",
+	} {
+		if err := vault.Write(src.Root, rel, pngData); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	noteText := "# IELTS\n\n" +
+		"![[Pasted image 20261027110938.png]]\n" +
+		"![[attachments/Pasted image 20261027111017.png]]\n" +
+		"The line chart shows percentages.\n\n" +
+		"![[local.png]]\n\n" +
+		"Tail.\n"
+	if err := vault.Write(src.Root, "notes/2026/ielts.md", noteText); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("notes/2026/ielts.md")
+	tt.Frame()
+
+	loaded := 0
+	for _, leaf := range a.doc.ed.Doc.Leaves() {
+		if leaf.Block.Kind != "image" {
+			continue
+		}
+		bmp := a.doc.loadImage(leaf.Block.URL)
+		if bmp == nil {
+			t.Fatalf("failed to load Obsidian image %q", leaf.Block.URL)
+		}
+		if w, h := bmp.Size(); w != 120 || h != 80 {
+			t.Fatalf("image %q size = %dx%d, want 120x80", leaf.Block.URL, w, h)
+		}
+		loaded++
+	}
+	if loaded != 3 {
+		t.Fatalf("loaded %d images, want 3", loaded)
+	}
+
+	// Edit only the trailing paragraph; the ![[...]] lines must stay untouched on disk.
+	a.doc.ed.SetSelection(a.doc.ed.Len(), a.doc.ed.Len())
+	focusDocument(a, tt)
+	tt.Type(" End.")
+	if !a.flush() {
+		t.Fatal("flush edited Obsidian note failed")
+	}
+	saved, err := readFile(src, "notes/2026/ielts.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(saved, "![[Pasted image 20261027110938.png]]\n![[attachments/Pasted image 20261027111017.png]]") ||
+		!strings.Contains(saved, "Tail. End.") {
+		t.Fatalf("saved markdown lost Obsidian embeds:\n%s", saved)
+	}
+
+	// Relocating the note to another Space must bring its Space-resolved Obsidian attachments along.
+	dst := a.state.Add("Archive", t.TempDir())
+	moved, _, err := a.moveWithResources(src, "notes/2026/ielts.md", dst, "")
+	if err != nil {
+		t.Fatalf("moveWithResources failed: %v", err)
+	}
+	movedText, err := readFile(dst, moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movedDoc := openDocument(dst, moved, movedText, false)
+	for _, leaf := range movedDoc.ed.Doc.Leaves() {
+		if leaf.Block.Kind == "image" && movedDoc.loadImage(leaf.Block.URL) == nil {
+			t.Fatalf("moved Obsidian image %q failed to load in destination space", leaf.Block.URL)
+		}
+	}
+
+	// External files must NEVER scan parent or sibling folders for bare Obsidian names.
+	extDir := t.TempDir()
+	if err := vault.Write(extDir, "attachments/secret.png", pngData); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(extDir, "outside.md", "![[secret.png]]\n"); err != nil {
+		t.Fatal(err)
+	}
+	extFile := filepath.Join(extDir, "outside.md")
+	if !a.openSystemFile(extFile) {
+		t.Fatal("failed to open external markdown")
+	}
+	if a.doc.loadImage("secret.png") != nil {
+		t.Fatal("external space scanned sibling folders for bare image filename")
+	}
+}

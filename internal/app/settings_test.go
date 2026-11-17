@@ -32,7 +32,7 @@ func TestMoreMenuAndSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("命令栏") || !tt.HasText("⇧⌘H") || !tt.HasText("⌘[") {
+	if !tt.HasText("命令栏") || !tt.HasText(a.keyLabel("replace")) || !tt.HasText(a.keyLabel("back")) {
 		t.Errorf("shortcuts tab: %q", tt.Texts())
 	}
 	if err := tt.Click("空间"); err != nil {

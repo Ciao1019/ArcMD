@@ -112,9 +112,22 @@ func (c Combo) String() string {
 // Label writes the combo as menus show it: "⇧⌘K" on macOS, "Ctrl+Shift+K"
 // elsewhere.
 func (c Combo) Label() string {
+	return c.label(runtime.GOOS == "darwin")
+}
+
+func (c Combo) label(darwin bool) string {
 	key := keyNames[c.Key]
-	if runtime.GOOS != "darwin" {
-		return c.String()
+	if !darwin {
+		var parts []string
+		for _, m := range []struct {
+			mod  ui.Modifiers
+			name string
+		}{{ui.Ctrl, "Ctrl"}, {ui.Alt, "Alt"}, {ui.Shift, "Shift"}, {ui.Super, "Super"}} {
+			if c.Mods&m.mod != 0 {
+				parts = append(parts, m.name)
+			}
+		}
+		return strings.Join(append(parts, key), "+")
 	}
 	if s, ok := keySymbols[c.Key]; ok {
 		s = i18n.T(s)

@@ -66,7 +66,7 @@ func (s Secrets) Delete(key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(file); !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(file); err != nil && !fsutil.IsMissingFile(file, err) {
 		return err
 	}
 	return nil

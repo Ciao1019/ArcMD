@@ -99,6 +99,9 @@ jobs:
       - name: Test case-sensitive file operations
         if: matrix.target == 'linux-amd64'
         run: go test ./internal/vault
+      - name: Test Windows platform behavior
+        if: matrix.target == 'windows-amd64'
+        run: go test ./...
       - name: Build and collect packages
         env:
           TARGET_PLATFORM: ${{ matrix.platform }}

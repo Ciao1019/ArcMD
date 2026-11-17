@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,13 @@ func TestResolve(t *testing.T) {
 	got, err := Resolve(root, "a/./b.md")
 	if err != nil || got != filepath.Join(root, "a", "b.md") {
 		t.Errorf("Resolve(a/./b.md) = %q, %v", got, err)
+	}
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(filepath.Join(blocker, "space"), "Welcome.md"); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Read through file ancestor = %v, want non-ErrNotExist error", err)
 	}
 }
 
