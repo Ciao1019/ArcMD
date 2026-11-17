@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,6 +55,46 @@ func TestMathSnapshot(t *testing.T) {
 			}
 			tt.Frame()
 			savePNG(t, filepath.Join(dir, "math-"+name+".png"), tt)
+		})
+	}
+}
+
+func TestBoldsymbolSnapshot(t *testing.T) {
+	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render bold matrix formulas")
+	source, err := os.ReadFile("../editor/testdata/normal-distribution.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"reading", "reading-dark", "editing", "narrow"} {
+		t.Run(name, func(t *testing.T) {
+			a, tt := newTestApp(t)
+			tt.SetSize(1380, 820)
+			if err := vault.Write(root(a), "Normal.md", string(source)); err != nil {
+				t.Fatal(err)
+			}
+			a.refreshTree()
+			a.open("Normal.md")
+			if name == "reading-dark" {
+				tt.SetDark(true)
+			}
+			if name == "narrow" {
+				tt.SetSize(620, 820)
+			}
+			if name == "editing" {
+				focusDocument(a, tt)
+				for _, leaf := range a.doc.ed.Doc.Leaves() {
+					if leaf.Block.Kind == "math" {
+						a.doc.ed.SetSelection(leaf.End, leaf.End)
+						break
+					}
+				}
+			}
+			for range 3 {
+				tt.Frame()
+				tt.Advance(200 * time.Millisecond)
+			}
+			tt.Frame()
+			savePNG(t, filepath.Join(dir, "boldsymbol-"+name+".png"), tt)
 		})
 	}
 }

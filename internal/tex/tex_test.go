@@ -8,7 +8,7 @@ import (
 
 // fixed measures every rune half its size wide, reaching 0.8 of it up and
 // 0.2 down, as a monospace font would.
-func fixed(s string, size float32, italic bool) (float32, float32, float32) {
+func fixed(s string, size float32, italic, bold bool) (float32, float32, float32) {
 	return float32(utf8.RuneCountInString(s)) * size * 0.5, size * 0.8, size * 0.2
 }
 
