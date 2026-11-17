@@ -9,6 +9,20 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/document"
 )
 
+func isSafeLangClass(lang string) bool {
+	lang = strings.TrimSpace(lang)
+	if lang == "" {
+		return false
+	}
+	for i := 0; i < len(lang); i++ {
+		c := lang[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '+' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func safeHTMLURL(s string) bool {
 	u, err := url.Parse(strings.TrimSpace(s))
 	if err != nil {
@@ -71,7 +85,11 @@ func ExportHTML(doc *document.Document) string {
 				i--
 				continue
 			case "code":
-				out.WriteString("<pre><code>" + html.EscapeString(b.Text()) + "</code></pre>")
+				classAttr := ""
+				if isSafeLangClass(b.Language) {
+					classAttr = ` class="language-` + html.EscapeString(strings.ToLower(strings.TrimSpace(b.Language))) + `"`
+				}
+				out.WriteString("<pre><code" + classAttr + ">" + html.EscapeString(b.Text()) + "</code></pre>")
 				continue
 			case "toggle":
 				var inner []*document.Block

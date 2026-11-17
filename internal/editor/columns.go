@@ -133,7 +133,7 @@ func (e *Editor) hoveredResizer() *columnHandle {
 	}
 	px, py := e.pointer.X, e.pointer.Y
 	for i := range e.resizers {
-		r := &e.resizers[i]
+		r := e.indexedResizer(i)
 		if math.Abs(float64(px-r.x)) < 5 && py >= r.y && py <= r.y+r.h {
 			return r
 		}
@@ -148,7 +148,7 @@ func (e *Editor) paintColumnsResizers(p *ui.Painter, bounds ui.Rect) {
 		return
 	}
 	for i := range e.resizers {
-		res := &e.resizers[i]
+		res := e.indexedResizer(i)
 		if res.y+res.h < e.Scroll.Y-40 || res.y > e.Scroll.Y+e.viewport+40 {
 			continue
 		}

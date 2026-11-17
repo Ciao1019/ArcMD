@@ -2,6 +2,8 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -266,4 +269,46 @@ func TestLarge200kDocumentEditingFooterDeferralAndAsyncSave(t *testing.T) {
 			d.saving, d.dirty(), d.changed(), derr, dig == d.baseline, d.saveErr, d.conflict, d.missing)
 	}
 	runtime.KeepAlive(tt)
+}
+
+func TestColdOpenDefersBaselineHashingUntilFirstEditOrSave(t *testing.T) {
+	doc := model.New()
+	doc.Blocks = make([]*model.Block, 0, 1200)
+	for i := 0; i < 1200; i++ {
+		doc.Blocks = append(doc.Blocks, model.NewBlock("paragraph", "Cold open paragraph line for lazy baseline verification."))
+	}
+	raw, err := doc.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	sp := &space.Space{ID: "cold", Name: "Cold", Root: dir}
+	if err := os.WriteFile(filepath.Join(dir, "long.arcmd"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d := openDocument(sp, "long.arcmd", raw, false)
+	if !d.baselinePending || d.dirty() || d.changed() {
+		t.Fatalf("expected lazy pending clean baseline on open: pending=%v dirty=%v changed=%v", d.baselinePending, d.dirty(), d.changed())
+	}
+	if err := d.save(); err != nil {
+		t.Fatalf("save on clean cold doc failed: %v", err)
+	}
+	if d.ed.Engine.OnBeforeChange == nil {
+		t.Fatal("expected OnBeforeChange hook registered while baseline is pending")
+	}
+
+	// First edit computes pre-change baseline automatically before mutating Doc.
+	d.ed.SetSelection(0, 0)
+	d.ed.ReplaceText(nil, "Edited ")
+	if d.baselinePending {
+		t.Fatal("expected first edit to materialize baseline")
+	}
+	if !d.dirty() || !d.changed() {
+		t.Fatalf("expected doc dirty after edit: dirty=%v changed=%v", d.dirty(), d.changed())
+	}
+	d.ed.Undo()
+	if d.dirty() || d.changed() {
+		t.Fatalf("expected undo back to lazy-materialized pre-edit baseline to clear dirty")
+	}
 }

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0
+
+This release upgrades PDF export to a pure-Go vector pipeline with hierarchical outlines and clickable links, adds native Mermaid diagram rendering and `\boldsymbol` bold math fonts, speeds up large-document editing and command-bar discovery with Pinyin/multi-keyword search and persistent caching, and introduces named version milestones with grapheme-level inline diffs.
+
+### Vector PDF export and native Mermaid diagrams
+
+- **Pure-Go vector PDF export (`internal/pdf`, `internal/editor/vectorpdf.go`)**: Export selectable, searchable PDFs directly as scalable vector paths, rectangles, and embedded Type 3 glyph subsets from KaTeX math (regular, bold, italic, and bold-italic) and system fonts with `/ToUnicode` mappings—eliminating full-page raster JPEG streams while embedding opaque images cleanly. Exported PDFs include hierarchical `/Outlines` bookmarks generated from document headings and clickable `/Link` annotations for external URLs and internal `#heading` anchors.
+- **Native Mermaid diagrams (`internal/mermaid`, `internal/editor/mermaid.go`)**: Render `flowchart` / `graph` (layered layout, subgraphs, 11 node shapes, solid/dashed/thick labeled edges) and `sequenceDiagram` (participants, actors, sync/async arrows, activations, notes, and `alt`/`opt`/`loop`/`par` fragments) directly in Go with light/dark theme tokens—no JavaScript or webview. Focusing a Mermaid block opens an editing card with live diagram preview above a monospace source editor (`↵↵` or `Tab` exits below); diagrams insert from `/` or the command bar and export into both standalone HTML and vector PDFs.
+
+### Search, code blocks, math, and version history
+
+- **Mandarin Pinyin, multi-keyword search, and persistent index cache (`internal/pinyin`, `internal/fuzzy`, `internal/search`)**: Match Chinese document titles and Space/folder hints by full Pinyin or initials (e.g. `zb` or `zhoubao`), combine whitespace-separated tokens across titles and full-text search, jump directly to matched fallback terms in the editor, and persist an atomic `0600` disk index snapshot (`search-cache.bin`) for instant startup search.
+- **Stateful incremental syntax highlighting and code soft-wrap toggle (`internal/editor/highlight.go`, `internal/editor/codewrap.go`)**: Upgrade code blocks to a line-cached stateful lexer supporting 17 languages (Go, Rust, C/C++/Java, JS/TS, Python, Ruby, PHP, Shell, JSON/JSONC, YAML, TOML, SQL, HTML, CSS, Markdown, and Mermaid), live ```` ```lang ```` fence conversion on Enter, a **Settings › General** default wrap preference (`codeNoWrap`), and per-block wrap toggles with horizontal scrolling.
+- **Native `\boldsymbol` math rendering (`internal/tex`, `internal/editor/math.go`)**: Parse and render `\boldsymbol{...}` across display math, inline math, bookmark previews, and vector PDF export using embedded unmodified `KaTeX_Main-Bold.ttf` and `KaTeX_Math-BoldItalic.ttf` faces (`9b2280d`), carrying scoped bold styling and glyph cache keys while preserving operator spacing, limits, and integral upper-hook clearance ([#4](https://github.com/Ciao1019/ArcMD/pull/4), thanks to `@Raspercival`).
+- **Version milestones, grapheme-level inline diffs, and Fenwick virtualization (`internal/history`, `internal/app/versions.go`, `internal/editor/fenwick.go`)**: Save, rename, and filter protected named milestones in `.arcmd/history` (`labels.json`), highlight exact intra-line character and word edits with Unicode grapheme-aware LCS diffing, and index virtualized row heights with an `O(log N)` Fenwick tree for large documents.
+
+### Documentation
+
+- Update `README.md`, `README.en.md`, `AGENTS.md`, and `third_party/README.md` for version 0.3.0, vector PDF export, native Mermaid diagrams, `\boldsymbol`, Pinyin/cached search, and version milestones.
+
+### Data compatibility
+
+Document (`.md` and legacy `.arcmd` format **8**) and Space configuration (`spaces.json` format **9**) formats are unchanged from 0.2.0. Preferences (`prefs.json` v1) add an optional `codeNoWrap` boolean; document history adds an optional `.arcmd/history/<doc>/labels.json` milestone map; and the configuration directory stores an optional regenerable `search-cache.bin` snapshot.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates. The plugin marketplace and plugin execution runtimes remain unavailable.
+
 ## 0.2.0
 
 This release introduces **Space Q&A**—a built-in, read-only AI research agent that searches and reads a Space's notes directly without a vector database—alongside viewport-aware floating menus, smarter live Markdown and display-math input, and large-document virtualization.

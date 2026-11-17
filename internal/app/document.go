@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	neturl "net/url"
 	"os"
 	"path"
@@ -39,6 +42,7 @@ type document struct {
 	failedVersion    uint64
 	baseline         [32]byte
 	baselineSkeleton [32]byte
+	baselinePending  bool
 	// dirtyRev, dirtyKnown and dirtyNow remember dirty for a revision.
 	dirtyRev            uint64
 	dirtyVersion        uint64
@@ -100,8 +104,7 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 		doc = editor.ImportMarkdown(text)
 	}
 	d.ed = editor.FromOwnedDocument(doc)
-	d.baseline, _ = d.ed.Doc.Digest()
-	d.rememberBaseline(d.ed.Doc)
+	d.initLazyBaseline()
 	if preferSource {
 		d.preview = editor.ExportMarkdown(d.ed.Doc)
 	}
@@ -115,8 +118,7 @@ func (d *document) text() string  { return editor.ExportMarkdown(d.ed.Committed(
 func (d *document) ensureBodyParagraph() {
 	if len(d.ed.Doc.Blocks) == 1 && d.ed.Doc.Blocks[0].Kind == "heading" {
 		d.ed.Doc.Blocks = append(d.ed.Doc.Blocks, model.NewBlock("paragraph", ""))
-		d.baseline, _ = d.ed.Doc.Digest()
-		d.rememberBaseline(d.ed.Doc)
+		d.initLazyBaseline()
 	}
 }
 
@@ -166,9 +168,16 @@ func (d *document) dirty() bool {
 }
 
 func (d *document) recomputeDirtySlow() {
+	if d.baselinePending && d.ed.Revision() == d.dirtyRev {
+		d.dirtyNow = false
+		d.skeletonDirty = false
+		d.textDirtyKnown = true
+		return
+	}
+	baseline := d.ensureBaseline()
 	committed := d.ed.Committed()
 	digest, err := committed.Digest()
-	d.dirtyNow = err != nil || digest != d.baseline
+	d.dirtyNow = err != nil || digest != baseline
 	clear(d.textDirty)
 	if !d.dirtyNow {
 		d.skeletonDirty = false
@@ -215,7 +224,7 @@ func (d *document) rebuildTextDirty(doc *model.Document) {
 
 func computeBaselineRuns(doc *model.Document, dst map[string][16]byte) map[string][16]byte {
 	if dst == nil {
-		dst = make(map[string][16]byte, len(doc.Blocks))
+		dst = make(map[string][16]byte, max(16, len(doc.Blocks)))
 	} else {
 		clear(dst)
 	}
@@ -242,11 +251,35 @@ func computeBaselineRuns(doc *model.Document, dst map[string][16]byte) map[strin
 
 // A run comparison is exact for a sequence of text-only edits. Structural
 // edits still take the full comparison; saving always verifies the whole model.
+func (d *document) initLazyBaseline() {
+	d.baselinePending = true
+	d.baseline = [32]byte{}
+	d.baselineSkeleton = [32]byte{}
+	clear(d.baselineRuns)
+	d.skeletonDirty = false
+	clear(d.textDirty)
+	d.textDirtyKnown = true
+	d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.ed.Revision(), true, false
+	d.dirtyVersion = d.ed.Version()
+	d.ed.Engine.OnBeforeChange = func() { d.ensureBaseline() }
+}
+
+func (d *document) ensureBaseline() [32]byte {
+	if d.baselinePending {
+		d.baselinePending = false
+		d.ed.Engine.OnBeforeChange = nil
+		d.baseline, _ = d.ed.Doc.Digest()
+		d.rememberBaseline(d.ed.Doc)
+	}
+	return d.baseline
+}
+
 func (d *document) rememberBaseline(doc *model.Document) {
 	d.applyBaselineState(computeBaselineRuns(doc, d.baselineRuns), doc.SkeletonDigest())
 }
 
 func (d *document) applyBaselineState(runs map[string][16]byte, skeleton [32]byte) {
+	d.baselinePending = false
 	d.baselineRuns = runs
 	d.baselineSkeleton = skeleton
 	d.skeletonDirty = false
@@ -260,6 +293,7 @@ type asyncSaveResult struct {
 	text             string
 	baseline         [32]byte
 	baselineSkeleton [32]byte
+	baselinePending  bool
 	baselineRuns     map[string][16]byte
 	committed        *model.Document
 	unchanged        bool
@@ -282,6 +316,9 @@ type cachedImage struct {
 
 // changed hashes the document and compares it with the saved baseline.
 func (d *document) changed() bool {
+	if d.baselinePending {
+		return false
+	}
 	digest, err := d.ed.Committed().Digest()
 	return err != nil || digest != d.baseline
 }
@@ -483,11 +520,16 @@ func (d *document) write(force bool) error {
 			return errMissing
 		}
 	}
+	if !force && d.baselinePending {
+		d.saveErr = nil
+		return nil
+	}
+	prevBaseline := d.ensureBaseline()
 	// Fingerprint the committed model without full JSON serialization on clean
 	// checks; only .arcmd saves serialize JSON.
 	committed := d.ed.Committed()
 	baseline, digErr := committed.Digest()
-	changed := digErr != nil || baseline != d.baseline
+	changed := digErr != nil || baseline != prevBaseline
 	if !changed && !force {
 		d.saveErr = nil
 		return nil
@@ -578,7 +620,7 @@ func (d *document) startAsyncAutosave(post func(func())) {
 	committed := d.ed.Committed()
 	snapshot := committed.Clone()
 	arcmd := strings.EqualFold(path.Ext(d.rel), ".arcmd")
-	prevBaseline := d.baseline
+	prevBaseline := d.ensureBaseline()
 
 	spClone := *d.space
 	if d.space.ExternalFiles != nil {
@@ -683,6 +725,23 @@ func (d *document) loadImage(url string) *ui.Bitmap {
 
 func (d *document) imageResource(url string) editor.ImageResource {
 	return d.imageResourceWith(url, nil)
+}
+
+func (d *document) rawImage(url string) image.Image {
+	full, err := d.localImage(url)
+	if err != nil {
+		return nil
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil
+	}
+	return img
 }
 
 func (d *document) imageResourceWith(url string, post func(func())) editor.ImageResource {

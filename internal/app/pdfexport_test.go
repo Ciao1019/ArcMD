@@ -60,8 +60,12 @@ func TestPDFTextLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "/ToUnicode") || !strings.Contains(string(data), "3 Tr") {
-		t.Fatal("no Unicode text layer")
+	s := string(data)
+	if !strings.Contains(s, "/ToUnicode") || !strings.Contains(s, "/Subtype /Type3") || !strings.Contains(s, "/Filter /FlateDecode") {
+		t.Fatal("expected vector Type 3 Unicode text and Flate stream")
+	}
+	if strings.Contains(s, "/DCTDecode") {
+		t.Fatal("unexpected raster JPEG page stream in vector PDF export")
 	}
 	if dir := os.Getenv("ARCMD_PDF_REVIEW"); dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -70,6 +74,49 @@ func TestPDFTextLayer(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "searchable.pdf"), data, 0600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestVectorPDFOutlinesLinksMathAndMermaid(t *testing.T) {
+	a, tt := newTestApp(t)
+	md := `# 架构总览
+
+参考 [外部链接](https://example.com/spec) 以及 [跳到核心流程](#核心流程)。
+
+## 核心流程
+
+| 模块 | 说明 |
+| --- | --- |
+| PDF | 纯 Go 矢量导出 |
+
+` + "```go\nfunc main() { println(\"ok\") }\n```\n\nInline bold symbol $\\boldsymbol{\\mu}$ in prose.\n\n$$\n\\boldsymbol{\\sum}_{i=1}^{n} \\boldsymbol{z}_i + z_i\n$$\n\n```mermaid\nflowchart LR\n  A[输入] --> B(排版)\n```\n"
+	if err := writeNative(root(a), "VectorSpec.arcmd", md); err != nil {
+		t.Fatal(err)
+	}
+	a.open("VectorSpec.arcmd")
+	a.exportPDF()
+	finishTestPDF(t, a, tt)
+
+	data, err := os.ReadFile(filepath.Join(root(a), "VectorSpec.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"/Outlines",
+		"/Subtype /Link",
+		"/URI (https://example.com/spec)",
+		"/Dest [",
+		"/Subtype /Type3",
+		"/ToUnicode",
+		"/Filter /FlateDecode",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("vector PDF missing %q", want)
+		}
+	}
+	if strings.Contains(s, "/DCTDecode") {
+		t.Fatal("unexpected raster JPEG stream in vector PDF without opaque photos")
 	}
 }
 

@@ -67,6 +67,7 @@ func (e *Engine) RelocateImages(urls map[string]string) {
 		}
 		return url
 	}
+	e.notifyBeforeChange()
 	e.Doc.MapImages(change)
 	for _, entries := range [][]historyEntry{e.undo, e.redo} {
 		for _, h := range entries {

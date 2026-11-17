@@ -6,7 +6,7 @@
 
 简体中文 · [English](README.en.md)
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.2.0-F21158" alt="版本 0.2.0"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.3.0-F21158" alt="版本 0.3.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="支持 macOS、Windows 与 Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="使用 Go 与 MyGo 原生开发"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI 工作流配置"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-zh-CN.svg" height="56" alt="下载 ArcMD Windows 版：x64 安装程序与 ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-zh-CN.svg" height="56" alt="下载 ArcMD Linux 版：x64 与 ARM64，DEB 与 TAR.GZ"></a>
 
-<sub>当前预览版本为 0.2.0，按钮会打开发布页；也可以直接<a href="#从源码运行">从源码运行</a>。</sub>
+<sub>当前预览版本为 0.3.0，按钮会打开发布页；也可以直接<a href="#从源码运行">从源码运行</a>。</sub>
 
 <br><br>
 
@@ -111,10 +111,10 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 
 | 领域 | 内置能力 |
 | --- | --- |
-| **丰富内容块** | H1–H6 标题、嵌套列表与任务、引用、五色可换图标高亮块、语法代码块、`<details>` 折叠块、脚注、上下标、`:sm` 表情与 `@` 日期/文档提及、可选中英文自动加空格。 |
+| **丰富内容块** | H1–H6 标题、嵌套列表与任务、引用、五色可换图标高亮块、17 种语言状态机增量高亮代码块（支持单块自动换行切换）、原生 Mermaid 流程图与时序图、`\boldsymbol` 粗体数学公式、`<details>` 折叠块、脚注、上下标、`:sm` 表情与 `@` 日期/文档提及、可选中英文自动加空格。 |
 | **表格、双栏与媒体** | CSV/TSV 粘贴建表、行列拖拽换位、跨格合并拆分、16 色底色、按列自然排序；可调比例双栏布局；图片无损裁剪（保留原图）与页面内 GIF 播放；框选多块批量操作与目录拖拽移动整章。 |
-| **分屏、命令栏与模板** | 最多四分屏并排或拆分为独立原生窗口；零阻塞 <kbd>⌘K</kbd> 命令栏（全文检索、<kbd>⇧⌘R</kbd> 跨文档替换与一键撤销）；空间模板（`{{date}}` / `{{time}}` / `{{weekday}}` / `{{title}}`）与 <kbd>⌥⌘T</kbd> 今日笔记。 |
-| **双链、专注与守护** | `[[双链]]` 跨空间补全、反向链接聚合与改名自动同步，`#标签` 全局整理；<kbd>⇧⌘F</kbd> 专注模式、段落余晖淡化、打字机滚动、字数目标与分屏只读锁；<kbd>⇧⌘M</kbd> 同步位置 Markdown 预览、带可选文字层 PDF / 独立 HTML 导出；`.arcmd/history` 按行差异恢复与外部修改冲突保护。 |
+| **分屏、命令栏与模板** | 最多四分屏并排或拆分为独立原生窗口；零阻塞 <kbd>⌘K</kbd> 命令栏（拼音/首字母与多关键词全文检索、持久化磁盘缓存、<kbd>⇧⌘R</kbd> 跨文档替换与一键撤销）；空间模板（`{{date}}` / `{{time}}` / `{{weekday}}` / `{{title}}`）与 <kbd>⌥⌘T</kbd> 今日笔记。 |
+| **双链、专注与守护** | `[[双链]]` 跨空间补全、反向链接聚合与改名自动同步，`#标签` 全局整理；<kbd>⇧⌘F</kbd> 专注模式、段落余晖淡化、打字机滚动、字数目标与分屏只读锁；<kbd>⇧⌘M</kbd> 同步位置 Markdown 预览、纯 Go 矢量 PDF（Type 3 字形、目录书签与可点击链接） / 独立 HTML 导出；`.arcmd/history` 命名里程碑、字素级行内差异恢复与外部修改冲突保护。 |
 | **空间问答 Agent** | <kbd>⌘J</kbd> 打开只读空间问答面板：不建向量索引，Agent 通过搜索、大纲、双链与按行阅读工具探索当前空间（含未保存草稿与外部空间文件），流式回答附内联来源胶囊、悬停论断高亮与滑移原文预览卡，点击直达对应内容块；支持 OpenAI / DeepSeek / OpenRouter / 本地 Ollama 等 Chat Completions 服务与终端 `arcmd ask`。 |
 
 **轻量核心，按需扩展**：核心内置只读的空间问答 Agent，而 AI 写作改写、翻译与同步能力规划通过可选插件提供（插件也可为问答 Agent 扩展工具），让编辑器核心始终纯粹轻快。插件清单、校验安装器与宿主接口已就位，沙箱运行时与市场正在建设中，详见[插件规范与路线图（英文）](docs/plugins.md)。
@@ -133,7 +133,7 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 | <kbd>⇧⌘M</kbd> | 富文本 ⇄ Markdown 预览（同步位置） | <kbd>⇧⌘F</kbd> | 进入 / 退出专注模式 |
 | <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | 页内查找替换 / 跨文档查找替换 | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | 添加移除书签 / 全部书签列表 |
 | <kbd>⌥⌘T</kbd> | 打开或创建今日笔记 | <kbd>⌥⌘Y</kbd> | 查看版本历史与差异恢复 |
-| <kbd>⌘J</kbd> | 向当前空间提问（空间问答） | <kbd>⇧⌘E</kbd> | 导出带可选文字层的 PDF |
+| <kbd>⌘J</kbd> | 向当前空间提问（空间问答） | <kbd>⇧⌘E</kbd> | 导出矢量 PDF（含书签与链接） |
 
 ---
 
@@ -219,6 +219,20 @@ ARCMD_SNAPSHOT=/tmp/arcmd-shots CGO_ENABLED=0 go test -run Snapshot ./internal/a
 如果 ArcMD 对你有帮助，欢迎在右上角点亮一颗 **⭐ Star**！
 
 <a href="https://github.com/Ciao1019/ArcMD/stargazers"><img src="docs/images/readme/star.gif" width="600" alt="点击 GitHub 上的 Star 按钮为 ArcMD 点亮星标"></a>
+
+</div>
+
+## Star 历史
+
+<div align="center">
+
+<a href="https://www.star-history.com/?repos=ciao1019%2Farcmd&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ciao1019/arcmd&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ciao1019/arcmd&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ciao1019/arcmd&type=date&legend=top-left" />
+ </picture>
+</a>
 
 </div>
 

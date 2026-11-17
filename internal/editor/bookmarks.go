@@ -167,10 +167,11 @@ func (e *Editor) ActiveOrTopBlockID() string {
 			}
 		}
 	}
-	for j, h := range e.handles {
+	for j := range e.handles {
+		h := *e.indexedHandle(j)
 		bottom := e.contentEnd
 		if j+1 < len(e.handles) {
-			bottom = e.handles[j+1].top
+			bottom = e.indexedHandle(j + 1).top
 		}
 		if bottom >= viewY+16 {
 			return h.id
@@ -188,32 +189,29 @@ func (e *Editor) revealPending(c *ui.Context) {
 	}
 	id, quiet := b.reveal, b.quiet
 	b.reveal, b.quiet = "", false
-	for _, h := range e.handles {
-		if h.id == id {
-			if quiet {
-				e.scrollGlide = scrollGlideState{}
-				e.Scroll.Y = max(0, h.top-48)
-				c.After(0)
-				return
-			}
-			e.jumpTo(c, id, h.top)
-			b.flash, b.flashAt = id, c.Now()
+	if hi, ok := e.handleIDs[id]; ok {
+		h := *e.indexedHandle(hi)
+		if quiet {
+			e.scrollGlide = scrollGlideState{}
+			e.Scroll.Y = max(0, h.top-48)
 			c.After(0)
 			return
 		}
+		e.jumpTo(c, id, h.top)
+		b.flash, b.flashAt = id, c.Now()
+		c.After(0)
+		return
 	}
 }
 
 // blockSpan is the band of the page a top-level block takes, from its top
 // to the next block's.
 func (e *Editor) blockSpan(id string) (ui.Rect, bool) {
-	for j, h := range e.handles {
-		if h.id != id {
-			continue
-		}
+	if j, ok := e.handleIDs[id]; ok {
+		h := *e.indexedHandle(j)
 		bottom := e.contentEnd
 		if j+1 < len(e.handles) {
-			bottom = e.handles[j+1].top
+			bottom = e.indexedHandle(j + 1).top
 		}
 		return ui.Rect{X: e.padding - 8, Y: h.top - 4, W: e.width - 2*e.padding + 16, H: bottom - h.top}, true
 	}
@@ -278,7 +276,8 @@ func (e *Editor) bookmarkMarks(c *ui.Context) {
 	winTop := e.Scroll.Y - 1200
 	winBottom := e.Scroll.Y + max(e.viewport, 900) + 64
 	hs, he := e.visibleHandleRange(winTop, winBottom)
-	for _, h := range e.handles[hs:he] {
+	for hi := hs; hi < he; hi++ {
+		h := *e.indexedHandle(hi)
 		_, marked := b.marks[h.id]
 		// The hollow mark stays while the pointer is on it, though the
 		// pointer has left the block for the margin.

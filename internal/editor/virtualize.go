@@ -3,7 +3,6 @@ package editor
 import (
 	"math"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -80,14 +79,6 @@ type blockMetric struct {
 	shapeWidth float32
 }
 
-type rowShift struct {
-	oldTop    float32
-	oldBottom float32
-	dy        float32
-	cumAfter  float32
-	id        string
-}
-
 func (e *Editor) shouldVirtualize() bool {
 	if e.printing {
 		return false
@@ -111,10 +102,242 @@ func (e *Editor) nextCacheClock() uint64 {
 
 func canDeferKind(kind string) bool {
 	switch kind {
-	case "image", "math", "rule", "table", "columns", "cell":
+	case "image", "rule", "columns", "cell":
 		return false
 	}
 	return true
+}
+
+func tableStamp(b *document.Block) runsStamp {
+	lo := uint64(14695981039346656037)
+	hi := uint64(0x9e3779b97f4a7c15) ^ uint64(len(b.Children))
+	lo = fnvMixUint64(lo, uint64(len(b.Widths)))
+	for _, w := range b.Widths {
+		lo = fnvMixUint32(lo, math.Float32bits(w))
+	}
+	for ri, tr := range b.Children {
+		hi = fnvMixUint64(hi, uint64(ri+1)<<8|uint64(len(tr.Children)))
+		for _, cell := range tr.Children {
+			st := makeRunsStamp(cell.Runs)
+			lo = fnvMixUint64(lo, st.lo^uint64(cell.ColSpan)<<16^uint64(cell.RowSpan))
+			hi = fnvMixUint64(hi, st.hi)
+		}
+	}
+	return runsStamp{lo: lo, hi: hi}
+}
+
+func (e *Editor) recordTableHeight(b *document.Block, width float32, cols int, stamp runsStamp, innerH float32) {
+	if e.heightHints == nil {
+		e.heightHints = make(map[string]heightHint, 64)
+	}
+	meta := uint64(len(b.Children))<<16 | uint64(cols)
+	e.heightHints[b.ID] = heightHint{
+		width:    width,
+		height:   innerH,
+		fontHash: meta,
+		stamp:    stamp,
+		exact:    true,
+	}
+}
+
+func (e *Editor) estimateTableInnerHeight(b *document.Block, w float32, widths []float32, cols int, stamp runsStamp) float32 {
+	nrows := len(b.Children)
+	meta := uint64(nrows)<<16 | uint64(cols)
+	if e.heightHints != nil {
+		if hint, ok := e.heightHints[b.ID]; ok && hint.width == w && hint.fontHash == meta && hint.stamp == stamp {
+			return max(42, hint.height)
+		}
+	}
+	total := float32(0)
+	for _, tr := range b.Children {
+		rh := float32(42)
+		for ci, cell := range tr.Children {
+			if ci < len(widths) {
+				cw := max(24, widths[ci]-28)
+				lines := 1
+				cur := float32(0)
+				for _, run := range cell.Runs {
+					for _, r := range run.Text {
+						if r == '\n' {
+							lines++
+							cur = 0
+							continue
+						}
+						adv := float32(7.5)
+						if r >= 0x1100 {
+							adv = 14
+						}
+						if cur+adv > cw && cur > 0 {
+							lines++
+							cur = adv
+						} else {
+							cur += adv
+						}
+					}
+				}
+				rh = max(rh, float32(lines)*22+4)
+			}
+		}
+		total += rh
+	}
+	if e.heightHints == nil {
+		e.heightHints = make(map[string]heightHint, 64)
+	}
+	e.heightHints[b.ID] = heightHint{
+		width:    w,
+		height:   total,
+		fontHash: meta,
+		stamp:    stamp,
+		exact:    false,
+	}
+	return total
+}
+
+func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, winTop, winBottom float32, leafOf func(string) document.Leaf, cellTop *float32, header *bool, blockLayout func(*document.Block, float32, float32, float32) float32) float32 {
+	start := y
+	y += 22
+	top := y
+	cols := len(b.Children[0].Children)
+	widths := make([]float32, cols)
+	sum := float32(cols)
+	if len(b.Widths) == cols {
+		sum = 0
+		for _, v := range b.Widths {
+			sum += v
+		}
+	}
+	for i := range widths {
+		value := float32(1)
+		if len(b.Widths) == cols {
+			value = b.Widths[i]
+		}
+		widths[i] = w * value / sum
+	}
+	colEdges := []float32{x}
+	for _, cw := range widths {
+		colEdges = append(colEdges, colEdges[len(colEdges)-1]+cw)
+	}
+	covered := document.CoveredCells(b)
+	nrows := len(b.Children)
+
+	var tStamp runsStamp
+	if canDefer || e.shouldVirtualize() {
+		tStamp = tableStamp(b)
+	}
+	if canDefer {
+		estInner := e.estimateTableInnerHeight(b, w, widths, cols, tStamp)
+		estTotal := estInner + 44
+		if start+estTotal < winTop || start > winBottom {
+			rowH := estInner / float32(max(1, nrows))
+			rowEdges := make([]float32, nrows+1)
+			ry := top
+			rowEdges[0] = ry
+			for ri := 0; ri < nrows; ri++ {
+				ry += rowH
+				rowEdges[ri+1] = ry
+			}
+			table := ui.Rect{X: x, Y: top, W: w, H: estInner}
+			var cells []decoration
+			for ri, tr := range b.Children {
+				for ci, cell := range tr.Children {
+					if covered[cell] {
+						continue
+					}
+					spanCols, spanRows := document.Span(cell)
+					spanCols, spanRows = min(spanCols, cols-ci), min(spanRows, nrows-ri)
+					rect := ui.Rect{X: colEdges[ci], Y: rowEdges[ri], W: colEdges[ci+spanCols] - colEdges[ci], H: rowEdges[ri+spanRows] - rowEdges[ri]}
+					e.rows = append(e.rows, row{
+						leafRevision: e.Revision(),
+						leaf:         leafOf(cell.ID),
+						rect:         rect,
+						x:            colEdges[ci] + 14,
+						y:            rect.Y + 7,
+						size:         14,
+						tableHeader:  ri == 0,
+					})
+					cells = append(cells, decoration{kind: "cell", rect: rect, table: table, header: ri == 0, right: ci+spanCols < cols, below: ri+spanRows < nrows, tone: cell.Background, id: cell.ID, ownerID: b.ID, rowIdx: ri, colIdx: ci})
+				}
+			}
+			e.decorations = append(e.decorations, cells...)
+			e.decorations = append(e.decorations, decoration{kind: "table", rect: table, id: b.ID, ownerID: b.ID, cols: colEdges, rows: rowEdges})
+			cx := x
+			for col := 0; col < cols-1; col++ {
+				cx += widths[col]
+				e.resizers = append(e.resizers, columnHandle{id: b.ID, col: col, x: cx, y: top, h: estInner, width: w, widths: widths})
+			}
+			return estTotal
+		}
+	}
+
+	var cells []decoration
+	type placed struct {
+		index, r, c, rows, cols int
+		h                       float32
+		cell                    *document.Block
+	}
+	var spots []placed
+	heights := make([]float32, nrows)
+	rowTop := top
+	for ri, tr := range b.Children {
+		heights[ri] = 42
+		*header = ri == 0
+		*cellTop = rowTop
+		for ci, cell := range tr.Children {
+			if covered[cell] {
+				continue
+			}
+			spanCols, spanRows := document.Span(cell)
+			spanCols, spanRows = min(spanCols, cols-ci), min(spanRows, nrows-ri)
+			cw := colEdges[ci+spanCols] - colEdges[ci]
+			index := len(e.rows)
+			h := blockLayout(cell, colEdges[ci]+14, 0, max(24, cw-28)) + 4
+			spots = append(spots, placed{index, ri, ci, spanRows, spanCols, h, cell})
+			if spanRows == 1 {
+				heights[ri] = max(heights[ri], h)
+			}
+		}
+		*header = false
+		rowTop += heights[ri]
+	}
+	*cellTop = 0
+	for _, sp := range spots {
+		if sp.rows > 1 {
+			sum := float32(0)
+			for _, h := range heights[sp.r : sp.r+sp.rows] {
+				sum += h
+			}
+			if sum < sp.h {
+				heights[sp.r+sp.rows-1] += sp.h - sum
+			}
+		}
+	}
+	rowEdges := []float32{y}
+	for _, h := range heights {
+		y += h
+		rowEdges = append(rowEdges, y)
+	}
+	for _, sp := range spots {
+		rect := ui.Rect{X: colEdges[sp.c], Y: rowEdges[sp.r], W: colEdges[sp.c+sp.cols] - colEdges[sp.c], H: rowEdges[sp.r+sp.rows] - rowEdges[sp.r]}
+		r := &e.rows[sp.index]
+		r.y += rect.Y + 7
+		r.rect = rect
+		cells = append(cells, decoration{kind: "cell", rect: rect, header: sp.r == 0, right: sp.c+sp.cols < cols, below: sp.r+sp.rows < nrows, tone: sp.cell.Background, id: sp.cell.ID, ownerID: b.ID, rowIdx: sp.r, colIdx: sp.c})
+	}
+	table := ui.Rect{X: x, Y: top, W: w, H: y - top}
+	for _, d := range cells {
+		d.table = table
+		e.decorations = append(e.decorations, d)
+	}
+	e.decorations = append(e.decorations, decoration{kind: "table", rect: table, id: b.ID, ownerID: b.ID, cols: colEdges, rows: rowEdges})
+	cx := x
+	for col := 0; col < cols-1; col++ {
+		cx += widths[col]
+		e.resizers = append(e.resizers, columnHandle{id: b.ID, col: col, x: cx, y: top, h: y - top, width: w, widths: widths})
+	}
+	if e.shouldVirtualize() {
+		e.recordTableHeight(b, w, cols, tStamp, y-top)
+	}
+	return y - start + 22
 }
 
 func (e *Editor) blockMetrics(b *document.Block, w float32, header bool) blockMetric {
@@ -181,12 +404,25 @@ func (e *Editor) blockShapeKey(b *document.Block, font ui.Font, header bool) sha
 	if strings.HasPrefix(e.inlineEditing, b.ID+":") {
 		revealed = e.inlineEditing
 	}
-	return shapeStyle{font, b.Align, b.Kind, revealed, e.noteKey(), b.Checked, header}
+	lang := ""
+	if b.Kind == "code" {
+		lang = b.Language
+	}
+	return shapeStyle{font: font, align: b.Align, kind: b.Kind, language: lang, revealed: revealed, notes: e.noteKey(), checked: b.Checked, header: header, noWrap: e.isCodeNoWrap(b)}
 }
 
-func (e *Editor) shapeBlock(b *document.Block, key shapeStyle, shapeWidth float32, theme *ui.Theme) cachedShape {
+func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme *ui.Theme) []ui.Span {
 	pg := e.page
-	font := key.font
+	if b.Kind == "code" {
+		if e.codeLex == nil {
+			e.codeLex = map[string]*codeLexCache{}
+		}
+		spans := codeSpansFor(b.ID, b.Language, b.Text(), pg, e.codeLex)
+		if len(spans) == 0 {
+			return []ui.Span{{Text: ""}}
+		}
+		return spans
+	}
 	var spans []ui.Span
 	for _, run := range b.Runs {
 		style := run.Style
@@ -215,7 +451,7 @@ func (e *Editor) shapeBlock(b *document.Block, key shapeStyle, shapeWidth float3
 			span.Background, span.Radius = c, 2
 		}
 		switch {
-		case key.header:
+		case header:
 			span.Weight = max(span.Weight, 500)
 		case b.Kind == "quote":
 			span.Color = pg.Caption
@@ -228,14 +464,18 @@ func (e *Editor) shapeBlock(b *document.Block, key shapeStyle, shapeWidth float3
 		}
 		spans = append(spans, span)
 	}
-	if b.Kind == "code" {
-		spans = codeSpans(b.Text(), pg)
-	} else if b.Kind != "math" && b.Kind != "raw" {
+	if b.Kind != "math" && b.Kind != "raw" {
 		spans = padAnnotations(spans, b.Runs, font.Size)
 	}
 	if len(spans) == 0 {
 		spans = []ui.Span{{Text: ""}}
 	}
+	return spans
+}
+
+func (e *Editor) shapeBlock(b *document.Block, key shapeStyle, shapeWidth float32, theme *ui.Theme) cachedShape {
+	font := key.font
+	spans := e.blockSpans(b, font, key.header, theme)
 	align := ui.Start
 	if b.Align == "center" {
 		align = ui.Center
@@ -246,11 +486,15 @@ func (e *Editor) shapeBlock(b *document.Block, key shapeStyle, shapeWidth float3
 	if b.Kind == "math" || b.Kind == "image" {
 		align = ui.Center
 	}
+	layoutWidth := shapeWidth
+	if key.noWrap {
+		layoutWidth = 0
+	}
 	return cachedShape{
 		key:      key,
 		runs:     slices.Clone(b.Runs),
 		width:    shapeWidth,
-		layout:   e.shapeInline(b, spans, font, ui.TextShape{Width: shapeWidth, Align: align}),
+		layout:   e.shapeInline(b, spans, font, ui.TextShape{Width: layoutWidth, Align: align}),
 		lastUsed: e.nextCacheClock(),
 	}
 }
@@ -277,11 +521,33 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 	stamp := makeRunsStamp(b.Runs)
 	if e.heightHints != nil {
 		if hint, ok := e.heightHints[b.ID]; ok && hint.width == shapeWidth && hint.fontHash == fHash && hint.stamp == stamp {
+			if b.Kind == "math" || isMermaidBlock(b) {
+				return max(hint.height, 40)
+			}
 			return max(hint.height, lineH)
 		}
 	}
+	if b.Kind == "math" {
+		est := float32(62 + 8)
+		if e.heightHints == nil {
+			e.heightHints = make(map[string]heightHint, 64)
+		}
+		e.heightHints[b.ID] = heightHint{width: shapeWidth, height: est, fontHash: fHash, stamp: stamp, exact: false}
+		return est
+	}
+	if isMermaidBlock(b) {
+		est := float32(180 + 8)
+		if e.heightHints == nil {
+			e.heightHints = make(map[string]heightHint, 64)
+		}
+		e.heightHints[b.ID] = heightHint{width: shapeWidth, height: est, fontHash: fHash, stamp: stamp, exact: false}
+		return est
+	}
+	noWrap := shapeWidth < 0
 	avail := shapeWidth
-	if font.Family != "monospace" {
+	if noWrap {
+		avail = -shapeWidth
+	} else if font.Family != "monospace" {
 		// Word-boundary wrapping breaks slightly earlier than glyph sums.
 		avail *= 0.94
 	}
@@ -302,6 +568,9 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 			if r == '\n' || r == '\u2028' {
 				lines++
 				curW = 0
+				continue
+			}
+			if noWrap {
 				continue
 			}
 			var adv float32
@@ -350,14 +619,22 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 	return est
 }
 
-func (e *Editor) activeBlockIDs() (caretID, anchorID, revealID string) {
-	caretID = e.Engine.LeafAt(e.Caret).Block.ID
+func (e *Editor) activeBlockOwners() (caretID, anchorID, revealID, caretOwner, anchorOwner, revealOwner string) {
+	cl := e.Engine.LeafAt(e.Caret)
+	caretID, caretOwner = cl.Block.ID, cl.Owner
 	if e.Anchor != e.Caret {
-		anchorID = e.Engine.LeafAt(e.Anchor).Block.ID
+		al := e.Engine.LeafAt(e.Anchor)
+		anchorID, anchorOwner = al.Block.ID, al.Owner
 	}
 	if e.revealAt != nil {
-		revealID = e.Engine.LeafAt(e.revealAt.Start).Block.ID
+		rl := e.Engine.LeafAt(e.revealAt.Start)
+		revealID, revealOwner = rl.Block.ID, rl.Owner
 	}
+	return caretID, anchorID, revealID, caretOwner, anchorOwner, revealOwner
+}
+
+func (e *Editor) activeBlockIDs() (caretID, anchorID, revealID string) {
+	caretID, anchorID, revealID, _, _, _ = e.activeBlockOwners()
 	return caretID, anchorID, revealID
 }
 
@@ -375,7 +652,7 @@ func (e *Editor) ensureRow(i int) *row {
 		return r
 	}
 	e.materializeRows([]int{i}, &e.cacheTheme)
-	return &e.rows[i]
+	return e.indexedRow(i)
 }
 
 // materializeViewport ensures every visible/overscan row is shaped and trims
@@ -407,7 +684,7 @@ func (e *Editor) ensureVisibleShaped(slack float32, theme *ui.Theme) {
 func (e *Editor) collectUnshapedRows(top, bottom float32, includeActive bool) []int {
 	var targets []int
 	for i := range e.rowSpace.between(top, bottom) {
-		if e.rows[i].layout == nil {
+		if e.indexedRow(i).layout == nil {
 			targets = append(targets, i)
 		}
 	}
@@ -417,7 +694,7 @@ func (e *Editor) collectUnshapedRows(top, bottom float32, includeActive bool) []
 			if id == "" {
 				continue
 			}
-			if idx, ok := e.rowIDs[id]; ok && e.rows[idx].layout == nil {
+			if idx, ok := e.rowIDs[id]; ok && e.indexedRow(idx).layout == nil {
 				targets = append(targets, idx)
 			}
 		}
@@ -429,8 +706,97 @@ func (e *Editor) collectUnshapedRows(top, bottom float32, includeActive bool) []
 	return targets
 }
 
-// materializeRows shapes ascending row indices in one linear geometry pass,
-// keeping the current reading anchor and smoothed block baselines aligned.
+func (e *Editor) syncMotionAfterShift(owner string, afterY, dy float32) {
+	if dy == 0 {
+		return
+	}
+	hi, hasHI := e.handleIDs[owner]
+	for id, bs := range e.motion.blocks {
+		if mhi, ok := e.handleIDs[id]; ok {
+			if (hasHI && mhi > hi) || (!hasHI && e.indexedHandle(mhi).top >= afterY) {
+				bs.laidY += dy
+				e.motion.blocks[id] = bs
+			}
+		}
+	}
+	for trID, slide := range e.motion.tableRows {
+		if slide.laidY >= afterY {
+			slide.laidY += dy
+			e.motion.tableRows[trID] = slide
+		}
+	}
+}
+
+func (e *Editor) materializeTable(rowIndex int, owner string, o Options) bool {
+	table := e.blockByID(owner)
+	if table == nil || table.Kind != "table" {
+		return false
+	}
+	di, found := e.decorationIDs[owner]
+	if !found {
+		return false
+	}
+	oldTable := *e.indexedDecoration(di)
+	if oldTable.kind != "table" {
+		return false
+	}
+	from, to := rowIndex, rowIndex+1
+	for from > 0 && e.indexedRow(from-1).leaf.Owner == owner {
+		from--
+	}
+	for to < len(e.rows) && e.indexedRow(to).leaf.Owner == owner {
+		to++
+	}
+	leaves := make(map[string]document.Leaf, to-from)
+	for k := from; k < to; k++ {
+		leaf, ok := e.Engine.LeafByID(e.indexedRow(k).leaf.Block.ID)
+		if !ok {
+			return false
+		}
+		leaves[leaf.Block.ID] = leaf
+	}
+	rows, decorations, resizers := e.rows, e.decorations, e.resizers
+	e.rows, e.decorations, e.resizers = nil, nil, nil
+	layout := e.blockLayouter(o, func(id string) document.Leaf { return leaves[id] }, nil, true)
+	start := oldTable.rect.Y - 22
+	height := layout(table, oldTable.rect.X, start, oldTable.rect.W)
+	updated, decorated, handles := e.rows, e.decorations, e.resizers
+	e.rows, e.decorations, e.resizers = rows, decorations, resizers
+	if len(updated) != to-from || len(decorated) == 0 {
+		return false
+	}
+	for k := range updated {
+		r := updated[k]
+		r.yApplied = e.rowYOff.query64(from + k)
+		e.rows[from+k] = r
+		e.rowSpace.update(from+k, r.rect)
+	}
+	decEnd := di + 1
+	decStart := decEnd - len(decorated)
+	for k := range decorated {
+		dc := decorated[k]
+		dc.yApplied = e.decYOff.query64(decStart + k)
+		e.decorations[decStart+k] = dc
+		e.decorationSpace.update(decStart+k, dc.rect)
+	}
+	next := 0
+	for j := range e.resizers {
+		if e.resizers[j].id == owner && next < len(handles) {
+			rs := handles[next]
+			rs.yApplied = e.resizerYOff.query64(j)
+			e.resizers[j] = rs
+			next++
+		}
+	}
+	oldTotal := oldTable.rect.H + 44
+	dy := height - oldTotal
+	e.shiftFollowing(to, start+oldTotal, dy, decStart, decEnd, owner, 0)
+	e.syncMotionAfterShift(owner, start+oldTotal, dy)
+	return true
+}
+
+// materializeRows shapes ascending row indices using O(log B) suffix Fenwick
+// shifts while preserving the current reading anchor and scroll glide target.
 func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 	if len(targets) == 0 || theme == nil {
 		return
@@ -439,152 +805,87 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 	if e.cache == nil {
 		e.cache = make(map[string]cachedShape)
 	}
-	firstRow := targets[0]
-	shifts := make([]rowShift, 0, len(targets))
-	caretAdjusted := make(map[string]float32, len(targets))
-	cum := float32(0)
-	ti := 0
-	minDec := len(e.decorations)
-	for j := firstRow; j < len(e.rows); j++ {
-		r := e.indexedRow(j)
+	o := e.layoutOptions()
+	o.Theme = theme
+	seenTables := make(map[string]bool)
+
+	for _, idx := range targets {
+		if idx < 0 || idx >= len(e.rows) {
+			continue
+		}
+		r := e.indexedRow(idx)
+		if r.layout != nil || r.leaf.Block == nil {
+			continue
+		}
+		b := r.leaf.Block
+		if b.Kind == "cell" && r.leaf.Owner != b.ID {
+			if seenTables[r.leaf.Owner] {
+				continue
+			}
+			seenTables[r.leaf.Owner] = true
+			e.materializeTable(idx, r.leaf.Owner, o)
+			continue
+		}
+
 		origY, origH := r.rect.Y, r.rect.H
-		if cum != 0 {
-			r.rect.Y += cum
-			r.y += cum
-			if f := r.picture; f != nil {
-				f.bounds.Y += cum
-				for k := range f.actions {
-					f.actions[k].bounds.Y += cum
-				}
-			}
+		m := e.blockMetrics(b, r.rect.W, r.tableHeader)
+		key := e.blockShapeKey(b, m.font, r.tableHeader)
+		cached, ok := e.cache[b.ID]
+		if !ok || cached.key != key || cached.width != m.shapeWidth || !slices.Equal(cached.runs, b.Runs) {
+			cached = e.shapeBlock(b, key, m.shapeWidth, theme)
+			e.cache[b.ID] = cached
+		} else {
+			cached.lastUsed = e.nextCacheClock()
+			e.cache[b.ID] = cached
 		}
-		if ti < len(targets) && j == targets[ti] {
-			ti++
-			b := r.leaf.Block
-			m := e.blockMetrics(b, r.rect.W, r.tableHeader)
-			key := e.blockShapeKey(b, m.font, r.tableHeader)
-			cached, ok := e.cache[b.ID]
-			if !ok || cached.key != key || cached.width != m.shapeWidth || !slices.Equal(cached.runs, b.Runs) {
-				cached = e.shapeBlock(b, key, m.shapeWidth, theme)
-				e.cache[b.ID] = cached
-			} else {
-				cached.lastUsed = e.nextCacheClock()
-				e.cache[b.ID] = cached
-			}
-			r.layout = cached.layout
-			_, h := cached.layout.Size()
-			h = max(h, m.font.Size*m.font.LineHeight)
-			if canDeferKind(b.Kind) {
-				e.recordExactHeight(b.ID, m.shapeWidth, h, m.font, b.Runs)
-			}
-			newH := m.top + h + m.bottom
-			dy := newH - origH
+		r.layout = cached.layout
+		_, h := cached.layout.Size()
+		h = max(h, m.font.Size*m.font.LineHeight)
+		newH := m.top + h + m.bottom
+		r.y = origY + m.top
+		r.rect.H = newH
+		if b.Kind == "math" {
+			newH = e.mathRow(r, h)
 			r.rect.H = newH
+		}
+		var wellOff float32
+		if isMermaidBlock(b) {
+			newH, wellOff = e.mermaidRow(r, h, m.gap)
+			r.rect.H = newH
+		}
+		if canDeferKind(b.Kind) {
+			hintH := h
+			if b.Kind == "math" || isMermaidBlock(b) {
+				hintH = newH
+			}
+			e.recordExactHeight(b.ID, e.hintWidthFor(b, m.shapeWidth), hintH, m.font, b.Runs)
+		}
+		e.rowSpace.update(idx, r.rect)
+
+		decStart, decEnd := -1, -1
+		if di, hasDec := e.decorationIDs[b.ID]; hasDec {
+			dc := e.indexedDecoration(di)
+			dc.rect.H = newH - m.gap
+			if isMermaidBlock(b) {
+				dc.mermaidHidden = r.mermaidHidden
+				dc.mermaidWellOff = wellOff
+			}
+			e.decorationSpace.update(di, dc.rect)
+			decStart, decEnd = di, di+1
+		}
+
+		handleShift := float32(0)
+		if hi, hasH := e.handleIDs[b.ID]; hasH {
+			hd := e.indexedHandle(hi)
+			prevY := hd.rect.Y
 			caret := cached.layout.Caret(0)
-			caretAdjusted[b.ID] = r.y + caret.Y + max(caret.H, 20)/2 - 12
-			if dy != 0 {
-				cum += dy
-				shifts = append(shifts, rowShift{oldTop: origY, oldBottom: origY + origH, dy: dy, cumAfter: cum, id: b.ID})
-				if di, ok := e.decorationIDs[b.ID]; ok {
-					e.decorations[di].rect.H = newH - m.gap
-					minDec = min(minDec, di)
-				}
-			}
+			hd.rect.Y = r.y + caret.Y + max(caret.H, 20)/2 - 12
+			handleShift = hd.rect.Y - prevY
 		}
+		dy := newH - origH
+		e.shiftFollowing(idx+1, origY+origH, dy, decStart, decEnd, b.ID, handleShift)
+		e.syncMotionAfterShift(b.ID, origY+origH, dy)
 	}
-	if len(shifts) == 0 {
-		for id, hy := range caretAdjusted {
-			if hi, ok := e.handleIDs[id]; ok {
-				e.handles[hi].rect.Y = hy
-			}
-		}
-		for j := range e.foldButtons {
-			if hy, ok := caretAdjusted[e.foldButtons[j].id]; ok {
-				e.foldButtons[j].rect.Y = hy + 4
-			}
-		}
-		return
-	}
-	e.rowSpace.refitSuffix(firstRow)
-
-	cumBefore := func(y float32) float32 {
-		idx := sort.Search(len(shifts), func(k int) bool { return shifts[k].oldBottom > y })
-		if idx == 0 {
-			return 0
-		}
-		return shifts[idx-1].cumAfter
-	}
-	firstTop := shifts[0].oldTop
-
-	if hi, ok := e.handleIDs[e.rows[firstRow].leaf.Owner]; ok {
-		for j := hi; j < len(e.handles); j++ {
-			h := &e.handles[j]
-			delta := cumBefore(h.top)
-			if delta != 0 {
-				h.top += delta
-				h.rect.Y += delta
-				if bs, ok := e.motion.blocks[h.id]; ok {
-					bs.laidY += delta
-					e.motion.blocks[h.id] = bs
-				}
-			}
-			if hy, ok := caretAdjusted[h.id]; ok {
-				h.rect.Y = hy
-			}
-		}
-	}
-	firstFold := sort.Search(len(e.foldButtons), func(j int) bool { return e.foldButtons[j].rect.Y+4 >= firstTop })
-	if firstFold > 0 {
-		firstFold--
-	}
-	for j := firstFold; j < len(e.foldButtons); j++ {
-		f := &e.foldButtons[j]
-		if hi, ok := e.handleIDs[f.id]; ok {
-			f.rect.Y = e.handles[hi].rect.Y + 4
-		}
-	}
-	for j := range e.decorations {
-		d := &e.decorations[j]
-		if d.rect.Y < firstTop {
-			continue
-		}
-		delta := cumBefore(d.rect.Y)
-		if delta == 0 {
-			continue
-		}
-		minDec = min(minDec, j)
-		d.rect.Y += delta
-		if d.table.H > 0 {
-			d.table.Y += delta
-		}
-		for k := range d.rows {
-			d.rows[k] += delta
-		}
-		if d.kind == "table" && len(e.motion.tableRows) > 0 {
-			if tb := e.blockByID(d.id); tb != nil {
-				for _, tr := range tb.Children {
-					if slide, ok := e.motion.tableRows[tr.ID]; ok {
-						slide.laidY += delta
-						e.motion.tableRows[tr.ID] = slide
-					}
-				}
-			}
-		}
-	}
-	if minDec < len(e.decorations) {
-		e.decorationSpace.refitSuffix(minDec)
-	}
-	for j := range e.resizers {
-		if e.resizers[j].y >= firstTop {
-			e.resizers[j].y += cumBefore(e.resizers[j].y)
-		}
-	}
-	firstOutline := sort.Search(len(e.outline), func(j int) bool { return e.outline[j].y >= firstTop })
-	for j := firstOutline; j < len(e.outline); j++ {
-		e.outline[j].y += cumBefore(e.outline[j].y)
-	}
-	e.contentEnd += cum
-	e.height += cum
 	e.restoreResizeAnchor(anchor)
 }
 
@@ -602,7 +903,7 @@ func (e *Editor) trimShapeCache(winTop, winBottom float32) {
 	}
 	candidates := make([]candidate, 0, len(e.cache)-maxCachedShapes)
 	for id, cached := range e.cache {
-		if id == caretID || id == anchorID || id == revealID || id == e.dragID || id == e.mathEditing || strings.HasPrefix(e.inlineEditing, id+":") {
+		if id == caretID || id == anchorID || id == revealID || id == e.dragID || id == e.mathEditing || id == e.mermaidEditing || strings.HasPrefix(e.inlineEditing, id+":") {
 			continue
 		}
 		idx, ok := e.rowIDs[id]
@@ -610,12 +911,24 @@ func (e *Editor) trimShapeCache(winTop, winBottom float32) {
 			candidates = append(candidates, candidate{id: id, used: cached.lastUsed, row: -1})
 			continue
 		}
-		r := &e.rows[idx]
-		if r.leaf.Owner != id || !canDeferKind(r.leaf.Block.Kind) {
+		r := e.indexedRow(idx)
+		if r.leaf.Block == nil {
 			continue
 		}
-		if r.rect.Y+r.rect.H >= winTop && r.rect.Y <= winBottom {
-			continue
+		if r.leaf.Block.Kind == "cell" {
+			if tdi, tok := e.decorationIDs[r.leaf.Owner]; tok {
+				td := *e.indexedDecoration(tdi)
+				if td.rect.Y+td.rect.H >= winTop && td.rect.Y <= winBottom {
+					continue
+				}
+			}
+		} else {
+			if r.leaf.Owner != id || !canDeferKind(r.leaf.Block.Kind) {
+				continue
+			}
+			if r.rect.Y+r.rect.H >= winTop && r.rect.Y <= winBottom {
+				continue
+			}
 		}
 		candidates = append(candidates, candidate{id: id, used: cached.lastUsed, row: idx})
 	}
@@ -641,9 +954,21 @@ func (e *Editor) trimShapeCache(winTop, winBottom float32) {
 	for _, c := range candidates {
 		cached := e.cache[c.id]
 		if cached.layout != nil {
-			_, h := cached.layout.Size()
-			h = max(h, cached.key.font.Size*cached.key.font.LineHeight)
-			e.recordExactHeight(c.id, cached.width, h, cached.key.font, cached.runs)
+			hw := cached.width
+			if cached.key.noWrap {
+				hw = -hw
+			}
+			var r *row
+			if c.row >= 0 && c.row < len(e.rows) {
+				r = e.indexedRow(c.row)
+			}
+			if r != nil && r.leaf.Block != nil && (r.leaf.Block.Kind == "math" || isMermaidBlock(r.leaf.Block)) {
+				e.recordExactHeight(c.id, hw, r.rect.H, cached.key.font, cached.runs)
+			} else {
+				_, h := cached.layout.Size()
+				h = max(h, cached.key.font.Size*cached.key.font.LineHeight)
+				e.recordExactHeight(c.id, hw, h, cached.key.font, cached.runs)
+			}
 		}
 		delete(e.cache, c.id)
 		if c.row >= 0 && c.row < len(e.rows) && e.rows[c.row].leaf.Block != nil && e.rows[c.row].leaf.Block.ID == c.id {

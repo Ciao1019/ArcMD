@@ -46,7 +46,7 @@ var insertions = []insertion{
 	{name: "一级标题", kind: "heading", level: 1, search: "h1 heading title yijibiaoti yjbt", icon: iconHeading1, grid: true, tint: "blue", md: "# 空格"},
 	{name: "二级标题", kind: "heading", level: 2, search: "h2 heading erjibiaoti ejbt", icon: iconHeading2, grid: true, tint: "blue", md: "## 空格"},
 	{name: "三级标题", kind: "heading", level: 3, search: "h3 heading sanjibiaoti sjbt", icon: iconHeading3, grid: true, tint: "blue", md: "### 空格"},
-	{name: "四级标题", kind: "heading", level: 4, search: "h4 heading sijibiaoti", icon: iconHeading4, grid: true, tint: "blue", md: "#### 空格"},
+	{name: "四级标题", kind: "heading", level: 4, search: "h4 heading sijibiaoti sjbt", icon: iconHeading4, grid: true, tint: "blue", md: "#### 空格"},
 	{name: "五级标题", kind: "heading", level: 5, search: "h5 heading wujibiaoti wjbt", icon: iconHeading5, grid: true, tint: "blue", md: "##### 空格"},
 	{name: "有序列表", kind: "numbered", search: "ordered numbered list youxuliebiao yxlb", icon: iconOrdered, grid: true, tint: "indigo", md: "1. 空格"},
 	{name: "无序列表", kind: "bullet", search: "bullet unordered list wuxuliebiao wxlb", icon: iconList, grid: true, tint: "indigo", md: "- 空格"},
@@ -60,6 +60,8 @@ var insertions = []insertion{
 	{name: "折叠块", kind: "toggle", search: "toggle details fold collapse zhediekuai zdk zhedie", icon: iconToggle, group: 1, tint: "indigo"},
 	{name: "分栏", kind: "columns", search: "columns grid fenlan fl shuanglan", icon: iconColumns, group: 1, tint: "indigo"},
 	{name: "公式", kind: "math", search: "math formula equation latex tex gongshi gs", icon: iconSigma, group: 1, tint: "teal"},
+	{name: "流程图", kind: "mermaid-flow", search: "mermaid flowchart graph diagram liuchengtu lct", icon: iconWorkflow, group: 1, tint: "teal", md: "```mermaid"},
+	{name: "时序图", kind: "mermaid-seq", search: "mermaid sequence diagram shixutu sxt", icon: iconSequence, group: 1, tint: "teal"},
 	{name: "链接到文档", kind: "wiki", search: "wiki link backlink shuanglian sl lianjie wendang", icon: iconLink, group: 1, tint: "blue", md: "[["},
 }
 
@@ -417,7 +419,7 @@ func turnItems(b *document.Block) []insertion {
 	}
 	for _, it := range insertions {
 		switch {
-		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image":
+		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq":
 		case b.Kind == "code" && it.kind == "callout":
 		case b.Kind == "callout" && (it.kind == "code" || it.kind == "quote"):
 		default:
@@ -441,6 +443,9 @@ func (e *Editor) blockMenuHeight(b *document.Block) float32 {
 		h += float32(rows)*36 + 5
 	}
 	if b.Kind == "callout" {
+		h += 32
+	}
+	if b.Kind == "code" && !isMermaidBlock(b) {
 		h += 32
 	}
 	if e.bookmarks.toggle != nil {
@@ -521,6 +526,11 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 					hover(e.menuRow(c, "bm-indent", iconIndent, e.page.CodeText, i18n.T("缩进和对齐"), "›", e.menuSub == "indent"), "indent")
 					if b.Kind == "callout" {
 						hover(e.menuRow(c, "bm-color", iconPalette, e.page.CodeText, i18n.T("颜色"), "›", e.menuSub == "color"), "color")
+					}
+					if b.Kind == "code" && !isMermaidBlock(b) {
+						if hover(e.menuRow(c, "bm-wrap", iconWrapText, e.page.CodeText, i18n.T("自动换行"), "", !e.isCodeNoWrap(b)), "").Clicked() {
+							act(func() { e.ToggleCodeWrap(id) })()
+						}
 					}
 					menuSeparator(c)
 					for _, row := range []struct {

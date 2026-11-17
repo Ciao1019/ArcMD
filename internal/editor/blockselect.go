@@ -262,7 +262,7 @@ func (e *Editor) blockPointer(ev ui.InputEvent) bool {
 			}
 		}
 		// The margin left of the handles, beside the page's blocks.
-		if ev.Mods == 0 && len(e.handles) > 0 && ev.X < e.padding-60 && ev.Y >= e.handles[0].top-8 && ev.Y <= e.contentEnd {
+		if ev.Mods == 0 && len(e.handles) > 0 && ev.X < e.padding-60 && ev.Y >= e.indexedHandle(0).top-8 && ev.Y <= e.contentEnd {
 			e.blocks.marquee, e.blocks.y0 = true, ev.Y
 			e.marqueeTo(ev.Y)
 			return true
@@ -285,10 +285,11 @@ func (e *Editor) blockPointer(ev ui.InputEvent) bool {
 func (e *Editor) marqueeTo(y float32) {
 	top, bottom := min(e.blocks.y0, y), max(e.blocks.y0, y)
 	from, to := -1, -1
-	for j, h := range e.handles {
+	for j := range e.handles {
+		h := *e.indexedHandle(j)
 		end := e.contentEnd
 		if j+1 < len(e.handles) {
-			end = e.handles[j+1].top
+			end = e.indexedHandle(j + 1).top
 		}
 		if end >= top && h.top <= bottom {
 			if from < 0 {
@@ -318,10 +319,10 @@ func (e *Editor) paintBlockSelection(p *ui.Painter, bounds ui.Rect, t *ui.Theme)
 	if first < 0 || last < 0 {
 		return
 	}
-	top := e.handles[first].top
+	top := e.indexedHandle(first).top
 	bottom := e.contentEnd
 	if last+1 < len(e.handles) {
-		bottom = e.handles[last+1].top
+		bottom = e.indexedHandle(last + 1).top
 	}
 	p.Fill(ui.Rect{X: bounds.X + e.padding - 8, Y: bounds.Y + top - 4, W: e.width - 2*e.padding + 16, H: bottom - top}, t.Selection, 6)
 }

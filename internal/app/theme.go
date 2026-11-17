@@ -790,3 +790,18 @@ func qaCitationColors(t *ui.Theme) qaCitationLook {
 		arrowHover:     pick(t, ui.Hex("#52525B"), ui.Hex("#E4E4E7")),
 	}
 }
+
+// versionDiffHighlight returns the intra-line emphasis background behind
+// changed grapheme clusters on green (added) or red (removed) diff rows.
+func versionDiffHighlight(dark, added bool) ui.Color {
+	if dark {
+		if added {
+			return ui.Hex("#4ADE80").Alpha(0.28)
+		}
+		return ui.Hex("#F87171").Alpha(0.28)
+	}
+	if added {
+		return ui.Hex("#16A34A").Alpha(0.24)
+	}
+	return ui.Hex("#DC2626").Alpha(0.22)
+}

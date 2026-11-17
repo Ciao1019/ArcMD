@@ -23,3 +23,29 @@ func TestScore(t *testing.T) {
 		t.Error("CJK query did not match")
 	}
 }
+
+func TestScoreMultiKeywordAndPinyin(t *testing.T) {
+	if _, ok := Score("notes daily", "Daily notes"); !ok {
+		t.Fatal("out-of-order multi-keyword query should match")
+	}
+	if _, ok := Score("daily missing", "Daily notes"); ok {
+		t.Fatal("partial multi-keyword query should not match")
+	}
+	if _, ok := Score("zb", "本周周报"); !ok {
+		t.Fatal("pinyin initials should match CJK title")
+	}
+	if _, ok := Score("zhoubao", "本周周报"); !ok {
+		t.Fatal("full pinyin should match CJK title")
+	}
+	if _, ok := Score("gongzuo zb", "工作周报"); !ok {
+		t.Fatal("multi-token pinyin query should match")
+	}
+	if _, ok := ScoreWithHint("gz zb", "周报", "工作 / 项目"); !ok {
+		t.Fatal("ScoreWithHint should match space hint + pinyin title")
+	}
+	titleOnly, ok1 := ScoreWithHint("zb", "周报", "杂项")
+	hintOnly, ok2 := ScoreWithHint("zb", "计划", "周报")
+	if !ok1 || !ok2 || titleOnly <= hintOnly {
+		t.Fatalf("title match (%d) should outrank hint-only match (%d)", titleOnly, hintOnly)
+	}
+}

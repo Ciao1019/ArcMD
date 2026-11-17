@@ -121,6 +121,7 @@ func (e *Engine) replaceTextWithOptions(a, z int, text string, committed, allowA
 	if slices.Equal(b.Runs, runs) {
 		return true
 	}
+	e.notifyBeforeChange()
 	i := e.leafIDs[first.Block.ID]
 	b.Runs = runs
 	if committed {
@@ -173,6 +174,7 @@ func (e *Engine) RestoreLeaf(s LeafState) bool {
 	if !ok {
 		return false
 	}
+	e.notifyBeforeChange()
 	leaf := e.leafAtIndex(i)
 	before := leaf.Block.Text()
 	leaf.Block.Runs = slices.Clone(s.Runs)
@@ -220,6 +222,9 @@ func (e *Engine) CommitLeaf(s LeafState, a, z int, text string) bool {
 
 	netChanged := !slices.Equal(s.Runs, runs)
 	previewChanged := !slices.Equal(b.Runs, runs)
+	if netChanged || previewChanged {
+		e.notifyBeforeChange()
+	}
 	if netChanged {
 		entry := historyEntry{Snapshot{Anchor: s.Anchor, Caret: s.Caret, Typing: s.Typing, Explicit: s.Explicit}, s.BlockID, slices.Clone(s.Runs)}
 		e.recordUndo(entry)
@@ -251,6 +256,7 @@ func (e *Engine) ReplaceBlockRuns(id string, runs []Run, anchor, caret int, typi
 	b := leaf.Block
 	next := Compact(runs)
 	if !slices.Equal(b.Runs, next) {
+		e.notifyBeforeChange()
 		before := b.Text()
 		entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(b.Runs)}
 		b.Runs = next

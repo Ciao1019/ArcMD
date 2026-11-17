@@ -47,9 +47,10 @@ type action struct {
 	run   func()
 	// doc is the document a document's action opens, to leave its text hit
 	// out; snippet and match show where a text hit found the query.
-	doc     place
-	snippet string
-	match   [2]int
+	doc      place
+	snippet  string
+	match    [2]int
+	findTerm string
 	// bookmark is the bookmark a bookmark's action goes to; faded marks one
 	// whose block is gone.
 	bookmark *space.Bookmark
@@ -374,7 +375,13 @@ func (a *App) results() []action {
 	}
 	var ms []scored
 	for _, act := range a.actions() {
-		s, ok := fuzzy.Score(q, act.title)
+		var s int
+		var ok bool
+		if act.kind == i18n.T("文档") {
+			s, ok = fuzzy.ScoreWithHint(q, act.title, act.hint)
+		} else {
+			s, ok = fuzzy.Score(q, act.title)
+		}
 		if !ok {
 			continue
 		}
@@ -407,9 +414,9 @@ func (a *App) results() []action {
 		if h.Count > 1 {
 			hint = strings.TrimPrefix(hint+fmt.Sprintf(i18n.T(" · %d 处"), h.Count), " · ")
 		}
-		id, rel := h.Space, h.Path
+		id, rel, term := h.Space, h.Path, h.Term
 		out = append(out, action{kind: i18n.T("内容"), title: vault.Title(rel), hint: hint, doc: p,
-			snippet: h.Snippet, match: h.Match, run: func() { a.openAtText(id, rel, query) }})
+			snippet: h.Snippet, match: h.Match, findTerm: term, run: func() { a.openAtTextTerm(id, rel, query, term) }})
 	}
 	return out
 }
@@ -623,6 +630,8 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("插入双链…"), "[[", after(ed.StartWikiLink))
 	cmd(i18n.T("插入公式"), "", after(ed.InsertMath))
 	cmd(i18n.T("插入行内公式"), "", after(ed.InsertInlineMath))
+	cmd(i18n.T("插入流程图"), "", after(ed.InsertMermaidFlowchart))
+	cmd(i18n.T("插入时序图"), "", after(ed.InsertMermaidSequence))
 	cmd(i18n.T("插入脚注"), "", after(ed.InsertFootnote))
 	cmd(i18n.T("上标"), "", after(func() { ed.SetScript("sup") }))
 	cmd(i18n.T("下标"), "", after(func() { ed.SetScript("sub") }))
@@ -716,6 +725,9 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("增加缩进"), "", after(func() { ed.Engine.Indent(1) }))
 	cmd(i18n.T("减少缩进"), "", after(func() { ed.Engine.Indent(-1) }))
 	cmd(i18n.T("插入图片…"), "", a.pickImages)
+	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "code" && !strings.EqualFold(strings.TrimSpace(b.Language), "mermaid") {
+		cmd(i18n.T("代码块：切换自动换行"), "", after(func() { ed.ToggleCodeWrap(b.ID) }))
+	}
 	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" {
 		cmd(i18n.T("裁剪图片…"), "", func() { ed.OpenCropper(b.ID) })
 	}

@@ -209,3 +209,69 @@ func isPipeRuleCell(s string) bool {
 	}
 	return true
 }
+
+// enterCodeFence converts a paragraph holding a fenced code header such as
+// "```go" or "```mermaid" into a code block when Enter is pressed at its end.
+func (e *Engine) enterCodeFence(leaf Leaf) bool {
+	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code {
+		return false
+	}
+	b := leaf.Block
+	if b.Kind != "paragraph" {
+		return false
+	}
+	source := b.Text()
+	if strings.ContainsAny(source, "\r\n\u2028") {
+		return false
+	}
+	lead := len(source) - len(strings.TrimLeft(source, " "))
+	if lead > 3 || (lead < len(source) && source[lead] == '\t') {
+		return false
+	}
+	rest := source[lead:]
+	if !strings.HasPrefix(rest, "```") {
+		return false
+	}
+	lang := strings.TrimSpace(rest[3:])
+	for i := 0; i < len(lang); i++ {
+		c := lang[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '+' || c == '-'
+		if !ok {
+			return false
+		}
+	}
+	e.Edit(func() {
+		b.Kind = "code"
+		b.Language = lang
+		b.Runs = nil
+		e.Anchor, e.Caret = leaf.Start, leaf.Start
+		e.Typing, e.Explicit = Style{}, false
+	})
+	return true
+}
+
+// enterMermaidExit exits a Mermaid block when Enter is pressed on a trailing
+// empty line (double-Enter), matching display math behavior.
+func (e *Engine) enterMermaidExit(leaf Leaf) bool {
+	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code {
+		return false
+	}
+	b := leaf.Block
+	if b.Kind != "code" || !strings.EqualFold(strings.TrimSpace(b.Language), "mermaid") {
+		return false
+	}
+	source := b.Text()
+	if !strings.HasSuffix(source, "\n") || leaf.Parent == nil {
+		return false
+	}
+	e.Edit(func() {
+		body := strings.TrimSuffix(source, "\n")
+		b.Runs = SliceRuns(b.Runs, 0, Len(body))
+		next := NewBlock("paragraph", "")
+		next.Indent = b.Indent
+		parent, index := leaf.Parent, leaf.Index+1
+		*parent = append(append(append([]*Block(nil), (*parent)[:index]...), next), (*parent)[index:]...)
+		e.FocusBlock(next.ID)
+	})
+	return true
+}

@@ -164,3 +164,62 @@ func TestSpatialNearestAtLargeFractionalCoordinates(t *testing.T) {
 		}
 	}
 }
+
+func TestSpatialShiftSuffixMatchesFullRebuild(t *testing.T) {
+	const n = 257
+	rects := make([]ui.Rect, n)
+	for i := range rects {
+		rects[i] = ui.Rect{X: 48, Y: float32(i) * 32, W: 700, H: 28}
+	}
+	var lazyIdx, fullIdx spatialIndex
+	lazyIdx.reset(n, func(i int) ui.Rect { return rects[i] })
+	fullIdx.reset(n, func(i int) ui.Rect { return rects[i] })
+
+	for _, op := range []struct {
+		first int
+		dy    float32
+	}{
+		{40, 125.5},
+		{180, -40.25},
+		{17, 64},
+	} {
+		for i := op.first; i < n; i++ {
+			rects[i].Y += op.dy
+		}
+		lazyIdx.shiftSuffix(op.first, op.dy)
+		fullIdx.reset(n, func(i int) ui.Rect { return rects[i] })
+	}
+
+	// Single leaf update interleaved with lazy shifts.
+	rects[90].H += 18
+	for i := 91; i < n; i++ {
+		rects[i].Y += 18
+	}
+	lazyIdx.update(90, rects[90])
+	lazyIdx.shiftSuffix(91, 18)
+	fullIdx.reset(n, func(i int) ui.Rect { return rects[i] })
+
+	for _, band := range [][2]float32{{0, 600}, {1200, 2600}, {5000, 7500}} {
+		var got, want []int
+		for i := range lazyIdx.between(band[0], band[1]) {
+			got = append(got, i)
+		}
+		for i := range fullIdx.between(band[0], band[1]) {
+			want = append(want, i)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("between %v len=%d, want %d", band, len(got), len(want))
+		}
+		for k := range got {
+			if got[k] != want[k] {
+				t.Fatalf("between %v got[%d]=%d, want %d", band, k, got[k], want[k])
+			}
+		}
+	}
+	for y := float32(0); y < 8600; y += 137 {
+		p := ui.Point{X: 100, Y: y}
+		if got, want := lazyIdx.nearest(p), fullIdx.nearest(p); got != want {
+			t.Fatalf("nearest %v: got %d, want %d", p, got, want)
+		}
+	}
+}

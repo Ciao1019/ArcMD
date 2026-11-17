@@ -37,6 +37,10 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			// The host picks the images and inserts it at the caret.
 		case "wiki":
 			e.Engine.Replace(e.Caret, e.Caret, "[[")
+		case "mermaid-flow":
+			e.InsertMermaidFlowchart()
+		case "mermaid-seq":
+			e.InsertMermaidSequence()
 		case "toggle":
 			e.Engine.SetKind("toggle", 0)
 			e.Engine.OpenToggle(e.Engine.LeafAt(e.Caret).Block.ID)
@@ -118,6 +122,8 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 		})
 		m.Submenu(i18n.T("插入"), func(sub *ui.Menu) {
 			menuAction(sub, i18n.T("行内公式"), e.InsertInlineMath)
+			menuAction(sub, i18n.T("流程图"), e.InsertMermaidFlowchart)
+			menuAction(sub, i18n.T("时序图"), e.InsertMermaidSequence)
 			menuAction(sub, i18n.T("脚注"), func() { e.InsertFootnote(); e.RequestFocus, e.reveal = true, true })
 			sub.Separator()
 			menuAction(sub, i18n.T("跳转脚注 / 返回正文"), func() { e.FollowFootnote() })
@@ -135,6 +141,12 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 			})
 		case "code":
 			m.Separator()
+			if !isMermaidBlock(leaf.Block) {
+				if m.Item(i18n.T("自动换行")).Checked(!e.isCodeNoWrap(leaf.Block)).Chosen() {
+					e.ToggleCodeWrap(leaf.Block.ID)
+					e.RequestFocus = true
+				}
+			}
 			menuAction(m, i18n.T("复制代码"), func() { e.copyBlock(leaf.Block.ID) })
 		case "cell":
 			m.Separator()

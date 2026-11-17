@@ -15,6 +15,9 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 	if e.blockPointer(ev) {
 		return true
 	}
+	if e.handleCodeScrollInput(ev) {
+		return true
+	}
 	if e.structuralPointer(ev) {
 		return true
 	}
@@ -351,7 +354,7 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		return true
 	case ui.KeyTab:
 		if !shift && mods == 0 && e.Anchor == e.Caret && !e.ReadOnly {
-			if e.exitInlineMath() || e.tabOutPair() || e.exitDisplayMath() {
+			if e.exitInlineMath() || e.tabOutPair() || e.exitDisplayMath() || e.exitMermaid() {
 				e.vertical = false
 				return true
 			}

@@ -11,6 +11,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/pinyin"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -420,7 +421,7 @@ func (a *App) folderPreview(c *ui.Context) {
 		hay := strings.ToLower(it.title + " " + it.rel)
 		ok := true
 		for _, w := range words {
-			if !strings.Contains(hay, w) {
+			if !pinyin.ContainsToken(hay, w) {
 				ok = false
 				break
 			}

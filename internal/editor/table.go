@@ -112,8 +112,9 @@ func (e *Editor) selectedLine() (decoration, bool) {
 	if !e.tableSel.ok {
 		return decoration{}, false
 	}
-	for _, d := range e.decorations {
-		if d.kind == "table" && d.id == e.tableSel.id {
+	if di, ok := e.decorationIDs[e.tableSel.id]; ok {
+		d := *e.indexedDecoration(di)
+		if d.kind == "table" {
 			n := len(d.cols) - 1
 			if e.tableSel.rows {
 				n = len(d.rows) - 1
@@ -142,7 +143,8 @@ func findParentBlocks(list *[]*document.Block, id string) (*[]*document.Block, i
 }
 
 func (e *Editor) tableDecoration(id string) (decoration, bool) {
-	for _, d := range e.decorations {
+	if di, ok := e.decorationIDs[id]; ok {
+		d := *e.indexedDecoration(di)
 		if d.kind == "table" && d.id == id {
 			return d, true
 		}
@@ -431,7 +433,7 @@ func (e *Editor) cellEnter() bool {
 func (e *Editor) paintTables(p *ui.Painter, bounds ui.Rect) {
 	pg := e.page
 	for i := range e.visibleDecorations(24) {
-		d := e.decorations[i]
+		d := *e.indexedDecoration(i)
 		// Include the bars and insertion pins above and beside the table.
 		if d.kind != "table" || d.rect.Y+d.rect.H+24 < e.Scroll.Y || d.rect.Y-24 > e.Scroll.Y+e.viewport || len(d.cols) < 2 || !e.barsShown(d) {
 			continue
@@ -814,12 +816,7 @@ func (e *Editor) tableToolbar(c *ui.Context, surface ui.Element) {
 // cellToolbar floats over cells selected across: merge, split and their
 // background.
 func (e *Editor) cellToolbar(c *ui.Context, bounds ui.Rect, id string, r document.CellRange) {
-	var d decoration
-	for _, dd := range e.decorations {
-		if dd.kind == "table" && dd.id == id {
-			d = dd
-		}
-	}
+	d, _ := e.tableDecoration(id)
 	if len(d.cols) <= r.Col1+1 || len(d.rows) <= r.Row1+1 {
 		return
 	}

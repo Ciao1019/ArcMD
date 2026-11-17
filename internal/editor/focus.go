@@ -11,14 +11,15 @@ func (e *Editor) paintDim(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 	owner := e.Engine.LeafAt(e.Caret).Owner
 	winTop, winBottom := e.motionWindow()
 	hs, he := e.visibleHandleRange(winTop, winBottom)
-	for offset, h := range e.handles[hs:he] {
+	for offset := 0; offset < he-hs; offset++ {
 		j := hs + offset
+		h := *e.indexedHandle(j)
 		if h.id == owner {
 			continue
 		}
 		bottom := e.contentEnd
 		if j+1 < len(e.handles) {
-			bottom = e.handles[j+1].top
+			bottom = e.indexedHandle(j + 1).top
 		}
 		dy := e.ownerVisualDY(h.id)
 		if bottom+dy < e.Scroll.Y || h.top+dy > e.Scroll.Y+e.viewport {

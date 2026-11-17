@@ -69,11 +69,11 @@ func (e *Editor) visibleHandleRange(top, bottom float32) (int, int) {
 	if !e.shouldVirtualize() {
 		return 0, len(e.handles)
 	}
-	start := sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top >= top })
+	start := sort.Search(len(e.handles), func(i int) bool { return e.indexedHandle(i).top >= top })
 	if start > 0 {
 		start--
 	}
-	end := sort.Search(len(e.handles), func(i int) bool { return e.handles[i].top > bottom })
+	end := sort.Search(len(e.handles), func(i int) bool { return e.indexedHandle(i).top > bottom })
 	return start, end
 }
 
@@ -84,11 +84,11 @@ func (e *Editor) visibleFoldRange(top, bottom float32) (int, int) {
 	if !e.shouldVirtualize() {
 		return 0, len(e.foldButtons)
 	}
-	start := sort.Search(len(e.foldButtons), func(i int) bool { return e.foldButtons[i].rect.Y+16 >= top })
+	start := sort.Search(len(e.foldButtons), func(i int) bool { return e.indexedFold(i).rect.Y+16 >= top })
 	if start > 0 {
 		start--
 	}
-	end := sort.Search(len(e.foldButtons), func(i int) bool { return e.foldButtons[i].rect.Y > bottom })
+	end := sort.Search(len(e.foldButtons), func(i int) bool { return e.indexedFold(i).rect.Y > bottom })
 	return start, end
 }
 
@@ -161,16 +161,18 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 		m.reset(e.Doc, e.width, now)
 		m.resizing = resizing
 		m.ready = true
-		for _, h := range e.handles[hs:he] {
+		for hi := hs; hi < he; hi++ {
+			h := *e.indexedHandle(hi)
 			m.blocks[h.id] = blockSlide{laidY: h.top}
 		}
 		e.visibleRowRange(func(i int) {
-			r := &e.rows[i]
+			r := e.indexedRow(i)
 			if r.leaf.Block.Kind != "cell" {
 				m.indents[r.leaf.Block.ID] = blockSlide{laidX: r.x}
 			}
 		})
-		for _, f := range e.foldButtons[fs:fe] {
+		for fi := fs; fi < fe; fi++ {
+			f := *e.indexedFold(fi)
 			if f.folded {
 				m.foldAngles[f.id] = -90
 			} else {
@@ -209,7 +211,8 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 	e.unfoldPending = false
 
 	clear(m.seen)
-	for _, h := range e.handles[hs:he] {
+	for hi := hs; hi < he; hi++ {
+		h := *e.indexedHandle(hi)
 		m.seen[h.id] = true
 		prev, ok := m.blocks[h.id]
 		var dy float32
@@ -233,7 +236,7 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 	}
 	if e.dragID != "" && !m.seen[e.dragID] {
 		if hi := e.handleIndex(e.dragID); hi >= 0 {
-			h := e.handles[hi]
+			h := *e.indexedHandle(hi)
 			m.seen[h.id] = true
 			m.blocks[h.id] = blockSlide{laidY: h.top}
 		}
@@ -310,7 +313,8 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 	if dt > 0 {
 		foldAlpha = 1 - float32(math.Exp(-dt/0.038))
 	}
-	for _, f := range e.foldButtons[fs:fe] {
+	for fi := fs; fi < fe; fi++ {
+		f := *e.indexedFold(fi)
 		m.seen[f.id] = true
 		target := float32(0)
 		if f.folded {
@@ -339,7 +343,7 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 
 	clear(m.seen)
 	e.visibleRowRange(func(i int) {
-		r := &e.rows[i]
+		r := e.indexedRow(i)
 		if r.leaf.Block == nil || r.leaf.Block.Kind == "cell" {
 			return
 		}
@@ -456,7 +460,8 @@ func (e *Editor) stepMotion(now time.Time) {
 	winTop, winBottom := e.motionWindow()
 	fs, fe := e.visibleFoldRange(winTop, winBottom)
 	foldAlpha := 1 - float32(math.Exp(-dt/0.038))
-	for _, f := range e.foldButtons[fs:fe] {
+	for fi := fs; fi < fe; fi++ {
+		f := *e.indexedFold(fi)
 		target := float32(0)
 		if f.folded {
 			target = -90
@@ -510,7 +515,7 @@ func (e *Editor) recordCalloutColors(snap bool, alpha float32) {
 	m := &e.motion
 	clear(m.seen)
 	e.visibleDecRange(func(i int) {
-		d := &e.decorations[i]
+		d := e.indexedDecoration(i)
 		if d.kind != "callout" || d.id == "" {
 			return
 		}
@@ -544,7 +549,7 @@ func (e *Editor) recordTableRowAnchors(snap bool, decay float32) {
 	m := &e.motion
 	clear(m.seen)
 	e.visibleDecRange(func(i int) {
-		d := &e.decorations[i]
+		d := e.indexedDecoration(i)
 		if d.kind != "table" || d.id == "" {
 			return
 		}
@@ -588,7 +593,7 @@ func (e *Editor) recordTableColAnchors(snap bool, decay float32) {
 	m := &e.motion
 	clear(m.seen)
 	e.visibleDecRange(func(i int) {
-		d := &e.decorations[i]
+		d := e.indexedDecoration(i)
 		if d.kind != "table" || d.id == "" {
 			return
 		}
@@ -630,7 +635,7 @@ func (e *Editor) recordTableColAnchors(snap bool, decay float32) {
 // blockBottom returns the bottom Y of handle index j in page coordinates.
 func (e *Editor) blockBottom(j int) float32 {
 	if j+1 < len(e.handles) {
-		return e.handles[j+1].top
+		return e.indexedHandle(j + 1).top
 	}
 	return e.contentEnd
 }
@@ -659,20 +664,20 @@ func (e *Editor) currentDragPlan() dragPlan {
 			return dragPlan{}
 		}
 	}
-	slotH := max(26, e.blockBottom(last)-e.handles[first].top)
-	slotY := e.handles[first].top
+	slotH := max(26, e.blockBottom(last)-e.indexedHandle(first).top)
+	slotY := e.indexedHandle(first).top
 	target := max(0, min(e.dropIndex, len(e.handles)-1))
 	if multi {
 		switch {
 		case target < first:
-			slotY = e.handles[target].top
+			slotY = e.indexedHandle(target).top
 		case target > last:
 			slotY = e.blockBottom(target) - slotH
 		}
 	} else {
 		switch {
 		case target < old:
-			slotY = e.handles[target].top
+			slotY = e.indexedHandle(target).top
 		case target > old:
 			slotY = e.blockBottom(target) - slotH
 		}

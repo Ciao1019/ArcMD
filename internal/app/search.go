@@ -59,6 +59,13 @@ func extractText(name, content string) (search.Extracted, error) {
 	return search.Extracted{Text: text, Icon: icon}, nil
 }
 
+func (a *App) searchCachePath() string {
+	if a.cfg.ConfigDir == "" {
+		return ""
+	}
+	return filepath.Join(a.cfg.ConfigDir, "search-cache.bin")
+}
+
 // refreshSearch reads the spaces' documents into the index again, only
 // the files changed since. The bar shows title matches meanwhile, and the
 // text hits when it is done.
@@ -80,6 +87,7 @@ func (a *App) refreshSearch() {
 		roots = append(roots, r)
 	}
 	prev := s.index
+	cachePath := a.searchCachePath()
 	s.busy = true
 	done := func(ix *search.Index) {
 		s.index, s.busy = ix, false
@@ -93,11 +101,18 @@ func (a *App) refreshSearch() {
 		post = a.win.Update
 	}
 	if !s.async || post == nil {
-		done(search.Refresh(prev, roots, extractText))
+		ix, changed := search.RefreshChanged(prev, roots, extractText)
+		if changed && cachePath != "" {
+			_ = search.SaveCache(cachePath, ix)
+		}
+		done(ix)
 		return
 	}
 	go func() {
-		ix := search.Refresh(prev, roots, extractText)
+		ix, changed := search.RefreshChanged(prev, roots, extractText)
+		if changed && cachePath != "" {
+			_ = search.SaveCache(cachePath, ix)
+		}
 		post(func() { done(ix) })
 	}()
 }
@@ -108,7 +123,7 @@ func (a *App) textHits(query string) []search.Hit {
 	s := &a.search
 	k := hitsKey{query: query, index: a.liveIndex()}
 	if k != s.hitsKey {
-		s.hits, s.hitsKey = k.index.Search(query, nil, searchLimit), k
+		s.hits, s.hitsKey = k.index.SearchMulti(query, nil, searchLimit), k
 	}
 	return s.hits
 }
@@ -152,13 +167,17 @@ func (a *App) openAnywhere(id, rel string) bool {
 // openAtText opens a document the bar found text in, with the find box on
 // that text.
 func (a *App) openAtText(id, rel, query string) {
+	a.openAtTextTerm(id, rel, query, "")
+}
+
+func (a *App) openAtTextTerm(id, rel, query, term string) {
 	if !a.openAnywhere(id, rel) || a.doc.loadErr != nil {
 		return
 	}
 	if a.doc.source {
 		a.doc.toggleMode()
 	}
-	a.doc.ed.FindText(strings.TrimSpace(query))
+	a.doc.ed.FindTextWithFallback(strings.TrimSpace(query), term)
 }
 
 // docHint is where a document is, for the bar: its folder, and its space

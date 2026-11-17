@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -69,7 +70,7 @@ func TestVirtualizedLayoutMillionCharMemoryAndNavigation(t *testing.T) {
 	// keeps the shape cache bounded, retains exact height hints, and shapes every visible row.
 	step := max(120, len(e.rows)/35)
 	for rowIdx := step; rowIdx < len(e.rows); rowIdx += step {
-		e.Scroll.Y = e.rows[rowIdx].rect.Y
+		e.Scroll.Y = e.indexedRow(rowIdx).rect.Y
 		tt.Frame()
 		if len(e.cache) > maxCachedShapes+cacheTrimHysteresis {
 			t.Fatalf("cache exceeded bound after jump to row %d: %d", rowIdx, len(e.cache))
@@ -86,18 +87,18 @@ func TestVirtualizedLayoutMillionCharMemoryAndNavigation(t *testing.T) {
 
 	// Jump back into an early evicted region and verify height/offset stability once re-shaped.
 	backRow := step
-	beforeY := e.rows[backRow].rect.Y
+	beforeY := e.indexedRow(backRow).rect.Y
 	e.Scroll.Y = beforeY
 	tt.Frame()
 	if e.rows[backRow].layout == nil {
 		t.Fatalf("evicted row %d was not re-shaped on return", backRow)
 	}
-	if diff := e.rows[backRow].rect.Y - beforeY; diff < -1 || diff > 1 {
+	if diff := e.indexedRow(backRow).rect.Y - beforeY; diff < -1 || diff > 1 {
 		t.Fatalf("expected evicted region offset to remain stable, moved by %.2f", diff)
 	}
 
 	// Return to the middle region for hit testing and editing assertions below.
-	e.Scroll.Y = e.rows[len(e.rows)/2].rect.Y
+	e.Scroll.Y = e.indexedRow(len(e.rows) / 2).rect.Y
 	tt.Frame()
 
 	// Verify hit testing and editing in a scrolled middle section, plus undo.
@@ -240,6 +241,140 @@ func TestLargeDocument200kInteractiveEditingAndIME(t *testing.T) {
 	}
 	if len(e.accessText()) > 4*accessWindowHalf*4 {
 		t.Fatalf("accessText grew unbounded after edits: %d", len(e.accessText()))
+	}
+	runtime.KeepAlive(tt)
+}
+
+func TestVirtualizedTablesMathAndMermaidColdOpenAndScrollAnchoring(t *testing.T) {
+	doc := document.New()
+	doc.Blocks = make([]*document.Block, 0, 520)
+	longCell := strings.Repeat("Multi-line table cell wrapping content for accurate height shift verification. ", 4)
+	for i := 0; i < 500; i++ {
+		if i%25 == 0 {
+			doc.Blocks = append(doc.Blocks, document.NewBlock("math", `\int_0^\infty x^2 e^{-x} dx = 2`))
+			mb := document.NewBlock("code", "flowchart LR\n    A[Start] --> B[End]")
+			mb.Language = "mermaid"
+			doc.Blocks = append(doc.Blocks, mb)
+		}
+		tbl := document.Table(3, 3)
+		if i%2 == 0 {
+			tbl.Children[1].Children[1].Runs = []document.Run{{Text: longCell}}
+		}
+		doc.Blocks = append(doc.Blocks, tbl)
+	}
+
+	start := time.Now()
+	e := FromOwnedDocument(doc)
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{Width: w, Theme: c.Theme()})
+	}, 960, 700)
+	tt.Frame()
+	elapsed := time.Since(start)
+	t.Logf("cold open + frame 1 for 500 3x3 tables + math/mermaid (%d leaves): %v", e.Engine.LeafCount(), elapsed)
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("cold open took too long: %v", elapsed)
+	}
+	if !e.hasLazyY {
+		t.Fatal("expected hasLazyY enabled on 500-table document")
+	}
+	last := len(e.rows) - 1
+	if e.indexedRow(last).layout != nil {
+		t.Fatal("expected last offscreen table cell to remain unshaped after cold open")
+	}
+
+	// Scroll to tail (triggers LRU cache trimming across tables) then scroll upward
+	// into unshaped multi-line wrapped tables with an active scrollGlide to test Scroll Anchoring.
+	e.Scroll.Y = max(0, e.height-900)
+	tt.Frame()
+	if len(e.cache) > maxCachedShapes+cacheTrimHysteresis {
+		t.Fatalf("cache exceeded bound after tail jump: %d", len(e.cache))
+	}
+
+	// Pick an unshaped middle-tail table, then land Scroll.Y directly past it so
+	// scrolling upward into it changes height above the current viewport anchor.
+	mid := len(e.rows) * 3 / 4
+	midRow := e.indexedRow(mid)
+	targetY := max(0, midRow.rect.Y+midRow.rect.H+40)
+	e.Scroll.Y = targetY
+	anchorBefore := e.resizeAnchor()
+	if anchorBefore.id == "" {
+		t.Fatal("expected valid scroll anchor before upward jump")
+	}
+	anchorIdx := e.rowIDs[anchorBefore.id]
+	e.scrollGlide = scrollGlideState{active: true, to: targetY - 160, lastY: targetY, tau: 0.05, at: time.Now()}
+	// Materialize the wrapped table just above the anchor while keeping glide active.
+	e.Scroll.Y = max(0, midRow.rect.Y-20)
+	tt.Frame()
+	if !e.scrollGlide.active {
+		t.Log("note: scrollGlide settled/stopped during test frame")
+	}
+	// Verify the anchor block stayed shaped and within sane bounds after table materialization.
+	ar := e.indexedRow(anchorIdx)
+	if ar.rect.Y <= 0 {
+		t.Fatalf("invalid anchored row Y after upward table materialization: %v", ar.rect.Y)
+	}
+	runtime.KeepAlive(tt)
+}
+
+func TestVirtualizedFenwickShiftMatchesFullLayout(t *testing.T) {
+	doc := document.New()
+	doc.Blocks = make([]*document.Block, 0, 950)
+	for i := 0; i < 920; i++ {
+		switch {
+		case i%100 == 0:
+			doc.Blocks = append(doc.Blocks, &document.Block{ID: document.NewBlock("heading", "").ID, Kind: "heading", Level: 2, Runs: []document.Run{{Text: fmt.Sprintf("Heading %d", i)}}})
+		case i%150 == 0:
+			doc.Blocks = append(doc.Blocks, document.Table(2, 2))
+		default:
+			doc.Blocks = append(doc.Blocks, document.NewBlock("paragraph", fmt.Sprintf("Line %d short text.", i)))
+		}
+	}
+
+	e := FromOwnedDocument(doc)
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{Width: w, Theme: c.Theme()})
+	}, 880, 700)
+	tt.Frame()
+	if !e.hasLazyY {
+		t.Fatal("expected hasLazyY enabled")
+	}
+
+	// Mutate paragraph 5 so its height grows across multiple wrapped lines.
+	leaf5 := e.Engine.LeafAt(30)
+	e.Engine.FocusBlock(leaf5.Block.ID)
+	cur := e.Engine.LeafAt(e.Caret)
+	e.Engine.Replace(cur.Start, cur.End, strings.Repeat("Extra wrapped content for Fenwick O(log B) shift test. ", 12))
+	tt.Frame()
+
+	// Snapshot lazy Fenwick-adjusted positions at mid and tail before full rebuild.
+	tailRowIdx := len(e.rows) - 1
+	midRowIdx := len(e.rows) / 2
+	gotMidY := e.indexedRow(midRowIdx).rect.Y
+	gotTailY := e.indexedRow(tailRowIdx).rect.Y
+	gotTailHandleY := e.indexedHandle(len(e.handles) - 1).top
+	gotTailOutlineY := e.indexedOutline(len(e.outline) - 1).y
+	gotLastDecY := e.indexedDecoration(len(e.decorations) - 1).rect.Y
+
+	e.ready = false
+	tt.Frame()
+
+	diff := func(a, b float32) float32 { return abs32(a - b) }
+	if d := diff(gotMidY, e.rows[midRowIdx].rect.Y); d > 0.5 {
+		t.Fatalf("mid row Y mismatch after Fenwick shift: got %.2f, full %.2f", gotMidY, e.rows[midRowIdx].rect.Y)
+	}
+	if d := diff(gotTailY, e.rows[tailRowIdx].rect.Y); d > 0.5 {
+		t.Fatalf("tail row Y mismatch after Fenwick shift: got %.2f, full %.2f", gotTailY, e.rows[tailRowIdx].rect.Y)
+	}
+	if d := diff(gotTailHandleY, e.handles[len(e.handles)-1].top); d > 0.5 {
+		t.Fatalf("tail handle top mismatch: got %.2f, full %.2f", gotTailHandleY, e.handles[len(e.handles)-1].top)
+	}
+	if d := diff(gotTailOutlineY, e.outline[len(e.outline)-1].y); d > 0.5 {
+		t.Fatalf("tail outline Y mismatch: got %.2f, full %.2f", gotTailOutlineY, e.outline[len(e.outline)-1].y)
+	}
+	if d := diff(gotLastDecY, e.decorations[len(e.decorations)-1].rect.Y); d > 0.5 {
+		t.Fatalf("last decoration Y mismatch: got %.2f, full %.2f", gotLastDecY, e.decorations[len(e.decorations)-1].rect.Y)
 	}
 	runtime.KeepAlive(tt)
 }

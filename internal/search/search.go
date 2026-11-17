@@ -62,7 +62,16 @@ type Index struct {
 // or extracted are left out too: search is a convenience, never the only
 // way to a document.
 func Refresh(prev *Index, roots []Root, extract Extract) *Index {
+	ix, _ := RefreshChanged(prev, roots, extract)
+	return ix
+}
+
+// RefreshChanged behaves like Refresh and additionally reports whether the
+// resulting snapshot differs from prev (new/modified entries or changed order),
+// allowing callers to skip unnecessary disk cache writes when nothing changed.
+func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 	next := &Index{entries: map[key]*entry{}}
+	changed := false
 	for _, r := range roots {
 		var docs []vault.Doc
 		if r.Files != nil {
@@ -80,12 +89,13 @@ func Refresh(prev *Index, roots []Root, extract Extract) *Index {
 				}
 				root, rel = filepath.Dir(full), filepath.Base(full)
 			}
-			info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+			fullFile := filepath.Join(root, filepath.FromSlash(rel))
+			info, err := os.Stat(fullFile)
 			if err != nil {
 				continue
 			}
 			if prev != nil {
-				if e, ok := prev.entries[k]; ok && e.file == filepath.Join(root, rel) && e.size == info.Size() && e.mod.Equal(info.ModTime()) {
+				if e, ok := prev.entries[k]; ok && e.file == fullFile && e.size == info.Size() && e.mod.Equal(info.ModTime()) {
 					next.entries[k] = e
 					next.order = append(next.order, k)
 					continue
@@ -99,11 +109,15 @@ func Refresh(prev *Index, roots []Root, extract Extract) *Index {
 			if err != nil {
 				continue
 			}
-			next.entries[k] = &entry{file: filepath.Join(root, rel), text: ex.Text, icon: ex.Icon, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
+			changed = true
+			next.entries[k] = &entry{file: fullFile, text: ex.Text, icon: ex.Icon, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
 			next.order = append(next.order, k)
 		}
 	}
-	return next
+	if !changed && (prev == nil || !slices.Equal(prev.order, next.order)) {
+		changed = true
+	}
+	return next, changed
 }
 
 // Len is how many documents the index holds.
@@ -123,6 +137,8 @@ type Hit struct {
 	// byte range of the match in it.
 	Snippet string
 	Match   [2]int
+	// Term is the matched search term used to generate Snippet/Match.
+	Term string
 }
 
 // Live replaces the indexed text of one document, the one open with
@@ -140,11 +156,23 @@ func Worth(query string) bool {
 	return n >= 2 || n == 1 && q[0] >= utf8.RuneSelf
 }
 
-// Search finds the query, case-insensitively, as the editor's find box
+// WorthMulti reports whether a potentially space-separated query has at least
+// one searchable term.
+func WorthMulti(query string) bool {
+	for _, t := range strings.Fields(strings.TrimSpace(query)) {
+		if Worth(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// Search finds the query literally, case-insensitively, as the editor's find box
 // does, in every document. Hits come in the index's order, documents with
 // more matches first, at most limit of them.
 func (ix *Index) Search(query string, live *Live, limit int) []Hit {
-	q := []rune(strings.Map(unicode.ToLower, strings.TrimSpace(query)))
+	trimmed := strings.TrimSpace(query)
+	q := []rune(strings.Map(unicode.ToLower, trimmed))
 	if !Worth(query) || limit <= 0 {
 		return nil
 	}
@@ -156,7 +184,7 @@ func (ix *Index) Search(query string, live *Live, limit int) []Hit {
 			return
 		}
 		snippet, match := snip(text, first, len(q))
-		hits = append(hits, Hit{Space: space, Path: path, Count: count, Snippet: snippet, Match: match})
+		hits = append(hits, Hit{Space: space, Path: path, Count: count, Snippet: snippet, Match: match, Term: trimmed})
 	}
 	if ix != nil {
 		for _, k := range ix.order {
@@ -174,6 +202,126 @@ func (ix *Index) Search(query string, live *Live, limit int) []Hit {
 	}
 	slices.SortStableFunc(hits, func(a, b Hit) int { return b.Count - a.Count })
 	return hits[:min(len(hits), limit)]
+}
+
+// SearchMulti finds documents containing all whitespace-separated query terms
+// (case-insensitively, AND semantics). Single-term queries behave identically
+// to Search. Multi-term queries prefer lines where multiple terms co-occur.
+func (ix *Index) SearchMulti(query string, live *Live, limit int) []Hit {
+	rawTerms := strings.Fields(strings.TrimSpace(query))
+	if len(rawTerms) == 0 || limit <= 0 || !WorthMulti(query) {
+		return nil
+	}
+	var terms []string
+	var runes [][]rune
+	seenTerm := make(map[string]bool, len(rawTerms))
+	for _, t := range rawTerms {
+		low := strings.Map(unicode.ToLower, t)
+		if seenTerm[low] {
+			continue
+		}
+		seenTerm[low] = true
+		terms = append(terms, t)
+		runes = append(runes, []rune(low))
+	}
+	if len(terms) == 1 {
+		return ix.Search(terms[0], live, limit)
+	}
+
+	type ranked struct {
+		hit   Hit
+		score int
+	}
+	var results []ranked
+	ix.each(live, func(space, path, text string) {
+		totalCount := 0
+		firstHits := make([]int, len(runes))
+		for i, q := range runes {
+			c, first := find(text, q)
+			if c == 0 {
+				return
+			}
+			totalCount += c
+			firstHits[i] = first
+		}
+		anchorIdx, anchorRune, distinctLine := bestMultiSnippetAnchor(text, runes, terms, firstHits)
+		snippet, match := snip(text, anchorRune, len(runes[anchorIdx]))
+		score := totalCount + distinctLine*1000
+		results = append(results, ranked{
+			hit:   Hit{Space: space, Path: path, Count: totalCount, Snippet: snippet, Match: match, Term: terms[anchorIdx]},
+			score: score,
+		})
+	})
+	slices.SortStableFunc(results, func(a, b ranked) int { return b.score - a.score })
+	n := min(len(results), limit)
+	hits := make([]Hit, n)
+	for i := 0; i < n; i++ {
+		hits[i] = results[i].hit
+	}
+	return hits
+}
+
+func bestMultiSnippetAnchor(text string, runes [][]rune, terms []string, firstHits []int) (termIdx, runePos, bestDistinct int) {
+	termIdx = 0
+	for i, t := range terms {
+		if Worth(t) {
+			termIdx = i
+			break
+		}
+	}
+	runePos = firstHits[termIdx]
+	bestDistinct = 1
+
+	docRunes := []rune(text)
+	lineStart := 0
+	for lineStart <= len(docRunes) {
+		lineEnd := lineStart
+		for lineEnd < len(docRunes) && docRunes[lineEnd] != '\n' {
+			lineEnd++
+		}
+		line := docRunes[lineStart:lineEnd]
+		distinct := 0
+		earliestIdx := -1
+		earliestPos := len(line) + 1
+		for i, q := range runes {
+			if pos := findRunesFirst(line, q); pos >= 0 {
+				distinct++
+				if earliestIdx < 0 || pos < earliestPos || (pos == earliestPos && Worth(terms[i]) && !Worth(terms[earliestIdx])) {
+					earliestIdx = i
+					earliestPos = pos
+				}
+			}
+		}
+		if distinct > bestDistinct && earliestIdx >= 0 {
+			bestDistinct = distinct
+			termIdx = earliestIdx
+			runePos = lineStart + earliestPos
+			if bestDistinct == len(runes) {
+				break
+			}
+		}
+		lineStart = lineEnd + 1
+	}
+	return termIdx, runePos, bestDistinct
+}
+
+func findRunesFirst(hay, needle []rune) int {
+	if len(needle) == 0 || len(needle) > len(hay) {
+		return -1
+	}
+	for i := 0; i <= len(hay)-len(needle); i++ {
+		ok := true
+		for j, r := range needle {
+			if unicode.ToLower(hay[i+j]) != r {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return i
+		}
+	}
+	return -1
 }
 
 // find counts the non-overlapping matches of q (lowered) in text and

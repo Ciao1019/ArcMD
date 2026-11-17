@@ -118,6 +118,15 @@ func (e *Editor) FindText(query string) {
 	e.showMatch()
 }
 
+// FindTextWithFallback searches for query literally first and falls back to
+// fallback when the document matches multi-keyword terms rather than the literal phrase.
+func (e *Editor) FindTextWithFallback(query, fallback string) {
+	e.FindText(query)
+	if len(e.find.matches) == 0 && fallback != "" && fallback != query {
+		e.FindText(fallback)
+	}
+}
+
 // FindQuery is the find box's query while it is open.
 func (e *Editor) FindQuery() (string, bool) { return e.find.query, e.find.open }
 
@@ -383,25 +392,35 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 			continue
 		}
 		dx, dy := e.visualOffset(r)
-		start := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].End > r.leaf.Start })
-		for i := start; i < len(f.matches) && f.matches[i].Start < r.leaf.End+1; i++ {
-			m := f.matches[i]
-			local := ui.TextInputRange{Start: max(0, m.Start-r.leaf.Start), End: min(r.leaf.End, m.End) - r.leaf.Start}
-			color := e.page.FindMatch
-			isCurrent := i == f.current
-			if isCurrent {
-				color = e.page.FindCurrent
-			}
-			for _, rect := range r.layout.SelectionRects(local) {
-				rect.X += bounds.X + r.x + dx
-				rect.Y += bounds.Y + r.y + dy
-				p.Fill(rect, color, 2.5)
-				if isCurrent && pulseU >= 0 {
-					pad := 1.5 + 4*(1-(1-pulseU)*(1-pulseU))
-					ring := ui.Rect{X: rect.X - pad, Y: rect.Y - pad*0.7, W: rect.W + 2*pad, H: rect.H + 1.4*pad}
-					p.Stroke(ring, p.Theme().Accent.Alpha(0.75*(1-pulseU)), 4, 1.5)
+		_, clipBox, _, _, scrollX, noWrap := e.codeScrollFor(r)
+		paintRowMatches := func(sx float32) {
+			start := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].End > r.leaf.Start })
+			for i := start; i < len(f.matches) && f.matches[i].Start < r.leaf.End+1; i++ {
+				m := f.matches[i]
+				local := ui.TextInputRange{Start: max(0, m.Start-r.leaf.Start), End: min(r.leaf.End, m.End) - r.leaf.Start}
+				color := e.page.FindMatch
+				isCurrent := i == f.current
+				if isCurrent {
+					color = e.page.FindCurrent
+				}
+				for _, rect := range r.layout.SelectionRects(local) {
+					rect.X += bounds.X + r.x + dx - sx
+					rect.Y += bounds.Y + r.y + dy
+					p.Fill(rect, color, 2.5)
+					if isCurrent && pulseU >= 0 {
+						pad := 1.5 + 4*(1-(1-pulseU)*(1-pulseU))
+						ring := ui.Rect{X: rect.X - pad, Y: rect.Y - pad*0.7, W: rect.W + 2*pad, H: rect.H + 1.4*pad}
+						p.Stroke(ring, p.Theme().Accent.Alpha(0.75*(1-pulseU)), 4, 1.5)
+					}
 				}
 			}
+		}
+		if noWrap {
+			p.Clip(ui.Rect{X: bounds.X + clipBox.X + dx, Y: bounds.Y + clipBox.Y + dy, W: clipBox.W, H: clipBox.H}, 0, func() {
+				paintRowMatches(scrollX)
+			})
+		} else {
+			paintRowMatches(0)
 		}
 	}
 }

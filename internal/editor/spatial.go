@@ -15,6 +15,7 @@ import (
 type spatialIndex struct {
 	n      int
 	bounds []spatialBounds
+	lazy   []float32
 	rect   func(int) ui.Rect
 }
 type spatialBounds struct{ left, top, right, bottom float32 }
@@ -30,12 +31,19 @@ func (s *spatialIndex) reset(n int, rect func(int) ui.Rect) {
 	} else {
 		s.bounds = s.bounds[:4*n]
 	}
+	if cap(s.lazy) < 4*n {
+		s.lazy = make([]float32, 4*n)
+	} else {
+		s.lazy = s.lazy[:4*n]
+		clear(s.lazy)
+	}
 	var build func(int, int, int)
 	build = func(node, a, z int) {
 		if z-a == 1 {
 			s.bounds[node] = rectBounds(rect(a))
 			return
 		}
+		s.push(node)
 		m := (a + z) / 2
 		build(node*2, a, m)
 		build(node*2+1, m, z)
@@ -44,6 +52,48 @@ func (s *spatialIndex) reset(n int, rect func(int) ui.Rect) {
 	if n > 0 {
 		build(1, 0, n)
 	}
+}
+
+func (s *spatialIndex) applyLazy(node int, dy float32) {
+	s.bounds[node].top += dy
+	s.bounds[node].bottom += dy
+	s.lazy[node] += dy
+}
+
+func (s *spatialIndex) push(node int) {
+	dy := s.lazy[node]
+	if dy == 0 {
+		return
+	}
+	s.lazy[node] = 0
+	s.applyLazy(node*2, dy)
+	s.applyLazy(node*2+1, dy)
+}
+
+// shiftSuffix translates the Y bounds of [first, n) in O(log N) via lazy propagation.
+func (s *spatialIndex) shiftSuffix(first int, dy float32) {
+	if dy == 0 || first >= s.n || s.n == 0 {
+		return
+	}
+	if first < 0 {
+		first = 0
+	}
+	var shift func(int, int, int)
+	shift = func(node, a, z int) {
+		if first >= z {
+			return
+		}
+		if first <= a {
+			s.applyLazy(node, dy)
+			return
+		}
+		s.push(node)
+		m := (a + z) / 2
+		shift(node*2, a, m)
+		shift(node*2+1, m, z)
+		s.bounds[node] = s.bounds[node*2].union(s.bounds[node*2+1])
+	}
+	shift(1, 0, s.n)
 }
 
 // refitSuffix follows the existing geometry translation, visiting each affected
@@ -58,9 +108,11 @@ func (s *spatialIndex) refitSuffix(first int) {
 			return
 		}
 		if z-a == 1 {
+			s.lazy[node] = 0
 			s.bounds[node] = rectBounds(s.rect(a))
 			return
 		}
+		s.push(node)
 		m := (a + z) / 2
 		change(node*2, a, m)
 		change(node*2+1, m, z)
@@ -75,9 +127,11 @@ func (s *spatialIndex) update(at int, r ui.Rect) {
 	var change func(int, int, int)
 	change = func(node, a, z int) {
 		if z-a == 1 {
+			s.lazy[node] = 0
 			s.bounds[node] = rectBounds(r)
 			return
 		}
+		s.push(node)
 		m := (a + z) / 2
 		if at < m {
 			change(node*2, a, m)
@@ -99,6 +153,7 @@ func (s *spatialIndex) between(top, bottom float32) iter.Seq[int] {
 			if z-a == 1 {
 				return yield(a)
 			}
+			s.push(node)
 			m := (a + z) / 2
 			return visit(node*2, a, m) && visit(node*2+1, m, z)
 		}
@@ -140,6 +195,7 @@ func (s *spatialIndex) nearest(p ui.Point) int {
 			}
 			return
 		}
+		s.push(node)
 		m := (a + z) / 2
 		if dist(s.bounds[node*2]) <= dist(s.bounds[node*2+1]) {
 			visit(node*2, a, m)

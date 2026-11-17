@@ -312,7 +312,7 @@ func (e *Editor) outlineList(c *ui.Context) {
 	if len(e.Doc.Blocks) > 0 {
 		title = e.Doc.Blocks[0].ID
 	}
-	active := max(0, sort.Search(len(e.outline), func(i int) bool { return e.outline[i].y > e.Scroll.Y+96 })-1)
+	active := max(0, sort.Search(len(e.outline), func(i int) bool { return e.indexedOutline(i).y > e.Scroll.Y+96 })-1)
 	if e.outlineState.jump.id != "" {
 		// A jump marks where it goes at once, not each heading it passes.
 		for i, item := range e.outline {
@@ -359,7 +359,7 @@ func (e *Editor) outlineList(c *ui.Context) {
 				ui.Box(c.Key("outline-gap:" + strconv.Itoa(cursor))).Height(float32(a-cursor) * outlineRow)
 			}
 			for i := a; i < z; i++ {
-				item := e.outline[i]
+				item := *e.indexedOutline(i)
 				on := i == active
 				row := ui.ButtonBase(c.Key("outline:"+item.id)).Height(outlineRow).Radius(6).
 					Padding(0, 8, 0, 8+float32(min(item.level-top, 4))*outlineIndent).

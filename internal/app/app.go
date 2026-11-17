@@ -24,6 +24,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/plugin"
 	"github.com/Ciao1019/ArcMD/internal/prefs"
+	"github.com/Ciao1019/ArcMD/internal/search"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/trashbin"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -33,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -286,6 +287,11 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.state = st
+	if p := a.searchCachePath(); p != "" {
+		if ix, err := search.LoadCache(p); err == nil {
+			a.search.index = ix
+		}
+	}
 	if sp := st.Get(space.ExternalID); sp != nil {
 		sp.Name = i18n.T("外部空间")
 		sp.Root = filepath.Join(cfg.ConfigDir, "external")

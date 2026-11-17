@@ -169,3 +169,65 @@ func TestLinksTagsAndIcons(t *testing.T) {
 		t.Error("icons")
 	}
 }
+
+func TestSearchMultiAndDiskCache(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "A.md", "Alpha topic\nLater unrelated line\nBeta outcome")
+	write(t, dir, "B.md", "First line\nAlpha and Beta together here")
+	write(t, dir, "C.md", "Only Alpha here")
+
+	p := &plain{}
+	roots := []Root{{Space: "s", Path: dir}}
+	ix, changed := RefreshChanged(nil, roots, p.extract)
+	if !changed || ix.Len() != 3 || p.reads != 3 {
+		t.Fatalf("initial RefreshChanged: changed=%v len=%d reads=%d", changed, ix.Len(), p.reads)
+	}
+
+	if !WorthMulti("a 发布") || WorthMulti("a b") {
+		t.Fatal("WorthMulti failed")
+	}
+	hits := ix.SearchMulti("Beta Alpha", nil, 10)
+	if len(hits) != 2 || hits[0].Path != "B.md" {
+		t.Fatalf("expected co-occurring B.md first, got %+v", hits)
+	}
+	for _, h := range hits {
+		sub := h.Snippet[h.Match[0]:h.Match[1]]
+		if !strings.EqualFold(sub, h.Term) {
+			t.Fatalf("invalid snippet match %q for term %q", sub, h.Term)
+		}
+	}
+	// Literal Search must still reject out-of-order multi-keyword queries (for replace.go).
+	if lit := ix.Search("Beta Alpha", nil, 10); len(lit) != 0 {
+		t.Fatalf("literal Search unexpectedly matched out-of-order terms: %+v", lit)
+	}
+
+	// Save & reload disk cache; second RefreshChanged should perform zero disk reads.
+	cachePath := filepath.Join(t.TempDir(), "search-cache.bin")
+	if err := SaveCache(cachePath, ix); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("cache permissions = %o, want 0600", mode)
+	}
+	loaded, err := LoadCache(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.reads = 0
+	ix2, changed2 := RefreshChanged(loaded, roots, p.extract)
+	if changed2 || p.reads != 0 || ix2.Len() != 3 {
+		t.Fatalf("cached RefreshChanged: changed=%v reads=%d len=%d", changed2, p.reads, ix2.Len())
+	}
+
+	// Corrupt cache fails gracefully without erroring caller assumptions.
+	if err := os.WriteFile(cachePath, []byte("BAD_DATA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCache(cachePath); err == nil {
+		t.Fatal("expected LoadCache to reject corrupt data")
+	}
+}

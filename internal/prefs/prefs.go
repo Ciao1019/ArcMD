@@ -24,6 +24,9 @@ type Prefs struct {
 	NoAutoPair bool    `json:"noAutoPair,omitempty"`
 	// AutoSpace puts a space between Chinese and Latin text as it is typed.
 	AutoSpace bool `json:"autoSpace,omitempty"`
+	// CodeNoWrap disables soft wrapping in code blocks by default so long
+	// lines scroll horizontally instead.
+	CodeNoWrap bool `json:"codeNoWrap,omitempty"`
 	// RecentCommands are the command bar's commands used last, latest
 	// first, which it lists first.
 	RecentCommands []string `json:"recentCommands,omitempty"`

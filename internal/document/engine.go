@@ -32,6 +32,14 @@ type Engine struct {
 	hiddenRevision       uint64
 	hidden               map[string]string
 	textChange           TextChange
+	OnBeforeChange       func()
+}
+
+func (e *Engine) notifyBeforeChange() {
+	if fn := e.OnBeforeChange; fn != nil {
+		e.OnBeforeChange = nil
+		fn()
+	}
 }
 
 func NewEngine(doc *Document) *Engine { return &Engine{Doc: doc.Clone()} }
@@ -49,6 +57,7 @@ func (e *Engine) Capture() Snapshot {
 }
 
 func (e *Engine) Restore(s Snapshot) {
+	e.notifyBeforeChange()
 	e.Doc, e.Anchor, e.Caret = s.Doc.Clone(), s.Anchor, s.Caret
 	e.Typing, e.Explicit = s.Typing, s.Explicit
 	e.revision++
@@ -74,6 +83,7 @@ func (e *Engine) Edit(change func()) {
 	}
 	e.depth++
 	defer func() { e.depth--; e.indexDoc = nil }()
+	e.notifyBeforeChange()
 	before := e.Capture()
 	change()
 	dropStrayColors(e.Doc.Blocks)
@@ -216,6 +226,7 @@ func (e *Engine) PreviewReplace(a, z int, text string) {
 	if e.replaceTextMode(a, z, text, false) {
 		return
 	}
+	e.notifyBeforeChange()
 	e.replace(a, z, text)
 	e.revision++
 }
@@ -420,7 +431,7 @@ func (e *Engine) Enter(soft bool) {
 		return
 	}
 	leaf := e.LeafAt(e.Caret)
-	if e.enterMath(leaf) || e.enterPipeTable(leaf) {
+	if e.enterMath(leaf) || e.enterCodeFence(leaf) || e.enterMermaidExit(leaf) || e.enterPipeTable(leaf) {
 		return
 	}
 	if leaf.Block.Kind == "image" && leaf.Parent != nil {
@@ -711,6 +722,7 @@ func (e *Engine) applyFormat(change func(*Style)) {
 				}
 				next := Compact(append(append(SliceRuns(runs, 0, localA), middle...), SliceRuns(runs, localZ, first.End-first.Start)...))
 				if !slices.Equal(runs, next) {
+					e.notifyBeforeChange()
 					i := e.leafIDs[first.Block.ID]
 					entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, first.Block.ID, slices.Clone(runs)}
 					first.Block.Runs = next

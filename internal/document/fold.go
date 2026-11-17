@@ -112,6 +112,7 @@ func (e *Engine) ToggleFold(id string) {
 		return
 	}
 	if parent, index := e.find(id); parent != nil {
+		e.notifyBeforeChange()
 		(*parent)[index].Folded = !(*parent)[index].Folded
 		e.version++
 		e.revision++
@@ -128,6 +129,7 @@ func (e *Engine) Reveal(id string) bool {
 			return changed
 		}
 		if parent, index := e.find(by); parent != nil {
+			e.notifyBeforeChange()
 			(*parent)[index].Folded = false
 			e.version++
 			e.revision++

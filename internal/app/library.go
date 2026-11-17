@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/pinyin"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/trashbin"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -556,7 +557,7 @@ func (a *App) libraryTrash(c *ui.Context) {
 		hay := strings.ToLower(it.Name() + " " + it.SpaceName + " " + it.Path)
 		ok := true
 		for _, w := range words {
-			if !strings.Contains(hay, w) {
+			if !pinyin.ContainsToken(hay, w) {
 				ok = false
 				break
 			}

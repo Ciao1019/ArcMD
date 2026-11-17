@@ -9,6 +9,7 @@ import (
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/history"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -92,4 +93,82 @@ func TestFeaturesSnapshot(t *testing.T) {
 			savePNG(t, filepath.Join(dir, "feature-"+name+".png"), tt)
 		})
 	}
+}
+
+const v03CodeMermaidSample = `# v0.3 技术写作预览
+
+` + "```go\n// BuildVectorPipeline executes per-language lexing and vector layout without wrapping long diagnostic lines.\nfunc BuildVectorPipeline(input string) (int, error) {\n\treturn len(input), nil\n}\n```\n\n```mermaid\nflowchart LR\n  A[Markdown] --> B{词法高亮}\n  B -->|Mermaid| C((矢量图表))\n  B -->|PDF| D[Type 3]\n```\n\n```mermaid\nsequenceDiagram\n  participant E as Editor\n  participant M as Mermaid\n  E->>+M: ParseAndLayout(src)\n  M-->>-E: Shapes & Paths\n```\n"
+
+// TestV03FeaturesSnapshot renders syntax highlighting, unfolded code scroll,
+// native Mermaid diagrams (light & dark), and version grapheme milestones.
+func TestV03FeaturesSnapshot(t *testing.T) {
+	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the v0.3 features")
+	for _, name := range []string{"code-mermaid-light", "code-mermaid-dark"} {
+		t.Run(name, func(t *testing.T) {
+			a, tt := newTestApp(t)
+			a.prefs.CodeNoWrap = true
+			if name == "code-mermaid-dark" {
+				tt.SetDark(true)
+			} else {
+				tt.SetDark(false)
+			}
+			doc := editor.ImportMarkdown(v03CodeMermaidSample)
+			text, err := doc.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := vault.Write(root(a), "v03Demo.arcmd", text); err != nil {
+				t.Fatal(err)
+			}
+			a.refreshTree()
+			a.refreshSearch()
+			a.open("v03Demo.arcmd")
+			for range 4 {
+				tt.Frame()
+				tt.Advance(200 * time.Millisecond)
+			}
+			tt.Frame()
+			savePNG(t, filepath.Join(dir, "feature-"+name+".png"), tt)
+		})
+	}
+
+	t.Run("versions-milestone", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		initial := "# 发布评审\n\n第一阶段完成 核心引擎 编写与自测。\n"
+		doc := editor.ImportMarkdown(initial)
+		text, err := doc.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := vault.Write(root(a), "Milestone.arcmd", text); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := history.SaveMilestone(root(a), "Milestone.arcmd", text, "定稿 v1", time.Now().Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.refreshSearch()
+		a.open("Milestone.arcmd")
+		tt.Frame()
+		caretAtEnd(a, tt)
+		for range len([]rune("编写与自测。")) {
+			tt.Key(0, ui.KeyBackspace)
+		}
+		tt.Type("发布与验收。")
+		saveSettle(tt)
+		a.openVersions()
+		tt.Frame()
+		for i, ver := range a.versions.versions {
+			if ver.Label == "定稿 v1" {
+				a.selectVersion(i)
+				break
+			}
+		}
+		for range 4 {
+			tt.Frame()
+			tt.Advance(200 * time.Millisecond)
+		}
+		tt.Frame()
+		savePNG(t, filepath.Join(dir, "feature-versions-milestone.png"), tt)
+	})
 }

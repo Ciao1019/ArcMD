@@ -21,6 +21,7 @@ type pdfExport struct {
 	source                          *document
 	title                           string
 	ed                              *editor.Editor
+	opts                            editor.Options
 	tops                            []float32
 	file                            *os.File
 	writer                          *pdf.Writer
@@ -57,8 +58,15 @@ func (a *App) startPDF(printing bool) {
 		a.notify("导出 PDF 失败。%v", err)
 		return
 	}
+	w := pdf.NewWriter(file, d.title())
+	if reg, bold, it, boldIt := editor.MathFontData(); len(reg) > 0 {
+		w.RegisterFontData(pdf.FontMath, false, false, reg)
+		w.RegisterFontData(pdf.FontMath, true, false, bold)
+		w.RegisterFontData(pdf.FontMathItalic, false, true, it)
+		w.RegisterFontData(pdf.FontMathItalic, true, true, boldIt)
+	}
 	a.pdfExport = &pdfExport{source: source, title: d.title(), ed: editor.FromDocument(d.ed.Committed()), file: file,
-		writer: pdf.NewWriter(file, d.title()), open: true, printing: printing, next: a.now.Add(time.Millisecond)}
+		writer: w, open: true, printing: printing, next: a.now.Add(time.Millisecond)}
 }
 
 func (a *App) cancelPDF() {
@@ -114,8 +122,16 @@ func (a *App) pdfExportView(c *ui.Context) {
 	}
 	job.next = c.Now().Add(time.Millisecond)
 	if job.tops == nil {
-		o := editor.Options{Width: paperWidth, Theme: documentTheme(false), Page: pageStyle(false), LoadImage: job.source.imageResource}
-		ui.Render(func(c *ui.Context) { job.tops = job.ed.Paginate(o, paperHeight-2*paperMargin) }, 1, 1, 1)
+		job.opts = editor.Options{
+			Width:        paperWidth,
+			Theme:        documentTheme(false),
+			Page:         pageStyle(false),
+			LoadImage:    job.source.imageResource,
+			LoadRawImage: job.source.rawImage,
+		}
+		ui.Render(func(c *ui.Context) { job.tops = job.ed.Paginate(job.opts, paperHeight-2*paperMargin) }, 1, 1, 1)
+		job.writer.ReservePages(len(job.tops))
+		job.writer.SetOutlines(job.ed.ExportOutlines(job.tops, paperHeight, paperMargin, pdf.A4Height))
 		c.After(time.Millisecond)
 		return
 	}
@@ -123,9 +139,9 @@ func (a *App) pdfExportView(c *ui.Context) {
 		a.finishPDF(job)
 		return
 	}
-	page := job.renderPage()
-	// Native drawing stays on the UI thread. JPEG encoding and page IO run
-	// between frames; at most one page bitmap is retained by the worker.
+	vp := job.buildVectorPage()
+	// Vector drawing stays on the UI thread for font/layout reads; zlib
+	// stream compression and disk IO run between frames.
 	job.busy = true
 	done := func(err error) {
 		job.busy = false
@@ -141,36 +157,23 @@ func (a *App) pdfExportView(c *ui.Context) {
 		job.page++
 	}
 	if a.win == nil {
-		done(job.writer.AddPage(page))
+		done(job.writer.FinishVectorPage(vp))
 		c.After(time.Millisecond)
 	} else {
-		go func() { err := job.writer.AddPage(page); a.win.Update(func() { done(err) }) }()
+		go func() { err := job.writer.FinishVectorPage(vp); a.win.Update(func() { done(err) }) }()
 	}
 }
 
-func (job *pdfExport) renderPage() pdf.Page {
+func (job *pdfExport) buildVectorPage() *pdf.VectorPage {
 	top := job.tops[job.page]
 	body := float32(paperHeight - 2*paperMargin)
 	bottom := top + body
 	if job.page+1 < len(job.tops) {
 		bottom = job.tops[job.page+1]
 	}
-	theme := documentTheme(false)
-	img := ui.Render(func(c *ui.Context) {
-		ui.Box(c).Fill().Background(theme.Background).Draw(func(p *ui.Painter, r ui.Rect) {
-			job.ed.PaintPage(p, ui.Rect{X: r.X, Y: r.Y + paperMargin, W: r.W, H: body}, top, bottom, theme)
-			span := ui.Span{Text: fmt.Sprintf("%d / %d", job.page+1, len(job.tops)), Size: 10, Color: theme.TextMuted}
-			w, _ := p.MeasureText(0, span)
-			p.RichText(r.X+(r.W-w)/2, r.Y+r.H-paperMargin/2-6, 0, span)
-		})
-	}, paperWidth, paperHeight, paperScale)
-	page := pdf.Page{Image: img, Width: pdf.A4Width, Height: pdf.A4Height}
-	sx, sy := pdf.A4Width/paperWidth, pdf.A4Height/paperHeight
-	for _, text := range job.ed.PageText(top, bottom) {
-		r := text.Bounds
-		page.Text = append(page.Text, pdf.Text{Value: text.Text, X: float64(r.X) * sx, Y: float64(r.Y-top+paperMargin) * sy, Width: float64(r.W) * sx, Height: float64(r.H) * sy})
-	}
-	return page
+	vp := job.writer.NewVectorPage(pdf.A4Width, pdf.A4Height)
+	job.ed.ExportVectorPage(vp, job.opts, top, bottom, job.page, len(job.tops), job.tops, paperWidth, paperHeight, paperMargin)
+	return vp
 }
 
 func (a *App) finishPDF(job *pdfExport) {
