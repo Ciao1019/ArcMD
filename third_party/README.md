@@ -50,8 +50,9 @@ displacement of the flattened strokes, drawn natively. The MIT notice is in
 
 Formula presentation was checked against Textus commit
 `21dc743b84c5c8f518cfdc95c9654fe31b61507e` (its math preview plugin and editor CSS).
-The native renderer embeds the unmodified `KaTeX_Main-Regular.ttf` and
-`KaTeX_Math-Italic.ttf` faces from KaTeX commit
+The native renderer embeds the unmodified `KaTeX_Main-Regular.ttf`,
+`KaTeX_Math-Italic.ttf`, `KaTeX_Main-Bold.ttf` and `KaTeX_Math-BoldItalic.ttf`
+faces from KaTeX commit
 `9b2280dee4acb4da7d866dbaccad120b00949c27` in `internal/editor/fonts/`.
 These fonts are under the SIL Open Font License 1.1, with copyright and reserved
 font names retained in `katex/OFL.txt` and in the font metadata. KaTeX's upstream

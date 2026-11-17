@@ -76,10 +76,10 @@ func (e *Editor) exitDisplayMath() bool {
 }
 
 // glyphs shapes a piece of a formula's text, kept for drawing.
-func (e *Editor) glyphs(text string, size float32, italic bool) *ui.TextLayout {
+func (e *Editor) glyphs(text string, size float32, italic, bold bool) *ui.TextLayout {
 	// A registration failure still leaves the system serif fallbacks usable.
 	_ = loadMathFonts()
-	key := fmt.Sprintf("%s|%g|%v", text, size, italic)
+	key := fmt.Sprintf("%s|%g|%v|%v", text, size, italic, bold)
 	if l, ok := e.mathGlyphs[key]; ok {
 		return l
 	}
@@ -90,13 +90,17 @@ func (e *Editor) glyphs(text string, size float32, italic bool) *ui.TextLayout {
 	if italic {
 		family = "KaTeX_Math, " + family
 	}
-	l := ui.ShapeRichText([]ui.Span{{Text: text, Size: size, Italic: italic}}, ui.Font{Family: family, Size: size, Italic: italic}, 0)
+	weight := 400
+	if bold {
+		weight = 700
+	}
+	l := ui.ShapeRichText([]ui.Span{{Text: text, Size: size, Italic: italic, Weight: weight}}, ui.Font{Family: family, Size: size, Italic: italic, Weight: weight}, 0)
 	e.mathGlyphs[key] = l
 	return l
 }
 
-func (e *Editor) measureMath(text string, size float32, italic bool) (w, ascent, descent float32) {
-	l := e.glyphs(text, size, italic)
+func (e *Editor) measureMath(text string, size float32, italic, bold bool) (w, ascent, descent float32) {
+	l := e.glyphs(text, size, italic, bold)
 	w, h := l.Size()
 	if lines := l.Lines(); len(lines) > 0 {
 		return w, lines[0].Ascent, lines[0].Descent
@@ -231,7 +235,7 @@ func (e *Editor) paintFormula(p *ui.Painter, box tex.Box, x, y float32, t *ui.Th
 	for _, op := range box.Ops {
 		switch op.Kind {
 		case "text":
-			l := e.glyphs(op.Text, op.Size, op.Italic)
+			l := e.glyphs(op.Text, op.Size, op.Italic, op.Bold)
 			baseline := float32(0)
 			if lines := l.Lines(); len(lines) > 0 {
 				baseline = lines[0].Baseline

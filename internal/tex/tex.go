@@ -17,8 +17,9 @@ import (
 
 // Measure returns the advance width of text at size, and how far its
 // glyphs reach above and below the baseline. Italic is a variable's style;
-// Upright text (numbers, names, \text) is not.
-type Measure func(text string, size float32, italic bool) (w, ascent, descent float32)
+// Upright text (numbers, names, \text) is not. Bold selects the matching
+// bold face for both measurement and drawing.
+type Measure func(text string, size float32, italic, bold bool) (w, ascent, descent float32)
 
 // Op is one thing a formula draws, in DIPs from the origin of its box, the
 // left end of its baseline, y growing downwards.
@@ -31,6 +32,7 @@ type Op struct {
 	Text   string
 	Size   float32
 	Italic bool
+	Bold   bool
 	// Error marks text TeX did not understand, drawn as a warning.
 	Error bool
 	// W and H are a rule's size.
@@ -78,7 +80,7 @@ func layoutMode(src string, size float32, m Measure, display bool) (Box, error) 
 
 // node is a parsed piece of a formula.
 type node struct {
-	kind string // "ord", "op", "bin", "rel", "open", "close", "punct", "text", "space", "group", "frac", "sqrt", "big", "func", "accent", "delim", "matrix", "error"
+	kind string // "ord", "op", "bin", "rel", "open", "close", "punct", "text", "space", "group", "bold", "frac", "sqrt", "big", "func", "accent", "delim", "matrix", "error"
 	text string
 	// italic is a variable's style.
 	italic bool
@@ -366,6 +368,17 @@ func (p *parser) commandNode(name string) (*node, error) {
 		return &node{kind: "accent", text: a, args: [][]*node{base}}, nil
 	}
 	switch name {
+	case "boldsymbol":
+		body, err := p.argument()
+		if err != nil {
+			return nil, err
+		}
+		n := &node{kind: "bold", args: [][]*node{body}}
+		if len(body) == 1 && !body[0].hasSup && !body[0].hasSub {
+			n.italic = body[0].italic
+			n.limits = body[0].limits
+		}
+		return n, nil
 	case "frac", "dfrac", "tfrac", "binom", "cfrac":
 		num, err := p.argument()
 		if err != nil {

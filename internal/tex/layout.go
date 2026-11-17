@@ -6,7 +6,8 @@ import (
 )
 
 type layouter struct {
-	m Measure
+	m    Measure
+	bold bool
 }
 
 // Metrics in em, after TeX's: the math axis, where fraction bars and
@@ -49,18 +50,21 @@ func (l *layouter) text(s string, size float32, italic, bad bool) Box {
 	if s == "" {
 		return Box{}
 	}
-	w, a, d := l.m(s, size, italic)
+	w, a, d := l.m(s, size, italic, l.bold)
 	if italic {
 		// Room for the slant of the last letter.
 		w += size * 0.04
 	}
-	return Box{W: w, Ascent: a, Descent: d, Ops: []Op{{Kind: "text", Text: s, Size: size, Italic: italic, Error: bad}}}
+	return Box{W: w, Ascent: a, Descent: d, Ops: []Op{{Kind: "text", Text: s, Size: size, Italic: italic, Bold: l.bold, Error: bad}}}
 }
 
 func smaller(size, scale float32) float32 { return max(minSize, size*scale) }
 
 // class is the spacing class of an atom, after TeX's.
 func class(n *node) string {
+	if n.kind == "bold" && len(n.args[0]) == 1 {
+		return class(n.args[0][0])
+	}
 	switch n.kind {
 	case "bin", "rel", "open", "close", "punct":
 		return n.kind
@@ -130,7 +134,7 @@ func (l *layouter) list(nodes []*node, size float32, display bool) Box {
 	}
 	if len(nodes) == 0 {
 		// An empty list keeps the height of a line, as "{}" does.
-		_, a, d := l.m("x", size, false)
+		_, a, d := l.m("x", size, false, l.bold)
 		out.Ascent, out.Descent = a*0.6, d*0.2
 	}
 	return out
@@ -143,7 +147,7 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 	case "ord", "bin", "rel", "open", "close", "punct":
 		base = l.text(n.text, size, n.italic, false)
 		if n.text == "" {
-			_, a, d := l.m("x", size, false)
+			_, a, d := l.m("x", size, false, l.bold)
 			base = Box{Ascent: a * .6, Descent: d * .2}
 		}
 	case "error":
@@ -154,6 +158,12 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		base = l.text(n.text, size, false, false)
 	case "group":
 		base = l.list(n.args[0], size, display)
+	case "bold":
+		// Keep the style inside the argument, including nested structures,
+		// without changing following atoms or scripts outside the group.
+		styled := *l
+		styled.bold = true
+		base = styled.list(n.args[0], size, display)
 	case "space":
 		return Box{W: n.space * size}
 	case "frac":
@@ -183,14 +193,24 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		b := l.list(n.sub, ss, false)
 		sub = &b
 	}
-	if n.limits && (display || n.kind == "func") && (n.kind == "big" || n.kind == "func") {
+	// A styled single atom keeps its operator geometry. Stop at an inner
+	// script: outer scripts then belong to the whole already-scripted box.
+	baseAtom := n
+	for baseAtom.kind == "bold" && len(baseAtom.args[0]) == 1 {
+		inner := baseAtom.args[0][0]
+		if inner.hasSup || inner.hasSub {
+			break
+		}
+		baseAtom = inner
+	}
+	if n.limits && (display || baseAtom.kind == "func") && (baseAtom.kind == "big" || baseAtom.kind == "func") {
 		return l.limits(base, sup, sub, size)
 	}
 	correction := float32(0)
 	if n.italic {
 		correction = size * .03
 	}
-	if n.kind == "big" && strings.ContainsAny(n.text, "∫∬∭∮") {
+	if baseAtom.kind == "big" && strings.ContainsAny(baseAtom.text, "∫∬∭∮") {
 		// An integral leans beyond its advance at the upper hook. Its
 		// upper limit needs clearance while the lower one stays close.
 		correction = size * .22
@@ -313,11 +333,11 @@ func (l *layouter) bigOperator(s string, size float32, display bool) Box {
 			gs = size * 1.9
 		}
 	}
-	w, a, d := l.m(s, gs, false)
+	w, a, d := l.m(s, gs, false, l.bold)
 	axis := size * axisHeight
 	// The glyph's ink is about its em box's middle 80%, centered there.
 	dy := -axis - (d-a)/2 - gs*0.08
-	return Box{W: w, Ascent: a - dy - gs*0.1, Descent: dy + d, Ops: []Op{{Kind: "text", Text: s, Size: gs, Y: dy}}}
+	return Box{W: w, Ascent: a - dy - gs*0.1, Descent: dy + d, Ops: []Op{{Kind: "text", Text: s, Size: gs, Y: dy, Bold: l.bold}}}
 }
 
 // accent draws a mark over (or a line under) its base.
