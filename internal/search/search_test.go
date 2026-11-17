@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -210,8 +211,10 @@ func TestSearchMultiAndDiskCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Fatalf("cache permissions = %o, want 0600", mode)
+	if runtime.GOOS != "windows" {
+		if mode := info.Mode().Perm(); mode != 0o600 {
+			t.Fatalf("cache permissions = %o, want 0600", mode)
+		}
 	}
 	loaded, err := LoadCache(cachePath)
 	if err != nil {
