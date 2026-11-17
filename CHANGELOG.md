@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.3.0
+## 0.2.1
 
-This release upgrades PDF export to a pure-Go vector pipeline with hierarchical outlines and clickable links, adds native Mermaid diagram rendering and `\boldsymbol` bold math fonts, speeds up large-document editing and command-bar discovery with Pinyin/multi-keyword search and persistent caching, and introduces named version milestones with grapheme-level inline diffs.
+This release upgrades PDF export to a pure-Go vector pipeline with hierarchical outlines and clickable links, adds native Mermaid diagram rendering, `\boldsymbol` bold math fonts, and Obsidian `![[...]]` image embed compatibility, speeds up large-document editing and command-bar discovery with Pinyin/multi-keyword search and persistent caching, introduces named version milestones with grapheme-level inline diffs, and resolves Windows shortcut and path-handling issues.
 
 ### Vector PDF export and native Mermaid diagrams
 
@@ -23,7 +23,7 @@ This release upgrades PDF export to a pure-Go vector pipeline with hierarchical 
 
 ### Documentation
 
-- Update `README.md`, `README.en.md`, `AGENTS.md`, and `third_party/README.md` for version 0.3.0, vector PDF export, native Mermaid diagrams, `\boldsymbol`, Pinyin/cached search, and version milestones.
+- Update `README.md`, `README.en.md`, `AGENTS.md`, and `third_party/README.md` for version 0.2.1, vector PDF export, native Mermaid diagrams, `\boldsymbol`, Pinyin/cached search, version milestones, Obsidian `![[...]]` image embeds, and Windows fixes.
 
 ### Data compatibility
 
