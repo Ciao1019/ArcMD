@@ -65,6 +65,9 @@ func TestBoldsymbolSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	source = append(source, []byte("\n$$\n"+`\sum_{i=1}^n x_i \quad \boldsymbol{\sum}_{i=1}^n x_i`+"\n$$\n\n$$\n"+
+		`\lim_{x\to 0}\frac{\sin x}{x} \quad \boldsymbol{\lim}_{x\to 0}\frac{\sin x}{x}`+"\n$$\n\n$$\n"+
+		`\int_0^\infty e^{-x}\,dx \quad \boldsymbol{\int}_0^\infty e^{-x}\,dx`+"\n$$\n")...)
 	for _, name := range []string{"reading", "reading-dark", "editing", "narrow"} {
 		t.Run(name, func(t *testing.T) {
 			a, tt := newTestApp(t)

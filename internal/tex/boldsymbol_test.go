@@ -103,3 +103,95 @@ func TestBoldsymbolRequiresArgument(t *testing.T) {
 		}
 	}
 }
+
+func TestBoldsymbolOperatorLimits(t *testing.T) {
+	for _, tc := range []struct {
+		source, operator, lower string
+		display, centered       bool
+	}{
+		{`\boldsymbol{\sum}_{i=1}^n`, "∑", "i", true, true},
+		{`\boldsymbol{\lim}_{x\to 0}`, "lim", "x", true, true},
+		{`\boldsymbol{\sum}\limits_{i=1}^n`, "∑", "i", true, true},
+		{`\boldsymbol{\sum}\nolimits_{i=1}^n`, "∑", "i", true, false},
+		{`\boldsymbol{\sum}_{i=1}^n`, "∑", "i", false, false},
+		{`\boldsymbol{\lim}_{x\to 0}`, "lim", "x", false, true},
+		{`\boldsymbol{\boldsymbol{\sum}}_{i=1}^n`, "∑", "i", true, true},
+		{`\boldsymbol{\boldsymbol{\sum}\nolimits}_{i=1}^n`, "∑", "i", true, false},
+		{`\boldsymbol{\boldsymbol{\sum}\nolimits}\limits_{i=1}^n`, "∑", "i", true, true},
+		{`\boldsymbol{\int}\limits_0^\infty`, "∫", "0", true, true},
+	} {
+		mode := "inline"
+		if tc.display {
+			mode = "display"
+		}
+		t.Run(mode+"/"+tc.source, func(t *testing.T) {
+			b, err := layoutMode(tc.source, 20, fixed, tc.display)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var operator, lower Op
+			for _, op := range b.Ops {
+				if op.Error {
+					t.Fatalf("unsupported token %q", op.Text)
+				}
+				if op.Text == tc.operator {
+					operator = op
+				}
+				if op.Text == tc.lower {
+					lower = op
+				}
+			}
+			if operator.Text == "" || lower.Text == "" || !operator.Bold || lower.Bold || lower.Y <= operator.Y {
+				t.Fatalf("operator or outer script lost its style/position: %+v, %+v", operator, lower)
+			}
+			width, _, _ := fixed(operator.Text, operator.Size, operator.Italic, operator.Bold)
+			if centered := lower.X < operator.X+width; centered != tc.centered {
+				t.Fatalf("centered = %v, want %v: operator %+v, lower %+v", centered, tc.centered, operator, lower)
+			}
+		})
+	}
+}
+
+func TestBoldsymbolIntegralHookClearance(t *testing.T) {
+	for _, source := range []string{`\boldsymbol{\int}_0^\infty`, `\boldsymbol{\boldsymbol{\int}}_0^\infty`} {
+		for _, render := range []func(string, float32, Measure) (Box, error){Layout, LayoutInline} {
+			b, err := render(source, 20, fixed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var upper, lower Op
+			for _, op := range b.Ops {
+				if op.Text == "∞" {
+					upper = op
+				}
+				if op.Text == "0" {
+					lower = op
+				}
+			}
+			if upper.Text == "" || lower.Text == "" || upper.Bold || lower.Bold || upper.Y >= lower.Y || math.Abs(float64(upper.X-lower.X-4.4)) > .001 {
+				t.Errorf("%s lost the integral's upper-hook clearance: upper %+v, lower %+v", source, upper, lower)
+			}
+		}
+	}
+}
+
+func TestBoldsymbolDoesNotReuseScriptedOperator(t *testing.T) {
+	for _, source := range []string{`\boldsymbol{\sum_i}^n`, `\boldsymbol{\boldsymbol{\sum_i}}\limits^n`} {
+		b := layout(t, source)
+		var operator, inner, outer Op
+		for _, op := range b.Ops {
+			switch op.Text {
+			case "∑":
+				operator = op
+			case "i":
+				inner = op
+			case "n":
+				outer = op
+			}
+		}
+		width, _, _ := fixed(operator.Text, operator.Size, false, true)
+		if operator.Text == "" || inner.Text == "" || outer.Text == "" || !inner.Bold || outer.Bold || inner.X >= operator.X+width || outer.X < operator.X+width {
+			t.Fatalf("%s reused the inner operator for an outer script: %+v", source, b)
+		}
+	}
+}

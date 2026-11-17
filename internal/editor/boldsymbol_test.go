@@ -3,6 +3,7 @@ package editor
 import (
 	"math"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/Ciao1019/ArcMD/internal/tex"
@@ -41,6 +42,9 @@ func TestBoldsymbolNormalDistribution(t *testing.T) {
 }
 
 func TestBoldsymbolUsesEmbeddedBoldFaces(t *testing.T) {
+	if err := loadMathFonts(); err != nil {
+		t.Skip(err)
+	}
 	e := New("")
 	for _, tc := range []struct {
 		text, file string
@@ -71,8 +75,13 @@ func TestBoldsymbolUsesEmbeddedBoldFaces(t *testing.T) {
 			regular := e.glyphs(tc.text, 40, tc.italic, false)
 			bold := e.glyphs(tc.text, 40, tc.italic, true)
 			got, _ := bold.Size()
-			if math.Abs(float64(got)-float64(advance)/64) > .05 {
-				t.Fatalf("bold advance %g does not match embedded face %g", got, float64(advance)/64)
+			want := float64(advance) / 64
+			if runtime.GOOS == "linux" {
+				// MyGo's Pango backend enables whole-pixel metric hinting.
+				want = math.Round(want)
+			}
+			if math.Abs(float64(got)-want) > .05 {
+				t.Fatalf("bold advance %g does not match embedded face %g", got, want)
 			}
 			if regular == bold || e.glyphs(tc.text, 40, tc.italic, false) != regular {
 				t.Fatal("bold and regular glyphs share a cache entry")

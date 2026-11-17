@@ -374,8 +374,9 @@ func (p *parser) commandNode(name string) (*node, error) {
 			return nil, err
 		}
 		n := &node{kind: "bold", args: [][]*node{body}}
-		if len(body) == 1 {
+		if len(body) == 1 && !body[0].hasSup && !body[0].hasSub {
 			n.italic = body[0].italic
+			n.limits = body[0].limits
 		}
 		return n, nil
 	case "frac", "dfrac", "tfrac", "binom", "cfrac":

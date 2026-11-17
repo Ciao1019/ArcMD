@@ -193,14 +193,24 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		b := l.list(n.sub, ss, false)
 		sub = &b
 	}
-	if n.limits && (display || n.kind == "func") && (n.kind == "big" || n.kind == "func") {
+	// A styled single atom keeps its operator geometry. Stop at an inner
+	// script: outer scripts then belong to the whole already-scripted box.
+	baseAtom := n
+	for baseAtom.kind == "bold" && len(baseAtom.args[0]) == 1 {
+		inner := baseAtom.args[0][0]
+		if inner.hasSup || inner.hasSub {
+			break
+		}
+		baseAtom = inner
+	}
+	if n.limits && (display || baseAtom.kind == "func") && (baseAtom.kind == "big" || baseAtom.kind == "func") {
 		return l.limits(base, sup, sub, size)
 	}
 	correction := float32(0)
 	if n.italic {
 		correction = size * .03
 	}
-	if n.kind == "big" && strings.ContainsAny(n.text, "∫∬∭∮") {
+	if baseAtom.kind == "big" && strings.ContainsAny(baseAtom.text, "∫∬∭∮") {
 		// An integral leans beyond its advance at the upper hook. Its
 		// upper limit needs clearance while the lower one stays close.
 		correction = size * .22
