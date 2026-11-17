@@ -481,6 +481,9 @@ func (a *App) runPaletteAction(act action) {
 }
 
 func (a *App) replaceReferences(old, replacement *document) {
+	if old != nil && old != replacement {
+		old.closeJSX()
+	}
 	if a.doc == old {
 		a.doc = replacement
 	}

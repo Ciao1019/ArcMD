@@ -51,6 +51,8 @@ ArcMD brings Markdown's familiar writing flow onto a calm, expressive native can
 
 ---
 
+- **Partial MDX support**: isolated JSX block islands inside the native editor, with an embedded compiler and no Node runtime dependency. [Scope, build and security boundaries](docs/mdx.md).
+
 ## Writing in Flow
 
 Stay on one calm page instead of splitting your focus between raw source and preview — every keystroke, expansion, and drag you see in the hero animation above runs live on the same surface:

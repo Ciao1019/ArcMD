@@ -2,11 +2,15 @@ package i18n
 
 // en translates the interface's messages into English, by their Chinese.
 var en = map[string]string{
-	"外部空间":    "External",
-	"打开文件…":   "Open File\u2026",
-	"从外部空间移除": "Remove from External",
-	"只添加选中的文件，保留原位置":          "Add selected files and keep their original locations",
-	"内置空间 · 文件保留在原位置":         "Built-in space \u00b7 Files stay in their original locations",
+	"JSX 编译失败（moejs）：":     "JSX compilation failed (moejs): ",
+	"JSX WebView 失败：":      "JSX WebView failed: ",
+	"部分或全部 JSX 未渲染；下方为源码。": "Some or all JSX could not be rendered; source is shown below.",
+	"重新载入并重试 JSX":          "Reload and retry JSX",
+	"外部空间":                 "External",
+	"打开文件…":                "Open File\u2026",
+	"从外部空间移除":              "Remove from External",
+	"只添加选中的文件，保留原位置":       "Add selected files and keep their original locations",
+	"内置空间 · 文件保留在原位置":      "Built-in space \u00b7 Files stay in their original locations",
 	"打开的外部文档会显示在这里，文件保留在原位置。": "External documents appear here. Files stay in their original locations.",
 	"请在普通空间中新建文档。":            "Create new documents in a folder space.",
 	"外部空间只记录文件，不能作为移动目标。":     "External keeps file references and cannot be a move destination.",

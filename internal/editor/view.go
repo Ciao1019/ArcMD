@@ -35,6 +35,8 @@ func sameLayoutPageKey(a, b layoutPageKey) bool {
 }
 
 type Editor struct {
+	embeddedBlocks map[string]EmbeddedBlock
+
 	notesDoc      *document.Document
 	notesRevision uint64
 	notesKey      string
@@ -439,6 +441,10 @@ type cachedShape struct {
 }
 
 type Options struct {
+	// EmbeddedBlocks overlays host-owned web views on code blocks, keyed by block ID.
+	// The host owns the views; nil views leave the original source visible.
+	EmbeddedBlocks map[string]EmbeddedBlock
+
 	// Resizing keeps offscreen shaping cached during an interactive resize.
 	// Hosts must clear it on release; the final layout is always exact.
 	Resizing             bool
@@ -570,6 +576,7 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 
 func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.services = c.Services()
+	e.syncEmbeddedBlocks(o.EmbeddedBlocks)
 	// Native window drags do not go through a split divider or the host's
 	// panel animation. Detect them here, including in detached windows.
 	if e.windowResize.active(c) {
@@ -742,6 +749,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					e.starter(c)
 					e.headerControls(c)
 				}
+				e.embeddedBlockViews(c)
 				e.imageControls(c, o)
 				e.bookmarkMarks(c)
 				if o.Footer != nil {
@@ -1103,7 +1111,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		cached, ok := e.cache[b.ID]
 		sameShape := ok && cached.key == key && slices.Equal(cached.runs, b.Runs)
 		active := virtualize && (b.ID == caretID || b.ID == anchorID || b.ID == revealID || b.ID == e.dragID || b.ID == e.mathEditing || strings.HasPrefix(e.inlineEditing, b.ID+":"))
-		deferShape := virtualize && !active && leaf.Owner == b.ID && canDeferKind(b.Kind)
+		_, embedded := e.embeddedBlocks[b.ID]
+		deferShape := virtualize && !active && !embedded && leaf.Owner == b.ID && canDeferKind(b.Kind)
 
 		var laid *textLayout
 		var h float32
@@ -1176,6 +1185,14 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		if b.Kind == "math" {
 			total = e.mathRow(&row, h)
 			row.rect.H = total
+		}
+		if block, ok := e.embeddedBlocks[b.ID]; ok {
+			// Keep shaped source for accessibility, selection and fallback, but
+			// reserve the web page's own rectangle in the native document flow.
+			total = block.Height + 16
+			row.rect.H = total
+			e.rows = append(e.rows, row)
+			return total
 		}
 		e.rows = append(e.rows, row)
 		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" {
@@ -1423,6 +1440,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				continue
 			}
 			r := *e.indexedRow(i)
+			if _, embedded := e.embeddedBlocks[r.leaf.Block.ID]; embedded && !e.printing {
+				continue
+			}
 			if plan.active && e.isDraggedOwner(r.leaf.Owner, plan) != draggedOnly {
 				continue
 			}

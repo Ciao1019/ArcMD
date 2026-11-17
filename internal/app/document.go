@@ -15,6 +15,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
+	"github.com/Ciao1019/ArcMD/internal/jsx"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
@@ -84,6 +85,17 @@ type document struct {
 	// marks are the document's bookmarks resolved to its blocks
 	// (bookmarks.go).
 	marks docMarks
+	// jsx is the compiled island projection for a .mdx file; jsxErr is set
+	// when compilation failed and the editor shows source instead.
+	jsx         *jsx.Manifest
+	jsxErr      error
+	jsxViewErr  error
+	jsxBlocks   map[string]editor.EmbeddedBlock
+	jsxViews    []ui.NativeWebView
+	jsxTheme    jsx.Theme
+	jsxThemeKey string
+	jsxThemeOK  bool
+	jsxLastPoll time.Time
 }
 
 func openDocument(sp *space.Space, rel, text string, preferSource bool) *document {
@@ -98,17 +110,29 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 		}
 	} else {
 		doc = editor.ImportMarkdown(text)
+		if projected := projectJSX(d, text); projected != nil {
+			doc = projected
+		}
 	}
 	d.ed = editor.FromOwnedDocument(doc)
 	d.baseline, _ = d.ed.Doc.Digest()
 	d.rememberBaseline(d.ed.Doc)
 	if preferSource {
-		d.preview = editor.ExportMarkdown(d.ed.Doc)
+		d.preview = d.text()
 	}
 	return d
 }
 func (d *document) title() string { return vault.Title(d.rel) }
-func (d *document) text() string  { return editor.ExportMarkdown(d.ed.Committed()) }
+
+// text is the user-facing Markdown/MDX that should be written to disk.
+// JSX projections are inverted so island fences never land in the file.
+func (d *document) text() string {
+	md := editor.ExportMarkdown(d.ed.Committed())
+	if d.jsx != nil {
+		return jsx.RestoreSource(md, d.jsx.Namespace)
+	}
+	return md
+}
 
 // ensureBodyParagraph gives a newly created heading-only Markdown page an
 // empty body paragraph below its title without marking the document dirty.
@@ -293,8 +317,14 @@ func (d *document) toggleMode() {
 	if !d.source {
 		targetID := d.ed.ActiveOrTopBlockID()
 		doc := d.ed.Committed()
-		d.preview = editor.ExportMarkdown(doc)
-		d.previewCaret = markdownBlockRuneOffset(doc, d.preview, targetID)
+		exported := editor.ExportMarkdown(doc)
+		d.preview = exported
+		if d.jsx != nil {
+			d.preview = jsx.RestoreSource(exported, d.jsx.Namespace)
+			d.previewCaret = 0
+		} else {
+			d.previewCaret = markdownBlockRuneOffset(doc, d.preview, targetID)
+		}
 		d.previewCaretPending = true
 		d.previewEnteredY = -1
 		d.source = true
@@ -514,7 +544,7 @@ func (d *document) write(force bool) error {
 	} else {
 		err = committed.Validate()
 		if err == nil {
-			text = editor.ExportMarkdown(committed)
+			text = d.text()
 		}
 	}
 	if err == nil {
@@ -591,6 +621,10 @@ func (d *document) startAsyncAutosave(post func(func())) {
 	expectedDisk := d.diskText
 	historyOff := d.historyOff
 	needInitialHistory := !d.historyOff && !d.historyStarted && expectedDisk != ""
+	jsxNS := ""
+	if d.jsx != nil {
+		jsxNS = d.jsx.Namespace
+	}
 	fullPath := d.fullPath()
 	ver := d.version
 	rev := d.ed.Revision()
@@ -624,6 +658,9 @@ func (d *document) startAsyncAutosave(post func(func())) {
 			prepErr = snapshot.Validate()
 			if prepErr == nil {
 				outText = editor.ExportMarkdown(snapshot)
+				if jsxNS != "" {
+					outText = jsx.RestoreSource(outText, jsxNS)
+				}
 				snapshot.ImportSource = outText
 				baseline, _ = snapshot.Digest()
 			}

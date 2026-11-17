@@ -118,6 +118,9 @@ func (a *App) closeWindow(w *docWindow) bool {
 			return false
 		}
 	}
+	if w.doc != nil {
+		w.doc.closeJSX()
+	}
 	for i, x := range a.windows {
 		if x == w {
 			a.windows = append(a.windows[:i], a.windows[i+1:]...)
@@ -175,6 +178,8 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 			return
 		}
 		width, _ := c.Size()
+		a.syncJSX(c, d)
+		a.jsxStatus(c, d)
 		editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, width, false, d))
 	})
 	w.win.SetTitle(docName(d.title()))

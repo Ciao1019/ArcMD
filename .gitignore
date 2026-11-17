@@ -17,3 +17,6 @@
 # Update signing keys belong outside the repository.
 mygo-update.key
 *.private-key
+
+# MDX compiler regeneration and browser tests (not runtime dependencies).
+/tools/mdx/node_modules/

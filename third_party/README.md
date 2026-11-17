@@ -87,3 +87,17 @@ native Go, under the MIT License, Copyright (c) 2025 kokonutUI. The full
 MIT notice is in `kokonutui/LICENSE`.
 
 [Kokonut UI source](https://github.com/kokonut-labs/kokonutui)
+
+## Optional MDX block islands
+
+`internal/jsx` embeds the MDX compiler and React/ReactDOM browser runtime.
+`tools/mdx` contains reproducible build sources and the pinned npm lockfile;
+Node, npm and esbuild are developer tools, not application runtime dependencies.
+The bundled dependency notices and versions are retained in `mdx/` and
+`mdx/DEPENDENCIES.json` (including nested dependencies). Inline legal notices
+are preserved in both generated JavaScript assets. JSDOM is test-only.
+
+The compiler runs in `github.com/MoeForge/moejs` v0.1.1 (Apache-2.0), using
+`github.com/MoeForge/moego` v0.1.0-alpha.3 (MIT). Their licenses and
+third-party notices are retained in `moejs/` and `moego/`; these directories
+are included by the existing application resource packaging configuration.

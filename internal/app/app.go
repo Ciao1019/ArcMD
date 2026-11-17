@@ -202,6 +202,8 @@ type App struct {
 	// (windows.go); newWindow, when set, makes them in tests.
 	windows   []*docWindow
 	newWindow func(title string, view func(*ui.Context), close func() bool) windowHandle
+	// testIslandView, when set, stands in for a system WebView in tests.
+	testIslandView func() ui.NativeWebView
 	// watchFiles follows a space's folder (watch.go), and watches are the
 	// folders followed, by space ID.
 	watchFiles watchFunc

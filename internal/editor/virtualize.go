@@ -602,6 +602,9 @@ func (e *Editor) trimShapeCache(winTop, winBottom float32) {
 	}
 	candidates := make([]candidate, 0, len(e.cache)-maxCachedShapes)
 	for id, cached := range e.cache {
+		if _, embedded := e.embeddedBlocks[id]; embedded {
+			continue
+		}
 		if id == caretID || id == anchorID || id == revealID || id == e.dragID || id == e.mathEditing || strings.HasPrefix(e.inlineEditing, id+":") {
 			continue
 		}
