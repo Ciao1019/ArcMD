@@ -416,7 +416,7 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 		if d.isWhiteboard() {
 			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
 		} else {
-			editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, cardWidth, false, d))
+			a.documentMapWorkspace(c, d, cardWidth)
 		}
 	})
 }

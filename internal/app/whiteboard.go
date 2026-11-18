@@ -194,6 +194,13 @@ func (a *App) documentCorner(c *ui.Context, d *document) {
 		return
 	}
 	if !d.source {
+		b := iconButton(c, "document-map", iconListTree, i18n.T("思维导图"), i18n.T("思维导图"), false)
+		if d.mindMap != nil {
+			b.Background(c.Theme().Accent.Alpha(.12))
+		}
+		if b.Clicked() {
+			a.toggleDocumentMap(d)
+		}
 		d.ed.Corner(c)
 	}
 }

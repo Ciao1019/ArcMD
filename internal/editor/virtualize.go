@@ -194,6 +194,10 @@ func (e *Editor) estimateTableInnerHeight(b *document.Block, w float32, widths [
 }
 
 func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, winTop, winBottom float32, leafOf func(string) document.Leaf, cellTop *float32, header *bool, blockLayout func(*document.Block, float32, float32, float32) float32) float32 {
+	padX, padY, minRow, extra := float32(14), float32(7), float32(42), float32(4)
+	if e.mapTablePreview {
+		padX, padY, minRow, extra = mapCellX, mapCellY, mapCellMinRow, 2*mapCellY
+	}
 	start := y
 	y += 22
 	top := y
@@ -279,7 +283,7 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 	heights := make([]float32, nrows)
 	rowTop := top
 	for ri, tr := range b.Children {
-		heights[ri] = 42
+		heights[ri] = minRow
 		*header = ri == 0
 		*cellTop = rowTop
 		for ci, cell := range tr.Children {
@@ -290,7 +294,7 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 			spanCols, spanRows = min(spanCols, cols-ci), min(spanRows, nrows-ri)
 			cw := colEdges[ci+spanCols] - colEdges[ci]
 			index := len(e.rows)
-			h := blockLayout(cell, colEdges[ci]+14, 0, max(24, cw-28)) + 4
+			h := blockLayout(cell, colEdges[ci]+padX, 0, max(24, cw-2*padX)) + extra
 			spots = append(spots, placed{index, ri, ci, spanRows, spanCols, h, cell})
 			if spanRows == 1 {
 				heights[ri] = max(heights[ri], h)
@@ -319,7 +323,7 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 	for _, sp := range spots {
 		rect := ui.Rect{X: colEdges[sp.c], Y: rowEdges[sp.r], W: colEdges[sp.c+sp.cols] - colEdges[sp.c], H: rowEdges[sp.r+sp.rows] - rowEdges[sp.r]}
 		r := &e.rows[sp.index]
-		r.y += rect.Y + 7
+		r.y += rect.Y + padY
 		r.rect = rect
 		cells = append(cells, decoration{kind: "cell", rect: rect, header: sp.r == 0, right: sp.c+sp.cols < cols, below: sp.r+sp.rows < nrows, tone: sp.cell.Background, id: sp.cell.ID, ownerID: b.ID, rowIdx: sp.r, colIdx: sp.c})
 	}
@@ -355,6 +359,10 @@ func (e *Editor) blockMetrics(b *document.Block, w float32, header bool) blockMe
 	}
 	if b.Kind == "cell" {
 		m.font.Size, m.font.LineHeight = 14, 22.0/14
+		if e.mapTablePreview {
+			m.font.Size, m.font.LineHeight = mapCellFont, 1.25
+			m.bottom, m.gap = 0, 0
+		}
 	}
 	switch b.Kind {
 	case "heading":

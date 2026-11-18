@@ -229,6 +229,17 @@ func annotationRuns(runs []document.Run) []annotationRun {
 	return out
 }
 
+// annotationLineRects is shared by painting and by tight map-node measurement.
+func annotationLineRects(r row, run annotationRun, look annotationLook, size float32) []ui.Rect {
+	rects := r.layout.SelectionRects(ui.TextInputRange{Start: run.start, End: run.end})
+	if k := len(rects) - 1; k >= 0 && look.pad > 0 {
+		// The last character's spacing is the gap after the text, not
+		// the text: the box pads both sides itself.
+		rects[k].W -= look.pad * size
+	}
+	return rects
+}
+
 // paintAnnotations draws a row's marks: under its text when under is
 // true, over it otherwise.
 func (e *Editor) paintAnnotations(p *ui.Painter, bounds ui.Rect, r row, under bool) {
@@ -250,12 +261,7 @@ func (e *Editor) paintAnnotations(p *ui.Painter, bounds ui.Rect, r row, under bo
 		}
 		progress := e.revealProgress(p, r.leaf.Start+run.start, r.leaf.Start+run.end)
 		color := e.annotationColor(run.variant, run.color)
-		rects := r.layout.SelectionRects(ui.TextInputRange{Start: run.start, End: run.end})
-		if k := len(rects) - 1; k >= 0 && look.pad > 0 {
-			// The last character's spacing is the gap after the text, not
-			// the text: the box pads both sides itself.
-			rects[k].W -= look.pad * size
-		}
+		rects := annotationLineRects(r, run, look, size)
 		for i, rect := range rects {
 			if rect.W < 1 {
 				continue

@@ -92,19 +92,27 @@ type Run struct {
 	Style Style  `json:"style,omitempty"`
 }
 
+// ListPlacement retains view-only Markdown container information when the
+// editor flattens a list. Native documents retain the original ImportSource.
+type ListPlacement struct {
+	Depth int
+	Item  bool // an otherwise empty item represented by its content block
+}
+
 type Block struct {
-	ImageWidth float32   `json:"imageWidth,omitempty"` // Preferred DIP width; zero is natural.
-	NoteLabel  string    `json:"noteLabel,omitempty"`  // Footnote definition label (version 6).
-	ID         string    `json:"id"`
-	Kind       string    `json:"kind"`
-	Runs       []Run     `json:"runs,omitempty"`
-	Level      int       `json:"level,omitempty"`
-	Indent     int       `json:"indent,omitempty"`
-	Checked    bool      `json:"checked,omitempty"`
-	Language   string    `json:"language,omitempty"`
-	URL        string    `json:"url,omitempty"`
-	Align      string    `json:"align,omitempty"`
-	Widths     []float32 `json:"widths,omitempty"`
+	MapList    *ListPlacement `json:"-"`
+	ImageWidth float32        `json:"imageWidth,omitempty"` // Preferred DIP width; zero is natural.
+	NoteLabel  string         `json:"noteLabel,omitempty"`  // Footnote definition label (version 6).
+	ID         string         `json:"id"`
+	Kind       string         `json:"kind"`
+	Runs       []Run          `json:"runs,omitempty"`
+	Level      int            `json:"level,omitempty"`
+	Indent     int            `json:"indent,omitempty"`
+	Checked    bool           `json:"checked,omitempty"`
+	Language   string         `json:"language,omitempty"`
+	URL        string         `json:"url,omitempty"`
+	Align      string         `json:"align,omitempty"`
+	Widths     []float32      `json:"widths,omitempty"`
 	// Color is a callout's color, one of CalloutColors (version 2).
 	Color string `json:"color,omitempty"`
 	// Folded hides what a heading or list item holds (version 4).

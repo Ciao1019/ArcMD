@@ -47,7 +47,9 @@ type Prefs struct {
 	NoDim bool `json:"noDim,omitempty"`
 	// OutlineClosed collapses the outline left of the page, which is open
 	// by default.
-	OutlineClosed bool `json:"outlineClosed,omitempty"`
+	OutlineClosed    bool `json:"outlineClosed,omitempty"`
+	MindMapBothSides bool `json:"mindMapBothSides,omitempty"`
+	MindMapOpen      bool `json:"mindMapOpen,omitempty"`
 	// Keys rebind commands, by their IDs, to shortcuts written as
 	// "Cmd+Shift+K"; a command left out keeps its default.
 	Keys map[string]string `json:"keys,omitempty"`
