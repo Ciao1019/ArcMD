@@ -3,7 +3,11 @@ package editor
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -1379,6 +1383,33 @@ func (b *Board) boardTextLayout(text string, size float32, fontFamily string, al
 	return tl
 }
 
+var boardHandFamily = sync.OnceValue(func() string {
+	if runtime.GOOS == "darwin" && !darwinHasKaitiOnDisk() {
+		return "Virgil, Bradley Hand, Segoe Print, system-ui"
+	}
+	return "Virgil, Bradley Hand, Segoe Print, Kaiti SC, STKaiti, KaiTi, system-ui"
+})
+
+func darwinHasKaitiOnDisk() bool {
+	patterns := []string{
+		"/System/Library/AssetsV2/com_apple_MobileAsset_Font*/*.asset/AssetData/Kaiti.ttc",
+		"/Library/Fonts/*Kai*",
+		"/Library/Fonts/*kai*",
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		patterns = append(patterns,
+			filepath.Join(home, "Library/Fonts/*Kai*"),
+			filepath.Join(home, "Library/Fonts/*kai*"),
+		)
+	}
+	for _, pat := range patterns {
+		if matches, err := filepath.Glob(pat); err == nil && len(matches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func boardFontFamily(name string) string {
 	switch name {
 	case "sans":
@@ -1386,7 +1417,7 @@ func boardFontFamily(name string) string {
 	case "mono":
 		return "monospace"
 	default:
-		return "Virgil, Bradley Hand, Segoe Print, Kaiti SC, STKaiti, KaiTi, cursive, system-ui"
+		return boardHandFamily()
 	}
 }
 
