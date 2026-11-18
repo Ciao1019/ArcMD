@@ -177,7 +177,7 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 			return
 		}
 		width, _ := c.Size()
-		editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, width, false, d))
+		a.documentMapWorkspace(c, d, width)
 	})
 	w.win.SetTitle(docName(d.title()))
 }

@@ -88,3 +88,5 @@ native Go, under the MIT License, Copyright (c) 2025 kokonutUI. The full
 MIT notice is in `kokonutui/LICENSE`.
 
 [Kokonut UI source](https://github.com/kokonut-labs/kokonutui)
+
+The native document map adapts the MIT-licensed [mygo-native-ui mindmap](https://github.com/xingkaixin/mygo-native-ui/tree/main/ui/mindmap). See [license and provenance](mygo-native-ui/README.md).

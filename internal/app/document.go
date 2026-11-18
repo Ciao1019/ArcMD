@@ -40,6 +40,9 @@ type document struct {
 	diskText         string
 	source           bool
 	ed               *editor.Editor
+	mindMap          *editor.MindMap
+	mapInitialized   bool
+	mapFraction      float32
 	board            *editor.Board
 	boardReadOnly    bool
 	boardBaseline    [32]byte

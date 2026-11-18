@@ -2,6 +2,16 @@ package i18n
 
 // en translates the interface's messages into English, by their Chinese.
 var en = map[string]string{
+	"调整思维导图宽度": "Resize mind map",
+	"思维导图画布":   "Mind map canvas",
+
+	"单侧布局":    "One-sided layout",
+	"双侧布局":    "Two-sided layout",
+	"导图布局":    "Map layout",
+	"居中并适应画布": "Center and fit map",
+	"折叠":      "Fold",
+	"展开":      "Expand",
+	"思维导图":    "Mind map",
 	"外部空间":    "External",
 	"打开文件…":   "Open File\u2026",
 	"从外部空间移除": "Remove from External",

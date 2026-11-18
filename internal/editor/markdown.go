@@ -84,13 +84,17 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 	}
 
 	var topSpans []rawSpan
+	var tailItem document.ListPlacement
 
 	var blocks func(int, string, int) []*document.Block
 	blocks = func(parent int, context string, indent int) []*document.Block {
 		var out []*document.Block
+		listEnd := -1
 		for index := range parsed.Children(parent) {
 			node := parsed.Block(index)
 			startCount := len(out)
+			previousListEnd := listEnd
+			listEnd = -1
 			b := &document.Block{ID: nextID(), Kind: "paragraph", Indent: indent}
 			switch node.Kind {
 			case parser.Paragraph, parser.Heading:
@@ -178,7 +182,19 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 						depth++
 					}
 					d := min(12, depth)
+					// The last source item can be empty and therefore absent from out.
+					tailItem = document.ListPlacement{Depth: d, Item: it.Next == item+1}
 					children := blocks(item, itemKind, d)
+					if !forSearch && len(children) > 0 {
+						if !isList(children[0].Kind) && children[0].Indent == d && children[0].MapList == nil {
+							children[0].MapList = &document.ListPlacement{Depth: d, Item: true}
+						}
+						for _, child := range children[1:] {
+							if child.Indent == d && child.MapList == nil {
+								child.MapList = &document.ListPlacement{Depth: d}
+							}
+						}
+					}
 					for _, child := range children {
 						if child.Kind == "task" && child.Indent == d {
 							child.Checked = it.Task == parser.Checked
@@ -186,6 +202,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					}
 					out = append(out, children...)
 				}
+				listEnd = node.End
 				if !forSearch && parent == 0 && len(out) > startCount {
 					if resolvedEnd, ok := resolveContainerSpanEnd(parsed, index, node.End); ok {
 						for k := startCount; k < len(out); k++ {
@@ -210,6 +227,11 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					b.Runs = append(b.Runs, child.Runs...)
 				}
 			case parser.CodeBlock:
+				if !forSearch && node.Fenced && previousListEnd >= 0 && previousListEnd <= node.Start &&
+					strings.Trim(text[previousListEnd:node.Start], " \t\r") == "\n" {
+					placement := tailItem
+					b.MapList = &placement
+				}
 				b.Kind, b.Language = "code", node.Language()
 				b.Runs = []document.Run{{Text: strings.TrimSuffix(parsed.Lines(index), "\n")}}
 			case parser.ThematicBreak:

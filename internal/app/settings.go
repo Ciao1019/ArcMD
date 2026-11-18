@@ -30,7 +30,8 @@ func (a *App) openSettings(tab string) {
 func (a *App) moreMenu(c *ui.Context) {
 	b := iconButton(c, "more", iconEllipsis, i18n.T("更多"), i18n.T("更多"), false).Role(ui.RoleMenuButton)
 	b.PopoverMenuButton(func(m *ui.Menu) {
-		noDoc := a.doc == nil || a.doc.loadErr != nil
+		d := a.doc
+		noDoc := d == nil || d.loadErr != nil
 		wb := a.doc != nil && a.doc.isWhiteboard()
 		if a.menuKey(m.Item(i18n.T("专注模式")), "focus").Checked(a.focus).Chosen() {
 			a.toggleFocus()
@@ -38,6 +39,7 @@ func (a *App) moreMenu(c *ui.Context) {
 		if a.menuKey(m.Item(i18n.T("目录")), "outline").Checked(a.outlineOpen()).Disabled(noDoc || a.doc.source || wb).Chosen() {
 			a.toggleOutline()
 		}
+
 		mode := i18n.T("预览 Markdown 导出")
 		if a.doc != nil && a.doc.source {
 			mode = i18n.T("返回富文本编辑")
@@ -68,6 +70,9 @@ func (a *App) moreMenu(c *ui.Context) {
 				a.exportHTML()
 			}
 		}).Disabled(noDoc)
+		if m.Item(i18n.T("思维导图")).Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || d.source).Chosen() {
+			a.toggleDocumentMap(d)
+		}
 		if m.Item(i18n.T("打印…")).Disabled(noDoc).Chosen() {
 			a.printDoc()
 		}
