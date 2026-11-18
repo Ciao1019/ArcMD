@@ -213,6 +213,11 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		// Escape with nothing open selects the caret's block, as Notion's.
 		return true
 	}
+	// TextInput supplies the space (or an IME commit). Consume its key here
+	// so MyGo does not also interpret Space/Shift+Space as page scrolling.
+	if key == ui.KeySpace && mods & ^ui.Shift == 0 && !e.ReadOnly {
+		return true
+	}
 	if _, composing := e.MarkedRange(); composing {
 		if key == ui.KeyEscape {
 			e.cancelComposition()
