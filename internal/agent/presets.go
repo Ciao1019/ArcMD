@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/url"
@@ -45,6 +46,7 @@ func PresetOf(id string) Preset {
 // Settings are what is needed to ask a model.
 type Settings struct {
 	BaseURL, Model, APIKey string
+	Protocol               string
 }
 
 // Errors of settings that cannot be used.
@@ -94,10 +96,42 @@ func (s Settings) CheckService() error {
 	return nil
 }
 
-// Provider is the Chat Completions service of the settings. DeepSeek's
-// thinking models need their reasoning sent back with tool calls.
-func (s Settings) Provider() *ChatCompletions {
+// An empty protocol is automatic, including for preferences saved before the picker.
+const (
+	ProtocolChat      = "chat-completions"
+	ProtocolResponses = "responses"
+)
+
+func responsesReasoner(model string) bool {
+	switch strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "openai/") {
+	case "gpt-6.2-sol", "gpt-6.2-astra":
+		return true
+	}
+	return false
+}
+
+func (s Settings) EffectiveProtocol() string {
+	switch s.Protocol {
+	case ProtocolChat, ProtocolResponses:
+		return s.Protocol
+	}
+	if responsesReasoner(s.Model) {
+		return ProtocolResponses
+	}
+	return ProtocolChat
+}
+
+type ModelService interface {
+	Provider
+	Models(context.Context) ([]string, error)
+}
+
+func (s Settings) Provider() ModelService {
 	u, _ := url.Parse(strings.TrimSpace(s.BaseURL))
 	replay := u != nil && (u.Hostname() == "api.deepseek.com" || strings.HasSuffix(u.Hostname(), ".deepseek.com"))
-	return &ChatCompletions{BaseURL: strings.TrimSpace(s.BaseURL), Model: strings.TrimSpace(s.Model), APIKey: strings.TrimSpace(s.APIKey), ReplayReasoning: replay}
+	chat := ChatCompletions{BaseURL: strings.TrimSpace(s.BaseURL), Model: strings.TrimSpace(s.Model), APIKey: strings.TrimSpace(s.APIKey), ReplayReasoning: replay}
+	if s.EffectiveProtocol() == ProtocolResponses {
+		return &Responses{chat}
+	}
+	return &chat
 }

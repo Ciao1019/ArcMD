@@ -66,10 +66,11 @@ type Prefs struct {
 	AI AI `json:"ai,omitzero"`
 }
 
-// AI is a model service speaking the Chat Completions format.
+// AI selects a model service and its streaming protocol.
 type AI struct {
 	// Provider is a preset's ID (agent.Presets), "custom" for another.
 	Provider string `json:"provider,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
 	BaseURL  string `json:"baseURL,omitempty"`
 	Model    string `json:"model,omitempty"`
 }

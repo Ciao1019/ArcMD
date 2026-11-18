@@ -35,7 +35,7 @@ func ask(args []string, cfg app.Config, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, askUsage); fs.PrintDefaults() }
 	spaceArg := fs.String("space", "", "space name, ID or folder (default: the active space)")
-	base := fs.String("base-url", os.Getenv("ARCMD_AI_BASE_URL"), "Chat Completions API root (default: settings)")
+	base := fs.String("base-url", os.Getenv("ARCMD_AI_BASE_URL"), "model service API root (default: settings)")
 	model := fs.String("model", os.Getenv("ARCMD_AI_MODEL"), "model name (default: settings)")
 	steps := fs.Int("max-steps", agent.DefaultMaxSteps, "most model steps for the question")
 	verbose := fs.Bool("v", false, "print each tool's whole result")
@@ -52,7 +52,7 @@ func ask(args []string, cfg app.Config, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "arcmd:", err)
 		return 1
 	}
-	settings := agent.Settings{BaseURL: *base, Model: *model, APIKey: os.Getenv("ARCMD_AI_KEY")}
+	settings := agent.Settings{BaseURL: *base, Model: *model, APIKey: os.Getenv("ARCMD_AI_KEY"), Protocol: p.AI.Protocol}
 	if settings.BaseURL == "" {
 		settings.BaseURL = p.AI.BaseURL
 		if settings.BaseURL == "" {

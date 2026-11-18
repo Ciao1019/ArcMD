@@ -57,10 +57,11 @@ type chatTool struct {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools,omitempty"`
-	Stream   bool          `json:"stream"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Tools           []chatTool    `json:"tools,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	Stream          bool          `json:"stream"`
 }
 
 type chatChunk struct {
@@ -86,6 +87,11 @@ func text(s string) *string { return &s }
 // body is the request in the service's format.
 func (c *ChatCompletions) body(req Request) chatRequest {
 	out := chatRequest{Model: c.Model, Stream: true}
+	// With function tools, this model's Chat Completions endpoint requires
+	// an explicit opt-out. Omitting the field leaves the service default active.
+	if strings.TrimPrefix(c.Model, "openai/") == "gpt-6.2-sol" && len(req.Tools) > 0 {
+		out.ReasoningEffort = "none"
+	}
 	if req.System != "" {
 		out.Messages = append(out.Messages, chatMessage{Role: "system", Content: text(req.System)})
 	}
@@ -121,11 +127,15 @@ func (c *ChatCompletions) body(req Request) chatRequest {
 
 // Complete sends the request and reads the streamed reply.
 func (c *ChatCompletions) Complete(ctx context.Context, req Request, onDelta func(Delta)) (Response, error) {
-	payload, err := json.Marshal(c.body(req))
+	return c.postStream(ctx, "/chat/completions", c.body(req), onDelta, readChatStream)
+}
+
+func (c *ChatCompletions) postStream(ctx context.Context, endpoint string, body any, onDelta func(Delta), read func(context.Context, io.Reader, func(Delta)) (Response, error)) (Response, error) {
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return Response{}, err
 	}
-	url := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/") + "/chat/completions"
+	url := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/") + endpoint
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return Response{}, err
@@ -150,7 +160,7 @@ func (c *ChatCompletions) Complete(ctx context.Context, req Request, onDelta fun
 	if res.StatusCode != http.StatusOK {
 		return Response{}, apiError(res)
 	}
-	return readChatStream(ctx, res.Body, onDelta)
+	return read(ctx, res.Body, onDelta)
 }
 
 // apiError reads a refusal's message from its body, in OpenAI's

@@ -174,7 +174,7 @@ func (a *App) qaSettings() agent.Settings {
 	if base == "" {
 		base = aiPreset(ai.Provider).BaseURL
 	}
-	return agent.Settings{BaseURL: base, Model: ai.Model, APIKey: q.key}
+	return agent.Settings{BaseURL: base, Model: ai.Model, APIKey: q.key, Protocol: ai.Protocol}
 }
 
 // qaReady reports whether a question can be asked, and why not.

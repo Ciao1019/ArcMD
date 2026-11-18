@@ -46,6 +46,8 @@ type Message struct {
 	// Reasoning is what a thinking model sent as its reasoning, kept for
 	// providers that want it back with the calls it led to.
 	Reasoning string
+	// responses retains ordered wire items for stateless Responses tool loops.
+	responses *responseReplay
 	// Calls are an assistant message's tool calls.
 	Calls []ToolCall
 	// CallID is the call a tool message answers.
@@ -295,6 +297,12 @@ func (a *Agent) fit(msgs []Message) []Message {
 	}
 	size := len(a.System)
 	for _, m := range msgs {
+		if m.responses != nil {
+			for _, item := range m.responses.items {
+				size += len(item)
+			}
+			continue
+		}
 		size += len(m.Text) + len(m.Reasoning)
 		for _, c := range m.Calls {
 			size += len(c.Args)
