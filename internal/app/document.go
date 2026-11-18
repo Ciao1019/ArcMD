@@ -1168,6 +1168,9 @@ func resolveSpaceImage(sp *space.Space, rel, url string) (string, error) {
 			return cand, nil
 		}
 	}
+	if _, full, ok := attachmentCandidate(sp, root, url); ok {
+		return full, nil
+	}
 	if !strings.Contains(decoded, "/") {
 		docDir := path.Dir(filepath.ToSlash(docRel))
 		for _, candRel := range []string{path.Join(docDir, "assets", decoded), path.Join("assets", decoded)} {

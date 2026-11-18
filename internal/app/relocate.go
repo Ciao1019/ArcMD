@@ -88,7 +88,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		for old := range d.urls {
 			if vault.IsWhiteboard(old) {
 				clean := strings.TrimPrefix(path.Clean(unescapeImagePath(old)), "/")
-				if !strings.HasPrefix(clean, assetsDir+"/") && !strings.Contains(clean, "/"+assetsDir+"/") {
+				if !underAttachmentFolder(clean, assetsDir) && !underAttachmentFolder(clean, attachmentFolder(src)) {
 					continue
 				}
 			}
@@ -115,7 +115,13 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 			if readErr != nil {
 				return to, copied, readErr
 			}
-			newURL, made, copyErr := relocateImage(dst.Root, path.Dir(target), old, data)
+			// An attachment already relative to the space's root stays there
+			// instead of being copied beside the moved document.
+			destDir := path.Dir(target)
+			if underAttachmentFolder(strings.TrimPrefix(path.Clean(unescapeImagePath(old)), "/"), attachmentFolder(src)) {
+				destDir = ""
+			}
+			newURL, made, copyErr := relocateImage(dst.Root, destDir, old, data)
 			if copyErr != nil {
 				return to, copied, copyErr
 			}

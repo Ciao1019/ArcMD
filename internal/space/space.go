@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"path"
 	"slices"
 	"strings"
 )
@@ -70,6 +71,10 @@ type Space struct {
 	// and folders instead of the order dragging leaves: "name" or
 	// "modified", newest first (version 8).
 	Sort map[string]string `json:"sort,omitempty"`
+	// AttachmentsDir is the folder the space keeps attachments in, as a
+	// slash-separated path relative to Root (version 10). Empty keeps the
+	// older arrangement: an assets folder beside each document.
+	AttachmentsDir string `json:"attachmentsDir,omitempty"`
 }
 
 // Sorts are the ways a folder may sort, beside its own order ("").
@@ -77,6 +82,39 @@ var Sorts = []string{"", "name", "modified"}
 
 // SortOf is how the folder dir sorts: "" for the order dragging leaves.
 func (s *Space) SortOf(dir string) string { return s.Sort[dir] }
+
+// CleanAttachmentsDir normalizes a folder to keep a space's attachments in
+// and reports whether it stays inside the space. "" keeps the old
+// arrangement (an assets folder beside each document), and "." keeps them at
+// the space's root.
+func CleanAttachmentsDir(dir string) (string, bool) {
+	dir = strings.TrimSpace(strings.ReplaceAll(dir, `\`, "/"))
+	if dir == "" {
+		return "", true
+	}
+	if path.IsAbs(dir) || strings.ContainsAny(dir, `:\`+"\x00") {
+		return "", false
+	}
+	clean := path.Clean(dir)
+	if clean == "." {
+		return ".", true
+	}
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", false
+	}
+	return clean, true
+}
+
+// SetAttachmentsDir records the folder the space keeps attachments in. It
+// reports false for a path that leaves the space.
+func (s *Space) SetAttachmentsDir(dir string) bool {
+	clean, ok := CleanAttachmentsDir(dir)
+	if !ok {
+		return false
+	}
+	s.AttachmentsDir = clean
+	return true
+}
 
 // SetSort sets how the folder dir sorts; "" goes back to its own order.
 func (s *Space) SetSort(dir, mode string) {
@@ -367,6 +405,11 @@ func (st *State) MovedAcross(fromID, from, toID, to string) {
 // kept pins in each space, which become the favorites in space order.
 func (st *State) migrate() {
 	for _, s := range st.Spaces {
+		if clean, ok := CleanAttachmentsDir(s.AttachmentsDir); ok {
+			s.AttachmentsDir = clean
+		} else {
+			s.AttachmentsDir = ""
+		}
 		for _, rel := range s.Pinned {
 			if !st.IsFavorite(s.ID, rel) {
 				st.Favorites = append(st.Favorites, Favorite{s.ID, rel})
@@ -406,8 +449,10 @@ type State struct {
 // marked in documents; older states have none. Version 8 added
 // Space.Sort, folders sorted by name or time. Version 9 adds the built-in
 // external space and its explicit ExternalFiles collection; older states
-// acquire it on the first external open.
-const CurrentVersion = 9
+// acquire it on the first external open. Version 10 added
+// Space.AttachmentsDir, the folder new attachments go in; empty means an
+// assets folder beside each document, as before.
+const CurrentVersion = 10
 
 // ErrNotFound reports a space ID the state does not have.
 var ErrNotFound = errors.New("space: not found")

@@ -196,8 +196,13 @@ func (a *App) writeAssetFor(d *document, dir, name string, data []byte) (string,
 	if err != nil {
 		return "", err
 	}
+	// Attachments go beside the document unless the space names a folder of
+	// its own; an external space always keeps them beside the open file.
+	writeDir, urlDir := path.Join(dir, assetsDir), assetsDir
 	if d.space.IsExternal() {
-		dir = path.Dir(nameOnDisk)
+		writeDir = path.Join(path.Dir(nameOnDisk), assetsDir)
+	} else if folder := attachmentFolder(d.space); folder != "" {
+		writeDir, urlDir = folder, folder
 	}
 	base := assetName(name)
 	ext := vault.FileExt(base)
@@ -207,8 +212,8 @@ func (a *App) writeAssetFor(d *document, dir, name string, data []byte) (string,
 		if i > 1 {
 			name = fmt.Sprintf("%s-%d%s", stem, i, ext)
 		}
-		rel := path.Join(assetsDir, name)
-		full, err := vault.Resolve(root, path.Join(dir, rel))
+		rel := path.Join(urlDir, name)
+		full, err := vault.Resolve(root, path.Join(writeDir, name))
 		if err != nil {
 			return "", err
 		}

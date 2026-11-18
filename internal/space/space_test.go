@@ -236,3 +236,61 @@ func TestFolderSortFollowsAndClears(t *testing.T) {
 		t.Fatal("forgetting drops it", s.Sort)
 	}
 }
+
+func TestCleanAttachmentsDir(t *testing.T) {
+	cases := []struct {
+		in    string
+		want  string
+		valid bool
+	}{
+		{"", "", true},
+		{"assets", "assets", true},
+		{"./附件/", "附件", true},
+		{".", ".", true},
+		{"a/../b", "b", true},
+		{"../x", "", false},
+		{"/abs/x", "", false},
+		{"C:/x", "", false},
+		{`..\x`, "", false},
+	}
+	for _, c := range cases {
+		got, ok := CleanAttachmentsDir(c.in)
+		if got != c.want || ok != c.valid {
+			t.Errorf("CleanAttachmentsDir(%q) = %q, %v; want %q, %v", c.in, got, ok, c.want, c.valid)
+		}
+	}
+	var s Space
+	if !s.SetAttachmentsDir("附件") || s.AttachmentsDir != "附件" {
+		t.Fatalf("SetAttachmentsDir: %+v", s)
+	}
+	if s.SetAttachmentsDir("../escape") || s.AttachmentsDir != "附件" {
+		t.Fatalf("an escaping folder was kept: %+v", s)
+	}
+	if !s.SetAttachmentsDir("") || s.AttachmentsDir != "" {
+		t.Fatalf("default reset: %+v", s)
+	}
+}
+
+func TestStoreAttachmentsDirRoundTripAndSanitizes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spaces.json")
+	store := NewStore(path)
+	st, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := st.Add("Notes", "/n")
+	s.AttachmentsDir = "附件"
+	if err := store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load()
+	if err != nil || got.Version != CurrentVersion || got.Spaces[0].AttachmentsDir != "附件" {
+		t.Fatalf("round trip = %+v, %v", got, err)
+	}
+	// A path that leaves the space never reaches the document layer.
+	os.WriteFile(path, []byte(`{"version":9,"spaces":[{"id":"a","name":"A","root":"/a","attachmentsDir":"../escape"}]}`), 0o644)
+	got, err = store.Load()
+	if err != nil || got.Spaces[0].AttachmentsDir != "" {
+		t.Fatalf("unsafe folder survived load: %+v, %v", got, err)
+	}
+}

@@ -197,6 +197,9 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 			a.withDocument(d, a.checkDisk)
 		}
 	}
+	if attachmentsTouched(sp, events) {
+		a.relinkAttachments(sp)
+	}
 
 }
 

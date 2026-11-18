@@ -173,9 +173,10 @@ Switching documents, switching Spaces and closing the window flush first.
 
 ### Spaces
 
-A space is a folder plus a name, glyph and color, kept in
+A space is a folder plus a name, glyph, color and attachments folder, kept in
 `<config>/ArcMD/spaces.json` with the order, the active space, pins and the
-last open document of each. The same file keeps bookmarks: places marked in
+last open document of each. New attachments go to the folder chosen from the
+space's menu; empty keeps the older `assets/` beside each document. The same file keeps bookmarks: places marked in
 documents by top-level block ID, with an excerpt that finds the block again
 in a Markdown file read afresh. They live outside the document so marking a
 place never edits or converts it. Switching a space swaps the document list, the
@@ -192,9 +193,13 @@ references are not repaired by moving a document.
 
 Local images resolve relative to the document's directory, including URL-encoded
 names and `../images` resources outside its Space. This is a read-only exception:
-resource writes remain inside the destination Space, using `assets/` and rebasing
-native document URLs when a parent reference would escape. GIFs show their first
-frame.
+resource writes remain inside the destination Space, using `assets/` or the
+space's attachments folder and rebasing native document URLs when a parent
+reference would escape. When a space names an attachments folder, references
+that no longer resolve where the document points are also looked up there; file
+watch events moving old folders into it rewrite the documents' references
+(`relinkAttachments`), while reading alone already resolves them, so opening a
+document never writes it. GIFs show their first frame.
 
 `editor/images.go` owns image layout, recovery cards, focus targets and the
 image preview. Figures follow Textus: natural size, centered in the column,
