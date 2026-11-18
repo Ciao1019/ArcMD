@@ -43,10 +43,11 @@ internal/spacefs/     问答 Agent 读文档的只读视图：每篇文档投影
 internal/agent/       问答 Agent：与服务无关的消息模型、工具调用循环（并行工具、步数与上下文预算、重试、取消）、Chat Completions 流式适配器、服务预设、系统提示与 [路径#L12-L18] 引用解析（不依赖 UI）
 internal/i18n/        界面语言：i18n.T 把中文界面文字查成当前语言（en.go 是英文对照表），Pick 按系统语言选择（不依赖 UI）
 internal/whiteboard/  Excalidraw 风格手绘白板：场景模型、两栖 .excalidraw.svg 编解码、Rough 矢量曲线、几何绑定与撤销栈（不依赖 UI）
+internal/mindmap/     原生文档思维导图排版与交互视图：单/双侧树布局、分支折线、视口裁剪与键盘导航（依赖 ui）
 docs/                 architecture.md（架构）、plugins.md（插件与市场规范）
 ```
 
-**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, trashbin, prefs, pdf, update, templates, i18n, agent, spacefs, whiteboard}`，`editor → {document, wiki, tex, mermaid, pdf, i18n, whiteboard}`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/trashbin/prefs/pdf/update/templates/i18n/agent/spacefs/whiteboard）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
+**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, trashbin, prefs, pdf, update, templates, i18n, agent, spacefs, whiteboard}`，`editor → {document, wiki, tex, mermaid, pdf, i18n, whiteboard, mindmap}`，`mindmap → ui`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/trashbin/prefs/pdf/update/templates/i18n/agent/spacefs/whiteboard）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 与 `mindmap` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
 
 ## 常用命令
 
@@ -145,7 +146,7 @@ gofmt -l .                                           # 必须无输出
     - 字数目标与阅读时长（文档 v8 的 `goal`）：工具栏的字数是按钮，点开菜单显示「约 N 分钟读完」（每分钟 400 个汉字或 200 个英文词）与距离目标的字数，「字数目标 ▸」有 500 / 1000 / 2000 / 3000 / 5000 与「自定义…」（字数旁弹出输入框，Enter 设定、Esc 取消）和「移除目标」。有目标时显示「N / 目标 字」，下面一条 2px 进度条，达到后字数变为强调色。设置目标是一个撤销步骤；命令栏「字数目标：N 字 / 移除字数目标」。
     - 图片：GIF 动画在可见时按帧播放（`gifFrames` 合成每帧并处理 disposal，帧间隔不足 20ms 按 100ms；超过 300 帧或像素总量过大时只显示首帧），打印、导出、缩略图与「减弱动态效果」时显示首帧。右键「裁剪图片…」（或命令栏，光标在图片上时）打开裁剪对话框：图片按比例放进对话框，四角手柄调整、框内拖动或方向键移动裁剪框（不小于 8 像素、不越出图片），显示三分线与像素尺寸，「重置」「取消」「裁剪」；裁剪结果另存为文档旁 `assets/原名-裁剪.png`（重名编号），图片块改指向它，是一个撤销步骤，原文件保留（`Options.CropImage` / `App.cropImage`）。动图不提供裁剪。
     - 目录可拖动：把标题拖到另一个标题上即把整个章节（到下一个同级或更高级标题为止）移到它前面，拖到目录末尾即移到文末，一个撤销步骤（`Engine.MoveSection`）；命令栏「章节上移 / 章节下移」在同级章节间移动光标所在章节。页面标题不动。
-  - 内容区：工具栏（后退/前进/重新载入 + 地址栏显示 `Space / 文件夹 / 文件.md` + 字数与「更多格式」 + 问答按钮（对话图标，打开时为 `glass` 底） + 最右侧 Arc / Zen 式「⋯」菜单）在卡片上方，卡片圆角 10；工具栏没有导出预览按钮，⇧⌘M、命令栏和「⋯」菜单可进入；
+  - 内容区：工具栏（后退/前进/重新载入 + 地址栏显示 `Space / 文件夹 / 文件.md` + 思维导图按钮、字数与「更多格式」 + 问答按钮（对话图标，打开时为 `glass` 底） + 最右侧 Arc / Zen 式「⋯」菜单）在卡片上方，卡片圆角 10；工具栏没有导出预览按钮，⇧⌘M、命令栏和「⋯」菜单可进入；思维导图面板（`internal/mindmap`、`internal/editor/mindmap.go`、`documentmap.go`、`⌥⌘M`）随文档显示单/双侧可折叠树、富文本/公式/代码/表格/图片/白板预览（长块自动截断或等比缩放、大文档自动折叠与增量同步）、百分比缩放与键盘导航；
   - 「⋯」菜单（`settings.go`）：只保留 10 个一级入口——专注模式、目录、Markdown 导出预览 / 返回富文本编辑、添加分屏（⌃⇧=，正文工具栏不再放分屏按钮）、版本历史、导出（Markdown 文件 / PDF 子菜单）、打印、在访达中显示文档、资料库（⇧⌘L）、设置…（⌘,）。新建、侧边栏与空间管理沿用各自的按钮、右键菜单和命令栏；所有空间、最近删除和插件从资料库进入；打字机滚动、快捷键、关于和检查更新从设置进入，命令栏仍可直接触达。设置是模态窗口，左侧标签「通用 / 外观 / 空间 / AI 问答 / 快捷键 / 关于」：通用显示新空间默认位置与配置文件夹、写作选项（打字机滚动、手绘标注、专注淡化、括号配对、中英文自动加空格）与更新；外观见上文；空间列出全部空间（编辑、显示、移除）；快捷键表 `shortcutList` 与本文件的表保持一致；关于显示版本、软件简介、GitHub 开源仓库入口与「新手教程 › 重新观看」，介绍写作、空间整理和本地存储；开源许可保留在项目的 LICENSE 与 third_party 文件中。只放真实存在的设置，不做占位开关。
   - 收起（⌘\）：侧边栏宽度动画折叠（内容不重排、被裁切）；指针移到窗口左缘时侧边栏以浮层滑出，离开即收回。
 - **空间问答**（`internal/agent`、`internal/spacefs`、`qa.go` / `qaview.go` / `qasettings.go`，⌘J、工具栏「⋯」左侧的对话图标、命令栏「向当前空间提问 / 问答：新对话 / AI 问答设置…」）：不建向量索引。每篇文档投影成带行号的 Markdown（`editor.ExportMarkdownParts` 按顶层块切开，记住每行属于哪个块），模型用只读工具 `glob`（按路径或文件名列出）、`grep`（不区分大小写的文字或正则，ripgrep 式 `路径:行:文字` 与上下文、总数、分页，并列出读不了的文件，「没找到」与「没有」可以区分）、`read`（按行号读，一次最多 400 行）、`outline`、`links`（双链、反链、标签）自己决定搜什么、读哪里，最多 16 步（最后一步不给工具、要求作答），同一步的工具调用并行执行；对话变长时先丢弃最早的工具结果。系统提示带空间概览（路径、标题、修改日期与二级标题，约 6000 字以内）、今天日期与正在看的文档，要求换说法多搜几次、新旧记录冲突时说明、全量问题翻完分页，并把文档内容当数据而不是指令。回答用 `[路径#L12-L18]` 引用读过的行。所有路径经 `vault.Resolve`，隐藏目录与空间外的文件读不到；打开且有未保存修改的文档按编辑中的内容读。面板在内容卡片右侧（宽 380，与侧边栏同样滑开，标题行与工具栏齐平、可拖动窗口，Windows / Linux 的窗口按钮让给它）：每个空间各有一段对话（只在本次运行内），切换空间看到该空间的对话，正在回答的问题绑定在提问时的空间。问题气泡、可折叠的「查找了 N 步 · 阅读 N 处」（每步图标、搜索词或路径与行号、「找到 N 处」）、流式回答（标题、列表、引用块、代码、粗体、行内代码），引用显示为内联胶囊标签（Kokonut UI `ai-citations` 风格，MIT：圆角底、首字圆徽标、短文档名及多源 `+N` 计数；悬停 120ms 或聚焦后以亮蓝色底线点亮对应论断并在问答卡片左侧浮出随指针平滑滑移的 288 宽来源预览卡（极窄窗回退到胶囊下方），避免遮挡回答正文；上滚阅读时列表底部浮出「回到最新」胶囊，点击滚回末尾并恢复跟随），答完底部显示叠放徽标的「N 个来源」折叠按钮，展开为带行号与跳转箭头的编号列表，悬停列表行同步点亮正文对应标签与论断，点击行或内联胶囊打开该文档并像书签一样滚到、点亮那个块（Markdown 文件按块序号定位）。停止保留已写出的部分；出错显示本地化原因（401 / 404 / 429 / 断流 / 网络）与「重试」（替换这一轮）；未设置时显示「设置模型…」。空白面板给三个示例问题与隐私说明。模型走 Chat Completions 格式（OpenAI、DeepSeek、OpenRouter、Ollama 预设，或自定义地址）：设置「AI 问答」依次填写 Base URL、API Key、模型名称；地址可由「常用服务」填入，地址与 Key 可用后点击「获取模型」才会在后台 `GET {地址}/models` 拉取模型列表（`ChatCompletions.Models`，刚输入的 Key 会先保存，无需另点保存；本机服务可不填 Key）。地址或 Key 改变时清空旧列表，等待再次点击，在可搜索的下拉框里选模型；列表拉不到或没有想要的可「手动输入」模型名；地址须为 https（本机除外）；Key 以明文单独存于配置目录的 `credentials/ai-api-key`（`prefs.Secrets`，目录 `0700`、文件 `0600`，原子写入），不进 prefs.json 或空间文档；不访问系统钥匙串，也不自动读取旧凭据，旧版用户在设置中重新保存一次 Key；DeepSeek 自动回传 `reasoning_content`。可重试的错误（429、5xx、断流）在还没输出文字时自动重试两次。测试通过 `qaState.provider` / `sync` / `secrets` 注入，绝不联网。
@@ -196,6 +197,7 @@ gofmt -l .                                           # 必须无输出
   | ⌘F / ⇧⌘H | 查找 / 查找和替换（Enter、⇧Enter 或 ⌘G、⇧⌘G 切换匹配，Esc 关闭） |
   | ⇧⌘F | 专注模式 |
   | ⇧⌘O | 展开 / 收起目录 |
+  | ⌥⌘M | 展开 / 收起思维导图 |
   | ⌘D / ⇧⌘D | 添加或移除书签 / 书签列表 |
   | ⌃⌘↑ / ⌃⌘↓ | 上一个 / 下一个书签 |
   | ⌥⌘Y | 版本历史 |

@@ -63,9 +63,36 @@ func TestDocumentMapSnapshot(t *testing.T) {
 	tt := ui.NewTester(a.View, 1480, 880)
 	tt.Frame()
 	tt.Frame()
-	for _, name := range []string{"document-map-one.png", "document-map-both.png"} {
-		if name == "document-map-both.png" {
+	for _, name := range []string{"document-map-one.png", "document-map-both.png", "document-map-dark.png", "document-map-long.png"} {
+		switch name {
+		case "document-map-both.png":
 			if err := tt.Click("双侧布局"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+		case "document-map-dark.png":
+			tt.SetDark(true)
+			settle(tt)
+		case "document-map-long.png":
+			tt.SetDark(false)
+			var long strings.Builder
+			long.WriteString("# 长内容文档\n\n## 超长代码块\n\n```go\n")
+			for i := 1; i <= 120; i++ {
+				long.WriteString("step := processBatchItem(item)\n")
+			}
+			long.WriteString("```\n\n## 超长段落\n\n")
+			long.WriteString(strings.Repeat("这是一段较长的技术说明文字，包含公式 $E=mc^2$ 与示例说明。", 8))
+			long.WriteString("\n\n## 大表格\n\n| 列 A | 列 B | 列 C |\n| --- | --- | --- |\n")
+			for r := 1; r <= 30; r++ {
+				long.WriteString("| Row | Data | Value |\n")
+			}
+			openSample(t, a, "LongMap.arcmd", long.String())
+			if !a.folded() {
+				a.toggleSidebar()
+			}
+			toggleDocumentMap(a.doc)
+			settle(tt)
+			if err := tt.Click("单侧布局"); err != nil {
 				t.Fatal(err)
 			}
 			tt.Frame()
@@ -216,5 +243,66 @@ func TestDocumentMapRefreshesSavedWhiteboard(t *testing.T) {
 	r2, b2 := count()
 	if r1-r2 < 100 || b2-b1 < 100 || a.doc.ed.Revision() != rev {
 		t.Fatalf("same-path SVG update without document edits: red/blue %d/%d -> %d/%d", r1, b1, r2, b2)
+	}
+}
+
+func TestDocumentMapShortcutPaletteCloseAndResponsive(t *testing.T) {
+	a, tt := newTestApp(t)
+	openSample(t, a, "MapShortcuts.arcmd", mapSample)
+	focusDocument(a, tt)
+	rev := a.doc.ed.Revision()
+
+	// ⌥⌘M toggles the mind map even while the writing surface has focus.
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyM)
+	tt.Frame()
+	if a.doc.mindMap == nil {
+		t.Fatal("⌥⌘M did not open the mind map while editing")
+	}
+	if a.doc.ed.Revision() != rev {
+		t.Fatal("⌥⌘M typed into the document")
+	}
+
+	// Close button inside the mind map header closes it and updates prefs.
+	if err := tt.Click("关闭思维导图"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.doc.mindMap != nil || a.prefs.MindMapOpen {
+		t.Fatal("header close button did not close mind map")
+	}
+
+	// Command Palette reaches mind map toggle and layout commands.
+	a.openPalette()
+	a.palette.query = "展开思维导图"
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if a.doc.mindMap == nil {
+		t.Fatal("command palette did not open mind map")
+	}
+	a.openPalette()
+	a.palette.query = "思维导图：切换为双侧布局"
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if !a.prefs.MindMapBothSides {
+		t.Fatal("command palette did not toggle mind map layout")
+	}
+
+	// Narrow width (< 580 card width) stacks editor and mind map vertically.
+	tt.SetSize(520, 760)
+	settle(tt)
+	if _, ok := tt.Find("调整思维导图高度"); !ok {
+		t.Fatal("narrow width did not switch mind map splitter to vertical stack")
+	}
+
+	// Multi-pane splits do not auto-open mind map across newly opened split panes.
+	a.prefs.MindMapOpen = true
+	a.openSplit(a.state.ActiveSpace(), "Journal/Ideas.md", false, false)
+	tt.Frame()
+	if a.split != nil && len(a.split.panes) > 1 {
+		if second := a.split.panes[1].doc; second != nil && second.mindMap != nil {
+			t.Fatal("secondary split pane auto-opened mind map")
+		}
 	}
 }

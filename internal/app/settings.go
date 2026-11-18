@@ -70,7 +70,7 @@ func (a *App) moreMenu(c *ui.Context) {
 				a.exportHTML()
 			}
 		}).Disabled(noDoc)
-		if m.Item(i18n.T("思维导图")).Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || d.source).Chosen() {
+		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || d.source).Chosen() {
 			a.toggleDocumentMap(d)
 		}
 		if m.Item(i18n.T("打印…")).Disabled(noDoc).Chosen() {

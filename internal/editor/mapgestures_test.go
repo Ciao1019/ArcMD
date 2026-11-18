@@ -12,7 +12,7 @@ func TestMapCanvasDragAndPointerZoom(t *testing.T) {
 	ed := New("# Root\n\n- First\n- Second")
 	m := &MindMap{}
 	tt := ui.NewTester(func(c *ui.Context) {
-		m.View(c, ed, Options{Theme: c.Theme()}, 600, nil, false, func(bool) {})
+		m.View(c, ed, Options{Theme: c.Theme()}, 600, nil, false, func(bool) {}, "", nil)
 	}, 600, 460)
 	tt.Frame()
 	box, ok := tt.Find("思维导图画布")
@@ -68,7 +68,7 @@ func BenchmarkRichMapGesture(b *testing.B) {
 	ed := New("# Reading\n\n" + strings.Repeat("## Section\n\n- **Important** and $x^2$\n\n```python\narr = x.numpy()\nprint(arr)\n```\n\n| Item | Cost |\n| --- | --- |\n| A | 12 |\n\n![Sketch](assets/test.excalidraw.svg)\n\n", 5))
 	m := &MindMap{}
 	tt := ui.NewTester(func(c *ui.Context) {
-		m.View(c, ed, Options{Theme: c.Theme(), LoadWhiteboard: func(string) (*whiteboard.Scene, uint64, error) { return scene, 1, nil }}, 800, nil, false, func(bool) {})
+		m.View(c, ed, Options{Theme: c.Theme(), LoadWhiteboard: func(string) (*whiteboard.Scene, uint64, error) { return scene, 1, nil }}, 800, nil, false, func(bool) {}, "", nil)
 	}, 800, 650)
 	tt.Frame()
 	m.autoFit = false

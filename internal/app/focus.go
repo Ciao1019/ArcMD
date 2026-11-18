@@ -159,10 +159,15 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 			a.withDocument(d, fn)
 		}
 	}
+	docTitle := ""
+	if d != nil {
+		docTitle = d.title()
+	}
 	return editor.Options{
 		FontSize:              a.prefs.ReadingSize(),
 		LineHeight:            a.prefs.ReadingLine(),
 		FontFamily:            a.prefs.BodyFamily(),
+		DocTitle:              docTitle,
 		Column:                a.prefs.Column(),
 		NoAutoPair:            a.prefs.NoAutoPair,
 		AutoSpace:             a.prefs.AutoSpace,

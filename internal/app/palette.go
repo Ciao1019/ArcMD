@@ -235,6 +235,41 @@ func (a *App) actions() []action {
 			outline = i18n.T("收起目录")
 		}
 		cmd(outline, a.keyLabel("outline"), a.toggleOutline)
+		mm := i18n.T("展开思维导图")
+		if a.doc.mindMap != nil {
+			mm = i18n.T("收起思维导图")
+		}
+		cmd(mm, a.keyLabel("mindmap"), a.toggleActiveDocumentMap)
+		if a.doc.mindMap != nil {
+			layoutCmd := i18n.T("思维导图：切换为双侧布局")
+			if a.prefs.MindMapBothSides {
+				layoutCmd = i18n.T("思维导图：切换为单侧布局")
+			}
+			cmd(layoutCmd, "", func() {
+				a.prefs.MindMapBothSides = !a.prefs.MindMapBothSides
+				a.savePrefs()
+			})
+			cmd(i18n.T("思维导图：居中并适应画布"), "", func() {
+				if a.doc != nil && a.doc.mindMap != nil {
+					a.doc.mindMap.CenterAndFit()
+				}
+			})
+			if a.doc.mindMap.HasFoldable() {
+				if a.doc.mindMap.HasFolded() {
+					cmd(i18n.T("思维导图：展开全部节点"), "", func() {
+						if a.doc != nil && a.doc.mindMap != nil {
+							a.doc.mindMap.UnfoldAll()
+						}
+					})
+				} else {
+					cmd(i18n.T("思维导图：折叠分支"), "", func() {
+						if a.doc != nil && a.doc.mindMap != nil {
+							a.doc.mindMap.CollapseBranches()
+						}
+					})
+				}
+			}
+		}
 	}
 	typewriter := i18n.T("开启打字机滚动")
 	if a.prefs.Typewriter {

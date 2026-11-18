@@ -119,6 +119,8 @@ var (
 	iconMapCenter     = lucide(`<path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3"/><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/>`)
 	iconMapOneSide    = lucide(`<rect x="2" y="9" width="5" height="6" rx="1.5"/><path d="M7 12h2c4 0 1-7 6-7h6M9 12c4 0 1 7 6 7h6"/>`)
 	iconMapBothSides  = lucide(`<rect x="9.5" y="9" width="5" height="6" rx="1.5"/><path d="M9.5 12C6 12 8 5 4 5H2m7.5 7C6 12 8 19 4 19H2m12.5-7C18 12 16 5 20 5h2m-7.5 7C18 12 16 19 20 19h2"/>`)
+	iconMapCollapse   = lucide(`<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>`)
+	iconMapExpand     = lucide(`<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>`)
 	iconFit           = lucide(`<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>`)
 	iconExternalSplit = lucide(`<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>`)
 	iconShapes        = lucide(`<path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/>`)
