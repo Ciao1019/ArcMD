@@ -28,7 +28,8 @@ type Buffer struct {
 	leafComp    *leafComposition
 	// refused is set when typing reached a read-only document, so the page
 	// can say why nothing happened.
-	refused bool
+	refused       bool
+	readOnlySpace bool
 }
 
 func newBuffer(doc *document.Document) *Buffer {
@@ -145,9 +146,15 @@ func (b *Buffer) slice(a, z int) string {
 }
 func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 	if b.ReadOnly {
+		if b.readOnlySpace && text == " " && r == nil {
+			b.readOnlySpace = false
+			return
+		}
+		b.readOnlySpace = false
 		b.refused = true
 		return
 	}
+	b.readOnlySpace = false
 	b.sync()
 	target := b.Selection().Range
 	if b.mark != nil {
@@ -183,10 +190,17 @@ func (b *Buffer) ReplaceText(r *ui.TextInputRange, text string) {
 }
 func (b *Buffer) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
 	if b.ReadOnly {
+		b.readOnlySpace = false
 		b.refused = text != ""
 		return
 	}
 	b.sync()
+	if text == "" && r == nil {
+		if b.Composing() {
+			b.cancelComposition()
+		}
+		return
+	}
 	target := b.Selection().Range
 	if b.mark != nil {
 		target = *b.mark

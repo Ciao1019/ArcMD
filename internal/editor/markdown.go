@@ -51,6 +51,8 @@ type rawSpan struct {
 	end   int
 }
 
+const arcmdMarkdownExtensions = (parser.Default &^ (parser.ExtAlerts | parser.ExtMentions | parser.ExtReferences)) | parser.ExtDollarMath
+
 func parseMarkdownSource(source string) parsedMarkdown {
 	return parseMarkdownSourceMode(source, false)
 }
@@ -71,7 +73,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 	}
 	result.Goal = goal
 
-	parsed := parser.New(parser.Default | parser.ExtDollarMath)
+	parsed := parser.New(arcmdMarkdownExtensions)
 	parsed.Set(text)
 
 	nextID := func() string {
@@ -146,15 +148,17 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 				}
 				out = append(out, children...)
 				if !forSearch && parent == 0 && len(out) > startCount {
-					for k := startCount; k < len(out); k++ {
-						s, e := -1, -1
-						if k == startCount {
-							s = node.Start
+					if resolvedEnd, ok := resolveContainerSpanEnd(parsed, index, node.End); ok {
+						for k := startCount; k < len(out); k++ {
+							s, e := -1, -1
+							if k == startCount {
+								s = node.Start
+							}
+							if k == len(out)-1 {
+								e = resolvedEnd
+							}
+							topSpans = append(topSpans, rawSpan{out[k], s, e})
 						}
-						if k == len(out)-1 {
-							e = node.End
-						}
-						topSpans = append(topSpans, rawSpan{out[k], s, e})
 					}
 				}
 				continue
@@ -183,15 +187,17 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					out = append(out, children...)
 				}
 				if !forSearch && parent == 0 && len(out) > startCount {
-					for k := startCount; k < len(out); k++ {
-						s, e := -1, -1
-						if k == startCount {
-							s = node.Start
+					if resolvedEnd, ok := resolveContainerSpanEnd(parsed, index, node.End); ok {
+						for k := startCount; k < len(out); k++ {
+							s, e := -1, -1
+							if k == startCount {
+								s = node.Start
+							}
+							if k == len(out)-1 {
+								e = resolvedEnd
+							}
+							topSpans = append(topSpans, rawSpan{out[k], s, e})
 						}
-						if k == len(out)-1 {
-							e = node.End
-						}
-						topSpans = append(topSpans, rawSpan{out[k], s, e})
 					}
 				}
 				continue
@@ -248,10 +254,28 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 			out = append(out, b)
 			if !forSearch && parent == 0 {
 				endOff := node.End
-				if node.Kind == parser.Heading && node.Start < len(text) && text[node.Start] != '#' {
-					endOff = extendSetextUnderline(text, endOff)
+				includeSpan := true
+				switch node.Kind {
+				case parser.Heading:
+					if node.Start < len(text) && text[node.Start] != '#' {
+						endOff = extendSetextUnderline(text, endOff)
+					}
+				case parser.MathBlock:
+					if node.Open {
+						includeSpan = false
+					} else if extEnd, ok := extendMathBlockEnd(text, node.Start, endOff); ok {
+						endOff = extEnd
+					} else {
+						includeSpan = false
+					}
+				case parser.CodeBlock:
+					if node.Fenced && node.Open {
+						includeSpan = false
+					}
 				}
-				topSpans = append(topSpans, rawSpan{b, node.Start, endOff})
+				if includeSpan {
+					topSpans = append(topSpans, rawSpan{b, node.Start, endOff})
+				}
 			}
 		}
 		return out
@@ -477,6 +501,9 @@ func overlapsProtectedInline(in []parser.Inline, start, end int) bool {
 }
 
 func isObsidianImageExt(target string) bool {
+	if isWhiteboardURL(target) {
+		return true
+	}
 	ext := strings.ToLower(path.Ext(target))
 	base := path.Base(target)
 	if base == "" || base == "." || base == ".." || len(base) <= len(ext) {
@@ -558,7 +585,7 @@ func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline
 		}
 		snippet := strings.Join(prose, "\n")
 		prose = prose[:0]
-		sub := parser.New(parser.Default | parser.ExtDollarMath)
+		sub := parser.New(arcmdMarkdownExtensions)
 		sub.Set(snippet)
 		for cIdx := range sub.Children(0) {
 			cNode := sub.Block(cIdx)
@@ -1097,6 +1124,7 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 	}
 	items := make([]emittedItem, 0, len(blocks))
 	numberedSeq := map[int]int{}
+	listCols := map[int]int{}
 
 	for i := 0; i < len(blocks); {
 		matched := -1
@@ -1135,12 +1163,17 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 			isList := isMarkdownListKind(firstKind) && blocks[i].Align == ""
 			if !isList {
 				clear(numberedSeq)
+				clear(listCols)
+			} else {
+				for bi := i; bi < i+spanLen; bi++ {
+					advanceListState(blocks[bi], numberedSeq, listCols)
+				}
 			}
 			items = append(items, emittedItem{text: ch.raw, isList: isList})
 			i += spanLen
 			continue
 		}
-		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq)
+		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols)
 		items = append(items, emittedItem{text: text, isList: isList})
 		i += consumed
 	}
@@ -1183,9 +1216,10 @@ type MarkdownPart struct {
 func ExportMarkdownParts(doc *document.Document) []MarkdownPart {
 	var top []MarkdownPart
 	numberedSeq := map[int]int{}
+	listCols := map[int]int{}
 	for i := 0; i < len(doc.Blocks); {
 		b := doc.Blocks[i]
-		text, consumed, _ := renderSingleMarkdownItem(doc.Blocks, i, numberedSeq)
+		text, consumed, _ := renderSingleMarkdownItem(doc.Blocks, i, numberedSeq, listCols)
 		top = append(top, MarkdownPart{Block: b.ID, Text: text})
 		i += consumed
 	}
@@ -1198,13 +1232,14 @@ func isMarkdownListKind(kind string) bool {
 
 func renderMarkdownBlockList(blocks []*document.Block) string {
 	numberedSeq := map[int]int{}
+	listCols := map[int]int{}
 	type item struct {
 		text   string
 		isList bool
 	}
 	var items []item
 	for i := 0; i < len(blocks); {
-		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq)
+		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols)
 		items = append(items, item{text: text, isList: isList})
 		i += consumed
 	}
@@ -1222,13 +1257,7 @@ func renderMarkdownBlockList(blocks []*document.Block) string {
 	return out.String() + "\n"
 }
 
-func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq map[int]int) (text string, consumed int, isList bool) {
-	b := blocks[i]
-	consumed = 1
-	align := b.Align
-	if align == "left" {
-		align = ""
-	}
+func advanceListState(b *document.Block, numberedSeq, listCols map[int]int) (padCols, num int) {
 	if b.Kind != "numbered" {
 		for d := range numberedSeq {
 			if !isMarkdownListKind(b.Kind) || d >= b.Indent {
@@ -1242,6 +1271,40 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq map[i
 			}
 		}
 	}
+	if !isMarkdownListKind(b.Kind) {
+		clear(listCols)
+		return 0, 0
+	}
+	for d := range listCols {
+		if d >= b.Indent {
+			delete(listCols, d)
+		}
+	}
+	padCols = 2 * b.Indent
+	if b.Indent > 0 {
+		if parentCol, ok := listCols[b.Indent-1]; ok {
+			padCols = max(padCols, parentCol)
+		}
+	}
+	markerW := 2
+	if b.Kind == "numbered" {
+		numberedSeq[b.Indent]++
+		num = numberedSeq[b.Indent]
+		markerW = len(fmt.Sprintf("%d. ", num))
+	}
+	listCols[b.Indent] = padCols + markerW
+	return padCols, num
+}
+
+func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, listCols map[int]int) (text string, consumed int, isList bool) {
+	b := blocks[i]
+	consumed = 1
+	align := b.Align
+	if align == "left" {
+		align = ""
+	}
+	padCols, num := advanceListState(b, numberedSeq, listCols)
+	pad := strings.Repeat(" ", padCols)
 
 	inline := exportRuns(b.Runs)
 	switch b.Kind {
@@ -1279,16 +1342,14 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq map[i
 			text = strings.Repeat("#", lvl) + " " + inline
 		}
 	case "bullet":
-		text = strings.Repeat("  ", b.Indent) + "- " + inline
+		text = pad + "- " + inline
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
 			isList = true
 		}
 	case "numbered":
-		numberedSeq[b.Indent]++
-		num := numberedSeq[b.Indent]
-		text = fmt.Sprintf("%s%d. %s", strings.Repeat("  ", b.Indent), num, inline)
+		text = fmt.Sprintf("%s%d. %s", pad, num, inline)
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
@@ -1299,7 +1360,7 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq map[i
 		if b.Checked {
 			check = "x"
 		}
-		text = strings.Repeat("  ", b.Indent) + "- [" + check + "] " + inline
+		text = pad + "- [" + check + "] " + inline
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
@@ -2255,6 +2316,64 @@ func extendSetextUnderline(text string, end int) int {
 		return end + lineLen
 	}
 	return end
+}
+
+// extendMathBlockEnd advances a closed MathBlock end past its closing delimiter
+// line because mygo's parser rewinds b.End to the last formula content line.
+func extendMathBlockEnd(text string, start, end int) (int, bool) {
+	if start < 0 || end < start || end > len(text) {
+		return 0, false
+	}
+	var closeDelim string
+	switch {
+	case strings.HasPrefix(text[start:], "$$"):
+		closeDelim = "$$"
+	case strings.HasPrefix(text[start:], `\[`):
+		closeDelim = `\]`
+	default:
+		return 0, false
+	}
+	already := strings.TrimRight(text[start:end], " \t\r\n")
+	if len(already) >= 2*len(closeDelim) && strings.Trim(already[len(closeDelim):], " \t\r\n") == closeDelim {
+		return end, true
+	}
+	readLine := func(s string) (trimmed string, consumed int) {
+		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+			consumed = nl + 1
+			trimmed = strings.TrimRight(s[:nl], "\r")
+		} else {
+			consumed = len(s)
+			trimmed = strings.TrimRight(s, "\r")
+		}
+		return strings.Trim(trimmed, " \t"), consumed
+	}
+	rest := text[end:]
+	cur, n1 := readLine(rest)
+	if cur == closeDelim {
+		return end + n1, true
+	}
+	if cur == "" && n1 < len(rest) {
+		next, n2 := readLine(rest[n1:])
+		if next == closeDelim {
+			return end + n1 + n2, true
+		}
+	}
+	return 0, false
+}
+
+func resolveContainerSpanEnd(parsed *parser.Document, index int, endOff int) (int, bool) {
+	node := parsed.Block(index)
+	for dIdx := index + 1; dIdx < node.Next; dIdx++ {
+		desc := parsed.Block(dIdx)
+		if desc.Open && (desc.Kind == parser.MathBlock || (desc.Kind == parser.CodeBlock && desc.Fenced)) {
+			return 0, false
+		}
+		if desc.Kind == parser.MathBlock && dIdx == node.Next-1 {
+			return 0, false
+		}
+		endOff = max(endOff, desc.End)
+	}
+	return endOff, true
 }
 
 func normalizeRunsForCompare(rs []document.Run) []document.Run {

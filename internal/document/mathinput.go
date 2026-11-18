@@ -261,11 +261,12 @@ func (e *Engine) enterMermaidExit(leaf Leaf) bool {
 		return false
 	}
 	source := b.Text()
-	if !strings.HasSuffix(source, "\n") || leaf.Parent == nil {
+	lastNL := strings.LastIndexByte(source, '\n')
+	if lastNL < 0 || strings.Trim(source[lastNL+1:], " \t") != "" || leaf.Parent == nil {
 		return false
 	}
 	e.Edit(func() {
-		body := strings.TrimSuffix(source, "\n")
+		body := source[:lastNL]
 		b.Runs = SliceRuns(b.Runs, 0, Len(body))
 		next := NewBlock("paragraph", "")
 		next.Indent = b.Indent

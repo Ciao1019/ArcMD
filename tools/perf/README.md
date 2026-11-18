@@ -94,7 +94,7 @@ Quiet.md's `window.draw` constructs a scene; `window.present` is separate. MyGo'
 normal `ui.Tester` also software-rasterizes and settles up to 20 frames, so timing
 `Tester.Type` would not be equivalent.
 
-`go run ./tools/perf overlay <directory>` copies MyGo v0.7.4 and writes a temporary
+`go run ./tools/perf overlay <directory>` copies MyGo v0.10.0 and writes a temporary
 modfile plus Go build overlay. The adapter skips `headless.present` rasterization,
 turns off test-only label collection, dispatches one real input event, and calls
 the normal runtime's `runFrame` exactly once. Rendering, layout, text shaping,

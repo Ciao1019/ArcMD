@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -258,4 +259,45 @@ func ReadOrEmpty(t *testing.T, root, rel string, v Version) string {
 		t.Fatal(err)
 	}
 	return s
+}
+
+func TestWhiteboardHistoryAndCopyTo(t *testing.T) {
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+	t0 := time.Date(2026, 3, 1, 9, 0, 0, 0, time.Local)
+	if err := Record(root1, "Arch.excalidraw", `{"version":2,"elements":[{"id":"a"}]}`, t0, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := Record(root1, "Arch.excalidraw", `{"version":2,"elements":[{"id":"a"},{"id":"b"}]}`, t0.Add(time.Minute), false); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := List(root1, "Arch.excalidraw")
+	if err != nil || len(vs) != 2 {
+		t.Fatalf("List = %+v, %v", vs, err)
+	}
+	if filepath.Ext(vs[0].File) != ".excalidraw" {
+		t.Fatalf("expected .excalidraw snapshot extension, got %q", vs[0].File)
+	}
+	if err := CopyTo(root1, "Arch.excalidraw", root2, "Arch.excalidraw", nil); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := List(root2, "Arch.excalidraw")
+	if err != nil || len(copied) != 2 {
+		t.Fatalf("copied List = %+v, %v", copied, err)
+	}
+
+	if err := Record(root1, "Diagram.excalidraw.svg", `<svg><!-- payload-start -->e30=<!-- payload-end --></svg>`, t0, true); err != nil {
+		t.Fatal(err)
+	}
+	svgVs, err := List(root1, "Diagram.excalidraw.svg")
+	if err != nil || len(svgVs) != 1 || !strings.HasSuffix(svgVs[0].File, ".excalidraw.svg") {
+		t.Fatalf("svg List = %+v, %v", svgVs, err)
+	}
+	if err := CopyTo(root1, "Diagram.excalidraw.svg", root2, "Diagram.excalidraw.svg", nil); err != nil {
+		t.Fatal(err)
+	}
+	svgCopied, err := List(root2, "Diagram.excalidraw.svg")
+	if err != nil || len(svgCopied) != 1 {
+		t.Fatalf("svg copied List = %+v, %v", svgCopied, err)
+	}
 }

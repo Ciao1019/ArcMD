@@ -360,6 +360,7 @@ func (e *Editor) shapeInline(b *document.Block, spans []ui.Span, font ui.Font, s
 	if len(visible) == 0 {
 		visible = spans
 	}
+	visible = e.shapeTabsAndCodeIndent(b, visible, font, shape)
 	l.TextLayout = ui.ShapeRichTextWith(visible, font, shape)
 	for _, o := range l.TextLayout.Objects() {
 		for i := range l.objects {
@@ -370,6 +371,143 @@ func (e *Editor) shapeInline(b *document.Block, spans []ui.Span, font ui.Font, s
 		}
 	}
 	return l
+}
+
+func (e *Editor) spaceAdvance(font ui.Font) float32 {
+	k := ui.Font{Family: font.Family, Size: font.Size, Weight: font.Weight, Italic: font.Italic}
+	if w, ok := e.spaceWidths[k]; ok {
+		return w
+	}
+	w, _ := ui.ShapeText("\u00a0", k, 0).Size()
+	if w <= 0 {
+		w = max(4, k.Size*0.5)
+	}
+	if e.spaceWidths == nil {
+		e.spaceWidths = make(map[ui.Font]float32, 8)
+	}
+	e.spaceWidths[k] = w
+	return w
+}
+
+// shapeTabsAndCodeIndent expands literal '\t' runes into 4-column inline object
+// spacers so leading and mid-line tabs advance visually on every text backend
+// while keeping 1:1 UTF-16 indices. In soft-wrapped code blocks, leading spaces
+// become non-breaking spaces so long indented tokens do not drop onto row 2 at x=0.
+func (e *Editor) shapeTabsAndCodeIndent(b *document.Block, spans []ui.Span, baseFont ui.Font, shape ui.TextShape) []ui.Span {
+	keepCodeIndent := b.Kind == "code" && shape.Width > 0
+	needs := false
+	for _, sp := range spans {
+		if sp.ObjectWidth > 0 {
+			continue
+		}
+		if strings.ContainsRune(sp.Text, '\t') || (keepCodeIndent && strings.ContainsRune(sp.Text, ' ')) {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return spans
+	}
+
+	out := make([]ui.Span, 0, len(spans)+4)
+	leading := true
+	col := 0
+	for _, sp := range spans {
+		if sp.ObjectWidth > 0 {
+			for _, r := range sp.Text {
+				if r == '\n' || r == '\u2028' {
+					leading = true
+					col = 0
+				} else {
+					leading = false
+					col++
+				}
+			}
+			out = append(out, sp)
+			continue
+		}
+		if sp.Text == "" {
+			out = append(out, sp)
+			continue
+		}
+		spFont := baseFont
+		if sp.Font != "" {
+			spFont.Family = sp.Font
+		}
+		if sp.Size > 0 {
+			spFont.Size = sp.Size
+		}
+		if sp.Weight > 0 {
+			spFont.Weight = sp.Weight
+		}
+		if sp.Italic {
+			spFont.Italic = true
+		}
+		isMono := strings.Contains(strings.ToLower(spFont.Family), "mono")
+		spaceW := float32(0)
+
+		var buf strings.Builder
+		firstPiece := true
+		flushBuf := func() {
+			if buf.Len() == 0 {
+				return
+			}
+			piece := sp
+			if !firstPiece {
+				piece.PaddingStart = 0
+			}
+			firstPiece = false
+			piece.Text = buf.String()
+			out = append(out, piece)
+			buf.Reset()
+		}
+
+		for _, r := range sp.Text {
+			switch r {
+			case '\n', '\u2028':
+				buf.WriteRune(r)
+				leading = true
+				col = 0
+			case '\t':
+				flushBuf()
+				if spaceW <= 0 {
+					spaceW = e.spaceAdvance(spFont)
+				}
+				cols := 4
+				if isMono {
+					cols = 4 - (col % 4)
+				}
+				tabSpan := sp
+				if !firstPiece {
+					tabSpan.PaddingStart = 0
+				}
+				firstPiece = false
+				if leading {
+					tabSpan.Text = "\u00a0"
+				} else {
+					tabSpan.Text = "\ufffc"
+				}
+				tabSpan.ObjectWidth = float32(cols) * spaceW
+				tabSpan.ObjectHeight = spFont.Size * 0.8
+				tabSpan.ObjectDescent = spFont.Size * 0.2
+				out = append(out, tabSpan)
+				col += cols
+			case ' ':
+				if leading && keepCodeIndent {
+					buf.WriteRune('\u00a0')
+				} else {
+					buf.WriteByte(' ')
+				}
+				col++
+			default:
+				leading = false
+				buf.WriteRune(r)
+				col++
+			}
+		}
+		flushBuf()
+	}
+	return out
 }
 
 func (l *textLayout) visual(at int, end bool) int {

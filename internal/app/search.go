@@ -10,6 +10,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/search"
 	"github.com/Ciao1019/ArcMD/internal/vault"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 )
 
 // searchState is the command bar's full-text search: the index of every
@@ -48,6 +49,13 @@ type hitsKey struct {
 // blocks' text, a line each, as the editor's find box sees it, and its
 // page icon.
 func extractText(name, content string) (search.Extracted, error) {
+	if vault.IsWhiteboard(name) {
+		scene, err := whiteboard.Decode(content)
+		if err != nil {
+			return search.Extracted{}, err
+		}
+		return search.Extracted{Text: scene.PlainText()}, nil
+	}
 	if strings.EqualFold(path.Ext(name), ".arcmd") {
 		doc, err := model.Decode(content)
 		if err != nil {
@@ -134,6 +142,12 @@ const searchLimit = 5
 // plainText is the document's text as search sees it, kept for the
 // revision.
 func (d *document) plainText() string {
+	if d.isWhiteboard() {
+		if rev := d.board.Revision(); !d.plainKnown || rev != d.plainRev {
+			d.plain, d.plainRev, d.plainKnown = d.board.Scene.PlainText(), rev, true
+		}
+		return d.plain
+	}
 	if rev := d.ed.Revision(); !d.plainKnown || rev != d.plainRev {
 		d.plain, d.plainRev, d.plainKnown = d.ed.Text(), rev, true
 	}
@@ -172,6 +186,24 @@ func (a *App) openAtText(id, rel, query string) {
 
 func (a *App) openAtTextTerm(id, rel, query, term string) {
 	if !a.openAnywhere(id, rel) || a.doc.loadErr != nil {
+		return
+	}
+	if a.doc.isWhiteboard() {
+		needle := strings.ToLower(strings.TrimSpace(term))
+		if needle == "" {
+			needle = strings.ToLower(strings.TrimSpace(query))
+		}
+		if needle != "" {
+			for _, el := range a.doc.board.Scene.Elements {
+				if el == nil {
+					continue
+				}
+				if strings.Contains(strings.ToLower(el.Text), needle) || strings.Contains(strings.ToLower(el.Name), needle) || strings.Contains(strings.ToLower(el.Link), needle) {
+					a.doc.board.RevealElement(el.ID)
+					break
+				}
+			}
+		}
 		return
 	}
 	if a.doc.source {

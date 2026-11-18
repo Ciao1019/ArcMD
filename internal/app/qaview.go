@@ -575,7 +575,7 @@ func (a *App) qaStepItem(c *ui.Context, spaceID string, st *qaStep, index, total
 								iconTitle = vault.Title(h.path)
 							}
 							ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-								docIcon(c, iconTitle, 13)
+								fileIcon(c, h.path, iconTitle, 13)
 								ui.Text(c, docName(h.head)).FontSize(11.5).FontWeight(500).TextColor(t.Text.Alpha(0.84)).
 									SingleLine().Shrink(1).MinWidth(0)
 								ui.Spacer(c)
@@ -610,7 +610,7 @@ func qaStepNode(c *ui.Context, st *qaStep, meta qaStepMeta) {
 		})
 	case meta.docPath != "" && st.call.Name == agent.ToolRead:
 		ui.Box(c.Key("doc")).Size(18, 18).Center().Shrink(0).Children(func() {
-			docIcon(c, meta.subject, 16)
+			fileIcon(c, meta.docPath, meta.subject, 16)
 		})
 	case st.call.Name == agent.ToolSearch:
 		ui.Box(c.Key("spark")).Size(18, 18).Radius(9).Background(t.Accent.Alpha(0.12)).Center().Shrink(0).Children(func() {

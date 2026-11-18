@@ -747,7 +747,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			dim := pinned && !opened
 			if n.Dir {
 				folderGlyph(c, a.columnLook(sp), open, a.holdsOpen(sp, n.Path))
-			} else if icon := docIcon(c, n.Title(), 16); dim {
+			} else if icon := fileIcon(c, n.Path, n.Title(), 16); dim {
 				icon.Opacity(closedIconAlpha)
 			}
 			if renaming {
@@ -833,6 +833,9 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		}
 		if m.Item(i18n.T("新建文档")).Chosen() {
 			a.newDoc(n.Path)
+		}
+		if a.menuKey(m.Item(i18n.T("新建白板")), "new-board").Chosen() {
+			a.newWhiteboard(n.Path)
 		}
 		a.templateMenu(m, n.Path)
 		if m.Item(i18n.T("在其中新建文件夹")).Chosen() {
@@ -924,6 +927,9 @@ func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 	}
 	if m.Item(i18n.T("新建文档")).Shortcut(ui.Cmd, ui.KeyN).Chosen() {
 		a.newDoc("")
+	}
+	if a.menuKey(m.Item(i18n.T("新建白板")), "new-board").Chosen() {
+		a.newWhiteboard("")
 	}
 	a.templateMenu(m, "")
 	a.sortMenu(m, sp, "")

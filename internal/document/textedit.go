@@ -59,6 +59,7 @@ func (e *Engine) restoreHistory(entry historyEntry) {
 		panic("document: text history lost its block")
 	}
 	leaf := e.leafAtIndex(i)
+	e.notifyBeforeLeafChange(leaf.Block.ID, leaf.Block.Runs)
 	before := leaf.Block.Text()
 	leaf.Block.Runs = slices.Clone(entry.runs)
 	e.publishTextChange(i, before, leaf.Block.Text())
@@ -121,7 +122,7 @@ func (e *Engine) replaceTextWithOptions(a, z int, text string, committed, allowA
 	if slices.Equal(b.Runs, runs) {
 		return true
 	}
-	e.notifyBeforeChange()
+	e.notifyBeforeLeafChange(b.ID, b.Runs)
 	i := e.leafIDs[first.Block.ID]
 	b.Runs = runs
 	if committed {
@@ -174,8 +175,8 @@ func (e *Engine) RestoreLeaf(s LeafState) bool {
 	if !ok {
 		return false
 	}
-	e.notifyBeforeChange()
 	leaf := e.leafAtIndex(i)
+	e.notifyBeforeLeafChange(leaf.Block.ID, leaf.Block.Runs)
 	before := leaf.Block.Text()
 	leaf.Block.Runs = slices.Clone(s.Runs)
 	e.Anchor, e.Caret = s.Anchor, s.Caret
@@ -223,7 +224,7 @@ func (e *Engine) CommitLeaf(s LeafState, a, z int, text string) bool {
 	netChanged := !slices.Equal(s.Runs, runs)
 	previewChanged := !slices.Equal(b.Runs, runs)
 	if netChanged || previewChanged {
-		e.notifyBeforeChange()
+		e.notifyBeforeLeafChange(s.BlockID, s.Runs)
 	}
 	if netChanged {
 		entry := historyEntry{Snapshot{Anchor: s.Anchor, Caret: s.Caret, Typing: s.Typing, Explicit: s.Explicit}, s.BlockID, slices.Clone(s.Runs)}
@@ -256,7 +257,7 @@ func (e *Engine) ReplaceBlockRuns(id string, runs []Run, anchor, caret int, typi
 	b := leaf.Block
 	next := Compact(runs)
 	if !slices.Equal(b.Runs, next) {
-		e.notifyBeforeChange()
+		e.notifyBeforeLeafChange(id, b.Runs)
 		before := b.Text()
 		entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(b.Runs)}
 		b.Runs = next

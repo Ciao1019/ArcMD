@@ -31,17 +31,18 @@ func (a *App) moreMenu(c *ui.Context) {
 	b := iconButton(c, "more", iconEllipsis, i18n.T("更多"), i18n.T("更多"), false).Role(ui.RoleMenuButton)
 	b.PopoverMenuButton(func(m *ui.Menu) {
 		noDoc := a.doc == nil || a.doc.loadErr != nil
+		wb := a.doc != nil && a.doc.isWhiteboard()
 		if a.menuKey(m.Item(i18n.T("专注模式")), "focus").Checked(a.focus).Chosen() {
 			a.toggleFocus()
 		}
-		if a.menuKey(m.Item(i18n.T("目录")), "outline").Checked(a.outlineOpen()).Disabled(noDoc || a.doc.source).Chosen() {
+		if a.menuKey(m.Item(i18n.T("目录")), "outline").Checked(a.outlineOpen()).Disabled(noDoc || a.doc.source || wb).Chosen() {
 			a.toggleOutline()
 		}
 		mode := i18n.T("预览 Markdown 导出")
 		if a.doc != nil && a.doc.source {
 			mode = i18n.T("返回富文本编辑")
 		}
-		if a.menuKey(m.Item(mode), "source").Disabled(noDoc).Chosen() {
+		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb).Chosen() {
 			a.toggleSource()
 		}
 		if a.menuKey(m.Item(i18n.T("添加分屏")), "split-add").Disabled(a.doc == nil).Chosen() {
@@ -52,13 +53,18 @@ func (a *App) moreMenu(c *ui.Context) {
 			a.openVersions()
 		}
 		m.Submenu(i18n.T("导出"), func(sub *ui.Menu) {
-			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc).Chosen() {
+			if wb {
+				if sub.Item(i18n.T("导出 SVG 文件")).Disabled(noDoc).Chosen() {
+					a.exportWhiteboardSVG(a.doc)
+				}
+			}
+			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb).Chosen() {
 				a.exportMarkdown()
 			}
 			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc).Chosen() {
 				a.exportPDF()
 			}
-			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc).Chosen() {
+			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb).Chosen() {
 				a.exportHTML()
 			}
 		}).Disabled(noDoc)

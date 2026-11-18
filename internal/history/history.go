@@ -93,19 +93,29 @@ func folder(root, rel string) (string, error) {
 
 func snapshotStem(name string) (base string, ok bool) {
 	switch {
+	case strings.HasSuffix(name, ".excalidraw.svg"):
+		return strings.TrimSuffix(name, ".excalidraw.svg"), true
 	case strings.HasSuffix(name, ".md"):
 		return strings.TrimSuffix(name, ".md"), true
 	case strings.HasSuffix(name, ".arcmd"):
 		return strings.TrimSuffix(name, ".arcmd"), true
+	case strings.HasSuffix(name, ".excalidraw"):
+		return strings.TrimSuffix(name, ".excalidraw"), true
 	}
 	return "", false
 }
 
 func snapshotExt(rel string) string {
-	if strings.EqualFold(filepath.Ext(rel), ".arcmd") {
+	switch strings.ToLower(vault.FileExt(rel)) {
+	case ".arcmd":
 		return ".arcmd"
+	case ".excalidraw.svg":
+		return ".excalidraw.svg"
+	case ".excalidraw":
+		return ".excalidraw"
+	default:
+		return ".md"
 	}
-	return ".md"
 }
 
 // List returns the versions of the document at rel, newest first.

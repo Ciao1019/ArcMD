@@ -264,7 +264,12 @@ func (a *App) checkDisk() {
 func (a *App) replaceDoc(text string) {
 	old := a.doc
 	d := openDocument(old.space, old.rel, text, old.source)
-	d.ed.Scroll = old.ed.Scroll
+	if old.isWhiteboard() && d.isWhiteboard() {
+		d.board.PreserveViewport(old.board)
+		d.boardReadOnly = old.boardReadOnly
+	} else {
+		d.ed.Scroll = old.ed.Scroll
+	}
 	a.replaceReferences(old, d)
 }
 

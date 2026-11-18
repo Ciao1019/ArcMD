@@ -8,7 +8,7 @@ overview, see the [README](../README.md).
 Build a production package for the current platform with the pinned MyGo CLI:
 
 ```sh
-CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.7.4 build
+CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.10.0 build
 ```
 
 On Apple Silicon Macs, this writes `ArcMD.app` and
@@ -38,7 +38,7 @@ macOS, then builds these packages with `CGO_ENABLED=0`:
 | Linux | x86-64 (`amd64`) | `.deb` and `.tar.gz` |
 | Linux | ARM64 (`arm64`) | `.deb` and `.tar.gz` |
 
-**Windows 32-bit is currently blocked by MyGo v0.7.4.** Its Windows backend
+**Windows 32-bit is currently blocked by MyGo v0.10.0.** Its Windows backend
 only implements `amd64` and `arm64`. A `windows/386` build selects an
 unsupported backend and fails at startup, even though Go can compile it.
 The packaging helper explicitly rejects that target until MyGo implements

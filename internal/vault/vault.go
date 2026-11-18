@@ -23,9 +23,39 @@ import (
 // Extensions are the file extensions the vault lists, lowercase.
 var Extensions = []string{".md", ".markdown", ".mdx"}
 
-// IsDocument includes native rich documents and Markdown import sources.
+// Compound and raw whiteboard extensions.
+const (
+	ExtWhiteboard    = ".excalidraw.svg"
+	ExtWhiteboardRaw = ".excalidraw"
+)
+
+// FileExt returns the document extension of name, recognizing compound
+// ".excalidraw.svg" files before falling back to path.Ext.
+func FileExt(name string) string {
+	base := path.Base(filepath.ToSlash(name))
+	if len(base) > len(ExtWhiteboard) && strings.EqualFold(base[len(base)-len(ExtWhiteboard):], ExtWhiteboard) {
+		return base[len(base)-len(ExtWhiteboard):]
+	}
+	return path.Ext(base)
+}
+
+// IsDocument includes native rich documents, Markdown sources, and whiteboards.
 func IsDocument(name string) bool {
-	return strings.EqualFold(path.Ext(name), ".arcmd") || IsMarkdown(name)
+	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsWhiteboard(name)
+}
+
+// IsWhiteboard reports whether name is an Excalidraw whiteboard document
+// (either amphibious .excalidraw.svg or raw .excalidraw JSON).
+func IsWhiteboard(name string) bool {
+	base := path.Base(filepath.ToSlash(name))
+	ext := strings.ToLower(FileExt(base))
+	return len(base) > len(ext) && (ext == ExtWhiteboard || ext == ExtWhiteboardRaw)
+}
+
+// IsWhiteboardSVG reports whether name is an amphibious .excalidraw.svg file.
+func IsWhiteboardSVG(name string) bool {
+	base := path.Base(filepath.ToSlash(name))
+	return len(base) > len(ExtWhiteboard) && strings.EqualFold(FileExt(base), ExtWhiteboard)
 }
 
 // IsMarkdown reports whether name has one of Extensions.
@@ -53,7 +83,7 @@ func (d Doc) Title() string { return Title(d.Path) }
 // Title returns the name of the file at rel without its extension.
 func Title(rel string) string {
 	base := path.Base(rel)
-	return strings.TrimSuffix(base, path.Ext(base))
+	return strings.TrimSuffix(base, FileExt(base))
 }
 
 // ErrOutside reports a path that leaves the root.
@@ -200,7 +230,7 @@ func List(root string) ([]Doc, error) {
 
 // CreateFile atomically chooses an unused document name and writes its content.
 func CreateFile(root, dir, title, extension, text string) (string, error) {
-	if extension != ".arcmd" && extension != ".md" {
+	if extension != ".arcmd" && extension != ".md" && extension != ExtWhiteboardRaw && extension != ExtWhiteboard {
 		return "", errors.New("vault: unsupported document extension")
 	}
 	title = sanitize(title)

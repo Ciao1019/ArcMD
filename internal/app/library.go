@@ -483,7 +483,7 @@ func (a *App) cardDoc(c *ui.Context, s *space.Space, rel, title string, depth in
 		row.Background(glass(t)).Shadow(0, 1, 3, 0, black.Alpha(0.07))
 	}
 	row.Children(func() {
-		docIcon(c, title, 15)
+		fileIcon(c, rel, title, 15)
 		name := ui.Text(c, docName(title)).FontSize(13).TextColor(t.Text).SingleLine().Grow(1).MinWidth(0)
 		if chosen {
 			name.FontWeight(600)
@@ -615,7 +615,7 @@ func (a *App) trashRow(c *ui.Context, it trashbin.Item, now time.Time) {
 				if it.Dir {
 					ui.Icon(c, iconFolder).FontSize(15).TextColor(ink.Alpha(0.55))
 				} else {
-					docIcon(c, title, 16)
+					fileIcon(c, it.Path, title, 16)
 				}
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {

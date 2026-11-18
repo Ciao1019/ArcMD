@@ -58,6 +58,18 @@ func (a *App) renameTag(from, to string) {
 		if d.loadErr != nil {
 			continue
 		}
+		if d.isWhiteboard() {
+			if d.boardReadOnly {
+				if strings.Contains(strings.ToLower(d.board.Scene.PlainText()), "#"+strings.ToLower(from)) {
+					skipped++
+				}
+				continue
+			}
+			if d.board.RewriteTags(from, to) {
+				edited = append(edited, d)
+			}
+			continue
+		}
 		if d.ed.ReadOnly {
 			if strings.Contains(strings.ToLower(d.ed.Doc.PlainText()), "#"+strings.ToLower(from)) {
 				skipped++
@@ -70,21 +82,47 @@ func (a *App) renameTag(from, to string) {
 	}
 	var files []replacedFile
 	var places []place
+	seenPlace := map[place]bool{}
 	a.eachDoc(func(sp *space.Space, n *vault.Node) bool {
-		places = append(places, place{sp.ID, n.Path})
+		p := place{sp.ID, n.Path}
+		seenPlace[p] = true
+		places = append(places, p)
 		return true
 	})
+	for _, sp := range a.state.Spaces {
+		if sp.IsExternal() {
+			continue
+		}
+		if docs, err := vault.List(sp.Root); err == nil {
+			for _, d := range docs {
+				p := place{sp.ID, d.Path}
+				if !seenPlace[p] {
+					seenPlace[p] = true
+					places = append(places, p)
+				}
+			}
+		}
+	}
 	for _, p := range places {
 		if resident[p] != nil {
 			continue
 		}
 		sp := a.state.Get(p.space)
 		before, err := readFile(sp, p.rel)
-		if err != nil || !strings.Contains(strings.ToLower(before), "#"+strings.ToLower(from)) {
+		if err != nil || (!vault.IsWhiteboard(p.rel) && !strings.Contains(strings.ToLower(before), "#"+strings.ToLower(from))) {
 			continue
 		}
 		d := openDocument(sp, p.rel, before, false)
-		if d.loadErr != nil || !d.ed.Engine.MapProse(change) {
+		if d.loadErr != nil {
+			continue
+		}
+		var ok bool
+		if d.isWhiteboard() {
+			ok = d.board.RewriteTags(from, to)
+		} else {
+			ok = d.ed.Engine.MapProse(change)
+		}
+		if !ok {
 			continue
 		}
 		if err := d.save(); err != nil {

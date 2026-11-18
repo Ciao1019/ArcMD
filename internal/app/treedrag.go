@@ -721,7 +721,7 @@ func (a *App) dragOverlayView(c *ui.Context) {
 		}
 		into := a.listDrop != nil && a.listDrop.kind == dropInto
 		ui.Overlay(c, func() {
-			a.floatingDragCard(c, g.x, g.y, g.cardW, lift, into, g.dir, g.openFolder, g.holdsOpen, g.dim, g.title, true)
+			a.floatingDragCard(c, g.x, g.y, g.cardW, lift, into, g.dir, g.openFolder, g.holdsOpen, g.dim, g.rel, g.title, true)
 		})
 	case a.dragSettle.active:
 		s := &a.dragSettle
@@ -737,13 +737,13 @@ func (a *App) dragOverlayView(c *ui.Context) {
 		w := s.fromW + (s.toRect.W-s.fromW)*k
 		lift := 1 - k
 		ui.Overlay(c, func() {
-			a.floatingDragCard(c, x, y, w, lift, false, s.dir, s.openFolder, s.holdsOpen, s.dim, s.title, false)
+			a.floatingDragCard(c, x, y, w, lift, false, s.dir, s.openFolder, s.holdsOpen, s.dim, s.rel, s.title, false)
 		})
 	}
 }
 
 // floatingDragCard draws a lifted row card at (x, y) above the window.
-func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder, dir, openFolder, holdsOpen, dim bool, title string, label bool) {
+func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder, dir, openFolder, holdsOpen, dim bool, rel, title string, label bool) {
 	t := c.Theme()
 	look := dragCardColors(t, a.look)
 	gap := float32(10)
@@ -770,7 +770,7 @@ func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder,
 	card.Children(func() {
 		if dir {
 			folderGlyph(c, a.look, openFolder, holdsOpen)
-		} else if icon := docIcon(c, title, 16); dim {
+		} else if icon := fileIcon(c, rel, title, 16); dim {
 			icon.Opacity(closedIconAlpha)
 		}
 		ink := t.Text

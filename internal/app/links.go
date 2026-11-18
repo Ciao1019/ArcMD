@@ -284,7 +284,7 @@ func (a *App) settledFooter(c *ui.Context, d *document) *pageFooterCache {
 func (a *App) liveTyping(c *ui.Context) time.Duration {
 	var wait time.Duration
 	for _, d := range a.residentDocuments() {
-		if d.loadErr != nil || d.ed.ByteLen() < footerLong {
+		if d.loadErr != nil || d.isWhiteboard() || d.ed.ByteLen() < footerLong {
 			continue
 		}
 		rev := d.ed.Revision()
@@ -322,7 +322,7 @@ func (a *App) pageFooter(c *ui.Context) {
 }
 
 func (a *App) pageFooterFor(c *ui.Context, d *document) {
-	if d == nil {
+	if d == nil || d.isWhiteboard() {
 		return
 	}
 	t := c.Theme()
@@ -382,7 +382,7 @@ func (a *App) pageFooterFor(c *ui.Context, d *document) {
 			row.Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						docIcon(c, a.iconTitle(id, rel), 16)
+						fileIcon(c, rel, a.iconTitle(id, rel), 16)
 						ui.Text(c, docName(vault.Title(rel))).FontSize(14).SingleLine().Shrink(1).MinWidth(0)
 						if hint := a.docHint(id, rel); hint != "" {
 							ui.Text(c, hint).FontSize(12).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
@@ -408,7 +408,7 @@ func (a *App) pageFooterFor(c *ui.Context, d *document) {
 func (a *App) iconTitle(spaceID, rel string) string {
 	title := vault.Title(rel)
 	icon := ""
-	if d := a.residentDocument(spaceID, rel); d != nil && d.loadErr == nil {
+	if d := a.residentDocument(spaceID, rel); d != nil && d.loadErr == nil && !d.isWhiteboard() {
 		icon = d.ed.Doc.Icon
 	} else {
 		icon = a.search.index.Icon(spaceID, rel)
@@ -434,28 +434,63 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 	resident := map[place]bool{}
 	for _, d := range a.residentDocuments() {
 		resident[place{d.space.ID, d.rel}] = true
-		if allowed[d.space.ID] && d.loadErr == nil && wiki.LinksTo(d.plainText(), from) && d.ed.Engine.MapText(rename) {
-			changed++
+		if allowed[d.space.ID] && d.loadErr == nil && wiki.LinksTo(d.plainText(), from) {
+			if d.isWhiteboard() {
+				if !d.boardReadOnly && d.board.RewriteWikiLinks(from, to) {
+					changed++
+				}
+			} else if d.ed.Engine.MapText(rename) {
+				changed++
+			}
 		}
 	}
 	var files []place
+	seenFile := map[place]bool{}
 	a.eachDoc(func(sp *space.Space, n *vault.Node) bool {
 		if allowed[sp.ID] {
-			files = append(files, place{sp.ID, n.Path})
+			p := place{sp.ID, n.Path}
+			seenFile[p] = true
+			files = append(files, p)
 		}
 		return true
 	})
+	for _, sp := range a.state.Spaces {
+		if !allowed[sp.ID] || sp.IsExternal() {
+			continue
+		}
+		if docs, err := vault.List(sp.Root); err == nil {
+			for _, d := range docs {
+				p := place{sp.ID, d.Path}
+				if !seenFile[p] {
+					seenFile[p] = true
+					files = append(files, p)
+				}
+			}
+		}
+	}
 	for _, file := range files {
 		if resident[file] || !vault.IsDocument(file.rel) {
 			continue
 		}
 		sp := a.state.Get(file.space)
 		text, err := readFile(sp, file.rel)
-		if err != nil || !wiki.LinksTo(text, from) {
+		if err != nil || (!vault.IsWhiteboard(file.rel) && !wiki.LinksTo(text, from)) {
 			continue
 		}
 		d := openDocument(sp, file.rel, text, false)
-		if d.loadErr != nil || !d.ed.Engine.MapText(rename) {
+		if d.loadErr != nil {
+			continue
+		}
+		if vault.IsWhiteboard(file.rel) && !wiki.LinksTo(d.plainText(), from) {
+			continue
+		}
+		var ok bool
+		if d.isWhiteboard() {
+			ok = d.board.RewriteWikiLinks(from, to)
+		} else {
+			ok = d.ed.Engine.MapText(rename)
+		}
+		if !ok {
 			continue
 		}
 		if err := d.save(); err != nil {
@@ -468,6 +503,87 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 	if changed > 0 {
 		a.refreshSearch()
 		a.notify("已更新 %d 篇文档中指向「%s」的链接。", changed, to)
+	}
+}
+
+// relinkWhiteboardEmbed updates ![[old.excalidraw]] / ![](...) references in
+// Markdown documents when a whiteboard file is renamed or moved inside sp.
+func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
+	if sp == nil || oldRel == "" || newRel == "" || oldRel == newRel {
+		return
+	}
+	oldBase := path.Base(oldRel)
+	newBase := path.Base(newRel)
+	matchURL := func(docRel, raw string) (string, bool) {
+		if !vault.IsWhiteboard(raw) {
+			return "", false
+		}
+		clean := unescapeImagePath(strings.TrimSpace(raw))
+		cleanNoSlash := strings.TrimPrefix(path.Clean(clean), "/")
+		docDir := path.Dir(docRel)
+		joined := cleanNoSlash
+		if docDir != "." && !strings.HasPrefix(clean, "/") {
+			joined = path.Clean(path.Join(docDir, clean))
+		}
+		if clean != oldBase && cleanNoSlash != oldRel && joined != oldRel {
+			return "", false
+		}
+		if clean == oldBase && path.Dir(oldRel) == path.Dir(newRel) {
+			return newBase, true
+		}
+		if strings.HasPrefix(clean, "/") {
+			return "/" + newRel, true
+		}
+		return newRel, true
+	}
+	resident := map[string]bool{}
+	for _, d := range a.residentDocuments() {
+		if d.space != sp {
+			continue
+		}
+		resident[d.rel] = true
+		if d.loadErr != nil || d.isWhiteboard() || d.ed.ReadOnly {
+			continue
+		}
+		urls := map[string]string{}
+		for _, u := range d.ed.ImageURLs() {
+			if nu, ok := matchURL(d.rel, u); ok {
+				urls[u] = nu
+			}
+		}
+		if len(urls) > 0 {
+			d.ed.RelocateImages(urls)
+		}
+	}
+	if sp.IsExternal() {
+		return
+	}
+	docs, err := vault.List(sp.Root)
+	if err != nil {
+		return
+	}
+	for _, info := range docs {
+		if resident[info.Path] || vault.IsWhiteboard(info.Path) {
+			continue
+		}
+		text, rErr := readFile(sp, info.Path)
+		if rErr != nil || !strings.Contains(text, oldBase) {
+			continue
+		}
+		d := openDocument(sp, info.Path, text, false)
+		if d.loadErr != nil {
+			continue
+		}
+		urls := map[string]string{}
+		for _, u := range d.ed.ImageURLs() {
+			if nu, ok := matchURL(info.Path, u); ok {
+				urls[u] = nu
+			}
+		}
+		if len(urls) > 0 {
+			d.ed.RelocateImages(urls)
+			_ = d.save()
+		}
 	}
 }
 
@@ -492,7 +608,12 @@ func (a *App) previewWikiFor(source *document, name string) editor.WikiPreview {
 		p.Missing = false
 		return p
 	}
-	text := []rune(d.ed.Committed().PlainText())
+	var text []rune
+	if d.isWhiteboard() {
+		text = []rune(d.board.Scene.PlainText())
+	} else {
+		text = []rune(d.ed.Committed().PlainText())
+	}
 	if len(text) > 500 {
 		text = append(text[:500], '…')
 	}

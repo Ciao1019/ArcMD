@@ -136,7 +136,7 @@ func htmlLang() string {
 // when the name is taken, never replacing a file.
 func (a *App) exportHTML() {
 	d := a.doc
-	if d == nil || d.loadErr != nil {
+	if d == nil || d.loadErr != nil || d.isWhiteboard() {
 		return
 	}
 	d.ed.UnmarkText()

@@ -188,15 +188,19 @@ func (a *App) copyAsset(dir, src string) (string, []byte, error) {
 // dir as a new file named for name, numbered when the name is taken, and
 // returns its URL from them. It never replaces a file.
 func (a *App) writeAsset(dir, name string, data []byte) (string, error) {
-	root, nameOnDisk, err := fileLocation(a.doc.space, a.doc.rel)
+	return a.writeAssetFor(a.doc, dir, name, data)
+}
+
+func (a *App) writeAssetFor(d *document, dir, name string, data []byte) (string, error) {
+	root, nameOnDisk, err := fileLocation(d.space, d.rel)
 	if err != nil {
 		return "", err
 	}
-	if a.doc.space.IsExternal() {
+	if d.space.IsExternal() {
 		dir = path.Dir(nameOnDisk)
 	}
 	base := assetName(name)
-	ext := path.Ext(base)
+	ext := vault.FileExt(base)
 	stem := strings.TrimSuffix(base, ext)
 	for i := 1; ; i++ {
 		name := base

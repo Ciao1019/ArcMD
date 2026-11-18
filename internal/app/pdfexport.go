@@ -13,6 +13,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdf"
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -38,13 +39,17 @@ func (a *App) startPDF(printing bool) {
 	if d == nil || d.loadErr != nil || a.pdfExport != nil {
 		return
 	}
+	if d.isWhiteboard() {
+		a.exportWhiteboardPDF(d, printing)
+		return
+	}
 	d.ed.UnmarkText()
 	root, rel, err := fileLocation(d.space, d.rel)
 	if err != nil {
 		a.notify("导出 PDF 失败。%v", err)
 		return
 	}
-	source := &document{space: &space.Space{Root: root}, rel: rel}
+	source := &document{space: &space.Space{ID: d.space.ID, Root: root}, rel: rel}
 	dir := filepath.Dir(d.fullPath())
 	if printing {
 		dir = filepath.Join(os.TempDir(), i18n.T("ArcMD 打印"))
@@ -123,11 +128,12 @@ func (a *App) pdfExportView(c *ui.Context) {
 	job.next = c.Now().Add(time.Millisecond)
 	if job.tops == nil {
 		job.opts = editor.Options{
-			Width:        paperWidth,
-			Theme:        documentTheme(false),
-			Page:         pageStyle(false),
-			LoadImage:    job.source.imageResource,
-			LoadRawImage: job.source.rawImage,
+			Width:          paperWidth,
+			Theme:          documentTheme(false),
+			Page:           pageStyle(false),
+			LoadImage:      job.source.imageResource,
+			LoadRawImage:   job.source.rawImage,
+			LoadWhiteboard: func(url string) (*whiteboard.Scene, uint64, error) { return a.loadWhiteboardFor(job.source, url) },
 		}
 		ui.Render(func(c *ui.Context) { job.tops = job.ed.Paginate(job.opts, paperHeight-2*paperMargin) }, 1, 1, 1)
 		job.writer.ReservePages(len(job.tops))

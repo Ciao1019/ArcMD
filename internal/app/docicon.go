@@ -6,6 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -15,6 +16,18 @@ import (
 // a few quiet colors, on a tint of that color. The color follows the name,
 // so a document keeps it as it moves, and documents side by side seldom
 // share one.
+
+// fileIcon draws the icon of rel/title: whiteboards without a leading emoji
+// show the whiteboard glyph on their title color tile; Markdown files show docIcon.
+func fileIcon(c *ui.Context, rel, title string, size float32) ui.Element {
+	if vault.IsWhiteboard(rel) && leadingEmoji(title) == "" {
+		ink, fill := docIconColors(c.Theme(), title)
+		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
+			ui.Icon(c, iconWhiteboard).FontSize(size * 0.64).TextColor(ink)
+		})
+	}
+	return docIcon(c, title, size)
+}
 
 // docIcon draws the icon of the document titled title, size DIPs square.
 func docIcon(c *ui.Context, title string, size float32) ui.Element {

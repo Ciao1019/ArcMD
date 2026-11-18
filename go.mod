@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/egoist/mygo v0.7.4
+	github.com/egoist/mygo v0.10.0
 	golang.org/x/image v0.46.0
 	golang.org/x/net v0.59.0
 )

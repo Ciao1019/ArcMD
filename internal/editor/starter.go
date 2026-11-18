@@ -12,7 +12,7 @@ import (
 )
 
 // starterKinds are the starter's blocks, by kind, in order.
-var starterKinds = []string{"task", "bullet", "table", "callout", "code", "image", "columns"}
+var starterKinds = []string{"task", "bullet", "table", "callout", "code", "image", "columns", "whiteboard"}
 
 // Blank reports whether nothing is written but the title: the document is
 // an optional level 1 heading and at most one empty paragraph.

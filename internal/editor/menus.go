@@ -62,6 +62,7 @@ var insertions = []insertion{
 	{name: "公式", kind: "math", search: "math formula equation latex tex gongshi gs", icon: iconSigma, group: 1, tint: "teal"},
 	{name: "流程图", kind: "mermaid-flow", search: "mermaid flowchart graph diagram liuchengtu lct", icon: iconWorkflow, group: 1, tint: "teal", md: "```mermaid"},
 	{name: "时序图", kind: "mermaid-seq", search: "mermaid sequence diagram shixutu sxt", icon: iconSequence, group: 1, tint: "teal"},
+	{name: "手绘白板", kind: "whiteboard", search: "whiteboard excalidraw sketch canvas draw baiban bb shouhui sh", icon: iconWhiteboard, group: 1, tint: "indigo", md: "```excalidraw"},
 	{name: "链接到文档", kind: "wiki", search: "wiki link backlink shuanglian sl lianjie wendang", icon: iconLink, group: 1, tint: "blue", md: "[["},
 }
 
@@ -419,7 +420,7 @@ func turnItems(b *document.Block) []insertion {
 	}
 	for _, it := range insertions {
 		switch {
-		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq":
+		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq" || it.kind == "whiteboard":
 		case b.Kind == "code" && it.kind == "callout":
 		case b.Kind == "callout" && (it.kind == "code" || it.kind == "quote"):
 		default:
@@ -445,7 +446,7 @@ func (e *Editor) blockMenuHeight(b *document.Block) float32 {
 	if b.Kind == "callout" {
 		h += 32
 	}
-	if b.Kind == "code" && !isMermaidBlock(b) {
+	if b.Kind == "code" && !isMermaidBlock(b) && !isWhiteboardBlock(b) {
 		h += 32
 	}
 	if e.bookmarks.toggle != nil {
@@ -527,7 +528,7 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 					if b.Kind == "callout" {
 						hover(e.menuRow(c, "bm-color", iconPalette, e.page.CodeText, i18n.T("颜色"), "›", e.menuSub == "color"), "color")
 					}
-					if b.Kind == "code" && !isMermaidBlock(b) {
+					if b.Kind == "code" && !isMermaidBlock(b) && !isWhiteboardBlock(b) {
 						if hover(e.menuRow(c, "bm-wrap", iconWrapText, e.page.CodeText, i18n.T("自动换行"), "", !e.isCodeNoWrap(b)), "").Clicked() {
 							act(func() { e.ToggleCodeWrap(id) })()
 						}

@@ -70,6 +70,13 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			e.SetSelection(at, at)
 		}
 		if ev.Clicks == 2 {
+			if !e.ReadOnly {
+				if r := e.rowAt(at); r != nil && !r.boardEditing &&
+					(isWhiteboardBlock(r.leaf.Block) || (isWhiteboardEmbed(r.leaf.Block) && e.saveWhiteboard != nil)) {
+					e.startBoardEditing(r.leaf.Block.ID)
+					return true
+				}
+			}
 			e.selectWord(at)
 		}
 		if ev.Clicks >= 3 {
@@ -128,10 +135,17 @@ func (e *Editor) command(command string, read func() string, write func(string))
 		}
 		return true
 	}
+	if command == "selectAll" {
+		if len(e.blocks.ids) > 0 {
+			e.SelectAllBlocks()
+			return true
+		}
+		e.selectAll()
+		e.vertical = false
+		return true
+	}
 	e.reveal, e.vertical = true, false
 	switch command {
-	case "selectAll":
-		e.SetSelection(0, e.Len())
 	case "cut":
 		e.copySelection(write)
 		e.ReplaceText(nil, "")
@@ -161,6 +175,7 @@ func (e *Editor) command(command string, read func() string, write func(string))
 
 func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) bool {
 	mods, key := ev.Mods, ev.Key
+	e.readOnlySpace = false
 	for _, r := range e.reserved {
 		if r.Mods == mods && r.Key == key {
 			return false
@@ -214,8 +229,19 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		return true
 	}
 	// TextInput supplies the space (or an IME commit). Consume its key here
-	// so MyGo does not also interpret Space/Shift+Space as page scrolling.
-	if key == ui.KeySpace && mods & ^ui.Shift == 0 && !e.ReadOnly {
+	// so MyGo does not also interpret Space/Shift+Space as page scrolling;
+	// in read-only mode, page the viewport instead of refusing a space edit.
+	if key == ui.KeySpace && mods & ^ui.Shift == 0 {
+		if e.ReadOnly {
+			dy := max(e.viewport-40, e.viewport/2)
+			if mods == ui.Shift {
+				dy = -dy
+			}
+			e.scrollGlide = scrollGlideState{}
+			e.outlineState.jump = outlineJump{}
+			e.Scroll.Y = min(e.outlineState.scrollMax, max(0, e.Scroll.Y+dy))
+			e.readOnlySpace = true
+		}
 		return true
 	}
 	if _, composing := e.MarkedRange(); composing {
@@ -373,11 +399,11 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		if mods & ^ui.Shift == 0 && e.columnTab(shift) {
 			return true
 		}
-		if shift || e.Anchor != e.Caret {
-			e.indent(shift)
-		} else {
-			e.ReplaceText(nil, "    ")
+		if e.ReadOnly {
+			e.refused = true
+			return true
 		}
+		e.tab(shift)
 		e.reveal = true
 		return true
 	default:
@@ -430,6 +456,151 @@ func (e *Editor) indent(remove bool) {
 		delta = -1
 	}
 	e.Engine.Indent(delta)
+	e.sync()
+}
+
+func (e *Editor) tab(shift bool) {
+	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+	first := e.Engine.LeafAt(a)
+	last := e.Engine.LeafAt(z)
+	if (first.Block.Kind == "code" || first.Block.Kind == "raw") && first.Block.ID == last.Block.ID && !isWhiteboardBlock(first.Block) {
+		if shift || (a < z && strings.ContainsRune(e.slice(a, z), '\n')) {
+			if e.Engine.IndentCode(shift) {
+				e.sync()
+			}
+			return
+		}
+		e.ReplaceText(nil, "\t")
+		return
+	}
+	if a == z {
+		switch first.Block.Kind {
+		case "bullet", "numbered", "task", "toggle":
+			e.indent(shift)
+			return
+		}
+		if !shift {
+			e.ReplaceText(nil, "\t")
+			return
+		}
+		if first.Block.Indent > 0 {
+			e.indent(true)
+			return
+		}
+		if a > first.Start && e.slice(a-1, a) == "\t" {
+			r := ui.TextInputRange{Start: a - 1, End: a}
+			e.ReplaceText(&r, "")
+			return
+		}
+		ls, _ := e.lineRange(a)
+		if ls < first.End && e.slice(ls, ls+1) == "\t" {
+			r := ui.TextInputRange{Start: ls, End: ls + 1}
+			e.ReplaceText(&r, "")
+			next := max(ls, a-1)
+			e.SetSelection(next, next)
+		}
+		return
+	}
+	e.indent(shift)
+}
+
+func blockContainsID(b *document.Block, id string) bool {
+	if b.ID == id {
+		return true
+	}
+	for _, c := range b.Children {
+		if blockContainsID(c, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// selectAll widens the selection step by step: inline math formula, current
+// leaf block, enclosing column or table, and finally the entire document.
+func (e *Editor) selectAll() {
+	total := e.Len()
+	if total == 0 {
+		e.SetSelection(0, 0)
+		return
+	}
+	sel := e.Selection().Range
+	var candidates []ui.TextInputRange
+
+	if e.inlineEditing != "" && e.inlineMath.blockID != "" {
+		if l, ok := e.Engine.LeafByID(e.inlineMath.blockID); ok {
+			bodyStart := l.Start + e.inlineMath.start + 1
+			bodyEnd := l.Start + e.inlineMath.end - 1
+			if bodyStart < bodyEnd && sel.Start >= l.Start+e.inlineMath.start && sel.End <= l.Start+e.inlineMath.end {
+				candidates = append(candidates, ui.TextInputRange{Start: bodyStart, End: bodyEnd})
+			}
+		}
+	}
+
+	first := e.Engine.LeafAt(sel.Start)
+	last := e.Engine.LeafAt(sel.End)
+	if first.Block.ID == last.Block.ID && first.Start < first.End {
+		b := first.Block
+		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
+		if editable {
+			candidates = append(candidates, ui.TextInputRange{Start: first.Start, End: first.End})
+		}
+	}
+
+	if first.Owner != "" && first.Owner == last.Owner {
+		var owner *document.Block
+		for _, b := range e.Doc.Blocks {
+			if b.ID == first.Owner {
+				owner = b
+				break
+			}
+		}
+		if owner != nil {
+			switch owner.Kind {
+			case "columns":
+				for _, col := range owner.Children {
+					if !blockContainsID(col, first.Block.ID) || !blockContainsID(col, last.Block.ID) {
+						continue
+					}
+					colStart, colEnd := -1, -1
+					for _, leaf := range e.Doc.Leaves() {
+						if leaf.Owner == owner.ID && blockContainsID(col, leaf.Block.ID) {
+							if colStart < 0 {
+								colStart = leaf.Start
+							}
+							colEnd = leaf.End
+						}
+					}
+					if colStart >= 0 && colStart < colEnd {
+						candidates = append(candidates, ui.TextInputRange{Start: colStart, End: colEnd})
+					}
+					break
+				}
+			case "table":
+				tableStart, tableEnd := -1, -1
+				for _, leaf := range e.Doc.Leaves() {
+					if leaf.Owner == owner.ID {
+						if tableStart < 0 {
+							tableStart = leaf.Start
+						}
+						tableEnd = leaf.End
+					}
+				}
+				if tableStart >= 0 && tableStart < tableEnd {
+					candidates = append(candidates, ui.TextInputRange{Start: tableStart, End: tableEnd})
+				}
+			}
+		}
+	}
+
+	candidates = append(candidates, ui.TextInputRange{Start: 0, End: total})
+	for _, c := range candidates {
+		if c.Start <= sel.Start && c.End >= sel.End && (c.Start < sel.Start || c.End > sel.End) {
+			e.SetSelection(c.Start, c.End)
+			return
+		}
+	}
+	e.SetSelection(0, total)
 }
 
 func (e *Editor) selectWord(at int) {

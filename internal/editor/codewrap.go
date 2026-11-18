@@ -16,7 +16,7 @@ func isMermaidBlock(b *document.Block) bool {
 // isCodeNoWrap reports whether code block b disables soft line wrapping.
 // Printing and Mermaid diagrams always wrap normally.
 func (e *Editor) isCodeNoWrap(b *document.Block) bool {
-	if b == nil || b.Kind != "code" || e.printing || isMermaidBlock(b) {
+	if b == nil || b.Kind != "code" || e.printing || isMermaidBlock(b) || isWhiteboardBlock(b) {
 		return false
 	}
 	if ov, ok := e.codeWrapOverride[b.ID]; ok {
@@ -29,7 +29,7 @@ func (e *Editor) isCodeNoWrap(b *document.Block) bool {
 // current editing session without modifying the underlying Markdown file.
 func (e *Editor) ToggleCodeWrap(id string) {
 	b := e.blockByID(id)
-	if b == nil || b.Kind != "code" || isMermaidBlock(b) {
+	if b == nil || b.Kind != "code" || isMermaidBlock(b) || isWhiteboardBlock(b) {
 		return
 	}
 	if e.codeWrapOverride == nil {

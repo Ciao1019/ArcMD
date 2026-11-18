@@ -12,6 +12,8 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/vault"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -32,6 +34,7 @@ type versionsState struct {
 	for_           *document
 	shown          string
 	doc            *model.Document
+	boardScene     *whiteboard.Scene
 	diff           []history.Line
 	added          int
 	gone           int
@@ -94,21 +97,39 @@ func (a *App) selectVersion(i int) {
 	if v.shown == ver.File {
 		return
 	}
-	v.shown, v.doc, v.diff, v.err = ver.File, nil, nil, nil
+	v.shown, v.doc, v.boardScene, v.diff, v.err = ver.File, nil, nil, nil, nil
 	text, err := history.Read(v.for_.space.Root, v.for_.rel, ver)
-	if err == nil {
+	if err != nil {
+		v.err = err
+		return
+	}
+	var nowText, thenText string
+	if vault.IsWhiteboard(ver.File) || v.for_.isWhiteboard() {
+		scene, decErr := whiteboard.Decode(text)
+		if decErr != nil {
+			v.err = decErr
+			return
+		}
+		v.boardScene = scene
+		if v.for_.isWhiteboard() {
+			nowText = v.for_.board.Scene.PlainText()
+		}
+		thenText = scene.PlainText()
+	} else {
 		if strings.EqualFold(path.Ext(ver.File), ".arcmd") {
 			v.doc, err = model.Decode(text)
 		} else {
 			v.doc = editor.ImportMarkdown(text)
 		}
+		if err != nil {
+			v.err = err
+			return
+		}
+		nowText = v.for_.ed.Committed().PlainText()
+		thenText = v.doc.PlainText()
 	}
-	if err != nil {
-		v.err = err
-		return
-	}
-	now := strings.Split(v.for_.ed.Committed().PlainText(), "\n")
-	then := strings.Split(v.doc.PlainText(), "\n")
+	now := strings.Split(nowText, "\n")
+	then := strings.Split(thenText, "\n")
 	v.diff = history.Diff(now, then)
 	v.added, v.gone = 0, 0
 	for _, l := range v.diff {
@@ -125,10 +146,18 @@ func (a *App) selectVersion(i int) {
 // step of the editor's history.
 func (a *App) restoreVersion() {
 	v := &a.versions
-	if v.doc == nil || v.for_ != a.doc {
+	if v.for_ != a.doc || (v.doc == nil && v.boardScene == nil) {
 		return
 	}
 	at := v.versions[v.sel].Time
+	if v.boardScene != nil && a.doc.isWhiteboard() {
+		a.doc.board.ReplaceScene(v.boardScene.Clone(), true)
+		a.doc.board.RequestFocus = true
+		v.open = false
+		_ = a.doc.write(true)
+		a.notify("已恢复到 %s 的版本，可用 ⌘Z 撤销。", versionTime(at, time.Now()))
+		return
+	}
 	a.doc.ed.Engine.ReplaceDocument(v.doc)
 	a.doc.ed.RequestFocus = true
 	v.open = false
@@ -147,11 +176,15 @@ func (a *App) createMilestone() {
 	}
 	content := d.diskText
 	if content == "" {
-		committed := d.ed.Committed()
-		if strings.EqualFold(path.Ext(d.rel), ".arcmd") {
-			content, _ = committed.Encode()
+		if d.isWhiteboard() {
+			content, _ = encodeWhiteboardFile(d.rel, d.board.SceneSnapshot())
 		} else {
-			content = editor.ExportMarkdown(committed)
+			committed := d.ed.Committed()
+			if strings.EqualFold(path.Ext(d.rel), ".arcmd") {
+				content, _ = committed.Encode()
+			} else {
+				content = editor.ExportMarkdown(committed)
+			}
 		}
 	}
 	saved, err := history.SaveMilestone(d.space.Root, d.rel, content, label, time.Now())
@@ -241,7 +274,7 @@ func (a *App) versionsView(c *ui.Context) {
 					v.createLabel = ""
 					v.createFocused = false
 				}
-				if v.doc != nil {
+				if v.doc != nil || v.boardScene != nil {
 					if ui.PrimaryButton(c.Key("version-restore"), i18n.T("恢复此版本")).Clicked() {
 						a.restoreVersion()
 					}
@@ -401,7 +434,7 @@ func (a *App) versionsView(c *ui.Context) {
 					case v.err != nil:
 						ui.Text(c, i18n.T("无法读取这个版本。")+v.err.Error()).TextColor(t.Danger)
 						return
-					case v.doc == nil:
+					case v.doc == nil && v.boardScene == nil:
 						return
 					case v.added == 0 && v.gone == 0:
 						ui.Text(c, i18n.T("与当前内容相同。")).FontSize(12).TextColor(t.TextMuted)

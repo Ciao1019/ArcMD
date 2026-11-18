@@ -6,7 +6,7 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.2.1-F21158" alt="Version 0.2.1"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.2.2-F21158" alt="Version 0.2.2"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.2.1. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.2.2. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
@@ -40,7 +40,7 @@ ArcMD brings Markdown's familiar writing flow onto a calm, expressive native can
 
 | ⚡ Pure Native, 120 Hz Ready | 📄 Plain `.md`, Zero Lock-in | 🎨 Arc Spaces & Tactile Craft |
 | --- | --- | --- |
-| Custom document engine and incremental layout keep typing at **0.273 ms P50** even in 1M-character documents, with non-blocking background saves. | Edits and autosaves standard `.md` files in place — no sidecar copies — so Obsidian, VS Code, Typora, and Git work on the exact same folder. | Multi-color Spaces, global Favorites, persistent Pinned tabs, a gliding caret, live syntax/TeX compilation, and spring micro-interactions. |
+| Custom document engine and incremental layout keep typing at **0.248 ms P50** even in 1M-character documents, with non-blocking background saves. | Edits and autosaves standard `.md` files in place — no sidecar copies — so Obsidian, VS Code, Typora, and Git work on the exact same folder. | Multi-color Spaces, global Favorites, persistent Pinned tabs, a gliding caret, live syntax/TeX compilation, and spring micro-interactions. |
 
 > **Tribute & Origin**
 >
@@ -111,7 +111,7 @@ ArcMD edits and autosaves standard **`.md` Markdown** files (`.md`, `.markdown`,
 
 | Area | Built-in Capabilities |
 | --- | --- |
-| **Expressive Blocks** | H1–H6 headings, nested lists & tasks, quotes, five-tone icon callouts, stateful incremental syntax highlighting across 17 languages (with per-block soft-wrap toggle), native Mermaid flowcharts & sequence diagrams, `\boldsymbol` bold math formulas, `<details>` toggles, footnotes, superscript/subscript, `:sm` emoji search, `@` dates & page mentions, optional CJK–Latin auto-spacing. |
+| **Expressive Blocks** | H1–H6 headings, nested lists & tasks, quotes, five-tone icon callouts, stateful incremental syntax highlighting across 17 languages (with per-block soft-wrap toggle), native Mermaid flowcharts & sequence diagrams, Excalidraw-compatible hand-drawn whiteboards (`.excalidraw.svg` / `.excalidraw` & `/` inline boards), `\boldsymbol` bold math formulas, `<details>` toggles, footnotes, superscript/subscript, `:sm` emoji search, `@` dates & page mentions, optional CJK–Latin auto-spacing. |
 | **Tables, Columns & Media** | CSV/TSV paste-to-table, row/column drag reorder, cell merge/split, 16 cell fills, natural column sort; adjustable two-column layouts; non-destructive image crop (keeping originals) & inline GIF playback; multi-block marquee selection & outline section drag. |
 | **Splits, Command Bar & Templates** | Up to four side-by-side split panes or dedicated native windows; zero-blocking <kbd>⌘K</kbd> command bar (Pinyin/initials & multi-keyword full-text search with persistent disk cache, undoable <kbd>⇧⌘R</kbd> cross-document replace); Space templates (`{{date}}`, `{{time}}`, `{{weekday}}`, `{{title}}`) & <kbd>⌥⌘T</kbd> Daily Notes. |
 | **Links, Focus & Safety** | `[[Wiki links]]` autocomplete across spaces, backlinks footer & rename sync, workspace `#tags`; <kbd>⇧⌘F</kbd> Focus Mode, paragraph afterglow dimming, typewriter scroll, word goals & per-pane reading lock; <kbd>⇧⌘M</kbd> synced Markdown preview, pure-Go vector PDF (Type 3 outlines, bookmarks & clickable links) & standalone HTML export; `.arcmd/history` named milestones, grapheme-level inline diff restore & live external-edit protection. |
@@ -128,7 +128,7 @@ Every action is reachable from the <kbd>⌘K</kbd> command bar, and shortcuts ca
 | Shortcut | Action | Shortcut | Action |
 | --- | --- | --- | --- |
 | <kbd>⌘K</kbd> / <kbd>⌘P</kbd> | Command bar & full-text search | <kbd>⌃1</kbd>…<kbd>⌃9</kbd> | Switch to Space 1–9 |
-| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> | New document / New folder | <kbd>⇧⌘L</kbd> | Open Library (Spaces / Plugins / Trash) |
+| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> / <kbd>⌥⌘B</kbd> | New document / folder / whiteboard | <kbd>⇧⌘L</kbd> | Open Library (Spaces / Plugins / Trash) |
 | <kbd>⌘&#92;</kbd> | Collapse / expand sidebar | <kbd>⌃⇧=</kbd> / <kbd>⌃⇧−</kbd> | Add / close split pane |
 | <kbd>⇧⌘M</kbd> | Rich text ⇄ Markdown preview (synced) | <kbd>⇧⌘F</kbd> | Toggle Focus Mode |
 | <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | Find & replace / Replace across space | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | Toggle bookmark / All bookmarks |
@@ -143,16 +143,16 @@ CPU frame construction time across **100 consecutive operations** in a mixed doc
 
 | Operation | P50 | P95 |
 | --- | ---: | ---: |
-| ⌨️ Typing | **0.273 ms** | **0.291 ms** |
-| ⌫ Backspace | **0.271 ms** | **0.306 ms** |
-| 🖱️ Scrolling | **0.548 ms** | **1.132 ms** |
+| ⌨️ Typing | **0.248 ms** | **0.304 ms** |
+| ⌫ Backspace | **0.245 ms** | **0.284 ms** |
+| 🖱️ Scrolling | **0.447 ms** | **1.059 ms** |
 
-A 120 Hz display budgets **8.3 ms** per frame. Even on a million-character document, CPU scene construction stays under **1.2 ms at P95**. Including event handling, body typing measures **0.275 ms P50**, typing with Find open **0.281 ms**, repeated IME candidate updates **0.264 ms**, and ordinary typing allocates **0.067 MB/op** (allocation volume, not resident memory).
+A 120 Hz display budgets **8.3 ms** per frame. Even on a million-character document, CPU scene construction stays under **1.1 ms at P95**. Including event handling, body typing measures **0.249 ms P50**, typing with Find open **0.260 ms**, repeated IME candidate updates **0.234 ms**, and ordinary typing allocates **0.063 MB/op** (allocation volume, not resident memory).
 
 <details>
 <summary>Environment & benchmark notes</summary>
 
-- **Setup**: Apple M5 / 24 GiB, macOS 26.5.1, Go 1.27.3, MyGo v0.7.4, `CGO_ENABLED=0`.
+- **Setup**: Apple M5 / 24 GiB, macOS 26.5.1, Go 1.27.3, MyGo v0.10.0, `CGO_ENABLED=0`.
 - **Scope**: Measures CPU scene construction through a headless host running the normal frame pipeline; excludes OS input dispatch, GPU rasterization/presentation, and display latency.
 - **Reproduce**: [Performance report](docs/performance.md) · [Benchmark harness](tools/perf/README.md).
 
@@ -189,7 +189,7 @@ ARCMD_HOME=/tmp/arcmd-dev CGO_ENABLED=0 go run ./cmd/arcmd
 Build a native application bundle (see [Building and releasing](docs/building.md)):
 
 ```sh
-CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.7.4 build
+CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.10.0 build
 ```
 
 ---

@@ -34,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.1"
+const Version = "0.2.2"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -97,7 +97,9 @@ type App struct {
 	treeFor string
 	treeErr error
 
-	doc *document
+	doc     *document
+	wbCache map[string]cachedWhiteboard
+	wbLib   whiteboardLibState
 	// split owns the visible panes; doc and history follow its focused pane.
 	split           *splitGroup
 	paneNavigation  bool
@@ -911,7 +913,7 @@ func isUntitled(name string) bool {
 // by hand keeps its name. A title taken by another file is numbered.
 func (a *App) followTitle() {
 	d := a.doc
-	if d == nil || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
+	if d == nil || d.isWhiteboard() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
 	if _, composing := d.ed.MarkedRange(); composing {
@@ -1035,6 +1037,9 @@ func (a *App) commitRename() {
 	}
 	if to != rel {
 		a.moved(sp, rel, to)
+		if vault.IsWhiteboard(rel) {
+			a.relinkWhiteboardEmbed(sp, rel, to)
+		}
 		if vault.IsDocument(rel) {
 			a.relink(vault.Title(rel), vault.Title(to), sources)
 		}
@@ -1297,7 +1302,7 @@ func writeNative(root, rel, markdown string) error {
 }
 
 func (a *App) exportMarkdown() {
-	if a.doc == nil || a.doc.loadErr != nil {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() {
 		return
 	}
 	a.doc.ed.UnmarkText()

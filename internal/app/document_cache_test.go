@@ -294,21 +294,50 @@ func TestColdOpenDefersBaselineHashingUntilFirstEditOrSave(t *testing.T) {
 	if err := d.save(); err != nil {
 		t.Fatalf("save on clean cold doc failed: %v", err)
 	}
-	if d.ed.Engine.OnBeforeChange == nil {
-		t.Fatal("expected OnBeforeChange hook registered while baseline is pending")
+	if d.ed.Engine.OnBeforeChange == nil || d.ed.Engine.OnBeforeLeafChange == nil {
+		t.Fatal("expected lazy baseline hooks registered while baseline is pending")
 	}
 
-	// First edit computes pre-change baseline automatically before mutating Doc.
+	// Single-leaf text edits record only the edited leaf instead of hashing all 1,200 blocks.
 	d.ed.SetSelection(0, 0)
 	d.ed.ReplaceText(nil, "Edited ")
-	if d.baselinePending {
-		t.Fatal("expected first edit to materialize baseline")
+	if !d.baselinePending || len(d.baselineOrigRuns) != 1 || len(d.baselineRuns) != 1 {
+		t.Fatalf("expected single-leaf baseline tracking without full materialization: pending=%v orig=%d runs=%d",
+			d.baselinePending, len(d.baselineOrigRuns), len(d.baselineRuns))
 	}
+	if !d.dirty() || !d.baselinePending {
+		t.Fatalf("expected doc dirty with baselinePending still true: dirty=%v pending=%v", d.dirty(), d.baselinePending)
+	}
+	d.ed.Undo()
+	if d.dirty() || !d.baselinePending {
+		t.Fatalf("expected undo on pending leaf edit to clear dirty while remaining lazy: dirty=%v pending=%v", d.dirty(), d.baselinePending)
+	}
+	d.ed.Redo()
 	if !d.dirty() || !d.changed() {
-		t.Fatalf("expected doc dirty after edit: dirty=%v changed=%v", d.dirty(), d.changed())
+		t.Fatalf("expected doc dirty after redo and changed() check: dirty=%v changed=%v", d.dirty(), d.changed())
+	}
+	if d.baselinePending || len(d.baselineOrigRuns) != 0 {
+		t.Fatalf("expected changed() to materialize full baseline: pending=%v orig=%d", d.baselinePending, len(d.baselineOrigRuns))
 	}
 	d.ed.Undo()
 	if d.dirty() || d.changed() {
-		t.Fatalf("expected undo back to lazy-materialized pre-edit baseline to clear dirty")
+		t.Fatalf("expected undo back to reconstructed pre-edit baseline to clear dirty")
+	}
+
+	// Verify structural edit after a leaf edit materializes the pre-leaf-edit baseline intact.
+	d2 := openDocument(sp, "long.arcmd", raw, false)
+	d2.ed.SetSelection(0, 0)
+	d2.ed.ReplaceText(nil, "Leaf ")
+	if !d2.baselinePending {
+		t.Fatal("expected d2 baseline to remain lazy after leaf edit")
+	}
+	d2.ed.Engine.Insert(model.NewBlock("paragraph", "new"))
+	if d2.baselinePending || !d2.dirty() || !d2.changed() {
+		t.Fatalf("expected structural edit to materialize baseline: pending=%v dirty=%v changed=%v", d2.baselinePending, d2.dirty(), d2.changed())
+	}
+	d2.ed.Undo()
+	d2.ed.Undo()
+	if d2.dirty() || d2.changed() {
+		t.Fatalf("expected two undos back to cold pre-edit state to clear dirty: dirty=%v changed=%v", d2.dirty(), d2.changed())
 	}
 }

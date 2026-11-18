@@ -376,33 +376,175 @@ func (d *Document) Encode() (string, error) {
 	return out.String(), err
 }
 
+// docHasher serializes document fields into a pooled SHA-256 digest without
+// heap-allocating string copies or per-leaf hash state.
+type docHasher struct {
+	h   hash.Hash
+	buf [256]byte
+}
+
+var docHasherPool = sync.Pool{
+	New: func() any { return &docHasher{h: sha256.New()} },
+}
+
+func acquireHasher() *docHasher {
+	dh := docHasherPool.Get().(*docHasher)
+	dh.h.Reset()
+	return dh
+}
+
+func releaseHasher(dh *docHasher) {
+	docHasherPool.Put(dh)
+}
+
+func (dh *docHasher) uint64(v uint64) {
+	binary.LittleEndian.PutUint64(dh.buf[:8], v)
+	_, _ = dh.h.Write(dh.buf[:8])
+}
+
+func (dh *docHasher) float32(v float32) {
+	if v == 0 {
+		v = 0
+	}
+	binary.LittleEndian.PutUint32(dh.buf[:4], math.Float32bits(v))
+	_, _ = dh.h.Write(dh.buf[:4])
+}
+
+func (dh *docHasher) float64(v float64) {
+	if v == 0 {
+		v = 0
+	}
+	binary.LittleEndian.PutUint64(dh.buf[:8], math.Float64bits(v))
+	_, _ = dh.h.Write(dh.buf[:8])
+}
+
+func (dh *docHasher) bool(v bool) {
+	if v {
+		dh.buf[0] = 1
+	} else {
+		dh.buf[0] = 0
+	}
+	_, _ = dh.h.Write(dh.buf[:1])
+}
+
+func (dh *docHasher) str(s string) {
+	dh.uint64(uint64(len(s)))
+	for len(s) > 0 {
+		n := copy(dh.buf[:], s)
+		_, _ = dh.h.Write(dh.buf[:n])
+		s = s[n:]
+	}
+}
+
+func (dh *docHasher) runs(runs []Run) {
+	dh.uint64(uint64(len(runs)))
+	for i := range runs {
+		r := &runs[i]
+		dh.str(r.Text)
+		st := &r.Style
+		dh.bool(st.NoMath)
+		dh.str(st.Script)
+		dh.bool(st.Bold)
+		dh.bool(st.Italic)
+		dh.bool(st.Underline)
+		dh.bool(st.Strike)
+		dh.bool(st.Code)
+		dh.str(st.Link)
+		dh.str(st.Color)
+		dh.str(st.Highlight)
+		dh.str(st.Annotation)
+		dh.str(st.AnnotationColor)
+	}
+}
+
+func (dh *docHasher) docHeader(d *Document) {
+	dh.str(d.Format)
+	dh.uint64(uint64(d.Version))
+	dh.str(d.Icon)
+	dh.str(d.Cover)
+	dh.float64(d.CoverY)
+	dh.uint64(uint64(d.Goal))
+	dh.str(d.Frontmatter)
+	dh.str(d.ImportSource)
+	dh.uint64(uint64(len(d.Blocks)))
+}
+
+func (dh *docHasher) block(b *Block, includeLeafRuns bool, leafOverrides map[string][]Run) {
+	if b == nil {
+		dh.bool(false)
+		return
+	}
+	dh.bool(true)
+	dh.float32(b.ImageWidth)
+	dh.str(b.NoteLabel)
+	dh.str(b.ID)
+	dh.str(b.Kind)
+	if len(b.Children) > 0 {
+		dh.runs(b.Runs)
+	} else if includeLeafRuns {
+		runs := b.Runs
+		if len(leafOverrides) > 0 {
+			if orig, ok := leafOverrides[b.ID]; ok {
+				runs = orig
+			}
+		}
+		dh.runs(runs)
+	}
+	dh.uint64(uint64(b.Level))
+	dh.uint64(uint64(b.Indent))
+	dh.bool(b.Checked)
+	dh.str(b.Language)
+	dh.str(b.URL)
+	dh.str(b.Align)
+	dh.uint64(uint64(len(b.Widths)))
+	for _, w := range b.Widths {
+		dh.float32(w)
+	}
+	dh.str(b.Color)
+	dh.bool(b.Folded)
+	dh.str(b.Background)
+	dh.uint64(uint64(b.ColSpan))
+	dh.uint64(uint64(b.RowSpan))
+	dh.str(b.Emoji)
+	dh.uint64(uint64(len(b.Children)))
+	for _, child := range b.Children {
+		dh.block(child, includeLeafRuns, leafOverrides)
+	}
+}
+
 // RunsDigest returns a 128-bit fingerprint of a block's styled runs without
 // allocating or cloning run slices.
 func RunsDigest(runs []Run) [16]byte {
-	var h [32]byte
-	d := sha256.New()
-	var buf [64]byte
-	hashRuns(d, &buf, runs)
-	sum := d.Sum(h[:0])
+	dh := acquireHasher()
+	dh.runs(runs)
+	sum := dh.h.Sum(dh.buf[:0])
 	var out [16]byte
 	copy(out[:], sum[:16])
+	releaseHasher(dh)
 	return out
 }
 
 // Digest validates the document and computes a SHA-256 fingerprint over all
 // persisted document, block, and run fields without serializing JSON.
 func (d *Document) Digest() ([32]byte, error) {
-	if err := d.Validate(); err != nil {
+	return d.DigestWithLeafRuns(nil)
+}
+
+// DigestWithLeafRuns validates and hashes the document while substituting any
+// leaf block runs supplied in leafOverrides, reconstructing pre-edit baselines
+// without cloning the document tree.
+func (d *Document) DigestWithLeafRuns(leafOverrides map[string][]Run) ([32]byte, error) {
+	if err := d.validateWithLeafRuns(leafOverrides); err != nil {
 		return [32]byte{}, err
 	}
-	h := sha256.New()
-	var buf [64]byte
-	hashDocHeader(h, &buf, d)
+	dh := acquireHasher()
+	dh.docHeader(d)
 	for _, b := range d.Blocks {
-		hashBlock(h, &buf, b)
+		dh.block(b, true, leafOverrides)
 	}
 	var out [32]byte
-	h.Sum(out[:0])
+	dh.h.Sum(out[:0])
+	releaseHasher(dh)
 	return out, nil
 }
 
@@ -410,126 +552,15 @@ func (d *Document) Digest() ([32]byte, error) {
 // leaf blocks' Runs, matching the exact subset of fields that text-only edits
 // cannot change. Thus Digest(a) == Digest(b) implies identical SkeletonDigests.
 func (d *Document) SkeletonDigest() [32]byte {
-	h := sha256.New()
-	var buf [64]byte
-	hashDocHeader(h, &buf, d)
+	dh := acquireHasher()
+	dh.docHeader(d)
 	for _, b := range d.Blocks {
-		hashBlockSkeleton(h, &buf, b)
+		dh.block(b, false, nil)
 	}
 	var out [32]byte
-	h.Sum(out[:0])
+	dh.h.Sum(out[:0])
+	releaseHasher(dh)
 	return out
-}
-
-func hashDocHeader(h hash.Hash, buf *[64]byte, d *Document) {
-	hashString(h, buf, d.Format)
-	hashUint64(h, buf, uint64(d.Version))
-	hashString(h, buf, d.Icon)
-	hashString(h, buf, d.Cover)
-	hashFloat64(h, buf, d.CoverY)
-	hashUint64(h, buf, uint64(d.Goal))
-	hashString(h, buf, d.Frontmatter)
-	hashString(h, buf, d.ImportSource)
-	hashUint64(h, buf, uint64(len(d.Blocks)))
-}
-
-func hashUint64(h hash.Hash, buf *[64]byte, v uint64) {
-	binary.LittleEndian.PutUint64(buf[:8], v)
-	_, _ = h.Write(buf[:8])
-}
-
-func hashFloat32(h hash.Hash, buf *[64]byte, v float32) {
-	if v == 0 {
-		v = 0
-	}
-	binary.LittleEndian.PutUint32(buf[:4], math.Float32bits(v))
-	_, _ = h.Write(buf[:4])
-}
-
-func hashFloat64(h hash.Hash, buf *[64]byte, v float64) {
-	if v == 0 {
-		v = 0
-	}
-	binary.LittleEndian.PutUint64(buf[:8], math.Float64bits(v))
-	_, _ = h.Write(buf[:8])
-}
-
-func hashBool(h hash.Hash, buf *[64]byte, v bool) {
-	if v {
-		buf[0] = 1
-	} else {
-		buf[0] = 0
-	}
-	_, _ = h.Write(buf[:1])
-}
-
-func hashString(h hash.Hash, buf *[64]byte, s string) {
-	hashUint64(h, buf, uint64(len(s)))
-	_, _ = io.WriteString(h, s)
-}
-
-func hashRuns(h hash.Hash, buf *[64]byte, runs []Run) {
-	hashUint64(h, buf, uint64(len(runs)))
-	for i := range runs {
-		r := &runs[i]
-		hashString(h, buf, r.Text)
-		st := &r.Style
-		hashBool(h, buf, st.NoMath)
-		hashString(h, buf, st.Script)
-		hashBool(h, buf, st.Bold)
-		hashBool(h, buf, st.Italic)
-		hashBool(h, buf, st.Underline)
-		hashBool(h, buf, st.Strike)
-		hashBool(h, buf, st.Code)
-		hashString(h, buf, st.Link)
-		hashString(h, buf, st.Color)
-		hashString(h, buf, st.Highlight)
-		hashString(h, buf, st.Annotation)
-		hashString(h, buf, st.AnnotationColor)
-	}
-}
-
-func hashBlock(h hash.Hash, buf *[64]byte, b *Block) {
-	hashBlockWithRuns(h, buf, b, true)
-}
-
-func hashBlockSkeleton(h hash.Hash, buf *[64]byte, b *Block) {
-	hashBlockWithRuns(h, buf, b, false)
-}
-
-func hashBlockWithRuns(h hash.Hash, buf *[64]byte, b *Block, includeLeafRuns bool) {
-	if b == nil {
-		hashBool(h, buf, false)
-		return
-	}
-	hashBool(h, buf, true)
-	hashFloat32(h, buf, b.ImageWidth)
-	hashString(h, buf, b.NoteLabel)
-	hashString(h, buf, b.ID)
-	hashString(h, buf, b.Kind)
-	if includeLeafRuns || len(b.Children) > 0 {
-		hashRuns(h, buf, b.Runs)
-	}
-	hashUint64(h, buf, uint64(b.Level))
-	hashUint64(h, buf, uint64(b.Indent))
-	hashBool(h, buf, b.Checked)
-	hashString(h, buf, b.Language)
-	hashString(h, buf, b.URL)
-	hashString(h, buf, b.Align)
-	hashUint64(h, buf, uint64(len(b.Widths)))
-	for _, w := range b.Widths {
-		hashFloat32(h, buf, w)
-	}
-	hashString(h, buf, b.Color)
-	hashBool(h, buf, b.Folded)
-	hashString(h, buf, b.Background)
-	hashUint64(h, buf, uint64(b.ColSpan))
-	hashUint64(h, buf, uint64(b.RowSpan))
-	hashString(h, buf, b.Emoji)
-	hashUint64(h, buf, uint64(len(b.Children)))
-	for _, child := range b.Children {
-		hashBlockWithRuns(h, buf, child, includeLeafRuns)
-	}
 }
 
 // SameDocument reports whether a and b hold identical document metadata and
@@ -586,7 +617,31 @@ func SameBlock(a, b *Block) bool {
 	return true
 }
 
+func countBlocks(blocks []*Block) int {
+	n := 0
+	for _, b := range blocks {
+		if b == nil {
+			continue
+		}
+		n += 1 + countBlocks(b.Children)
+	}
+	return n
+}
+
+func runsHasText(runs []Run) bool {
+	for i := range runs {
+		if runs[i].Text != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Document) Validate() error {
+	return d.validateWithLeafRuns(nil)
+}
+
+func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 	if d.Format != "arcmd" || d.Version != CurrentVersion {
 		return fmt.Errorf("document: unsupported format %q version %d", d.Format, d.Version)
 	}
@@ -602,16 +657,19 @@ func (d *Document) Validate() error {
 	if d.Goal < 0 || d.Goal > 1000000 {
 		return errors.New("document: invalid word goal")
 	}
-	ids := make(map[string]bool)
+	ids := make(map[string]struct{}, countBlocks(d.Blocks))
 	var visit func(*Block, string, int) error
 	visit = func(b *Block, parent string, depth int) error {
 		if b == nil || depth > 24 {
 			return errors.New("document: invalid block nesting")
 		}
-		if b.ID == "" || ids[b.ID] {
+		if b.ID == "" {
 			return errors.New("document: missing or duplicate block ID")
 		}
-		ids[b.ID] = true
+		if _, dup := ids[b.ID]; dup {
+			return errors.New("document: missing or duplicate block ID")
+		}
+		ids[b.ID] = struct{}{}
 		if b.Level < 0 || b.Level > 6 || b.Indent < 0 || b.Indent > 12 {
 			return errors.New("document: invalid block attributes")
 		}
@@ -642,7 +700,13 @@ func (d *Document) Validate() error {
 		if b.Kind == "footnote" && (b.NoteLabel == "" || len(b.NoteLabel) > 1000 || strings.ContainsAny(b.NoteLabel, "[]\n\r\t ")) || b.Kind != "footnote" && b.NoteLabel != "" {
 			return errors.New("document: invalid footnote label")
 		}
-		for _, r := range b.Runs {
+		runs := b.Runs
+		if len(leafOverrides) > 0 && len(b.Children) == 0 {
+			if orig, ok := leafOverrides[b.ID]; ok {
+				runs = orig
+			}
+		}
+		for _, r := range runs {
 			if r.Style.Script != "" && r.Style.Script != "sup" && r.Style.Script != "sub" {
 				return errors.New("document: invalid script")
 			}
@@ -721,7 +785,7 @@ func (d *Document) Validate() error {
 		}
 		// Span checks dereference cells, so validate their structure first.
 		if b.Kind == "table" {
-			return validSpans(b)
+			return validSpansWithOverrides(b, leafOverrides)
 		}
 		return nil
 	}
@@ -984,11 +1048,36 @@ func CoveredCells(table *Block) map[*Block]bool {
 // validSpans checks a table's merged cells: inside the table, not
 // overlapping, and the cells they cover empty.
 func validSpans(table *Block) error {
-	taken := map[[2]int]bool{}
+	return validSpansWithOverrides(table, nil)
+}
+
+func validSpansWithOverrides(table *Block, leafOverrides map[string][]Run) error {
+	hasMerged := false
+	for _, row := range table.Children {
+		for _, cell := range row.Children {
+			if cell.ColSpan > 1 || cell.RowSpan > 1 {
+				hasMerged = true
+				break
+			}
+		}
+		if hasMerged {
+			break
+		}
+	}
+	if !hasMerged {
+		return nil
+	}
+	taken := make(map[[2]int]struct{})
 	for r, row := range table.Children {
 		for c, cell := range row.Children {
-			if taken[[2]int{r, c}] {
-				if cell.ColSpan > 1 || cell.RowSpan > 1 || cell.Text() != "" {
+			if _, ok := taken[[2]int{r, c}]; ok {
+				cellRuns := cell.Runs
+				if len(leafOverrides) > 0 {
+					if orig, has := leafOverrides[cell.ID]; has {
+						cellRuns = orig
+					}
+				}
+				if cell.ColSpan > 1 || cell.RowSpan > 1 || runsHasText(cellRuns) {
 					return errors.New("document: merged cell over content")
 				}
 				continue
@@ -999,10 +1088,13 @@ func validSpans(table *Block) error {
 			}
 			for rr := r; rr < r+rows; rr++ {
 				for cc := c; cc < c+cols; cc++ {
-					if (rr != r || cc != c) && taken[[2]int{rr, cc}] {
-						return errors.New("document: overlapping merged cells")
+					key := [2]int{rr, cc}
+					if rr != r || cc != c {
+						if _, ok := taken[key]; ok {
+							return errors.New("document: overlapping merged cells")
+						}
 					}
-					taken[[2]int{rr, cc}] = true
+					taken[key] = struct{}{}
 				}
 			}
 		}

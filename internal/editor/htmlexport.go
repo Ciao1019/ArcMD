@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 )
 
 func isSafeLangClass(lang string) bool {
@@ -85,6 +86,12 @@ func ExportHTML(doc *document.Document) string {
 				i--
 				continue
 			case "code":
+				if isWhiteboardBlock(b) {
+					if scene, err := whiteboard.Decode(b.Text()); err == nil {
+						out.WriteString(`<figure class="arcmd-whiteboard">` + whiteboard.ExportSVG(scene, whiteboard.DefaultLightPalette()) + `</figure>`)
+						continue
+					}
+				}
 				classAttr := ""
 				if isSafeLangClass(b.Language) {
 					classAttr = ` class="language-` + html.EscapeString(strings.ToLower(strings.TrimSpace(b.Language))) + `"`

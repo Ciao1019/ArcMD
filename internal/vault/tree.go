@@ -81,7 +81,7 @@ func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
 		}
 		switch {
 		case isDir:
-			if skipDir(name) {
+			if skipDir(name) || name == "assets" {
 				continue
 			}
 			kids, err := readBranch(root, p, ancestors)
@@ -170,8 +170,8 @@ func Rename(root, rel, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !fi.IsDir() && !(IsMarkdown(rel) && IsMarkdown(name)) && !strings.EqualFold(path.Ext(name), path.Ext(rel)) {
-		name += path.Ext(rel)
+	if !fi.IsDir() && !(IsMarkdown(rel) && IsMarkdown(name)) && !strings.EqualFold(FileExt(name), FileExt(rel)) {
+		name += FileExt(rel)
 	}
 	to := path.Join(path.Dir(rel), name)
 	if to == rel {

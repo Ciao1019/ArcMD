@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.2
+
+This release introduces pure-Go Excalidraw-compatible hand-drawn whiteboards across standalone files and Markdown documents, upgrades the MyGo UI runtime to `v0.10.0`, and resolves key editing bugs covering code block indentation, hierarchical `⌘A` / `Ctrl+A` selection, nested list indentation with single-Backspace tabs, and `Space` key viewport jumping.
+
+### Native hand-drawn whiteboards
+
+- **Pure-Go Excalidraw whiteboard engine (`internal/whiteboard`, `internal/editor/board*.go`, `internal/app/whiteboard.go`)**: Create standalone amphibious `.excalidraw.svg` (and `.excalidraw`) whiteboard documents (`⌥⌘B` / `Ctrl+Alt+B`, sidebar, or command bar), insert inline ```` ```excalidraw ```` blocks from `/`, or embed `![[*.excalidraw.svg]]` boards inside Markdown documents with double-click / modal editing and one-click extraction to standalone files.
+- **Hand-drawn shapes, connectors, libraries, and Workspace integration**: Draw with 19 shape and connector tools (including rectangle, diamond, ellipse, triangle, parallelogram, hexagon, cylinder, cloud, star, callout, document, stadium, actor, freedraw, text, sticky note, frame, arrow, and line plus eraser and laser pointer), Rough-style strokes with hachure/cross-hatch/solid fills, magnetic arrow bindings with sharp/curved/elbowed routing, smart snap guides, Mermaid-to-whiteboard conversion, built-in and importable `.excalidrawlib` shape libraries (`whiteboard-library.excalidrawlib`), `[[wiki-link]]` badges and backlinks, Space Q&A indexing and element-level citation jumps, version history/restore, and pure-Go vector PDF and standalone HTML export.
+
+### Editor and keyboard fixes
+
+- **Code block visual tabs, soft-wrap indentation, paste recovery, and Enter/Tab behavior (`internal/editor/input.go`, `internal/editor/clipboard.go`, `internal/editor/codewrap.go`, `internal/editor/style.go`, `internal/editor/vectorpdf.go`, `internal/document/engine.go`)**: Render leading `\t` tabs visually in code blocks and vector PDFs, preserve visual leading indentation across soft-wrapped long lines, preserve and recover leading indentation when pasting HTML code snippets (`<pre>` / `white-space: pre`), auto-indent on `Enter` in code blocks while cleaning abandoned blank-line indentation, and support literal `\t` insertion plus multi-line `Tab` / `Shift+Tab` indent/outdent ([#19](https://github.com/Ciao1019/ArcMD/issues/19)).
+- **Hierarchical `⌘A` / `Ctrl+A` Select All (`internal/editor/input.go`)**: Expand selection progressively on repeated `⌘A` / `Ctrl+A`—inline math body → current block or table cell → enclosing column or table → full document (plus all top-level blocks in block selection mode)—without jumping the viewport scroll position ([#18](https://github.com/Ciao1019/ArcMD/issues/18)).
+- **Nested list indentation and single-Backspace tabs (`internal/editor/input.go`, `internal/document/engine.go`, `internal/editor/markdown.go`)**: Indent and outdent single or multi-item bullet, numbered, and task lists cleanly with `Tab` / `Shift+Tab`, step down indentation before unstyling on `Backspace` or empty `Enter`, preserve nested ordered-list levels across Markdown round-trips, and insert `\t` in prose so a single `Backspace` deletes the whole tab ([#17](https://github.com/Ciao1019/ArcMD/issues/17)).
+- **Prevent `Space` paging while editing (`internal/editor/input.go`, `internal/editor/view.go`, `internal/editor/buffer.go`, `internal/editor/reading.go`)**: Consume `Space` and `Shift+Space` key events in the editable writing surface so MyGo does not scroll the page while typing or composing IME text, while keeping `Space` / `Shift+Space` viewport paging working cleanly in read-only mode without triggering the locked-page notice ([#16](https://github.com/Ciao1019/ArcMD/pull/16), [#7](https://github.com/Ciao1019/ArcMD/issues/7), thanks to `@Raspercival`).
+
+### Runtime and performance
+
+- **MyGo `v0.10.0` and baseline tracking (`go.mod`, `go.sum`, `internal/document/engine.go`, `internal/app/document.go`, `tools/perf/overlay.go`)**: Upgrade `github.com/egoist/mygo` from `v0.7.4` to `v0.10.0`—measuring **0.248 ms P50** typing and **0.447 ms P50** scrolling on the 1M-character mixed benchmark—and add leaf-scoped baseline run tracking (`OnBeforeLeafChange`) to avoid full-document dirty recomputation on single-leaf edits.
+
+### Documentation
+
+- Update `README.md`, `README.en.md`, `AGENTS.md`, `docs/building.md`, `tools/dev.sh`, `tools/perf/README.md`, and `.github/workflows/build.yml` for version `0.2.2`, hand-drawn whiteboards, and MyGo `v0.10.0`.
+
+### Data compatibility
+
+Document (`.md` and legacy `.arcmd` format **8**) and Space configuration (`spaces.json` format **9**) formats are unchanged from 0.2.1. Spaces may also contain optional Excalidraw-compatible `.excalidraw.svg` / `.excalidraw` whiteboard files, and the configuration directory may store user whiteboard library items in `whiteboard-library.excalidrawlib`.
+
+### Downloads
+
+Packages are available for macOS (Apple Silicon and Intel), Windows x64, and Linux (x64 and ARM64). Verify downloads against `SHA256SUMS.txt`. Signed update archives and manifests support in-app updates. The plugin marketplace and plugin execution runtimes remain unavailable.
+
 ## 0.2.1
 
 This release upgrades PDF export to a pure-Go vector pipeline with hierarchical outlines and clickable links, adds native Mermaid diagram rendering, `\boldsymbol` bold math fonts, and Obsidian `![[...]]` image embed compatibility, speeds up large-document editing and command-bar discovery with Pinyin/multi-keyword search and persistent caching, introduces named version milestones with grapheme-level inline diffs, and resolves Windows shortcut and path-handling issues.

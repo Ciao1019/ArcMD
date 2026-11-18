@@ -19,6 +19,10 @@ func TestMultilinePasteCaretAndContinuedTyping(t *testing.T) {
 				tt.SetSize(width, 650)
 				focus(e, tt)
 				tt.Key(ui.Cmd, ui.KeyA)
+				if got := e.Selection().Range; got != (ui.TextInputRange{Start: 0, End: ui.UTF16Len(first)}) {
+					t.Fatalf("first Cmd+A selected %+v; want first block %d", got, ui.UTF16Len(first))
+				}
+				tt.Key(ui.Cmd, ui.KeyA)
 				selection := e.Selection()
 				tt.Key(ui.Cmd, ui.KeyC)
 				if e.Selection() != selection {

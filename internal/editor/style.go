@@ -57,9 +57,31 @@ type Page struct {
 	MathBorder, MathShadow ui.Color
 	// Covers are the two colors, top-left to bottom-right, of each of
 	// document.CoverGradients.
-	Covers   map[string][2]ui.Color
-	Tokens   CodeTokens
-	Callouts map[string]Callout
+	Covers     map[string][2]ui.Color
+	Tokens     CodeTokens
+	Callouts   map[string]Callout
+	Whiteboard WhiteboardStyle
+}
+
+// WhiteboardStyle holds the Excalidraw-inspired light/dark adaptive design
+// tokens for standalone and embedded hand-drawn whiteboards.
+type WhiteboardStyle struct {
+	Canvas       ui.Color
+	Grid         ui.Color
+	IslandFill   ui.Color
+	IslandBorder ui.Color
+	IslandShadow ui.Color
+	ActiveFill   ui.Color
+	ActiveInk    ui.Color
+	Selection    ui.Color
+	HandleFill   ui.Color
+	Guide        ui.Color
+	NoteFill     ui.Color
+	NoteBorder   ui.Color
+	FrameStroke  ui.Color
+	FrameLabel   ui.Color
+	Strokes      map[string]ui.Color
+	Fills        map[string]ui.Color
 }
 
 // CodeTokens color the tokens of a code block.
@@ -151,6 +173,43 @@ func pageOf(p Page, t *ui.Theme) Page {
 			p.Callouts[tone] = Callout{Fill: hue.Alpha(.08), Border: hue.Alpha(.25), Icon: hue}
 		}
 	}
+	wb := &p.Whiteboard
+	set(&wb.Canvas, t.Background)
+	set(&wb.Grid, t.Text.Alpha(.09))
+	set(&wb.IslandFill, p.Popover)
+	set(&wb.IslandBorder, p.MathBorder)
+	set(&wb.IslandShadow, p.MathShadow)
+	set(&wb.ActiveFill, t.Accent.Alpha(.14))
+	set(&wb.ActiveInk, t.Accent)
+	set(&wb.Selection, t.Accent)
+	set(&wb.HandleFill, t.Background)
+	set(&wb.Guide, t.Danger)
+	set(&wb.NoteFill, p.Callouts["yellow"].Fill)
+	set(&wb.NoteBorder, p.Callouts["yellow"].Border)
+	set(&wb.FrameStroke, t.Border)
+	set(&wb.FrameLabel, p.Caption)
+	if wb.Strokes == nil {
+		wb.Strokes = map[string]ui.Color{
+			"ink":    t.Text,
+			"gray":   t.TextMuted,
+			"red":    p.TextColors["red"],
+			"orange": p.TextColors["orange"],
+			"green":  p.TextColors["green"],
+			"blue":   p.TextColors["blue"],
+			"purple": p.TextColors["purple"],
+		}
+	}
+	if wb.Fills == nil {
+		wb.Fills = map[string]ui.Color{
+			"ink":    t.Text.Alpha(.14),
+			"gray":   t.TextMuted.Alpha(.22),
+			"red":    p.Highlights["light-red"],
+			"orange": p.Highlights["light-orange"],
+			"green":  p.Highlights["light-green"],
+			"blue":   p.Highlights["light-blue"],
+			"purple": p.Highlights["light-purple"],
+		}
+	}
 	return p
 }
 
@@ -194,7 +253,27 @@ func samePage(a, b Page) bool {
 		maps.Equal(a.Highlights, b.Highlights) &&
 		maps.Equal(a.CellFills, b.CellFills) &&
 		maps.Equal(a.Covers, b.Covers) &&
-		maps.Equal(a.Callouts, b.Callouts)
+		maps.Equal(a.Callouts, b.Callouts) &&
+		sameWhiteboardStyle(a.Whiteboard, b.Whiteboard)
+}
+
+func sameWhiteboardStyle(a, b WhiteboardStyle) bool {
+	return a.Canvas == b.Canvas &&
+		a.Grid == b.Grid &&
+		a.IslandFill == b.IslandFill &&
+		a.IslandBorder == b.IslandBorder &&
+		a.IslandShadow == b.IslandShadow &&
+		a.ActiveFill == b.ActiveFill &&
+		a.ActiveInk == b.ActiveInk &&
+		a.Selection == b.Selection &&
+		a.HandleFill == b.HandleFill &&
+		a.Guide == b.Guide &&
+		a.NoteFill == b.NoteFill &&
+		a.NoteBorder == b.NoteBorder &&
+		a.FrameStroke == b.FrameStroke &&
+		a.FrameLabel == b.FrameLabel &&
+		maps.Equal(a.Strokes, b.Strokes) &&
+		maps.Equal(a.Fills, b.Fills)
 }
 
 func clonePage(p Page) Page {
@@ -204,5 +283,7 @@ func clonePage(p Page) Page {
 	p.CellFills = maps.Clone(p.CellFills)
 	p.Covers = maps.Clone(p.Covers)
 	p.Callouts = maps.Clone(p.Callouts)
+	p.Whiteboard.Strokes = maps.Clone(p.Whiteboard.Strokes)
+	p.Whiteboard.Fills = maps.Clone(p.Whiteboard.Fills)
 	return p
 }

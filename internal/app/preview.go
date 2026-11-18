@@ -14,6 +14,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/pinyin"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/vault"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -293,10 +294,22 @@ func truncateMarkdownForPreview(text string) string {
 func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	p := &a.preview
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
+		key := "open/" + sp.ID + "/" + rel
+		if a.doc.isWhiteboard() {
+			rev := time.Unix(0, int64(a.doc.board.Revision()))
+			if th, ok := p.thumbs[key]; ok && th.changed.Equal(rev) {
+				return th.doc
+			}
+			if p.thumbs == nil {
+				p.thumbs = map[string]thumb{}
+			}
+			d := &document{space: sp, rel: rel, board: editor.NewBoard(a.doc.board.SceneSnapshot()), loadErr: a.doc.loadErr}
+			p.thumbs[key] = thumb{d, rev}
+			return d
+		}
 		// The open one, as edited, in an editor of its own: one editor
 		// takes one place in a frame. Only the top blocks can fit in the
 		// 150 DIP thumbnail card, so long documents skip cloning the rest.
-		key := "open/" + sp.ID + "/" + rel
 		rev := time.Unix(0, int64(a.doc.ed.Revision()))
 		if th, ok := p.thumbs[key]; ok && th.changed.Equal(rev) {
 			return th.doc
@@ -327,6 +340,12 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	}
 	if p.thumbs == nil {
 		p.thumbs = map[string]thumb{}
+	}
+	if vault.IsWhiteboard(rel) {
+		scene, loadErr := whiteboard.Decode(text)
+		d := &document{space: sp, rel: rel, board: editor.NewBoard(scene), loadErr: loadErr}
+		p.thumbs[key] = thumb{d, info.ModTime()}
+		return d
 	}
 	var doc *model.Document
 	var loadErr error
@@ -477,7 +496,7 @@ func (a *App) folderPreview(c *ui.Context) {
 				}
 				fill.Children(func() {
 					ui.Box(c).Width(previewIconCenter - previewSideInset - 8)
-					docIcon(c, it.title, 16)
+					fileIcon(c, it.rel, it.title, 16)
 					ui.Box(c).Width(previewTextX - previewIconCenter - 8)
 					ui.Column(c).Grow(1).MinWidth(0).PaddingEnd(10).Children(func() {
 						ui.Text(c, docName(it.title)).FontSize(13).TextColor(p.col.title).SingleLine()
@@ -515,7 +534,11 @@ func (a *App) pickPreview(c *ui.Context, rel string) {
 		a.openIn(sp, rel)
 	}
 	if a.doc != nil {
-		a.doc.ed.RequestFocus = true
+		if a.doc.isWhiteboard() {
+			a.doc.board.RequestFocus = true
+		} else {
+			a.doc.ed.RequestFocus = true
+		}
 	}
 }
 
@@ -536,22 +559,32 @@ func (a *App) docPreview(c *ui.Context) {
 		// Dark paper on a dark card needs an edge to read as a page.
 		paper.Border(1, dt.Border)
 	}
-	paper.Children(func() {
-		page := ui.Themed(c.Key("thumb:"+t.space.ID+"/"+t.rel), dt).Absolute().Left(0).Top(0).
-			Size(previewThumbW, previewThumbH/scale).TransformOrigin(0, 0).Scale(scale, scale).Disabled(true)
-		page.Children(func() {
-			editor.View(c.Key("thumb-editor"), d.ed, editor.Options{
-				Width:     previewThumbW,
-				Theme:     dt,
-				Page:      pageStyle(a.paperDark),
-				LoadImage: d.imageResource,
+	if d.isWhiteboard() {
+		pg := pageStyle(a.paperDark)
+		paper.Background(pg.Whiteboard.Canvas)
+		paper.Draw(func(pt *ui.Painter, r ui.Rect) {
+			if d.board != nil && d.board.Scene != nil {
+				editor.PaintSceneFit(pt, r, d.board.Scene, pg.Whiteboard, dt, 10)
+			}
+		})
+	} else {
+		paper.Children(func() {
+			page := ui.Themed(c.Key("thumb:"+t.space.ID+"/"+t.rel), dt).Absolute().Left(0).Top(0).
+				Size(previewThumbW, previewThumbH/scale).TransformOrigin(0, 0).Scale(scale, scale).Disabled(true)
+			page.Children(func() {
+				editor.View(c.Key("thumb-editor"), d.ed, editor.Options{
+					Width:     previewThumbW,
+					Theme:     dt,
+					Page:      pageStyle(a.paperDark),
+					LoadImage: d.imageResource,
+				})
 			})
 		})
-	})
+	}
 	title := vault.Title(t.rel)
 	ui.Row(c.Key("thumb-meta")).Height(previewRowPitch).PaddingX(previewSideInset).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Width(previewIconCenter - previewSideInset - 8)
-		docIcon(c, title, 16)
+		fileIcon(c, t.rel, title, 16)
 		ui.Box(c).Width(previewTextX - previewIconCenter - 8)
 		ui.Column(c).Grow(1).MinWidth(0).PaddingEnd(10).Children(func() {
 			ui.Text(c, docName(title)).FontSize(13).TextColor(p.col.title).SingleLine()

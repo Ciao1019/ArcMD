@@ -46,9 +46,15 @@ func (e *Editor) pasteSelection(read func() string) {
 	if e.ReadOnly {
 		return
 	}
+	kind := e.Engine.LeafAt(e.Caret).Block.Kind
+	inLiteral := kind == "code" || kind == "raw" || kind == "math"
 	clipboard := e.services.ReadClipboardData(fragmentFormat, transfer.FileList, transfer.PNG, transfer.HTML, transfer.Markdown, transfer.Text)
 	if data, err := clipboard.Read(fragmentFormat); err == nil && len(data) < 16<<20 {
 		if doc, err := document.Decode(string(data)); err == nil {
+			if inLiteral {
+				e.Buffer.ReplaceText(nil, doc.PlainText())
+				return
+			}
 			e.UnmarkText()
 			e.Engine.Paste(doc)
 			e.sync()
@@ -73,37 +79,48 @@ func (e *Editor) pasteSelection(read func() string) {
 		}
 	}
 	text := read()
-	if md, err := clipboard.Read(transfer.Markdown); err == nil && len(md) < 8<<20 && len(md) > 0 {
-		text = string(md)
+	if kind != "code" && kind != "raw" && !e.Engine.CurrentStyle().Code {
+		if md, err := clipboard.Read(transfer.Markdown); err == nil && len(md) < 8<<20 && len(md) > 0 {
+			text = string(md)
+		}
 	}
 	// A complete display formula copied from a chat or Markdown document
 	// is math even when the clipboard also offers a styled HTML code block.
 	// A formula editor accepts the body alone; other literal contexts keep
 	// the text, including its delimiters.
-	kind := e.Engine.LeafAt(e.Caret).Block.Kind
-	if kind != "code" && kind != "raw" && kind != "cell" && !e.Engine.CurrentStyle().Code {
+	if !inLiteral && kind != "cell" && !e.Engine.CurrentStyle().Code {
 		if doc := pastedMath(text); doc != nil {
-			if kind == "math" {
-				if len(doc.Blocks) == 1 && doc.Blocks[0].Kind == "math" {
-					e.ReplaceText(nil, doc.Blocks[0].Text())
-					return
-				}
-			} else {
+			e.UnmarkText()
+			e.Engine.Paste(doc)
+			e.sync()
+			return
+		}
+	} else if kind == "math" && !e.Engine.CurrentStyle().Code {
+		if doc := pastedMath(text); doc != nil && len(doc.Blocks) == 1 && doc.Blocks[0].Kind == "math" {
+			e.ReplaceText(nil, doc.Blocks[0].Text())
+			return
+		}
+	}
+	// Rich text from a browser or another editor keeps its structure;
+	// HTML that holds only plain text pastes as the text. Inside a code block,
+	// if plain text lost leading indentation, recover it from HTML code blocks.
+	if data, err := clipboard.Read(transfer.HTML); err == nil && len(data) > 0 && len(data) < 8<<20 {
+		doc := ImportHTML(string(data))
+		if !inLiteral {
+			if rich(doc) {
 				e.UnmarkText()
 				e.Engine.Paste(doc)
 				e.sync()
 				return
 			}
-		}
-	}
-	// Rich text from a browser or another editor keeps its structure;
-	// HTML that holds only plain text pastes as the text.
-	if data, err := clipboard.Read(transfer.HTML); err == nil && len(data) > 0 && len(data) < 8<<20 {
-		if doc := ImportHTML(string(data)); rich(doc) && kind != "code" && kind != "raw" && kind != "math" {
-			e.UnmarkText()
-			e.Engine.Paste(doc)
-			e.sync()
-			return
+		} else if kind == "code" && strings.ContainsRune(text, '\n') && !hasIndentedLine(text) {
+			if htmlText := doc.PlainText(); hasIndentedLine(htmlText) && sameTrimmedLines(text, htmlText) {
+				if strings.HasSuffix(normalizeLineBreaks(text), "\n") && !strings.HasSuffix(htmlText, "\n") {
+					text = htmlText + "\n"
+				} else {
+					text = htmlText
+				}
+			}
 		}
 	}
 	if !literalBlock(kind) && !e.CurrentStyle().Code && len(text) < 8<<20 {
@@ -162,4 +179,34 @@ func rich(doc *document.Document) bool {
 		}
 	}
 	return false
+}
+
+func normalizeLineBreaks(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
+}
+
+func hasIndentedLine(s string) bool {
+	for _, line := range strings.Split(normalizeLineBreaks(s), "\n") {
+		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') && strings.TrimLeft(line, " \t") != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func sameTrimmedLines(a, b string) bool {
+	na := strings.TrimSuffix(normalizeLineBreaks(a), "\n")
+	nb := strings.TrimSuffix(normalizeLineBreaks(b), "\n")
+	al := strings.Split(na, "\n")
+	bl := strings.Split(nb, "\n")
+	if len(al) != len(bl) {
+		return false
+	}
+	for i := range al {
+		if strings.TrimLeft(al[i], " \t") != strings.TrimLeft(bl[i], " \t") {
+			return false
+		}
+	}
+	return true
 }

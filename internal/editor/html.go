@@ -68,7 +68,7 @@ func (h *htmlImporter) flush() {
 		}
 		b.Runs = document.Compact(b.Runs)
 	} else {
-		text := strings.TrimSuffix(b.Text(), "\n")
+		text := strings.ReplaceAll(strings.TrimSuffix(b.Text(), "\n"), "\u00a0", " ")
 		b.Runs = []document.Run{{Text: text}}
 	}
 	if len(b.Runs) == 0 && b.Kind != "task" && b.Kind != "bullet" && b.Kind != "numbered" {
@@ -218,12 +218,29 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		h.block("heading", level, func() { h.children(n, style) })
 		return
 	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav, atom.Figure, atom.Figcaption, atom.Dt, atom.Dd, atom.Address, atom.Center:
+		if h.pre {
+			if h.cur != nil && len(h.cur.Runs) > 0 && !strings.HasSuffix(h.cur.Text(), "\n") {
+				h.text("\n", document.Style{})
+			}
+			h.children(n, document.Style{})
+			return
+		}
 		if n.DataAtom == atom.Div && hasHTMLClass(n, "arcmd-columns") {
 			h.flush()
 			if cols := columnsOfHTML(n); cols != nil {
 				h.blocks = append(h.blocks, cols)
 				return
 			}
+		}
+		if n.DataAtom == atom.Div && h.kind == "" && hasPreWhiteSpace(n) {
+			h.flush()
+			h.pre = true
+			h.block("code", 0, func() {
+				h.cur = &document.Block{ID: document.NewID(), Kind: "code", Language: codeLanguage(n)}
+				h.children(n, document.Style{})
+			})
+			h.pre = false
+			return
 		}
 		if h.kind == "quote" || h.kind == "bullet" || h.kind == "numbered" {
 			// Paragraphs inside a quote or a list item stay what they are in.
@@ -269,6 +286,10 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		h.flush()
 		return
 	case atom.Ul, atom.Ol, atom.Menu:
+		if h.pre {
+			h.children(n, document.Style{})
+			return
+		}
 		kind := "bullet"
 		if n.DataAtom == atom.Ol {
 			kind = "numbered"
@@ -283,6 +304,13 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		h.indent = savedIndent
 		return
 	case atom.Li:
+		if h.pre {
+			if h.cur != nil && len(h.cur.Runs) > 0 && !strings.HasSuffix(h.cur.Text(), "\n") {
+				h.text("\n", document.Style{})
+			}
+			h.children(n, document.Style{})
+			return
+		}
 		kind := "bullet"
 		if len(h.lists) > 0 {
 			kind = h.lists[len(h.lists)-1]
@@ -331,6 +359,21 @@ func taskState(li *html.Node) *bool {
 	}
 	look(li, 0)
 	return found
+}
+
+func hasPreWhiteSpace(n *html.Node) bool {
+	css := strings.ToLower(attr(n, "style"))
+	for _, decl := range strings.Split(css, ";") {
+		prop, val, ok := strings.Cut(decl, ":")
+		if !ok || strings.TrimSpace(prop) != "white-space" {
+			continue
+		}
+		val = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(val), "!important"))
+		if val == "pre" || val == "pre-wrap" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasHTMLClass(n *html.Node, want string) bool {

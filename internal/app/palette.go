@@ -205,6 +205,7 @@ func (a *App) actions() []action {
 	cmd(i18n.T("在所有文档中查找和替换…"), a.keyLabel("replace-all"), a.openReplaceAll)
 	if !active.IsExternal() {
 		cmd(i18n.T("新建文档"), a.keyLabel("new-doc"), func() { a.newDoc(dir) })
+		cmd(i18n.T("新建白板"), a.keyLabel("new-board"), func() { a.newWhiteboard(dir) })
 		cmd(i18n.T("新建文件夹"), a.keyLabel("new-folder"), func() { a.newFolder(dir) })
 		cmd(i18n.T("今日笔记"), a.keyLabel("daily"), a.openDaily)
 		for _, t := range a.spaceTemplates(a.state.ActiveSpace()) {
@@ -228,7 +229,7 @@ func (a *App) actions() []action {
 		focus = i18n.T("退出专注模式")
 	}
 	cmd(focus, a.keyLabel("focus"), a.toggleFocus)
-	if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
+	if a.doc != nil && !a.doc.isWhiteboard() && a.doc.loadErr == nil && !a.doc.source {
 		outline := i18n.T("展开目录")
 		if a.outlineOpen() {
 			outline = i18n.T("收起目录")
@@ -322,21 +323,32 @@ func (a *App) actions() []action {
 			cmd(i18n.T("重新保存到原位置"), "", a.keepMine)
 			danger(i18n.T("放弃修改并关闭"), "", a.useDisk)
 		}
-		mode := i18n.T("预览 Markdown 导出")
-		if a.doc.source {
-			mode = i18n.T("返回富文本编辑")
+		if a.doc.isWhiteboard() {
+			cmd(i18n.T("导出 SVG 文件"), "", func() { a.exportWhiteboardSVG(a.doc) })
+			cmd(i18n.T("适应画布"), "", func() { a.doc.board.FitToContent(ui.Rect{}) })
+			if !a.doc.boardReadOnly {
+				cmd(i18n.T("撤销"), "⌘Z", func() { a.doc.board.Undo() })
+				cmd(i18n.T("重做"), "⇧⌘Z", func() { a.doc.board.Redo() })
+			}
+		} else {
+			mode := i18n.T("预览 Markdown 导出")
+			if a.doc.source {
+				mode = i18n.T("返回富文本编辑")
+			}
+			cmd(mode, a.keyLabel("source"), a.toggleSource)
 		}
-		cmd(mode, a.keyLabel("source"), a.toggleSource)
 		cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
 		cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
 		cmd(i18n.T("打印…"), "", a.printDoc)
 		cmd(i18n.T("重命名文档"), "", func() { a.renameIn(sp, rel) })
-		if a.doc.loadErr == nil && !a.doc.source {
+		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() {
 			a.editorActions(cmd)
 		}
-		cmd(i18n.T("导出 Markdown 文件"), "", a.exportMarkdown)
-		cmd(i18n.T("将当前文档存为模板"), "", a.saveAsTemplate)
-		cmd(i18n.T("导出 HTML 网页"), "", a.exportHTML)
+		if !a.doc.isWhiteboard() {
+			cmd(i18n.T("导出 Markdown 文件"), "", a.exportMarkdown)
+			cmd(i18n.T("将当前文档存为模板"), "", a.saveAsTemplate)
+			cmd(i18n.T("导出 HTML 网页"), "", a.exportHTML)
+		}
 		cmd(i18n.T("在新窗口中打开当前文档"), "", func() { a.openInWindow(sp, rel) })
 		cmd(i18n.T("在访达中显示文档"), "", func() { a.revealIn(sp, rel) })
 	}
@@ -632,6 +644,7 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("插入行内公式"), "", after(ed.InsertInlineMath))
 	cmd(i18n.T("插入流程图"), "", after(ed.InsertMermaidFlowchart))
 	cmd(i18n.T("插入时序图"), "", after(ed.InsertMermaidSequence))
+	cmd(i18n.T("插入手绘白板"), "", after(ed.InsertWhiteboard))
 	cmd(i18n.T("插入脚注"), "", after(ed.InsertFootnote))
 	cmd(i18n.T("上标"), "", after(func() { ed.SetScript("sup") }))
 	cmd(i18n.T("下标"), "", after(func() { ed.SetScript("sub") }))
@@ -728,7 +741,7 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "code" && !strings.EqualFold(strings.TrimSpace(b.Language), "mermaid") {
 		cmd(i18n.T("代码块：切换自动换行"), "", after(func() { ed.ToggleCodeWrap(b.ID) }))
 	}
-	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" {
+	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" && !vault.IsWhiteboard(b.URL) {
 		cmd(i18n.T("裁剪图片…"), "", func() { ed.OpenCropper(b.ID) })
 	}
 }

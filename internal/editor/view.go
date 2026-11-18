@@ -14,6 +14,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/mermaid"
 	"github.com/Ciao1019/ArcMD/internal/tex"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -182,6 +183,26 @@ type Editor struct {
 	// the others show the formula (math.go).
 	mathEditing, laidMath       string
 	mermaidEditing, laidMermaid string
+	boardEditing, laidBoard     string
+	boardFocusPending           bool
+	boardModalID                string
+	laidModalBoard              string
+	boardModalFocusPending      bool
+	boardHeights                map[string]float32
+	boardDragID                 string
+	boardDragStartH             float32
+	boards                      map[string]*Board
+	boardSynced                 map[string]string
+	boardEmbedRev               map[string]uint64
+	boardScenes                 map[string]boardSceneCache
+	embedBoards                 map[string]embedBoardCache
+	loadWhiteboard              func(string) (*whiteboard.Scene, uint64, error)
+	createWhiteboard            func(*whiteboard.Scene) (string, error)
+	saveWhiteboard              func(string, *whiteboard.Scene) uint64
+	openWhiteboard              func(string, bool)
+	saveBlockAsWhiteboard       func(string, *whiteboard.Scene)
+	boardWikiSuggest            func(string) []string
+	openWikiSplit               func(string, bool)
 	laidFindKey                 string
 	bindings                    map[string]Combo
 	openWiki, openTag           func(string)
@@ -190,6 +211,7 @@ type Editor struct {
 	mermaids                    map[string]mermaidShape
 	mermaidLayouts              map[string]*ui.TextLayout
 	codeLex                     map[string]*codeLexCache
+	spaceWidths                 map[ui.Font]float32
 	codeNoWrap                  bool
 	codeWrapOverride            map[string]bool
 	codeScrollX                 map[string]float32
@@ -272,7 +294,15 @@ type row struct {
 	mermaidHidden bool
 	mermaidErr    string
 	mermaidError  *ui.TextLayout
-	yApplied      float64
+
+	boardScene   *whiteboard.Scene
+	boardRect    ui.Rect
+	boardEditing bool
+	boardEmbed   bool
+	boardErr     string
+	boardError   *ui.TextLayout
+
+	yApplied float64
 }
 
 // decoration is what the page draws behind its text: the fill of a code
@@ -303,6 +333,9 @@ type decoration struct {
 	empty          bool
 	mermaidHidden  bool
 	mermaidWellOff float32
+	boardEditing   bool
+	boardEmbed     bool
+	boardURL       string
 	yApplied       float64
 }
 
@@ -331,7 +364,7 @@ var codeLanguages = []struct{ name, label string }{
 	{"", "纯文本"}, {"go", "Go"}, {"javascript", "JavaScript"}, {"typescript", "TypeScript"}, {"python", "Python"},
 	{"rust", "Rust"}, {"java", "Java"}, {"c", "C"}, {"cpp", "C++"}, {"csharp", "C#"}, {"swift", "Swift"},
 	{"kotlin", "Kotlin"}, {"ruby", "Ruby"}, {"php", "PHP"}, {"bash", "Shell"}, {"sql", "SQL"},
-	{"html", "HTML"}, {"css", "CSS"}, {"json", "JSON"}, {"yaml", "YAML"}, {"toml", "TOML"}, {"markdown", "Markdown"}, {"mermaid", "Mermaid"},
+	{"html", "HTML"}, {"css", "CSS"}, {"json", "JSON"}, {"yaml", "YAML"}, {"toml", "TOML"}, {"markdown", "Markdown"}, {"mermaid", "Mermaid"}, {"excalidraw", "Excalidraw"},
 }
 
 // languageLabel names a fence language for people.
@@ -561,6 +594,17 @@ type Options struct {
 	// Reserved are keys the host handles, which the page does not take
 	// even where it would, as ⌃⌘↑ would move the caret.
 	Reserved []Combo
+	// Whiteboard integration callbacks.
+	LoadWhiteboard        func(url string) (*whiteboard.Scene, uint64, error)
+	CreateWhiteboard      func(scene *whiteboard.Scene) (url string, err error)
+	SaveWhiteboard        func(url string, scene *whiteboard.Scene) uint64
+	OpenWhiteboard        func(url string, split bool)
+	SaveBlockAsWhiteboard func(blockID string, scene *whiteboard.Scene)
+	BoardWikiSuggest      func(query string) []string
+	OpenWikiSplit         func(name string, split bool)
+	UserWhiteboardLib     func() []whiteboard.LibraryItem
+	SaveWhiteboardLib     func([]whiteboard.LibraryItem)
+	ImportWhiteboardLib   func(onLoad func([]whiteboard.LibraryItem))
 }
 
 func New(markdown string) *Editor { return FromOwnedDocument(ImportMarkdown(markdown)) }
@@ -581,9 +625,15 @@ func newEditorWithBuffer(buf *Buffer) *Editor {
 }
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	if e.ReadOnly {
+		if e.readOnlySpace && text == " " && r == nil {
+			e.readOnlySpace = false
+			return
+		}
+		e.readOnlySpace = false
 		e.refused = true
 		return
 	}
+	e.readOnlySpace = false
 	e.editImageCaption()
 	e.clearBlocks()
 	if e.autoSpace {
@@ -603,9 +653,11 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 }
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
 	if e.ReadOnly {
+		e.readOnlySpace = false
 		e.refused = e.refused || text != ""
 		return
 	}
+	e.readOnlySpace = false
 	e.editImageCaption()
 	e.Buffer.SetMarkedText(r, text, selected)
 	e.reveal = true
@@ -637,6 +689,13 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.openReveal = openReveal{checked: true, pending: o.DrawAnnotations && hasAnnotations(e.Doc.Blocks)}
 	}
 	e.openWiki, e.openTag, e.openLink = o.OpenWiki, o.OpenTag, o.OpenLink
+	e.loadWhiteboard = o.LoadWhiteboard
+	e.createWhiteboard = o.CreateWhiteboard
+	e.saveWhiteboard = o.SaveWhiteboard
+	e.openWhiteboard = o.OpenWhiteboard
+	e.saveBlockAsWhiteboard = o.SaveBlockAsWhiteboard
+	e.boardWikiSuggest = o.BoardWikiSuggest
+	e.openWikiSplit = o.OpenWikiSplit
 	e.header.pickCover = o.PickCover
 	e.bookmarks.marks, e.bookmarks.toggle, e.bookmarks.label, e.bookmarks.key = o.Bookmarks, o.ToggleBookmark, o.LabelBookmark, o.BookmarkKey
 	e.reserved = o.Reserved
@@ -737,8 +796,14 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					HandleTextInput(e).Role(ui.RoleTextField).Label(i18n.T("文档")).FocusRing(false)
 				accessTextValue(surface.Access, e.accessText)
 				if e.RequestFocus {
-					surface.Focus()
-					e.lastInput = c.Now()
+					if e.boardModalID != "" {
+						e.boardModalFocusPending = true
+					} else if e.boardEditing != "" {
+						e.boardFocusPending = true
+					} else {
+						surface.Focus()
+						e.lastInput = c.Now()
+					}
 					e.RequestFocus = false
 				}
 				e.focused = surface.Focused()
@@ -790,6 +855,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					e.headerControls(c)
 				}
 				e.imageControls(c, o)
+				e.boardControls(c, o)
 				e.bookmarkMarks(c)
 				if o.Footer != nil {
 					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(max(80, e.width-2*e.padding))
@@ -813,6 +879,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.imagePreview(c)
 	e.cropView(c)
 	e.wikiPreview(c, surface, o.PreviewWiki)
+	e.boardModalView(c, o)
 	return pane
 }
 
@@ -867,7 +934,16 @@ func (e *Editor) layout(o Options) {
 	if e.find.open {
 		findKey = e.find.query
 	}
-	same := !finishResize && !refreshResize && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
+	embedStale := false
+	if e.loadWhiteboard != nil && len(e.embedBoards) > 0 {
+		for url, cached := range e.embedBoards {
+			if _, rev, err := e.loadWhiteboard(url); err == nil && rev != cached.rev {
+				embedStale = true
+				break
+			}
+		}
+	}
+	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
 	if same && e.cacheRevision == e.Revision() {
 		return
 	}
@@ -882,7 +958,9 @@ func (e *Editor) layout(o Options) {
 		clear(e.maths)
 		clear(e.mermaidLayouts)
 		clear(e.mermaids)
+		clear(e.boardScenes)
 		clear(e.codeLex)
+		clear(e.spaceWidths)
 		pageKey.page = clonePage(e.page)
 	} else {
 		pageKey.page = e.laidPage.page
@@ -897,6 +975,8 @@ func (e *Editor) layout(o Options) {
 	e.ready, e.width, e.cacheRevision, e.cacheTheme, e.laidPage = true, o.Width, e.Revision(), *o.Theme, pageKey
 	e.laidMath = e.mathEditing
 	e.laidMermaid = e.mermaidEditing
+	e.laidBoard = e.boardEditing
+	e.laidModalBoard = e.boardModalID
 	e.laidFindKey = findKey
 	// The text column is 820 wide unless the reader picked another.
 	e.column = columnWidth(o.Column)
@@ -1048,14 +1128,15 @@ func (e *Editor) layout(o Options) {
 
 func (e *Editor) layoutOptions() Options {
 	return Options{
-		Theme:      &e.cacheTheme,
-		Page:       e.page,
-		Width:      e.width,
-		FontSize:   e.readingSize,
-		LineHeight: e.readingLine,
-		FontFamily: e.fontFamily,
-		Column:     e.laidPage.column,
-		CodeNoWrap: e.codeNoWrap,
+		Theme:          &e.cacheTheme,
+		Page:           e.page,
+		Width:          e.width,
+		FontSize:       e.readingSize,
+		LineHeight:     e.readingLine,
+		FontFamily:     e.fontFamily,
+		Column:         e.laidPage.column,
+		CodeNoWrap:     e.codeNoWrap,
+		LoadWhiteboard: e.loadWhiteboard,
 	}
 }
 
@@ -1143,7 +1224,7 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		if laid == nil && deferShape {
 			estH := e.estimateBlockHeight(b, font, e.hintWidthFor(b, shapeWidth))
 			total := top + max(estH, font.Size*font.LineHeight) + bottom
-			if b.Kind == "math" || isMermaidBlock(b) {
+			if b.Kind == "math" || isMermaidBlock(b) || isWhiteboardBlock(b) {
 				total = estH
 			}
 			if y+total < winTop || y > winBottom {
@@ -1157,9 +1238,13 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 					row.mermaidHidden = true
 				}
 				e.rows = append(e.rows, row)
-				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" {
+				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || isWhiteboardEmbed(b) {
 					d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
-					if isMermaidBlock(b) {
+					if isWhiteboardEmbed(b) {
+						d.kind, d.id, d.boardEmbed, d.boardURL, d.boardEditing = "whiteboard-embed", b.ID, true, b.URL, row.boardEditing
+					} else if isWhiteboardBlock(b) {
+						d.kind, d.label, d.id = "whiteboard", b.Language, b.ID
+					} else if isMermaidBlock(b) {
 						d.kind, d.label, d.id, d.mermaidHidden = "mermaid", b.Language, b.ID, true
 					} else if b.Kind == "code" {
 						d.label, d.id = b.Language, b.ID
@@ -1181,7 +1266,9 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		h = max(h, font.Size*font.LineHeight)
 		total := top + h + bottom
 		row := row{leafRevision: e.Revision(), leaf: leaf, layout: laid, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size, tableHeader: header}
-		if b.Kind == "image" {
+		if isWhiteboardEmbed(b) {
+			total = e.layoutWhiteboardEmbed(&row, o, gap)
+		} else if b.Kind == "image" {
 			total = e.layoutImage(&row, o)
 		}
 		if b.Kind == "rule" {
@@ -1197,17 +1284,27 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			total, mermaidWellOff = e.mermaidRow(&row, h, gap)
 			row.rect.H = total
 		}
+		if isWhiteboardBlock(b) {
+			total = e.whiteboardRow(&row, o, gap)
+		}
 		if virtualize && leaf.Owner == b.ID && canDeferKind(b.Kind) {
 			hintH := h
-			if b.Kind == "math" || isMermaidBlock(b) {
+			if b.Kind == "math" || isMermaidBlock(b) || isWhiteboardBlock(b) {
 				hintH = total
 			}
 			e.recordExactHeight(b.ID, e.hintWidthFor(b, shapeWidth), hintH, font, b.Runs)
 		}
 		e.rows = append(e.rows, row)
-		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" {
+		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" || isWhiteboardEmbed(b) {
 			d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
-			if isMermaidBlock(b) {
+			if isWhiteboardEmbed(b) {
+				d.kind, d.id, d.boardEmbed, d.boardURL, d.boardEditing = "whiteboard-embed", b.ID, true, b.URL, row.boardEditing
+				d.rect = row.boardRect
+			} else if isWhiteboardBlock(b) {
+				d.kind, d.label, d.id = "whiteboard", b.Language, b.ID
+				d.boardEditing = row.boardEditing
+				d.rect = row.boardRect
+			} else if isMermaidBlock(b) {
 				d.kind, d.label, d.id = "mermaid", b.Language, b.ID
 				d.mermaidHidden, d.mermaidWellOff = row.mermaidHidden, mermaidWellOff
 			} else if b.Kind == "code" {
@@ -1237,6 +1334,9 @@ func (e *Editor) indexedRow(i int) *row {
 				for k := range f.actions {
 					f.actions[k].bounds.Y += dy
 				}
+			}
+			if r.boardRect.W > 0 {
+				r.boardRect.Y += dy
 			}
 			r.yApplied = off
 		}
@@ -1287,6 +1387,10 @@ func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange
 		rect := ui.Rect{X: row.rect.X + (row.rect.W-mw)/2, Y: row.rect.Y + row.mermaidTop, W: 2, H: 20}
 		return rect, ui.TextInputRange{Start: row.leaf.Start, End: row.leaf.Start}, true
 	}
+	if isWhiteboardBlock(row.leaf.Block) || row.boardEmbed {
+		rect := ui.Rect{X: row.boardRect.X, Y: row.boardRect.Y, W: 2, H: 20}
+		return rect, ui.TextInputRange{Start: row.leaf.Start, End: row.leaf.Start}, true
+	}
 	rect := row.layout.Caret(local)
 	rect.X += row.x
 	rect.Y += row.y
@@ -1301,7 +1405,7 @@ func (e *Editor) IndexForPoint(point ui.Point) (int, bool) {
 		return 0, false
 	}
 	best := e.ensureRow(e.rowSpace.nearest(point))
-	if (best.picture != nil && !e.captionVisible(best.leaf.Block)) || best.mermaidHidden {
+	if (best.picture != nil && !e.captionVisible(best.leaf.Block)) || best.mermaidHidden || isWhiteboardBlock(best.leaf.Block) || best.boardEmbed {
 		return best.leaf.Start, true
 	}
 	px := point.X - best.x
@@ -1516,6 +1620,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				if e.paintMermaid(p, bounds, r, t) {
 					return
 				}
+				if e.paintWhiteboardRow(p, bounds, r, t) {
+					return
+				}
 				shiftedBounds := ui.Rect{X: bounds.X + dx - scrollX, Y: bounds.Y + dy, W: bounds.W, H: bounds.H}
 				e.paintAnnotations(p, shiftedBounds, r, true)
 				textColor := t.Text
@@ -1679,6 +1786,8 @@ func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) 
 		switch {
 		case d.kind == "mermaid" && d.id != "":
 			e.paintMermaidHover(p, bounds, d, t)
+		case (d.kind == "whiteboard" || d.kind == "whiteboard-embed") && d.id != "":
+			e.paintWhiteboardHover(p, bounds, d, t)
 		case d.kind == "code" && d.id != "":
 			if idx, ok := e.rowIDs[d.id]; ok {
 				barBox, _, availW, contentW, scrollX, noWrap := e.codeScrollFor(*e.indexedRow(idx))
@@ -1767,6 +1876,8 @@ func (e *Editor) hoverControl(x, y float32) bool {
 			return e.focusBlockStart(d.id)
 		case d.kind == "mermaid" && d.id != "" && in(mermaidCopyButton(d)) && e.hovered(d.rect, 0):
 			e.copyBlock(d.id)
+			return true
+		case (d.kind == "whiteboard" || d.kind == "whiteboard-embed") && d.id != "" && e.whiteboardControl(d, x, y):
 			return true
 		case d.kind == "table" && e.tableControl(d, x, y):
 			return true

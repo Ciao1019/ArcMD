@@ -1,0 +1,831 @@
+package editor
+
+import (
+	"path"
+	"strings"
+	"time"
+
+	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/pdf"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
+	"github.com/egoist/mygo/ui"
+)
+
+const (
+	boardDefaultEditH = float32(440)
+	boardMinEditH     = float32(260)
+	boardMaxEditH     = float32(760)
+	boardRestMaxH     = float32(420)
+	boardMargin       = float32(14)
+)
+
+type boardSceneCache struct {
+	src   string
+	scene *whiteboard.Scene
+	err   error
+}
+
+type embedBoardCache struct {
+	rev   uint64
+	scene *whiteboard.Scene
+	err   error
+}
+
+func isWhiteboardBlock(b *document.Block) bool {
+	if b == nil || b.Kind != "code" {
+		return false
+	}
+	lang := strings.TrimSpace(b.Language)
+	return strings.EqualFold(lang, "excalidraw") || strings.EqualFold(lang, "whiteboard")
+}
+
+func isWhiteboardURL(raw string) bool {
+	clean, _, _ := strings.Cut(strings.TrimSpace(raw), "#")
+	clean, _, _ = strings.Cut(clean, "?")
+	base := path.Base(strings.ReplaceAll(clean, `\`, "/"))
+	low := strings.ToLower(base)
+	return (len(low) > len(".excalidraw.svg") && strings.HasSuffix(low, ".excalidraw.svg")) ||
+		(len(low) > len(".excalidraw") && strings.HasSuffix(low, ".excalidraw"))
+}
+
+func isWhiteboardEmbed(b *document.Block) bool {
+	if b == nil || b.Kind != "image" {
+		return false
+	}
+	return isWhiteboardURL(b.URL)
+}
+
+func (e *Editor) startBoardEditing(id string) {
+	e.boardEditing = id
+	e.boardFocusPending = id != ""
+	e.ready = false
+}
+
+func (e *Editor) openBoardModal(id string) {
+	if e.ReadOnly || id == "" {
+		return
+	}
+	e.boardModalID = id
+	e.boardModalFocusPending = true
+	e.ready = false
+	if b := e.blockByID(id); b != nil {
+		if board := e.boardForBlock(b); board != nil {
+			board.RequestFit()
+		}
+	}
+}
+
+func (e *Editor) closeBoardModal(id string, board *Board) {
+	if board != nil {
+		e.commitBoardToBlock(id, board)
+	}
+	e.boardModalID = ""
+	e.ready = false
+	if e.boardEditing == id {
+		if board != nil {
+			board.RequestFit()
+		}
+		e.boardFocusPending = true
+	} else {
+		e.RequestFocus = true
+	}
+}
+
+// EditWhiteboardBlock opens the inline interactive whiteboard editor for block id.
+func (e *Editor) EditWhiteboardBlock(id string) {
+	if e.ReadOnly {
+		return
+	}
+	e.startBoardEditing(id)
+}
+
+// InsertWhiteboard inserts a starter hand-drawn whiteboard at the caret and
+// opens it directly in interactive editing mode. When CreateWhiteboard is wired,
+// it creates an amphibious *.excalidraw.svg image asset so standard Markdown
+// viewers (Typora, GitHub, browsers) render the vector drawing directly.
+func (e *Editor) InsertWhiteboard() {
+	if e.ReadOnly {
+		return
+	}
+	starter := whiteboard.StarterScene()
+	var targetID string
+	if e.createWhiteboard != nil {
+		if url, err := e.createWhiteboard(starter); err == nil && url != "" {
+			b := document.NewBlock("image", i18n.T("手绘白板"))
+			b.URL = url
+			targetID = b.ID
+			e.Engine.Insert(b)
+			e.startBoardEditing(targetID)
+			e.sync()
+			e.reveal = true
+			return
+		}
+	}
+	src, err := starter.Encode()
+	if err != nil {
+		return
+	}
+	b := document.NewBlock("code", src)
+	b.Language = "excalidraw"
+	targetID = b.ID
+	e.Engine.Insert(b)
+	e.startBoardEditing(targetID)
+	e.sync()
+	e.reveal = true
+}
+
+func (e *Editor) whiteboardSceneFor(id, src string) (*whiteboard.Scene, error) {
+	if e.boardScenes == nil {
+		e.boardScenes = map[string]boardSceneCache{}
+	}
+	if c, ok := e.boardScenes[id]; ok && c.src == src {
+		return c.scene, c.err
+	}
+	scene, err := whiteboard.Decode(src)
+	e.boardScenes[id] = boardSceneCache{src: src, scene: scene, err: err}
+	return scene, err
+}
+
+func (e *Editor) boardForBlock(b *document.Block) *Board {
+	if b == nil {
+		return nil
+	}
+	if e.boards == nil {
+		e.boards = map[string]*Board{}
+	}
+	if isWhiteboardEmbed(b) {
+		if e.boardEmbedRev == nil {
+			e.boardEmbedRev = map[string]uint64{}
+		}
+		var scene *whiteboard.Scene
+		var rev uint64
+		var err error
+		if e.loadWhiteboard != nil {
+			scene, rev, err = e.loadWhiteboard(b.URL)
+		}
+		if err != nil || scene == nil {
+			scene = whiteboard.NewScene()
+		}
+		board, ok := e.boards[b.ID]
+		if !ok {
+			board = NewBoard(scene.Clone())
+			e.boards[b.ID] = board
+			e.boardEmbedRev[b.ID] = rev
+		} else if e.boardEmbedRev[b.ID] != rev {
+			board.ReplaceScene(scene.Clone(), false)
+			e.boardEmbedRev[b.ID] = rev
+		}
+		return board
+	}
+	if e.boardSynced == nil {
+		e.boardSynced = map[string]string{}
+	}
+	src := b.Text()
+	board, ok := e.boards[b.ID]
+	if !ok || e.boardSynced[b.ID] != src {
+		scene, err := whiteboard.Decode(src)
+		if err != nil || scene == nil {
+			scene = whiteboard.NewScene()
+		}
+		if !ok {
+			board = NewBoard(scene)
+			e.boards[b.ID] = board
+		} else {
+			board.ReplaceScene(scene, false)
+		}
+		e.boardSynced[b.ID] = src
+	}
+	return board
+}
+
+func (e *Editor) commitBoardToBlock(id string, b *Board) {
+	if b == nil || e.ReadOnly {
+		return
+	}
+	blk := e.blockByID(id)
+	if blk == nil {
+		return
+	}
+	if isWhiteboardEmbed(blk) {
+		if e.saveWhiteboard != nil {
+			rev := e.saveWhiteboard(blk.URL, b.SceneSnapshot())
+			if e.boardEmbedRev == nil {
+				e.boardEmbedRev = map[string]uint64{}
+			}
+			e.boardEmbedRev[id] = rev
+			delete(e.embedBoards, blk.URL)
+		}
+		return
+	}
+	encoded, err := b.SceneSnapshot().Encode()
+	if err != nil {
+		return
+	}
+	if e.boardSynced == nil {
+		e.boardSynced = map[string]string{}
+	}
+	if e.boardSynced[id] == encoded {
+		return
+	}
+	e.boardSynced[id] = encoded
+	e.Engine.Edit(func() {
+		blk.Runs = []document.Run{{Text: encoded}}
+	})
+	e.sync()
+}
+
+func (e *Editor) whiteboardRow(r *row, o Options, gap float32) float32 {
+	b := r.leaf.Block
+	src := b.Text()
+	editing := !e.printing && !e.ReadOnly && e.boardEditing == b.ID && e.boardModalID != b.ID
+	r.boardEditing = editing
+	r.boardEmbed = false
+	r.boardErr = ""
+	r.boardError = nil
+	r.boardScene = nil
+
+	if editing {
+		h := boardDefaultEditH
+		if custom, ok := e.boardHeights[b.ID]; ok {
+			h = max(boardMinEditH, min(boardMaxEditH, custom))
+		}
+		r.boardRect = ui.Rect{X: r.rect.X, Y: r.rect.Y + boardMargin, W: r.rect.W, H: h}
+		_ = e.boardForBlock(b)
+		r.rect.H = 2*boardMargin + h + gap
+		return r.rect.H
+	}
+
+	scene, err := e.whiteboardSceneFor(b.ID, src)
+	if err != nil {
+		r.boardErr = i18n.T("白板无法打开") + ": " + err.Error()
+		r.boardError = ui.ShapeText(r.boardErr, ui.Font{Family: "system-ui", Size: 13}, max(40, r.rect.W-24))
+		_, eh := r.boardError.Size()
+		h := max(48, eh+24)
+		r.boardRect = ui.Rect{X: r.rect.X, Y: r.rect.Y + boardMargin, W: r.rect.W, H: h}
+		r.rect.H = 2*boardMargin + h + gap
+		return r.rect.H
+	}
+	r.boardScene = scene
+	h := boardPreviewHeight(scene, r.rect.W, e.printing)
+	r.boardRect = ui.Rect{X: r.rect.X, Y: r.rect.Y + boardMargin, W: r.rect.W, H: h}
+	r.rect.H = 2*boardMargin + h + gap
+	return r.rect.H
+}
+
+func (e *Editor) layoutWhiteboardEmbed(r *row, o Options, gap float32) float32 {
+	b := r.leaf.Block
+	r.boardEmbed = true
+	editing := !e.printing && !e.ReadOnly && e.saveWhiteboard != nil && e.boardEditing == b.ID && e.boardModalID != b.ID
+	r.boardEditing = editing
+	r.boardErr = ""
+	r.boardError = nil
+	r.boardScene = nil
+
+	if editing {
+		availW := r.rect.W
+		if b.ImageWidth > 120 {
+			availW = min(availW, b.ImageWidth)
+		}
+		h := boardDefaultEditH
+		if custom, ok := e.boardHeights[b.ID]; ok {
+			h = max(boardMinEditH, min(boardMaxEditH, custom))
+		}
+		x := r.rect.X + (r.rect.W-availW)/2
+		r.boardRect = ui.Rect{X: x, Y: r.rect.Y + boardMargin, W: availW, H: h}
+		_ = e.boardForBlock(b)
+		r.rect.H = 2*boardMargin + h + gap
+		return r.rect.H
+	}
+
+	if e.loadWhiteboard == nil {
+		r.boardErr = i18n.T("白板无法打开")
+		r.boardError = ui.ShapeText(r.boardErr, ui.Font{Family: "system-ui", Size: 13}, max(40, r.rect.W-24))
+		r.boardRect = ui.Rect{X: r.rect.X, Y: r.rect.Y + boardMargin, W: r.rect.W, H: 64}
+		r.rect.H = 2*boardMargin + 64 + gap
+		return r.rect.H
+	}
+	scene, rev, err := e.loadWhiteboard(b.URL)
+	if err != nil || scene == nil {
+		msg := i18n.T("白板无法打开")
+		if err != nil {
+			msg += ": " + err.Error()
+		}
+		r.boardErr = msg
+		r.boardError = ui.ShapeText(msg, ui.Font{Family: "system-ui", Size: 13}, max(40, r.rect.W-24))
+		_, eh := r.boardError.Size()
+		h := max(64, eh+28)
+		r.boardRect = ui.Rect{X: r.rect.X, Y: r.rect.Y + boardMargin, W: r.rect.W, H: h}
+		r.rect.H = 2*boardMargin + h + gap
+		return r.rect.H
+	}
+	if e.embedBoards == nil {
+		e.embedBoards = map[string]embedBoardCache{}
+	}
+	e.embedBoards[b.URL] = embedBoardCache{rev: rev, scene: scene, err: nil}
+	r.boardScene = scene
+
+	availW := r.rect.W
+	if b.ImageWidth > 120 {
+		availW = min(availW, b.ImageWidth)
+	}
+	h := boardPreviewHeight(scene, availW, e.printing)
+	x := r.rect.X + (r.rect.W-availW)/2
+	r.boardRect = ui.Rect{X: x, Y: r.rect.Y + boardMargin, W: availW, H: h}
+	r.rect.H = 2*boardMargin + h + gap
+	return r.rect.H
+}
+
+func boardPreviewHeight(scene *whiteboard.Scene, width float32, printing bool) float32 {
+	if scene == nil || len(scene.Elements) == 0 {
+		return 140
+	}
+	sb := whiteboard.SceneBounds(scene)
+	if sb.Empty() {
+		return 140
+	}
+	pad := float32(24)
+	availW := max(40, width-2*pad)
+	scale := min(1.0, availW/sb.W)
+	h := sb.H*scale + 2*pad
+	if printing {
+		return max(96, min(680, h))
+	}
+	return max(120, min(boardRestMaxH, h))
+}
+
+func (e *Editor) paintWhiteboardRow(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bool {
+	if !isWhiteboardBlock(r.leaf.Block) && !r.boardEmbed {
+		return false
+	}
+	if r.boardEditing {
+		return true // painted by interactive BoardView overlay in boardControls
+	}
+	dx, dy := e.visualOffset(r)
+	box := r.boardRect
+	box.X += bounds.X + dx
+	box.Y += bounds.Y + dy
+
+	if r.boardError != nil {
+		p.StrokeDashed(box, e.page.Caption, 8, 1)
+		ew, eh := r.boardError.Size()
+		p.TextLayout(r.boardError, box.X+(box.W-ew)/2, box.Y+(box.H-eh)/2, t.Danger)
+		return true
+	}
+
+	wb := e.page.Whiteboard
+	if r.boardEmbed || (!e.printing && e.hovered(r.boardRect, 0)) {
+		p.Fill(box, wb.Canvas, 10)
+		border := e.page.CodeBorder
+		if !e.printing && e.hovered(r.boardRect, 0) {
+			border = t.Accent.Alpha(0.45)
+		}
+		p.Stroke(box, border, 10, 1)
+	}
+	if r.boardScene != nil && len(r.boardScene.Elements) > 0 {
+		PaintSceneFit(p, box, r.boardScene, wb, t, 20)
+	} else if !e.printing {
+		hint := ui.ShapeText(i18n.T("白板暂无图形"), ui.Font{Family: "system-ui", Size: 13}, 0)
+		hw, hh := hint.Size()
+		p.TextLayout(hint, box.X+(box.W-hw)/2, box.Y+(box.H-hh)/2, e.page.Placeholder)
+	}
+
+	if r.boardEmbed && !e.printing {
+		badge := ui.ShapeText(path.Base(r.leaf.Block.URL), ui.Font{Family: "system-ui", Size: 11, Weight: 500}, 0)
+		bw, bh := badge.Size()
+		pill := ui.Rect{X: box.X + 10, Y: box.Y + box.H - bh - 14, W: min(box.W-20, bw+14), H: bh + 6}
+		p.Fill(pill, wb.IslandFill, 6)
+		p.Stroke(pill, wb.IslandBorder, 6, 1)
+		p.TextLayout(badge, pill.X+7, pill.Y+3, e.page.Caption)
+	}
+	return true
+}
+
+func boardEditButtonRect(d decoration) ui.Rect {
+	return ui.Rect{X: d.rect.X + d.rect.W - 244, Y: d.rect.Y + 8, W: 76, H: 24}
+}
+
+func boardExpandButtonRect(d decoration) ui.Rect {
+	return ui.Rect{X: d.rect.X + d.rect.W - 162, Y: d.rect.Y + 8, W: 76, H: 24}
+}
+
+func boardSaveFileButtonRect(d decoration) ui.Rect {
+	return ui.Rect{X: d.rect.X + d.rect.W - 350, Y: d.rect.Y + 8, W: 100, H: 24}
+}
+
+func boardCopySVGButtonRect(d decoration) ui.Rect {
+	return ui.Rect{X: d.rect.X + d.rect.W - 80, Y: d.rect.Y + 8, W: 72, H: 24}
+}
+
+func boardEmbedOpenRect(d decoration) ui.Rect {
+	return ui.Rect{X: d.rect.X + d.rect.W - 170, Y: d.rect.Y + 8, W: 74, H: 24}
+}
+
+func boardEmbedSplitRect(d decoration) ui.Rect {
+	return ui.Rect{X: d.rect.X + d.rect.W - 90, Y: d.rect.Y + 8, W: 82, H: 24}
+}
+
+type boardHoverAction uint8
+
+const (
+	hoverNone boardHoverAction = iota
+	hoverEdit
+	hoverExpand
+	hoverOpen
+	hoverSplit
+)
+
+type boardHoverPill struct {
+	rect   ui.Rect
+	icon   *ui.SVG
+	label  string
+	action boardHoverAction
+}
+
+func (e *Editor) embedHoverPills(d decoration) []boardHoverPill {
+	var pills []boardHoverPill
+	rx := d.rect.X + d.rect.W - 8
+	push := func(w float32, icon *ui.SVG, label string, act boardHoverAction) {
+		if rx-w < d.rect.X+8 {
+			return
+		}
+		rx -= w
+		pills = append(pills, boardHoverPill{
+			rect:   ui.Rect{X: rx, Y: d.rect.Y + 8, W: w, H: 24},
+			icon:   icon,
+			label:  label,
+			action: act,
+		})
+		rx -= 6
+	}
+	if e.openWhiteboard != nil {
+		push(84, iconExternalSplit, i18n.T("在分屏中编辑"), hoverSplit)
+		push(74, iconWhiteboard, i18n.T("打开白板"), hoverOpen)
+	}
+	if !e.ReadOnly && e.saveWhiteboard != nil {
+		push(76, iconMaximize, i18n.T("放大画布"), hoverExpand)
+		push(76, iconPencil, i18n.T("编辑画布"), hoverEdit)
+	}
+	return pills
+}
+
+func (e *Editor) paintWhiteboardHover(p *ui.Painter, bounds ui.Rect, d decoration, t *ui.Theme) {
+	if e.printing || d.boardEditing {
+		return
+	}
+	ddy := e.ownerVisualDY(d.ownerID)
+	copied := d.id == e.copiedID && p.Now().Sub(e.copiedAt) < 1500*time.Millisecond
+	if copied {
+		p.After(1500*time.Millisecond - p.Now().Sub(e.copiedAt))
+	}
+	if !copied && !e.hovered(d.rect, 0) {
+		return
+	}
+	wb := e.page.Whiteboard
+	drawPill := func(docRect ui.Rect, icon *ui.SVG, label string, active bool) {
+		r := ui.Rect{X: docRect.X + bounds.X, Y: docRect.Y + bounds.Y + ddy, W: docRect.W, H: docRect.H}
+		bg := wb.IslandFill
+		fg := e.page.Caption
+		if active {
+			bg = wb.ActiveFill
+			fg = wb.ActiveInk
+		} else if e.hovered(docRect, 0) {
+			bg = e.page.Hover
+			fg = t.Text
+		}
+		p.Fill(r, bg, 6)
+		p.Stroke(r, wb.IslandBorder, 6, 1)
+		p.Icon(icon, ui.Rect{X: r.X + 6, Y: r.Y + (r.H-13)/2, W: 13, H: 13}, fg)
+		sp := ui.Span{Text: label, Size: 11.5, Font: "system-ui", Color: fg}
+		_, th := p.MeasureText(0, sp)
+		p.RichText(r.X+22, r.Y+(r.H-th)/2, 0, sp)
+	}
+
+	if d.boardEmbed {
+		for _, pill := range e.embedHoverPills(d) {
+			drawPill(pill.rect, pill.icon, pill.label, false)
+		}
+		return
+	}
+
+	if !e.ReadOnly {
+		if e.saveBlockAsWhiteboard != nil && d.rect.W >= 370 {
+			drawPill(boardSaveFileButtonRect(d), iconWhiteboard, i18n.T("存为独立白板"), false)
+		}
+		drawPill(boardEditButtonRect(d), iconPencil, i18n.T("编辑画布"), false)
+		drawPill(boardExpandButtonRect(d), iconMaximize, i18n.T("放大画布"), false)
+	}
+	if copied {
+		drawPill(boardCopySVGButtonRect(d), iconCheck, i18n.T("已复制"), true)
+	} else {
+		drawPill(boardCopySVGButtonRect(d), iconCopy, i18n.T("复制 SVG"), false)
+	}
+}
+
+func (e *Editor) whiteboardControl(d decoration, x, y float32) bool {
+	in := func(r ui.Rect) bool { return x >= r.X && x <= r.X+r.W && y >= r.Y && y <= r.Y+r.H }
+	if d.boardEditing {
+		return false
+	}
+	if d.boardEmbed {
+		for _, pill := range e.embedHoverPills(d) {
+			if !in(pill.rect) {
+				continue
+			}
+			switch pill.action {
+			case hoverEdit:
+				e.startBoardEditing(d.id)
+				return true
+			case hoverExpand:
+				e.openBoardModal(d.id)
+				return true
+			case hoverOpen:
+				if e.openWhiteboard != nil {
+					e.openWhiteboard(d.boardURL, false)
+					return true
+				}
+			case hoverSplit:
+				if e.openWhiteboard != nil {
+					e.openWhiteboard(d.boardURL, true)
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !e.ReadOnly && e.saveBlockAsWhiteboard != nil && d.rect.W >= 370 && in(boardSaveFileButtonRect(d)) {
+		if b := e.blockByID(d.id); b != nil {
+			if scene, err := e.whiteboardSceneFor(d.id, b.Text()); err == nil {
+				e.saveBlockAsWhiteboard(d.id, scene.Clone())
+			}
+		}
+		return true
+	}
+	if !e.ReadOnly && in(boardEditButtonRect(d)) {
+		e.startBoardEditing(d.id)
+		return true
+	}
+	if !e.ReadOnly && in(boardExpandButtonRect(d)) {
+		e.openBoardModal(d.id)
+		return true
+	}
+	if in(boardCopySVGButtonRect(d)) {
+		if b := e.blockByID(d.id); b != nil {
+			if scene, err := e.whiteboardSceneFor(d.id, b.Text()); err == nil && e.services != (ui.Services{}) {
+				e.services.WriteClipboard(whiteboard.ExportSVG(scene, whiteboard.DefaultLightPalette()))
+				e.copiedID, e.copiedAt = d.id, e.lastInput
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// boardControls renders the interactive inline BoardView for e.boardEditing.
+func (e *Editor) boardControls(c *ui.Context, o Options) {
+	if e.printing || e.ReadOnly || e.boardEditing == "" || e.boardModalID != "" {
+		return
+	}
+	idx, ok := e.rowIDs[e.boardEditing]
+	if !ok {
+		return
+	}
+	r := e.indexedRow(idx)
+	if !r.boardEditing {
+		return
+	}
+	b := r.leaf.Block
+	board := e.boardForBlock(b)
+	if board == nil {
+		return
+	}
+	if e.boardFocusPending {
+		board.RequestFocus = true
+		e.boardFocusPending = false
+	}
+	box := r.boardRect
+	dy := e.ownerVisualDY(r.leaf.Owner)
+	t := o.Theme
+
+	card := ui.Column(c.Key("inline-board:"+b.ID)).Absolute().Left(box.X).Top(box.Y+dy).Size(box.W, box.H).
+		Radius(10).Background(e.page.Whiteboard.Canvas).Border(1.25, t.Accent.Alpha(0.45)).
+		Shadow(0, 4, 18, 0, e.page.MathShadow).Clip()
+	card.Children(func() {
+		BoardView(c, board, BoardOptions{
+			Theme:             t,
+			Page:              e.page,
+			Compact:           true,
+			ReadOnly:          e.ReadOnly,
+			WikiSuggest:       e.boardWikiSuggest,
+			OpenWiki:          e.openWikiSplit,
+			UserLibrary:       o.UserWhiteboardLib,
+			SaveUserLibrary:   o.SaveWhiteboardLib,
+			ImportLibraryFile: o.ImportWhiteboardLib,
+			ExpandModal:       func() { e.openBoardModal(b.ID) },
+			Done: func() {
+				e.commitBoardToBlock(b.ID, board)
+				e.boardEditing = ""
+				e.ready = false
+				e.RequestFocus = true
+			},
+			OnChange: func() {
+				e.commitBoardToBlock(b.ID, board)
+			},
+		})
+	})
+
+	// Bottom resize handle bar to adjust inline canvas height.
+	grip := ui.Box(c.Key("board-resize:"+b.ID)).Absolute().Left(box.X+box.W/2-36).Top(box.Y+dy+box.H-5).
+		Size(72, 10).Radius(5).Cursor(ui.CursorResizeNS).Tooltip(i18n.T("拖动调整画布高度"))
+	if grip.Hovered() || e.boardDragID == b.ID {
+		grip.Background(t.Accent.Alpha(0.28))
+	} else {
+		grip.Background(e.page.CodeBorder)
+	}
+	_, dragDY, pressed := grip.Dragged()
+	if pressed {
+		if e.boardDragID != b.ID {
+			e.boardDragID = b.ID
+			e.boardDragStartH = box.H
+		}
+		if e.boardHeights == nil {
+			e.boardHeights = map[string]float32{}
+		}
+		next := max(boardMinEditH, min(boardMaxEditH, e.boardHeights[b.ID]+dragDY))
+		if e.boardHeights[b.ID] == 0 {
+			next = max(boardMinEditH, min(boardMaxEditH, e.boardDragStartH+dragDY))
+		}
+		e.boardHeights[b.ID] = next
+		e.ready = false
+	} else if e.boardDragID == b.ID {
+		e.boardDragID = ""
+	}
+}
+
+// boardModalView opens a full-window Excalidraw modal over the document.
+func (e *Editor) boardModalView(c *ui.Context, o Options) {
+	if e.boardModalID == "" || e.printing {
+		return
+	}
+	b := e.blockByID(e.boardModalID)
+	if b == nil {
+		e.boardModalID = ""
+		return
+	}
+	board := e.boardForBlock(b)
+	if board == nil {
+		e.boardModalID = ""
+		return
+	}
+	if e.boardModalFocusPending {
+		board.RequestFocus = true
+		e.boardModalFocusPending = false
+	}
+	t := o.Theme
+	winW, winH := c.Size()
+	w := min(float32(1240), max(320, winW-48))
+	h := min(float32(840), max(280, winH-48))
+
+	ui.Overlay(c, func() {
+		backdrop := ui.Box(c.Key("board-modal-bg")).Fill().Background(e.page.Scrim).Center()
+		if c.Shortcut(0, ui.KeyEscape) {
+			e.closeBoardModal(b.ID, board)
+			return
+		}
+		backdrop.Children(func() {
+			panel := ui.Column(c.Key("board-modal-panel")).Size(w, h).Radius(14).
+				Background(e.page.Whiteboard.Canvas).Border(1, e.page.Whiteboard.IslandBorder).
+				Shadow(0, 16, 48, 0, e.page.MathShadow).Clip()
+			panel.Children(func() {
+				// Top bar with "Save as standalone file" and "Done".
+				hdr := ui.Row(c).Height(42).PaddingX(14).Gap(8).AlignItems(ui.Center).
+					Background(e.page.Whiteboard.IslandFill).Border(1, e.page.Whiteboard.IslandBorder)
+				hdr.Children(func() {
+					ui.Icon(c, iconWhiteboard).FontSize(16).TextColor(e.page.Whiteboard.ActiveInk)
+					ui.Text(c, i18n.T("手绘白板")).FontSize(13).FontWeight(600).TextColor(t.Text).Grow(1)
+					if isWhiteboardBlock(b) && e.saveBlockAsWhiteboard != nil && !e.ReadOnly {
+						saveBtn := ui.ButtonBase(c.Key("board-save-as")).Height(28).PaddingX(10).Radius(7).
+							Border(1, e.page.Whiteboard.IslandBorder).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+						if saveBtn.Hovered() {
+							saveBtn.Background(t.SurfaceHover)
+						}
+						saveBtn.Children(func() {
+							ui.Text(c, i18n.T("存为独立白板")).FontSize(12).TextColor(t.Text)
+						})
+						if saveBtn.Clicked() {
+							e.commitBoardToBlock(b.ID, board)
+							snap := board.SceneSnapshot()
+							id := b.ID
+							e.boardModalID = ""
+							e.boardEditing = ""
+							e.saveBlockAsWhiteboard(id, snap)
+						}
+					}
+					done := ui.ButtonBase(c.Key("board-modal-done")).Height(28).PaddingX(12).Radius(7).
+						Background(t.Accent).Center().Cursor(ui.CursorPointer)
+					done.Children(func() {
+						ui.Text(c, i18n.T("完成")).FontSize(12).FontWeight(600).TextColor(t.AccentText)
+					})
+					if done.Clicked() {
+						e.closeBoardModal(b.ID, board)
+					}
+				})
+				ui.Column(c).Grow(1).MinHeight(0).MinWidth(0).Children(func() {
+					BoardView(c, board, BoardOptions{
+						Theme:             t,
+						Page:              e.page,
+						Compact:           false,
+						ReadOnly:          e.ReadOnly,
+						WikiSuggest:       e.boardWikiSuggest,
+						OpenWiki:          e.openWikiSplit,
+						UserLibrary:       o.UserWhiteboardLib,
+						SaveUserLibrary:   o.SaveWhiteboardLib,
+						ImportLibraryFile: o.ImportWhiteboardLib,
+						OnChange: func() {
+							e.commitBoardToBlock(b.ID, board)
+						},
+					})
+				})
+			})
+		})
+	})
+}
+
+// ExportWhiteboardPDF draws scene into a vector PDF page mapped inside dst rect.
+func ExportWhiteboardPDF(vp *pdf.VectorPage, scene *whiteboard.Scene, pg Page, t *ui.Theme, dstX, dstY, dstW, dstH, sc float64) {
+	if vp == nil || scene == nil || dstW <= 0 || dstH <= 0 {
+		return
+	}
+	wb := pg.Whiteboard
+	sb := whiteboard.SceneBounds(scene)
+	if sb.Empty() {
+		return
+	}
+	pad := 16.0 * sc
+	availW := max(8, dstW-2*pad)
+	availH := max(8, dstH-2*pad)
+	scale := min(availW/float64(sb.W), availH/float64(sb.H))
+	ox := dstX + (dstW-float64(sb.W)*scale)/2 - float64(sb.X)*scale
+	oy := dstY + (dstH-float64(sb.H)*scale)/2 - float64(sb.Y)*scale
+
+	vp.PushClip(dstX, dstY, dstW, dstH, 6*sc)
+	defer vp.PopClip()
+
+	for _, passFrame := range []bool{true, false} {
+		for _, el := range scene.Elements {
+			if el == nil || (el.Kind == whiteboard.KindFrame) != passFrame {
+				continue
+			}
+			for _, pr := range whiteboard.BuildPrimitives(scene, el) {
+				segs := make([]pdf.PathSegment, 0, len(pr.Cmds))
+				for _, cmd := range pr.Cmds {
+					var s pdf.PathSegment
+					switch cmd.Kind {
+					case whiteboard.CmdMoveTo:
+						s = pdf.PathSegment{Op: 0, X0: ox + float64(cmd.X)*scale, Y0: oy + float64(cmd.Y)*scale}
+					case whiteboard.CmdLineTo:
+						s = pdf.PathSegment{Op: 1, X0: ox + float64(cmd.X)*scale, Y0: oy + float64(cmd.Y)*scale}
+					case whiteboard.CmdQuadTo:
+						s = pdf.PathSegment{Op: 2, X0: ox + float64(cmd.C1X)*scale, Y0: oy + float64(cmd.C1Y)*scale, X1: ox + float64(cmd.X)*scale, Y1: oy + float64(cmd.Y)*scale}
+					case whiteboard.CmdCubeTo:
+						s = pdf.PathSegment{Op: 3, X0: ox + float64(cmd.C1X)*scale, Y0: oy + float64(cmd.C1Y)*scale, X1: ox + float64(cmd.C2X)*scale, Y1: oy + float64(cmd.C2Y)*scale, X2: ox + float64(cmd.X)*scale, Y2: oy + float64(cmd.Y)*scale}
+					case whiteboard.CmdClose:
+						s = pdf.PathSegment{Op: 4}
+					}
+					segs = append(segs, s)
+				}
+				var fill, stroke [4]uint8
+				if pr.Filled {
+					fill = pdfRGBA(resolveBoardFill(wb, pr.FillColor, t))
+				}
+				if pr.Stroked {
+					if pr.IsHachure {
+						fc := resolveBoardFill(wb, pr.StrokeColor, t)
+						stroke = pdfRGBA(fc.Mix(resolveBoardStroke(wb, pr.StrokeColor, t), 0.34))
+					} else {
+						stroke = pdfRGBA(resolveBoardStroke(wb, pr.StrokeColor, t))
+					}
+				}
+				vp.DrawPath(segs, fill, stroke, max(0.4, float64(pr.StrokeWidth)*scale), len(pr.Dash) > 0)
+			}
+			if txt := strings.TrimSpace(el.Text); txt != "" {
+				eb := whiteboard.ShapeTextBox(el)
+				fs := float64(max(11, el.FontSize)) * scale
+				cx := ox + float64(eb.X+eb.W/2)*scale
+				cy := oy + float64(eb.Y+eb.H/2)*scale
+				lines := strings.Split(txt, "\n")
+				lh := fs * 1.3
+				startY := cy - float64(len(lines)-1)*lh/2 + fs*0.35
+				col := pdfRGBA(resolveBoardStroke(wb, el.StrokeColor, t))
+				for i, line := range lines {
+					w := estimateVectorTextWidth(line, fs)
+					x := cx - w/2
+					if el.Kind == whiteboard.KindText || el.Kind == whiteboard.KindNote {
+						x = ox + float64(eb.X+10)*scale
+					}
+					vp.DrawText(line, x, startY+float64(i)*lh, w, fs, pdf.TextStyle{Family: pdf.FontSans}, col)
+				}
+			}
+		}
+	}
+}

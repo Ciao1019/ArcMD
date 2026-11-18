@@ -162,7 +162,7 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 			if d != nil {
 				name = d.title()
 				if width >= 325 {
-					docIcon(c, a.iconTitle(d.space.ID, d.rel), 14)
+					fileIcon(c, d.rel, a.iconTitle(d.space.ID, d.rel), 14)
 				}
 			}
 			ui.Text(c, name).FontSize(12).SingleLine().Grow(1).MinWidth(0).TextColor(t.TextMuted)
@@ -181,7 +181,7 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 			run(func() { a.openPalette(); a.palette.pane = pane })
 		}
 		if d != nil && full && width >= 480 && d.loadErr == nil && !d.source {
-			d.ed.Corner(c)
+			a.documentCorner(c, d)
 		}
 		if full {
 			options := iconButton(c, "options", iconSplit, fmt.Sprintf(i18n.T("分屏 %d 选项"), index+1), i18n.T("分屏选项"), false).Size(26, 26)
@@ -370,6 +370,36 @@ func (a *App) splitDropTargetFor(c *ui.Context, target ui.Element, index int) {
 	}
 	r := target.Bounds()
 	x, y, _ := target.PointerPosition()
+	var targetDoc *document
+	if index >= 0 && a.split != nil && index < len(a.split.panes) {
+		targetDoc = a.split.panes[index].doc
+	} else if a.split == nil {
+		targetDoc = a.doc
+	}
+	if targetDoc != nil && targetDoc.isWhiteboard() && !targetDoc.boardReadOnly &&
+		r.W > 180 && r.H > 180 && x > 72 && x < r.W-72 && y > 72 && y < r.H-72 {
+		if ok {
+			a.dragGrab.consumed = true
+			if index >= 0 {
+				a.focusPane(index, false)
+			}
+			a.boardDropDocCard(targetDoc, x, y, d.space, d.rel)
+			return
+		}
+		fill, rim := splitDropColors(c.Theme())
+		target.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			cw, ch := float32(204), float32(66)
+			cx := max(r.X+16, min(r.X+r.W-16-cw, r.X+x-cw/2))
+			cy := max(r.Y+16, min(r.Y+r.H-16-ch, r.Y+y-ch/2))
+			card := ui.Rect{X: cx, Y: cy, W: cw, H: ch}
+			p.Fill(card, fill, 10)
+			p.StrokeDashed(card, rim, 10, 1.5)
+			sp := ui.Span{Text: i18n.T("松手生成文档关联卡"), Size: 12.5, Weight: 600, Font: "system-ui", Color: rim}
+			tw, th := p.MeasureText(cw-16, sp)
+			p.RichText(card.X+(card.W-tw)/2, card.Y+(card.H-th)/2, cw-16, sp)
+		})
+		return
+	}
 	vertical := min(y, r.H-y) < min(x, r.W-x)
 	if a.split != nil {
 		vertical = a.split.vertical
@@ -435,7 +465,7 @@ func (a *App) splitSidebarRow(c *ui.Context, sp *space.Space) {
 			}
 			cell.Children(func() {
 				if p.doc != nil {
-					docIcon(c, a.iconTitle(p.doc.space.ID, p.doc.rel), 14)
+					fileIcon(c, p.doc.rel, a.iconTitle(p.doc.space.ID, p.doc.rel), 14)
 				} else {
 					ui.Icon(c, iconSplit).FontSize(14)
 				}

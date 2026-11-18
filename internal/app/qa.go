@@ -18,6 +18,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/spacefs"
 	"github.com/Ciao1019/ArcMD/internal/vault"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -220,6 +221,13 @@ func (a *App) qaSession(spaceID string) *qaSession {
 // QAPage is a document file as the agent reads it: its Markdown, each
 // line knowing its top-level block.
 func QAPage(name, content string) (*spacefs.Page, error) {
+	if vault.IsWhiteboard(name) {
+		scene, err := whiteboard.Decode(content)
+		if err != nil {
+			return nil, err
+		}
+		return pageOfWhiteboard(name, scene), nil
+	}
 	var doc *model.Document
 	if strings.EqualFold(path.Ext(name), ".arcmd") {
 		d, err := model.Decode(content)
@@ -231,6 +239,15 @@ func QAPage(name, content string) (*spacefs.Page, error) {
 		doc = editor.ImportMarkdown(content)
 	}
 	return pageOfDocument(name, doc), nil
+}
+
+func pageOfWhiteboard(name string, scene *whiteboard.Scene) *spacefs.Page {
+	lines := scene.MarkdownSummary()
+	out := make([]spacefs.Part, len(lines))
+	for i, l := range lines {
+		out[i] = spacefs.Part{Block: l.ElementID, Text: l.Text}
+	}
+	return spacefs.PageOf(name, out)
 }
 
 func pageOfDocument(name string, doc *model.Document) *spacefs.Page {
@@ -268,7 +285,11 @@ func (a *App) qaSpace(spaceID string) *spacefs.FS {
 	live := map[string]*spacefs.Page{}
 	for _, d := range a.residentDocuments() {
 		if d.space == sp && d.loadErr == nil && d.dirty() {
-			live[d.rel] = pageOfDocument(d.rel, d.ed.Doc)
+			if d.isWhiteboard() {
+				live[d.rel] = pageOfWhiteboard(d.rel, d.board.Scene)
+			} else {
+				live[d.rel] = pageOfDocument(d.rel, d.ed.Doc)
+			}
 		}
 	}
 	fs.SetLive(live)
@@ -461,6 +482,24 @@ func (a *App) openCitation(spaceID string, c agent.Citation) {
 	fs := a.qa.spaces[spaceID]
 	if fs == nil || !a.openAnywhere(spaceID, c.Path) || a.doc == nil || a.doc.loadErr != nil {
 		a.notify("找不到引用的文档：%s", c.Path)
+		return
+	}
+	if a.doc.isWhiteboard() {
+		page, err := fs.Page(c.Path)
+		if err != nil {
+			return
+		}
+		at, ok := page.Locate(c.From)
+		if !ok {
+			return
+		}
+		if at.Block != "" {
+			a.doc.board.RevealElement(at.Block)
+			return
+		}
+		if elems := a.doc.board.Scene.Elements; at.Index >= 0 && at.Index < len(elems) {
+			a.doc.board.RevealElement(elems[at.Index].ID)
+		}
 		return
 	}
 	if a.doc.source {

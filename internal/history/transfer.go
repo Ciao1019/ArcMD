@@ -107,10 +107,7 @@ func CopyTo(fromRoot, from, toRoot, to string, rewrite func(string, string) (str
 				recordRemap(relDir, origBase, filepath.Base(target))
 				return nil
 			}
-			ext := filepath.Ext(target)
-			if ext != ".md" && ext != ".arcmd" {
-				ext = ".md"
-			}
+			ext := snapshotExt(target)
 			base := strings.TrimSuffix(filepath.Base(target), ext)
 			kept := strings.HasSuffix(base, "~")
 			at, err := time.ParseInLocation(stamp, strings.TrimSuffix(base, "~"), time.Local)

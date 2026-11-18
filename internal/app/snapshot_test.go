@@ -153,6 +153,7 @@ func TestSnapshot(t *testing.T) {
 				ed.RequestFocus = true
 				tt.Frame()
 				tt.Key(ui.Cmd, ui.KeyA)
+				tt.Key(ui.Cmd, ui.KeyA)
 				tt.Key(ui.Cmd, ui.KeyC)
 				tt.Key(0, ui.KeyBackspace)
 				tt.Key(ui.Cmd, ui.KeyV)

@@ -35,6 +35,7 @@ func ctrlCmd() ui.Modifiers {
 var bindings = []binding{
 	{id: "palette", label: "命令栏", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyK), combo(ui.Cmd, ui.KeyL), combo(ui.Cmd, ui.KeyP)}},
 	{id: "new-doc", label: "新建文档", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyN)}},
+	{id: "new-board", label: "新建白板", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyB)}},
 	{id: "new-folder", label: "新建文件夹", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyN)}},
 	{id: "daily", label: "今日笔记", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyT)}},
 	{id: "replace-all", label: "在所有文档中查找和替换", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyR)}},

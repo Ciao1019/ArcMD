@@ -33,13 +33,23 @@ type Engine struct {
 	hidden               map[string]string
 	textChange           TextChange
 	OnBeforeChange       func()
+	OnBeforeLeafChange   func(id string, runs []Run)
 }
 
 func (e *Engine) notifyBeforeChange() {
+	e.OnBeforeLeafChange = nil
 	if fn := e.OnBeforeChange; fn != nil {
 		e.OnBeforeChange = nil
 		fn()
 	}
+}
+
+func (e *Engine) notifyBeforeLeafChange(id string, runs []Run) {
+	if fn := e.OnBeforeLeafChange; fn != nil {
+		fn(id, runs)
+		return
+	}
+	e.notifyBeforeChange()
 }
 
 func NewEngine(doc *Document) *Engine { return &Engine{Doc: doc.Clone()} }
@@ -444,6 +454,10 @@ func (e *Engine) Enter(soft bool) {
 		return
 	}
 	if !soft && e.Anchor == e.Caret && leaf.Block.Text() == "" && (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task" || leaf.Block.Kind == "quote" || leaf.Block.Kind == "toggle") {
+		if (leaf.Block.Kind == "bullet" || leaf.Block.Kind == "numbered" || leaf.Block.Kind == "task") && leaf.Block.Indent > 0 {
+			e.Indent(-1)
+			return
+		}
 		e.SetKind("paragraph", 0)
 		return
 	}
@@ -451,7 +465,29 @@ func (e *Engine) Enter(soft bool) {
 		e.enterToggle(b)
 		return
 	}
-	e.Replace(min(e.Anchor, e.Caret), max(e.Anchor, e.Caret), "\n")
+	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+	first := e.LeafAt(a)
+	if first.Block.Kind == "code" && e.LeafAt(z).Block.ID == first.Block.ID && !isWhiteboardBlockLang(first.Block) {
+		text := first.Block.Text()
+		ba := ByteOffset(text, a-first.Start)
+		bz := ByteOffset(text, z-first.Start)
+		lineStart := 0
+		if nl := strings.LastIndexByte(text[:ba], '\n'); nl >= 0 {
+			lineStart = nl + 1
+		}
+		indentEnd := lineStart
+		for indentEnd < ba && (text[indentEnd] == ' ' || text[indentEnd] == '\t') {
+			indentEnd++
+		}
+		indent := text[lineStart:indentEnd]
+		replaceFrom := a
+		if indentEnd == ba && indent != "" && (bz == len(text) || text[bz] == '\n' || text[bz] == '\r') {
+			replaceFrom = first.Start + Len(text[:lineStart])
+		}
+		e.Replace(replaceFrom, z, "\n"+indent)
+		return
+	}
+	e.Replace(a, z, "\n")
 }
 
 // OpenToggle gives the toggle id an empty line of content, indented under
@@ -722,7 +758,7 @@ func (e *Engine) applyFormat(change func(*Style)) {
 				}
 				next := Compact(append(append(SliceRuns(runs, 0, localA), middle...), SliceRuns(runs, localZ, first.End-first.Start)...))
 				if !slices.Equal(runs, next) {
-					e.notifyBeforeChange()
+					e.notifyBeforeLeafChange(first.Block.ID, runs)
 					i := e.leafIDs[first.Block.ID]
 					entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, first.Block.ID, slices.Clone(runs)}
 					first.Block.Runs = next
@@ -871,8 +907,143 @@ func (e *Engine) Align(align string) {
 	e.Edit(func() { e.LeafAt(e.Caret).Block.Align = align })
 }
 
+func isWhiteboardBlockLang(b *Block) bool {
+	if b.Kind != "code" {
+		return false
+	}
+	lang := strings.TrimSpace(b.Language)
+	return strings.EqualFold(lang, "excalidraw") || strings.EqualFold(lang, "whiteboard")
+}
+
 func (e *Engine) Indent(delta int) {
-	e.Edit(func() { b := e.LeafAt(e.Caret).Block; b.Indent = max(0, min(12, b.Indent+delta)) })
+	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+	e.Edit(func() {
+		if a == z {
+			b := e.LeafAt(a).Block
+			if b.Kind != "cell" {
+				b.Indent = max(0, min(12, b.Indent+delta))
+			}
+			return
+		}
+		seen := map[string]bool{}
+		for _, leaf := range e.Doc.Leaves() {
+			if leaf.End < a || leaf.Start > z {
+				continue
+			}
+			if leaf.Start == z && leaf.Start > a {
+				continue
+			}
+			if leaf.Block.Kind == "cell" || seen[leaf.Block.ID] {
+				continue
+			}
+			seen[leaf.Block.ID] = true
+			leaf.Block.Indent = max(0, min(12, leaf.Block.Indent+delta))
+		}
+	})
+}
+
+// IndentCode indents or outdents lines within a single code or raw block.
+// Forward Tab only handles multi-line selections (returning false otherwise so
+// the caller inserts a literal tab); backward Shift+Tab handles both collapsed
+// carets and selections.
+func (e *Engine) IndentCode(remove bool) bool {
+	if e.ReadOnly {
+		return false
+	}
+	a, z := min(e.Anchor, e.Caret), max(e.Anchor, e.Caret)
+	leaf := e.LeafAt(a)
+	if (leaf.Block.Kind != "code" && leaf.Block.Kind != "raw") || e.LeafAt(z).Block.ID != leaf.Block.ID || isWhiteboardBlockLang(leaf.Block) {
+		return false
+	}
+	text := leaf.Block.Text()
+	localA, localZ := a-leaf.Start, z-leaf.Start
+	ba, bz := ByteOffset(text, localA), ByteOffset(text, localZ)
+	if !remove && (a == z || !strings.ContainsRune(text[ba:bz], '\n')) {
+		return false
+	}
+	firstLineStart := 0
+	if nl := strings.LastIndexByte(text[:ba], '\n'); nl >= 0 {
+		firstLineStart = nl + 1
+	}
+	effectiveBZ := bz
+	if bz > ba && text[bz-1] == '\n' && bz-1 >= firstLineStart {
+		effectiveBZ = bz - 1
+	}
+
+	type lineEdit struct {
+		uLine int
+		rem   int
+	}
+	var edits []lineEdit
+	linePos := firstLineStart
+	for linePos <= effectiveBZ {
+		lineEnd := len(text)
+		if nl := strings.IndexByte(text[linePos:], '\n'); nl >= 0 {
+			lineEnd = linePos + nl
+		}
+		uLine := Len(text[:linePos])
+		if !remove {
+			edits = append(edits, lineEdit{uLine: uLine})
+		} else {
+			rem := 0
+			if strings.HasPrefix(text[linePos:lineEnd], "\t") {
+				rem = 1
+			} else {
+				for rem < 4 && linePos+rem < lineEnd && text[linePos+rem] == ' ' {
+					rem++
+				}
+			}
+			if rem > 0 {
+				edits = append(edits, lineEdit{uLine: uLine, rem: rem})
+			}
+		}
+		if lineEnd >= len(text) {
+			break
+		}
+		linePos = lineEnd + 1
+	}
+	if len(edits) == 0 {
+		return true
+	}
+
+	runs := leaf.Block.Runs
+	blockLen := leaf.End - leaf.Start
+	var out []Run
+	prev := 0
+	newA, newZ := localA, localZ
+	for _, ed := range edits {
+		if ed.uLine > prev {
+			out = append(out, SliceRuns(runs, prev, ed.uLine)...)
+		}
+		if !remove {
+			out = append(out, Run{Text: "\t"})
+			if localA > ed.uLine {
+				newA++
+			}
+			if localZ > ed.uLine {
+				newZ++
+			}
+			prev = ed.uLine
+		} else {
+			newA -= min(ed.rem, max(0, localA-ed.uLine))
+			newZ -= min(ed.rem, max(0, localZ-ed.uLine))
+			prev = ed.uLine + ed.rem
+		}
+	}
+	if prev < blockLen {
+		out = append(out, SliceRuns(runs, prev, blockLen)...)
+	}
+
+	newAnchor, newCaret := leaf.Start+newA, leaf.Start+newZ
+	if e.Anchor > e.Caret {
+		newAnchor, newCaret = newCaret, newAnchor
+	}
+	if e.depth > 0 {
+		leaf.Block.Runs = Compact(out)
+		e.Anchor, e.Caret = newAnchor, newCaret
+		return true
+	}
+	return e.ReplaceBlockRuns(leaf.Block.ID, out, newAnchor, newCaret, e.Typing, e.Explicit)
 }
 
 func (e *Engine) ResizeTable(rows bool, delta int) {

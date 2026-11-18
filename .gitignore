@@ -17,3 +17,10 @@
 # Update signing keys belong outside the repository.
 mygo-update.key
 *.private-key
+
+# Local benchmark binaries and generated promo/video scripts
+/perf
+/brag-output/
+/promo-output/
+/xiaohongshu-output/
+/tools/readme-video/

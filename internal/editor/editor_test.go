@@ -79,7 +79,8 @@ func TestIMEIsOneRichTransaction(t *testing.T) {
 	}
 	tt.Compose("候选", 2)
 	tt.Key(0, ui.KeyEscape)
-	if !reflect.DeepEqual(e.Doc, before) {
+	tt.Compose("", 0)
+	if !reflect.DeepEqual(e.Doc, before) || e.Composing() {
 		t.Fatal("cancel changed rich content")
 	}
 }
@@ -1030,6 +1031,15 @@ func TestBlockMenuFitsShortViewport(t *testing.T) {
 		if label == "一级标题" {
 			minH = 24
 		}
+		assertWithin(label, minH*0.95, 640, 620)
+	}
+	tt.Advance(150 * time.Millisecond)
+	tt.Frame()
+	for _, label := range []string{"一级标题", "缩进和对齐", "剪切", "复制", "创建副本", "删除", "上移", "下移", "添加书签", "在下方添加"} {
+		minH := float32(32)
+		if label == "一级标题" {
+			minH = 24
+		}
 		assertWithin(label, minH, 640, 620)
 	}
 	if err := tt.Click("创建副本"); err != nil {
@@ -1046,7 +1056,8 @@ func TestBlockMenuFitsShortViewport(t *testing.T) {
 	lastID = e.Doc.Blocks[len(e.Doc.Blocks)-1].ID
 	e.OpenBlockMenu(lastID, "")
 	tt.Frame()
-	assertWithin("一级标题", 24, 640, 620)
+	assertWithin("一级标题", 24*0.95, 640, 620)
+	tt.Advance(150 * time.Millisecond)
 	e.menuScroll.Y = 1e6
 	tt.Frame()
 	assertWithin("在下方添加", 32, 640, 620)
@@ -1063,6 +1074,11 @@ func TestBlockMenuFitsShortViewport(t *testing.T) {
 	e.Engine.Indent(1)
 	e.sync()
 	e.OpenBlockMenu(lastID, "indent")
+	tt.Frame()
+	for _, label := range []string{"左对齐", "居中对齐", "右对齐", "增加缩进", "减少缩进"} {
+		assertWithin(label, 32*0.95, 500, 620)
+	}
+	tt.Advance(150 * time.Millisecond)
 	tt.Frame()
 	for _, label := range []string{"左对齐", "居中对齐", "右对齐", "增加缩进", "减少缩进"} {
 		assertWithin(label, 32, 500, 620)
@@ -1091,9 +1107,15 @@ func TestBlockMenuFitsShortViewport(t *testing.T) {
 	}
 	e.OpenBlockMenu(midHandle.id, "")
 	tt.Frame()
-	topCell := assertWithin("一级标题", 24, 640, 720)
+	topCell := assertWithin("一级标题", 24*0.95, 640, 720)
 	if !(topCell.Y+topCell.H <= handleWin.Y || topCell.Y >= handleWin.Y+handleWin.H) {
 		t.Fatalf("menu overlaps handle rect %+v: top cell at %+v", handleWin, topCell)
+	}
+	tt.Advance(150 * time.Millisecond)
+	tt.Frame()
+	topCell = assertWithin("一级标题", 24, 640, 720)
+	if !(topCell.Y+topCell.H <= handleWin.Y || topCell.Y >= handleWin.Y+handleWin.H) {
+		t.Fatalf("settled menu overlaps handle rect %+v: top cell at %+v", handleWin, topCell)
 	}
 	e.menuScroll.Y = 1e6
 	tt.Frame()
@@ -1117,6 +1139,7 @@ func TestBlockMenuFitsShortViewport(t *testing.T) {
 	lastID = e.Doc.Blocks[len(e.Doc.Blocks)-1].ID
 	e.OpenBlockMenu(lastID, "")
 	tt.Frame()
+	tt.Advance(150 * time.Millisecond)
 	e.menuScroll.Y = 1e6
 	tt.Frame()
 	assertWithin("在下方添加", 32, 640, 300)
@@ -1137,6 +1160,9 @@ func TestBlockMenuFitsShortViewport(t *testing.T) {
 	n := len(e.Doc.Blocks)
 	e.SelectBlocks(e.Doc.Blocks[n-2].ID, e.Doc.Blocks[n-1].ID)
 	e.OpenBlockMenu(e.Doc.Blocks[n-2].ID, "")
+	tt.Frame()
+	assertWithin("下移", 32*0.95, 640, 620)
+	tt.Advance(150 * time.Millisecond)
 	tt.Frame()
 	assertWithin("下移", 32, 640, 620)
 	if err := tt.Click("下移"); err != nil {

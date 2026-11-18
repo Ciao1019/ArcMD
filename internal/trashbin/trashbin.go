@@ -198,7 +198,7 @@ func (b Bin) Restore(it Item, root string) (string, error) {
 		}
 	}
 	name := path.Base(it.Path)
-	ext := path.Ext(name)
+	ext := vault.FileExt(name)
 	if it.Dir {
 		ext = ""
 	}

@@ -143,10 +143,15 @@ func (e *Engine) Join(backward bool) bool {
 		case isRule(here.Block) || isMedia(here.Block) && here.Block.Text() == "":
 			e.removeLeaf(here, backward)
 		case backward && here.Block.Kind != "paragraph" && here.Block.Kind != "cell" && !isMedia(here.Block) && !(isVerbatim(here.Block) && here.Block.Text() != ""):
-			// Backspace at the start of a styled block drops the style first,
-			// as in Notion and Yuque: an emptied callout or heading becomes a
-			// paragraph, and the next Backspace joins it to the block above.
+			// Backspace at the start of a styled block outdents nested lists first
+			// and then drops the style to a paragraph, so the next Backspace joins
+			// it to the block above.
 			b := here.Block
+			if (b.Kind == "bullet" || b.Kind == "numbered" || b.Kind == "task") && b.Indent > 0 {
+				b.Indent--
+				e.Anchor, e.Caret = here.Start, here.Start
+				return
+			}
 			b.Kind, b.Level, b.Checked, b.Language, b.Color, b.URL = "paragraph", 0, false, "", "", ""
 			e.Anchor, e.Caret = here.Start, here.Start
 		case there == nil:

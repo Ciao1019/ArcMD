@@ -172,6 +172,8 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.cyclePane()
 	case a.pressed(c, "new-doc"):
 		a.newDoc(a.currentDir())
+	case a.pressed(c, "new-board"):
+		a.newWhiteboard(a.currentDir())
 	case a.pressed(c, "new-folder"):
 		a.newFolder(a.currentDir())
 	case a.pressed(c, "daily"):
@@ -411,7 +413,11 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 	}
 	page.Children(func() {
 		a.conflictBarFor(c, d)
-		editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, cardWidth, false, d))
+		if d.isWhiteboard() {
+			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
+		} else {
+			editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, cardWidth, false, d))
+		}
 	})
 }
 
@@ -451,9 +457,7 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Box(c).Width(8)
 		a.address(c)
 		ui.Box(c).Width(8)
-		if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
-			a.doc.ed.Corner(c)
-		}
+		a.documentCorner(c, a.doc)
 		ask := iconButton(c, "ask", iconAsk, i18n.T("问答"), a.withKey(i18n.T("向当前空间提问"), "ask"), a.state.ActiveSpace() == nil)
 		if a.qa.open {
 			ask.Background(glass(c.Theme()))
@@ -486,7 +490,7 @@ func (a *App) address(c *ui.Context) {
 			ui.Text(c, i18n.T("搜索或打开文档")).TextColor(t.TextMuted).NoWrap()
 			return
 		}
-		docIcon(c, a.iconTitle(a.doc.space.ID, a.doc.rel), 16)
+		fileIcon(c, a.doc.rel, a.iconTitle(a.doc.space.ID, a.doc.rel), 16)
 		sp := a.doc.space
 		parts := []string{sp.Name}
 		if dir := path.Dir(a.doc.rel); dir != "." {

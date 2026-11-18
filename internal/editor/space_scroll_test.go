@@ -56,7 +56,14 @@ func TestReadOnlySpaceStillPages(t *testing.T) {
 	tt.ClickAt(350, 290)
 	before, scroll := e.Text(), e.Scroll.Y
 	tt.TypeKey(0, ui.KeySpace, " ")
-	if e.Scroll.Y <= scroll || e.Text() != before {
-		t.Fatal("read-only Space should page without editing")
+	tt.Frame()
+	if e.Scroll.Y <= scroll || e.Text() != before || !e.refusedAt.IsZero() {
+		t.Fatalf("read-only Space should page down without editing or refusing: scroll=%v (was %v), refusedAt=%v", e.Scroll.Y, scroll, e.refusedAt)
+	}
+	down := e.Scroll.Y
+	tt.TypeKey(ui.Shift, ui.KeySpace, " ")
+	tt.Frame()
+	if e.Scroll.Y >= down || e.Text() != before || !e.refusedAt.IsZero() {
+		t.Fatalf("read-only Shift+Space should page up without editing or refusing: scroll=%v (was %v), refusedAt=%v", e.Scroll.Y, down, e.refusedAt)
 	}
 }

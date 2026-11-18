@@ -9,7 +9,7 @@ ArcMD 是一个开源的原生富文本文档编辑器，交互和气质参考 A
 | 项 | 版本 / 说明 |
 | --- | --- |
 | Go | 1.27.3（`go.mod` 要求；本地较旧时 `GOTOOLCHAIN=auto` 会自动下载） |
-| UI | `github.com/egoist/mygo` v0.7.4：`mygo`（窗口、菜单、对话框、Shell）、`ui`（即时模式控件）、`ui.ShapeRichText` / `ui.TextInputClient`（底层字形排版与系统输入接口） |
+| UI | `github.com/egoist/mygo` v0.10.0：`mygo`（窗口、菜单、对话框、Shell）、`ui`（即时模式控件）、`ui.ShapeRichText` / `ui.TextInputClient`（底层字形排版与系统输入接口） |
 | 其他依赖 | `golang.org/x/net/html`（HTML 粘贴的解析；MyGo 已间接依赖，不新增模块） |
 | cgo | **禁止**。所有代码必须能以 `CGO_ENABLED=0` 构建（与 MyGo 一致） |
 | 平台 | macOS 为主力，Linux / Windows 必须能交叉编译通过 |
@@ -42,10 +42,11 @@ internal/templates/   空间模板（.arcmd/templates）与今日笔记：列出
 internal/spacefs/     问答 Agent 读文档的只读视图：每篇文档投影成带行号的 Markdown（行 → 顶层块与纯文本行），search / glob / grep / read / outline / links 与空间概览，未保存内容作为 live 页面叠加（不依赖 UI）
 internal/agent/       问答 Agent：与服务无关的消息模型、工具调用循环（并行工具、步数与上下文预算、重试、取消）、Chat Completions 流式适配器、服务预设、系统提示与 [路径#L12-L18] 引用解析（不依赖 UI）
 internal/i18n/        界面语言：i18n.T 把中文界面文字查成当前语言（en.go 是英文对照表），Pick 按系统语言选择（不依赖 UI）
+internal/whiteboard/  Excalidraw 风格手绘白板：场景模型、两栖 .excalidraw.svg 编解码、Rough 矢量曲线、几何绑定与撤销栈（不依赖 UI）
 docs/                 architecture.md（架构）、plugins.md（插件与市场规范）
 ```
 
-**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, trashbin, prefs, pdf, update, templates, i18n, agent, spacefs}`，`editor → {document, wiki, tex, mermaid, pdf, i18n}`，`fuzzy → pinyin`，`search → wiki`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/trashbin/prefs/pdf/update/templates/i18n/agent/spacefs）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
+**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, trashbin, prefs, pdf, update, templates, i18n, agent, spacefs, whiteboard}`，`editor → {document, wiki, tex, mermaid, pdf, i18n, whiteboard}`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/trashbin/prefs/pdf/update/templates/i18n/agent/spacefs/whiteboard）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
 
 ## 常用命令
 
@@ -65,7 +66,7 @@ gofmt -l .                                           # 必须无输出
 ## MyGo 使用约定
 
 - **先查源码，不要凭印象写 API。** MyGo 更新很快，网上资料常常过时。以 module cache 中当前版本为准：
-  `go doc github.com/egoist/mygo/ui <Name>`，或读 `$(go env GOMODCACHE)/github.com/egoist/mygo@v0.7.4/`（`docs/`、`examples/` 很全，`examples/notes`、`examples/code-editor`、`examples/markdown-chat` 与本项目最接近）。
+  `go doc github.com/egoist/mygo/ui <Name>`，或读 `$(go env GOMODCACHE)/github.com/egoist/mygo@v0.10.0/`（`docs/`、`examples/` 很全，`examples/notes`、`examples/code-editor`、`examples/markdown-chat` 与本项目最接近）。
 - **即时模式**：`App.View(c)` 每帧从状态重建界面。状态放在 `App`（或其子结构）里，控件通过指针绑定（`&a.layout`、`&a.palette.query`），不要在控件里藏状态。
 - **稳定身份**：列表、循环中创建的控件用 `c.Key(id)` 给稳定 key，否则焦点/动画/滚动会串。
 - **线程**：View 和回调都在主线程。阻塞操作（`mygo.Dialog.*`、网络、大量 IO）放到 goroutine，结果用 `win.Update(func(){...})` 回到主线程。小文件的读写（打开/保存单个文档）可以在主线程。
@@ -175,6 +176,7 @@ gofmt -l .                                           # 必须无输出
   | --- | --- |
   | ⌘K / ⌘L / ⌘P | 命令栏（点击地址栏同效） |
   | ⌘N / ⇧⌘N | 在当前文件夹新建文档 / 文件夹 |
+  | ⌥⌘B | 在当前文件夹新建白板 |
   | ⌘\ | 收起/展开侧边栏 |
   | ⌘, | 设置 |
   | ⇧⌘M | 富文本 ⇄ Markdown 导出预览（只读） |

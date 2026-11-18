@@ -86,6 +86,12 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	for _, d := range docs {
 		target := to + d.rel[len(rel):]
 		for old := range d.urls {
+			if vault.IsWhiteboard(old) {
+				clean := strings.TrimPrefix(path.Clean(unescapeImagePath(old)), "/")
+				if !strings.HasPrefix(clean, assetsDir+"/") && !strings.Contains(clean, "/"+assetsDir+"/") {
+					continue
+				}
+			}
 			file, resolveErr := resolveSpaceImage(src, d.rel, old)
 			if resolveErr != nil {
 				continue
@@ -144,6 +150,10 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		if d.live == nil {
 			continue
 		}
+		if d.live.isWhiteboard() {
+			d.live.diskText = d.original
+			continue
+		}
 		d.live.ed.RelocateImages(d.urls)
 		text, _ := relocateText(d.rel, d.original, d.urls)
 		d.live.diskText = text
@@ -192,6 +202,10 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 			return nil, err
 		}
 		d := &movingDocument{rel: p.Path, original: text, urls: map[string]string{}, live: live}
+		if vault.IsWhiteboard(p.Path) {
+			docs = append(docs, d)
+			continue
+		}
 		collect := func(text string) error {
 			doc, err := imageDocument(p.Path, text)
 			if err != nil {
@@ -227,6 +241,9 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 }
 
 func imageDocument(rel, text string) (*model.Document, error) {
+	if vault.IsWhiteboard(rel) {
+		return model.New(), nil
+	}
 	if vault.IsMarkdown(rel) {
 		if strings.HasPrefix(strings.TrimSpace(text), "{") {
 			if doc, err := model.Decode(text); err == nil {
@@ -239,6 +256,9 @@ func imageDocument(rel, text string) (*model.Document, error) {
 }
 
 func relocateText(rel, text string, urls map[string]string) (string, error) {
+	if vault.IsWhiteboard(rel) {
+		return text, nil
+	}
 	changed := false
 	for old, newURL := range urls {
 		changed = changed || old != newURL
@@ -278,8 +298,8 @@ func relocateText(rel, text string, urls map[string]string) (string, error) {
 
 func relocateImage(root, dir, original string, data []byte) (string, string, error) {
 	decoded := unescapeImagePath(original)
-	stem := strings.TrimSuffix(assetName(path.Base(decoded)), path.Ext(decoded))
-	ext := path.Ext(decoded)
+	ext := vault.FileExt(decoded)
+	stem := strings.TrimSuffix(assetName(path.Base(decoded)), ext)
 	for i := 0; ; i++ {
 		candidate, label := path.Join(dir, decoded), original
 		if i > 0 {

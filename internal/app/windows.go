@@ -158,13 +158,11 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 		top := ui.Row(c.Key("window-bar")).Height(max(44, bar.Height)).PaddingX(12).Gap(8).AlignItems(ui.Center).DragWindow()
 		top.Children(func() {
 			ui.Box(c).Width(bar.Left)
-			docIcon(c, a.iconTitle(d.space.ID, d.rel), 16)
+			fileIcon(c, d.rel, a.iconTitle(d.space.ID, d.rel), 16)
 			ui.Text(c, docName(d.title())).FontSize(13).FontWeight(600).SingleLine().Shrink(1).MinWidth(0)
 			ui.Text(c, d.space.Name).FontSize(12).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
 			ui.Box(c).Grow(1)
-			if d.loadErr == nil {
-				d.ed.Corner(c)
-			}
+			a.documentCorner(c, d)
 			if iconButton(c, "window-main", iconWindowBack, i18n.T("在主窗口中打开"), i18n.T("在主窗口中打开"), false).Clicked() {
 				a.backToMain(w)
 			}
@@ -172,6 +170,10 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 		})
 		if d.loadErr != nil {
 			ui.Text(c, i18n.T("文档无法打开。")+d.loadErr.Error()).TextColor(t.Danger).Padding(24)
+			return
+		}
+		if d.isWhiteboard() {
+			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
 			return
 		}
 		width, _ := c.Size()

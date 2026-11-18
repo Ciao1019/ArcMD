@@ -211,11 +211,12 @@ func TestLargeDocument200kInteractiveEditingAndIME(t *testing.T) {
 		tt.Compose("nihao", 5)
 		tt.Type("你好")
 	}
-	// Cancel an active composition via Escape.
+	// Cancel an active composition via OS IME end.
 	tt.Compose("quxiao", 6)
 	tt.Key(0, ui.KeyEscape)
+	tt.Compose("", 0)
 	if e.Composing() {
-		t.Fatal("Escape did not cancel active composition")
+		t.Fatal("IME cancel did not end active composition")
 	}
 	// Undo last committed Chinese word via Cmd+Z.
 	tt.Key(ui.Cmd, ui.KeyZ)

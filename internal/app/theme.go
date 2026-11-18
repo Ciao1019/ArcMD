@@ -1,12 +1,14 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"math"
 	"math/rand/v2"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -516,6 +518,40 @@ func pageStyle(dark bool) editor.Page {
 			"yellow": {Fill: ui.Hex("#FFF5EB"), Border: ui.Hex("#FED4A4"), Icon: ui.Hex("#DE7802")},
 			"red":    {Fill: ui.Hex("#FEF1F1"), Border: ui.Hex("#FBBFBC"), Icon: ui.Hex("#D83931")},
 		},
+		Whiteboard: editor.WhiteboardStyle{
+			Canvas:       ui.Hex("#FFFFFF"),
+			Grid:         ui.Hex("#1F232914"),
+			IslandFill:   ui.Hex("#FFFFFFF2"),
+			IslandBorder: ui.Hex("#DEE0E3"),
+			IslandShadow: ui.Hex("#1F23291C"),
+			ActiveFill:   ui.Hex("#ECEAFF"),
+			ActiveInk:    ui.Hex("#5B5BD6"),
+			Selection:    ui.Hex("#5B5BD6"),
+			HandleFill:   ui.Hex("#FFFFFF"),
+			Guide:        ui.Hex("#E03131"),
+			NoteFill:     ui.Hex("#FFF9DB"),
+			NoteBorder:   ui.Hex("#F08C00"),
+			FrameStroke:  ui.Hex("#C5C9D0"),
+			FrameLabel:   ui.Hex("#646A73"),
+			Strokes: map[string]ui.Color{
+				"ink":    ui.Hex("#1E1E1E"),
+				"gray":   ui.Hex("#6B7280"),
+				"red":    ui.Hex("#E03131"),
+				"orange": ui.Hex("#F08C00"),
+				"green":  ui.Hex("#2F9E44"),
+				"blue":   ui.Hex("#1971C2"),
+				"purple": ui.Hex("#6741D9"),
+			},
+			Fills: map[string]ui.Color{
+				"ink":    ui.Hex("#E9ECEF"),
+				"gray":   ui.Hex("#E5E7EB"),
+				"red":    ui.Hex("#FFC9C9"),
+				"orange": ui.Hex("#FFEC99"),
+				"green":  ui.Hex("#B2F2BB"),
+				"blue":   ui.Hex("#A5D8FF"),
+				"purple": ui.Hex("#D0BFFF"),
+			},
+		},
 	}
 }
 
@@ -601,7 +637,64 @@ func darkPageStyle() editor.Page {
 			"yellow": {Fill: ui.Hex("#3B2D21"), Border: ui.Hex("#694824"), Icon: ui.Hex("#FF9A2E")},
 			"red":    {Fill: ui.Hex("#3B2527"), Border: ui.Hex("#6B3435"), Icon: ui.Hex("#F76964")},
 		},
+		Whiteboard: editor.WhiteboardStyle{
+			Canvas:       ui.Hex("#1F2023"),
+			Grid:         ui.Hex("#FFFFFF14"),
+			IslandFill:   ui.Hex("#2A2B30F2"),
+			IslandBorder: ui.Hex("#393B40"),
+			IslandShadow: ui.Hex("#00000059"),
+			ActiveFill:   ui.Hex("#373262"),
+			ActiveInk:    ui.Hex("#A5A1FF"),
+			Selection:    ui.Hex("#8B85FF"),
+			HandleFill:   ui.Hex("#1F2023"),
+			Guide:        ui.Hex("#FF6B6B"),
+			NoteFill:     ui.Hex("#352B1D"),
+			NoteBorder:   ui.Hex("#F59F00"),
+			FrameStroke:  ui.Hex("#50535B"),
+			FrameLabel:   ui.Hex("#A2A5AB"),
+			Strokes: map[string]ui.Color{
+				"ink":    ui.Hex("#E3E4E7"),
+				"gray":   ui.Hex("#9CA3AF"),
+				"red":    ui.Hex("#FF8787"),
+				"orange": ui.Hex("#FFC078"),
+				"green":  ui.Hex("#69DB7C"),
+				"blue":   ui.Hex("#74C0FC"),
+				"purple": ui.Hex("#B197FC"),
+			},
+			Fills: map[string]ui.Color{
+				"ink":    ui.Hex("#34363C"),
+				"gray":   ui.Hex("#3F4148"),
+				"red":    ui.Hex("#592B2B"),
+				"orange": ui.Hex("#523B1E"),
+				"green":  ui.Hex("#22462E"),
+				"blue":   ui.Hex("#213B58"),
+				"purple": ui.Hex("#3B2D59"),
+			},
+		},
 	}
+}
+
+// whiteboardSVGPalette converts editor.WhiteboardStyle tokens into a pure Go SVG palette.
+func whiteboardSVGPalette(wb editor.WhiteboardStyle) whiteboard.Palette {
+	hex := func(c ui.Color) string {
+		s := c.SRGB()
+		return fmt.Sprintf("#%02X%02X%02X", s.R, s.G, s.B)
+	}
+	pal := whiteboard.Palette{
+		Background: hex(wb.Canvas),
+		NoteFill:   hex(wb.NoteFill),
+		NoteBorder: hex(wb.NoteBorder),
+		FrameLabel: hex(wb.FrameLabel),
+		Strokes:    make(map[string]string, len(wb.Strokes)),
+		Fills:      make(map[string]string, len(wb.Fills)),
+	}
+	for k, v := range wb.Strokes {
+		pal.Strokes[k] = hex(v)
+	}
+	for k, v := range wb.Fills {
+		pal.Fills[k] = hex(v)
+	}
+	return pal
 }
 
 // bannerLook are the colors of the update banners above the spaces

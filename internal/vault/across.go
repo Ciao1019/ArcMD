@@ -64,7 +64,7 @@ func MoveTo(from, rel, to, dir string) (dest string, copied bool, err error) {
 func freeName(root, dir, name string, isDir bool) (string, string, error) {
 	ext := ""
 	if !isDir {
-		ext = path.Ext(name)
+		ext = FileExt(name)
 	}
 	stem := strings.TrimSuffix(name, ext)
 	for i := 1; i < 1000; i++ {

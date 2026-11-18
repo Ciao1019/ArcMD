@@ -134,6 +134,17 @@ func (a *App) replaceEverywhere() {
 			return out
 		}
 		if d := resident[place{h.Space, h.Path}]; d != nil {
+			if d.isWhiteboard() {
+				if d.boardReadOnly {
+					skipped++
+					continue
+				}
+				if d.board.MapText(change) {
+					count, docs = count+n, docs+1
+					edited = append(edited, d)
+				}
+				continue
+			}
 			if d.ed.ReadOnly {
 				skipped++
 				continue
@@ -150,7 +161,16 @@ func (a *App) replaceEverywhere() {
 			continue
 		}
 		d := openDocument(sp, h.Path, before, false)
-		if d.loadErr != nil || !d.ed.Engine.MapText(change) {
+		if d.loadErr != nil {
+			continue
+		}
+		var ok bool
+		if d.isWhiteboard() {
+			ok = d.board.MapText(change)
+		} else {
+			ok = d.ed.Engine.MapText(change)
+		}
+		if !ok {
 			continue
 		}
 		if err := d.save(); err != nil {
@@ -185,7 +205,11 @@ func (a *App) replaceEverywhere() {
 // replace wrote.
 func (a *App) undoReplace(files []replacedFile, edited []*document) {
 	for _, d := range edited {
-		d.ed.Undo()
+		if d.isWhiteboard() {
+			d.board.Undo()
+		} else {
+			d.ed.Undo()
+		}
 	}
 	kept := 0
 	for _, f := range files {

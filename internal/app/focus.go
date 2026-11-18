@@ -6,6 +6,7 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -48,7 +49,11 @@ func (a *App) toggleFocus() {
 	a.finishSpaceEdit()
 	a.focus = !a.focus
 	if a.doc != nil {
-		a.doc.ed.RequestFocus = true
+		if a.doc.isWhiteboard() {
+			a.doc.board.RequestFocus = true
+		} else {
+			a.doc.ed.RequestFocus = true
+		}
 	}
 }
 
@@ -68,14 +73,14 @@ func (a *App) setOutline(open bool) {
 
 // toggleOutline opens or collapses the outline of the document in front.
 func (a *App) toggleOutline() {
-	if a.doc != nil && a.doc.loadErr == nil && !a.doc.source {
+	if a.doc != nil && a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() {
 		a.doc.ed.ToggleOutline()
 	}
 }
 
 // outlineOpen reports whether the document in front shows its outline.
 func (a *App) outlineOpen() bool {
-	return a.doc != nil && a.doc.ed.OutlineOpen()
+	return a.doc != nil && !a.doc.isWhiteboard() && a.doc.ed.OutlineOpen()
 }
 
 // toggleDim fades the paragraphs but the caret's in focus mode, or not.
@@ -121,7 +126,11 @@ func (a *App) focusView(c *ui.Context) {
 			w, _ := c.Size()
 			ui.Column(c.Key("page")).Grow(1).MinHeight(0).Children(func() {
 				a.conflictBar(c)
-				editor.View(c.Key(a.doc.viewKey()), a.doc.ed, a.editorOptions(c, w-18, true))
+				if a.doc.isWhiteboard() {
+					editor.BoardView(c.Key(a.doc.viewKey()), a.doc.board, a.boardOptionsFor(c, a.doc))
+				} else {
+					editor.View(c.Key(a.doc.viewKey()), a.doc.ed, a.editorOptions(c, w-18, true))
+				}
 			})
 		})
 	})
@@ -151,39 +160,49 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		}
 	}
 	return editor.Options{
-		FontSize:        a.prefs.ReadingSize(),
-		LineHeight:      a.prefs.ReadingLine(),
-		FontFamily:      a.prefs.BodyFamily(),
-		Column:          a.prefs.Column(),
-		NoAutoPair:      a.prefs.NoAutoPair,
-		AutoSpace:       a.prefs.AutoSpace,
-		CodeNoWrap:      a.prefs.CodeNoWrap,
-		EmojiSuggest:    suggestEmoji,
-		Resizing:        a.splitResizing || a.qa.resizing,
-		Width:           width,
-		Theme:           c.Theme(),
-		Page:            pageStyle(a.paperDark),
-		Attach:          func() { run(a.pickImages) },
-		DropFiles:       func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
-		PasteImage:      func(data []byte) { run(func() { a.pasteImage(data) }) },
-		LoadImage:       func(url string) editor.ImageResource { return a.imageResourceFor(d, url) },
-		ReplaceImage:    func(id, url string) { a.pickReplacementImage(d, id, url) },
-		RevealImage:     func(url string) { a.revealImage(d, url) },
-		CropImage:       func(id, url string, r image.Rectangle) { a.cropImage(d, id, url, r) },
-		OpenLink:        func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
-		OpenWiki:        func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
-		OpenTag:         func(tag string) { run(func() { a.openTag(tag) }) },
-		PreviewWiki:     func(name string) editor.WikiPreview { return a.previewWikiFor(d, name) },
-		WikiSuggest:     func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
-		Footer:          func(c *ui.Context) { a.pageFooterFor(c, d) },
-		Typewriter:      a.prefs.Typewriter,
-		DrawAnnotations: a.prefs.DrawAnnotations,
-		Dim:             focus && !a.prefs.NoDim,
-		PickCover:       func(done func(string)) { run(func() { a.pickCover(done) }) },
-		Bindings:        a.editorBindings(),
-		Outline:         !a.prefs.OutlineClosed,
-		SetOutline:      a.setOutline,
-		Bookmarks:       a.marksOf(d),
+		FontSize:              a.prefs.ReadingSize(),
+		LineHeight:            a.prefs.ReadingLine(),
+		FontFamily:            a.prefs.BodyFamily(),
+		Column:                a.prefs.Column(),
+		NoAutoPair:            a.prefs.NoAutoPair,
+		AutoSpace:             a.prefs.AutoSpace,
+		CodeNoWrap:            a.prefs.CodeNoWrap,
+		EmojiSuggest:          suggestEmoji,
+		Resizing:              a.splitResizing || a.qa.resizing,
+		Width:                 width,
+		Theme:                 c.Theme(),
+		Page:                  pageStyle(a.paperDark),
+		Attach:                func() { run(a.pickImages) },
+		DropFiles:             func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
+		PasteImage:            func(data []byte) { run(func() { a.pasteImage(data) }) },
+		LoadImage:             func(url string) editor.ImageResource { return a.imageResourceFor(d, url) },
+		ReplaceImage:          func(id, url string) { a.pickReplacementImage(d, id, url) },
+		RevealImage:           func(url string) { a.revealImage(d, url) },
+		CropImage:             func(id, url string, r image.Rectangle) { a.cropImage(d, id, url, r) },
+		OpenLink:              func(url string) { a.navigateInPane(d, func() { a.followLink(url) }) },
+		OpenWiki:              func(name string) { a.navigateInPane(d, func() { a.openWiki(name) }) },
+		OpenTag:               func(tag string) { run(func() { a.openTag(tag) }) },
+		PreviewWiki:           func(name string) editor.WikiPreview { return a.previewWikiFor(d, name) },
+		WikiSuggest:           func(typed string) []editor.WikiItem { return a.wikiSuggestFor(d, typed) },
+		Footer:                func(c *ui.Context) { a.pageFooterFor(c, d) },
+		Typewriter:            a.prefs.Typewriter,
+		DrawAnnotations:       a.prefs.DrawAnnotations,
+		Dim:                   focus && !a.prefs.NoDim,
+		PickCover:             func(done func(string)) { run(func() { a.pickCover(done) }) },
+		Bindings:              a.editorBindings(),
+		Outline:               !a.prefs.OutlineClosed,
+		SetOutline:            a.setOutline,
+		Bookmarks:             a.marksOf(d),
+		LoadWhiteboard:        func(url string) (*whiteboard.Scene, uint64, error) { return a.loadWhiteboardFor(d, url) },
+		CreateWhiteboard:      func(scene *whiteboard.Scene) (string, error) { return a.createWhiteboardAssetFor(d, scene) },
+		SaveWhiteboard:        func(url string, scene *whiteboard.Scene) uint64 { return a.saveWhiteboardFor(d, url, scene) },
+		OpenWhiteboard:        func(url string, split bool) { a.openWhiteboardFrom(d, url, split) },
+		SaveBlockAsWhiteboard: func(blockID string, scene *whiteboard.Scene) { a.saveBlockAsWhiteboard(d, blockID, scene) },
+		BoardWikiSuggest:      func(q string) []string { return a.boardWikiNames(d, q) },
+		OpenWikiSplit:         func(name string, split bool) { a.openWikiFromBoard(d, name, split) },
+		UserWhiteboardLib:     a.userWhiteboardLibrary,
+		SaveWhiteboardLib:     a.saveWhiteboardLibrary,
+		ImportWhiteboardLib:   a.importWhiteboardLibrary,
 		ToggleBookmark: func(id string) {
 			a.toggleBookmark(d, id)
 		},

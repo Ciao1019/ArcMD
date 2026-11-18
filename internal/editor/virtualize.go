@@ -521,7 +521,7 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 	stamp := makeRunsStamp(b.Runs)
 	if e.heightHints != nil {
 		if hint, ok := e.heightHints[b.ID]; ok && hint.width == shapeWidth && hint.fontHash == fHash && hint.stamp == stamp {
-			if b.Kind == "math" || isMermaidBlock(b) {
+			if b.Kind == "math" || isMermaidBlock(b) || isWhiteboardBlock(b) {
 				return max(hint.height, 40)
 			}
 			return max(hint.height, lineH)
@@ -535,7 +535,7 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 		e.heightHints[b.ID] = heightHint{width: shapeWidth, height: est, fontHash: fHash, stamp: stamp, exact: false}
 		return est
 	}
-	if isMermaidBlock(b) {
+	if isMermaidBlock(b) || isWhiteboardBlock(b) {
 		est := float32(180 + 8)
 		if e.heightHints == nil {
 			e.heightHints = make(map[string]heightHint, 64)
@@ -578,7 +578,11 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 			case r >= 0x1100:
 				adv = size
 			case r == '\t':
-				adv = 2 * size
+				if mono {
+					adv = 2.4 * size
+				} else {
+					adv = 2 * size
+				}
 			case mono:
 				adv = 0.60 * size
 			case r < 0x80:
@@ -853,9 +857,12 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 			newH, wellOff = e.mermaidRow(r, h, m.gap)
 			r.rect.H = newH
 		}
+		if isWhiteboardBlock(b) {
+			newH = e.whiteboardRow(r, e.layoutOptions(), m.gap)
+		}
 		if canDeferKind(b.Kind) {
 			hintH := h
-			if b.Kind == "math" || isMermaidBlock(b) {
+			if b.Kind == "math" || isMermaidBlock(b) || isWhiteboardBlock(b) {
 				hintH = newH
 			}
 			e.recordExactHeight(b.ID, e.hintWidthFor(b, m.shapeWidth), hintH, m.font, b.Runs)
@@ -866,7 +873,10 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 		if di, hasDec := e.decorationIDs[b.ID]; hasDec {
 			dc := e.indexedDecoration(di)
 			dc.rect.H = newH - m.gap
-			if isMermaidBlock(b) {
+			if isWhiteboardBlock(b) {
+				dc.boardEditing = r.boardEditing
+				dc.rect = r.boardRect
+			} else if isMermaidBlock(b) {
 				dc.mermaidHidden = r.mermaidHidden
 				dc.mermaidWellOff = wellOff
 			}
@@ -962,7 +972,7 @@ func (e *Editor) trimShapeCache(winTop, winBottom float32) {
 			if c.row >= 0 && c.row < len(e.rows) {
 				r = e.indexedRow(c.row)
 			}
-			if r != nil && r.leaf.Block != nil && (r.leaf.Block.Kind == "math" || isMermaidBlock(r.leaf.Block)) {
+			if r != nil && r.leaf.Block != nil && (r.leaf.Block.Kind == "math" || isMermaidBlock(r.leaf.Block) || isWhiteboardBlock(r.leaf.Block)) {
 				e.recordExactHeight(c.id, hw, r.rect.H, cached.key.font, cached.runs)
 			} else {
 				_, h := cached.layout.Size()

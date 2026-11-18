@@ -141,3 +141,79 @@ func TestNativeDocumentsAndExclusiveCreation(t *testing.T) {
 		t.Fatal("native format classification")
 	}
 }
+
+func TestWhiteboardDocumentsCreateListRenameMove(t *testing.T) {
+	root := t.TempDir()
+	first, err := CreateFile(root, "Design", "System", ".excalidraw", `{"type":"excalidraw","version":2,"elements":[]}`)
+	if err != nil || first != "Design/System.excalidraw" {
+		t.Fatalf("CreateFile = %q, %v", first, err)
+	}
+	second, err := CreateFile(root, "Design", "System", ".excalidraw", `{"type":"excalidraw","version":2,"elements":[]}`)
+	if err != nil || second != "Design/System 2.excalidraw" {
+		t.Fatalf("CreateFile collision = %q, %v", second, err)
+	}
+	if !IsWhiteboard(first) || !IsDocument(first) || IsMarkdown(first) {
+		t.Fatalf("classification wrong for %q", first)
+	}
+	docs, err := List(root)
+	if err != nil || len(docs) != 2 {
+		t.Fatalf("List = %+v, %v", docs, err)
+	}
+	renamed, err := Rename(root, first, "Arch")
+	if err != nil || renamed != "Design/Arch.excalidraw" {
+		t.Fatalf("Rename = %q, %v", renamed, err)
+	}
+	moved, err := Move(root, renamed, "")
+	if err != nil || moved != "Arch.excalidraw" {
+		t.Fatalf("Move = %q, %v", moved, err)
+	}
+}
+
+func TestAmphibiousWhiteboardSVGVaultAndAssetsTree(t *testing.T) {
+	root := t.TempDir()
+	svgPayload := `<svg xmlns="http://www.w3.org/2000/svg"></svg>`
+	rel, err := CreateFile(root, "Design", "Flow", ExtWhiteboard, svgPayload)
+	if err != nil || rel != "Design/Flow.excalidraw.svg" {
+		t.Fatalf("CreateFile = %q, %v", rel, err)
+	}
+	if !IsWhiteboard(rel) || !IsWhiteboardSVG(rel) || !IsDocument(rel) || Title(rel) != "Flow" {
+		t.Fatalf("classification/Title failed for %q", rel)
+	}
+	if err := Write(root, "assets/Inline-Board.excalidraw.svg", svgPayload); err != nil {
+		t.Fatal(err)
+	}
+	// Tree hides assets/ from the sidebar while List still includes assets/*.excalidraw.svg for search/QA.
+	tree, err := Tree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Find(tree, "assets") != nil {
+		t.Fatalf("expected Tree to skip assets folder, got %+v", tree)
+	}
+	docs, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundAsset := false
+	for _, d := range docs {
+		if d.Path == "assets/Inline-Board.excalidraw.svg" {
+			foundAsset = true
+		}
+	}
+	if !foundAsset {
+		t.Fatalf("expected List to include assets whiteboard: %+v", docs)
+	}
+
+	renamed, err := Rename(root, rel, "Architecture")
+	if err != nil || renamed != "Design/Architecture.excalidraw.svg" {
+		t.Fatalf("Rename = %q, %v", renamed, err)
+	}
+	dst := t.TempDir()
+	if err := Write(dst, "Architecture.excalidraw.svg", svgPayload); err != nil {
+		t.Fatal(err)
+	}
+	dest, _, err := MoveTo(root, renamed, dst, "")
+	if err != nil || dest != "Architecture 2.excalidraw.svg" {
+		t.Fatalf("MoveTo = %q, %v", dest, err)
+	}
+}

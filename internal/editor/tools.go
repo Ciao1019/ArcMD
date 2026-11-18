@@ -41,6 +41,8 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			e.InsertMermaidFlowchart()
 		case "mermaid-seq":
 			e.InsertMermaidSequence()
+		case "whiteboard":
+			e.InsertWhiteboard()
 		case "toggle":
 			e.Engine.SetKind("toggle", 0)
 			e.Engine.OpenToggle(e.Engine.LeafAt(e.Caret).Block.ID)
@@ -140,14 +142,16 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 				}
 			})
 		case "code":
-			m.Separator()
-			if !isMermaidBlock(leaf.Block) {
-				if m.Item(i18n.T("自动换行")).Checked(!e.isCodeNoWrap(leaf.Block)).Chosen() {
-					e.ToggleCodeWrap(leaf.Block.ID)
-					e.RequestFocus = true
+			if !isWhiteboardBlock(leaf.Block) {
+				m.Separator()
+				if !isMermaidBlock(leaf.Block) {
+					if m.Item(i18n.T("自动换行")).Checked(!e.isCodeNoWrap(leaf.Block)).Chosen() {
+						e.ToggleCodeWrap(leaf.Block.ID)
+						e.RequestFocus = true
+					}
 				}
+				menuAction(m, i18n.T("复制代码"), func() { e.copyBlock(leaf.Block.ID) })
 			}
-			menuAction(m, i18n.T("复制代码"), func() { e.copyBlock(leaf.Block.ID) })
 		case "cell":
 			m.Separator()
 			m.Submenu(i18n.T("表格"), func(sub *ui.Menu) {

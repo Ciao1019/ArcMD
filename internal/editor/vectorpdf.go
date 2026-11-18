@@ -432,6 +432,16 @@ func (e *Editor) exportVectorRows(
 			}
 		}
 
+		if isWhiteboardBlock(r.leaf.Block) || r.boardEmbed {
+			if r.boardError != nil {
+				ew, _ := r.boardError.Size()
+				vp.DrawText(r.boardErr, px(r.boardRect.X+(r.boardRect.W-ew)/2), py(r.boardRect.Y+20), pw(ew), 13*sy, pdf.TextStyle{Family: pdf.FontSans}, pdfRGBA(t.Danger))
+			} else if r.boardScene != nil {
+				ExportWhiteboardPDF(vp, r.boardScene, pg, t, px(r.boardRect.X), py(r.boardRect.Y), pw(r.boardRect.W), ph(r.boardRect.H), sc)
+			}
+			continue
+		}
+
 		if r.layout == nil {
 			continue
 		}
@@ -1128,7 +1138,7 @@ func splitEmojiSubranges(blockText string, uStart, uEnd int) []textChunk {
 	if sub == "" {
 		return nil
 	}
-	if !containsColorEmoji(sub) {
+	if !containsColorEmoji(sub) && !strings.ContainsRune(sub, '\t') {
 		return []textChunk{{start: uStart, end: uEnd}}
 	}
 	var out []textChunk
@@ -1138,6 +1148,15 @@ func splitEmojiSubranges(blockText string, uStart, uEnd int) []textChunk {
 	first := true
 	for _, r := range sub {
 		n := document.Len(string(r))
+		if r == '\t' {
+			if !first && pos > curStart {
+				out = append(out, textChunk{start: curStart, end: pos, emoji: curEmoji})
+			}
+			pos += n
+			curStart = pos
+			first = true
+			continue
+		}
 		em := isColorEmojiRune(r)
 		if first {
 			curEmoji = em
@@ -1152,7 +1171,7 @@ func splitEmojiSubranges(blockText string, uStart, uEnd int) []textChunk {
 		}
 		pos += n
 	}
-	if pos > curStart {
+	if !first && pos > curStart {
 		out = append(out, textChunk{start: curStart, end: pos, emoji: curEmoji})
 	}
 	return out

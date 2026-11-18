@@ -238,7 +238,7 @@ func (a *App) favoriteTile(c *ui.Context, i int, f space.Favorite, g favoriteGri
 	if hidden || dragging {
 		tile.Opacity(0) // the copy under the pointer stands for it
 	}
-	tile.Children(func() { docIcon(c, title, favoriteIcon) })
+	tile.Children(func() { fileIcon(c, f.Path, title, favoriteIcon) })
 	if sp != nil && a.renameSpace == sp.ID && a.renaming == f.Path {
 		a.renameUnder(c, tile)
 	}

@@ -14,6 +14,7 @@ func (e *Editor) SetReadOnly(on bool) {
 		e.cancelComposition()
 	}
 	e.ReadOnly = on
+	e.readOnlySpace = false
 	e.ready = false
 	e.slashOpen, e.linkOpen, e.menuOpen, e.colorOpen, e.langOpen = false, false, false, false, false
 	e.cellFillOpen, e.annotatePanel = false, false

@@ -95,3 +95,47 @@ func TestIndexedTextRangesAndHistory(t *testing.T) {
 	}
 	check()
 }
+
+func TestDigestWithLeafRunsAndZeroAllocRunsDigest(t *testing.T) {
+	e := textEngine("Paragraph zero")
+	tbl := Table(2, 2)
+	tbl.Children[0].Children[0].Runs = []Run{{Text: "Cell A", Style: Style{Bold: true}}}
+	tbl.Children[1].Children[1].Runs = []Run{{Text: "Cell B"}}
+	e.Insert(tbl)
+
+	origDigest, err := e.Doc.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paraID := e.Doc.Blocks[0].ID
+	cellID := tbl.Children[0].Children[0].ID
+	origPara := append([]Run(nil), e.Doc.Blocks[0].Runs...)
+	origCell := append([]Run(nil), tbl.Children[0].Children[0].Runs...)
+
+	e.Replace(0, 0, "Edit ")
+	cellLeaf, ok := e.LeafByID(cellID)
+	if !ok {
+		t.Fatal("missing cell leaf")
+	}
+	e.Replace(cellLeaf.Start, cellLeaf.Start, "Modified ")
+
+	reconstructed, err := e.Doc.DigestWithLeafRuns(map[string][]Run{
+		paraID: origPara,
+		cellID: origCell,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconstructed != origDigest {
+		t.Fatalf("DigestWithLeafRuns mismatch: got %x, want %x", reconstructed, origDigest)
+	}
+
+	// Warm up pool then assert RunsDigest performs 0 heap allocations.
+	sampleRuns := []Run{{Text: "Hello **world**", Style: Style{Bold: true, Color: "blue"}}, {Text: " 中文段落😀"}}
+	_ = RunsDigest(sampleRuns)
+	if allocs := testing.AllocsPerRun(50, func() {
+		_ = RunsDigest(sampleRuns)
+	}); allocs != 0 {
+		t.Fatalf("RunsDigest allocated %.1f times per call, want 0", allocs)
+	}
+}
