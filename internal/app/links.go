@@ -291,7 +291,7 @@ func (a *App) liveTyping(c *ui.Context) time.Duration {
 		if rev != d.typedRev {
 			d.typedRev, d.typedAt = rev, c.Now()
 		}
-		if stamp, ok := a.search.liveDocs[d]; ok && stamp.revision == rev || !ok && !d.dirty() {
+		if stamp, ok := a.search.liveDocs[d]; ok && stamp.revision == rev || !ok && !d.dirty() && d.savedSeq <= a.search.indexedSeq {
 			continue
 		}
 		wait = max(wait, footerSettle-c.Now().Sub(d.typedAt))
@@ -303,9 +303,10 @@ func (a *App) footerData(d *document) *pageFooterCache {
 	ix := a.liveIndex()
 	location := place{d.space.ID, d.rel}
 	cache := &d.footer
+	stale := d.savedSeq > a.search.indexedSeq
 	if !cache.ready || cache.index != ix || cache.location != location {
 		text, ok := ix.TextOf(location.space, location.rel)
-		if !ok || d.dirty() {
+		if !ok || d.dirty() || stale {
 			text = d.plainText()
 		}
 		*cache = pageFooterCache{ready: true, index: ix, location: location,

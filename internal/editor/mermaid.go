@@ -95,6 +95,7 @@ func (e *Editor) insertMermaidBlock(src string) {
 			leaf.Block.Kind = "code"
 			leaf.Block.Language = "mermaid"
 			leaf.Block.Runs = []document.Run{{Text: src}}
+			leaf.Block.Comments = nil
 			e.Engine.FocusBlock(leaf.Block.ID)
 		})
 	} else {

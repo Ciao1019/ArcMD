@@ -526,6 +526,7 @@ func (a *App) flushCurrent() bool {
 		}
 		return false
 	}
+	a.syncSavedSearch(a.doc)
 	a.followTitle()
 	return true
 }
@@ -817,8 +818,12 @@ func (a *App) reload() {
 		a.notify("重新载入 %s 失败。%v", vault.Title(rel), err)
 		return
 	}
-	a.replaceReferences(a.doc, openDocument(a.doc.space, rel, text, source))
+	next := openDocument(a.doc.space, rel, text, source)
+	a.search.writeSeq++
+	next.savedSeq = a.search.writeSeq
+	a.replaceReferences(a.doc, next)
 	a.refreshTree()
+	a.refreshSearch()
 }
 
 // toggleSource switches the open document between live preview and source.

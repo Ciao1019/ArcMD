@@ -85,7 +85,7 @@ func (e *Editor) watchComplete(now time.Time, emoji func(string) []EmojiItem, do
 		return
 	}
 	leaf := e.Engine.LeafAt(e.Caret)
-	if k := leaf.Block.Kind; k == "code" || k == "raw" || k == "math" || e.Engine.CurrentStyle().Code {
+	if k := leaf.Block.Kind; k == "code" || k == "raw" || k == "math" || e.Engine.CurrentStyle().Code || e.Engine.CurrentStyle().Kbd {
 		return
 	}
 	text := leaf.Block.Text()

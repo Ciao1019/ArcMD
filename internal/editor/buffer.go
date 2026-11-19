@@ -80,7 +80,7 @@ func (b *Buffer) Committed() *document.Document {
 		rev := b.Revision()
 		if b.leafComp.committedDoc == nil || b.leafComp.committedRev != rev {
 			clone := b.Doc.Clone()
-			replaceBlockRunsByID(clone.Blocks, b.leafComp.state.BlockID, b.leafComp.state.Runs)
+			replaceBlockLeafByID(clone.Blocks, b.leafComp.state.BlockID, b.leafComp.state.Runs, b.leafComp.state.Comments)
 			b.leafComp.committedDoc = clone
 			b.leafComp.committedRev = rev
 		}
@@ -89,13 +89,14 @@ func (b *Buffer) Committed() *document.Document {
 	return b.Doc
 }
 
-func replaceBlockRunsByID(blocks []*document.Block, id string, runs []document.Run) bool {
+func replaceBlockLeafByID(blocks []*document.Block, id string, runs []document.Run, comments []document.InlineComment) bool {
 	for _, blk := range blocks {
 		if blk.ID == id {
 			blk.Runs = slices.Clone(runs)
+			blk.Comments = slices.Clone(comments)
 			return true
 		}
-		if len(blk.Children) > 0 && replaceBlockRunsByID(blk.Children, id, runs) {
+		if len(blk.Children) > 0 && replaceBlockLeafByID(blk.Children, id, runs, comments) {
 			return true
 		}
 	}
@@ -269,7 +270,7 @@ func (b *Buffer) Undo() {
 func (b *Buffer) Redo() { b.UnmarkText(); b.Engine.Redo(); b.sync() }
 func (b *Buffer) Wrap(marker string) {
 	b.UnmarkText()
-	marks := map[string]string{"**": "bold", "*": "italic", "~~": "strike", "`": "code", "_": "underline"}
+	marks := map[string]string{"**": "bold", "*": "italic", "~~": "strike", "`": "code", "_": "underline", "<kbd>": "kbd"}
 	b.Engine.Toggle(marks[marker])
 	b.sync()
 }

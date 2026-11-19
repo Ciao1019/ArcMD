@@ -165,26 +165,76 @@ func padAnnotations(spans []ui.Span, runs []document.Run, size float32) []ui.Spa
 	if !needsPad {
 		return spans
 	}
-	type gap struct {
-		at  int // The character ending at at gets the spacing.
-		pad float32
-	}
-	var gaps []gap
-	var sb strings.Builder
-	for _, r := range runs {
-		sb.WriteString(r.Text)
-	}
-	text := sb.String()
+	var gaps []textGap
 	for _, run := range annotationRuns(runs) {
 		look, ok := lookOf(run.variant)
 		if !ok || look.pad == 0 {
 			continue
 		}
 		if run.start > 0 {
-			gaps = append(gaps, gap{run.start, look.pad * size})
+			gaps = append(gaps, textGap{run.start, look.pad * size})
 		}
-		gaps = append(gaps, gap{run.end, look.pad * size})
+		gaps = append(gaps, textGap{run.end, look.pad * size})
 	}
+	return applySpanGaps(spans, runs, gaps)
+}
+
+const kbdPad = float32(0.22)
+
+type textGap struct {
+	at  int // The character ending at at gets the spacing.
+	pad float32
+}
+
+type kbdSpan struct {
+	start, end int
+	trimLast   bool
+}
+
+func kbdRuns(runs []document.Run) []kbdSpan {
+	var out []kbdSpan
+	at := 0
+	for _, r := range runs {
+		n := document.Len(r.Text)
+		if r.Style.Kbd && n > 0 {
+			trim := !strings.HasSuffix(r.Text, "\n") && !strings.HasSuffix(r.Text, "\u2028")
+			if k := len(out) - 1; k >= 0 && out[k].end == at {
+				out[k].end = at + n
+				out[k].trimLast = trim
+			} else {
+				out = append(out, kbdSpan{start: at, end: at + n, trimLast: trim})
+			}
+		}
+		at += n
+	}
+	return out
+}
+
+func padKeycaps(spans []ui.Span, runs []document.Run, size float32) []ui.Span {
+	kRuns := kbdRuns(runs)
+	if len(kRuns) == 0 {
+		return spans
+	}
+	gaps := make([]textGap, 0, len(kRuns)*2)
+	for _, kr := range kRuns {
+		if kr.start > 0 {
+			gaps = append(gaps, textGap{kr.start, kbdPad * size})
+		}
+		gaps = append(gaps, textGap{kr.end, kbdPad * size})
+	}
+	return applySpanGaps(spans, runs, gaps)
+}
+
+func applySpanGaps(spans []ui.Span, runs []document.Run, gaps []textGap) []ui.Span {
+	if len(gaps) == 0 {
+		return spans
+	}
+	var sb strings.Builder
+	for _, r := range runs {
+		sb.WriteString(r.Text)
+	}
+	text := sb.String()
+	total := document.Len(text)
 	// From the end, so earlier offsets hold.
 	for i := len(gaps) - 1; i >= 0; i-- {
 		g := gaps[i]
@@ -194,7 +244,6 @@ func padAnnotations(spans []ui.Span, runs []document.Run, size float32) []ui.Spa
 			continue
 		}
 		from := g.at - document.Len(string(r))
-		total := document.Len(text)
 		mid := sliceSpans(spans, from, g.at)
 		for k := range mid {
 			mid[k].LetterSpacing += g.pad

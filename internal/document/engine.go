@@ -124,6 +124,9 @@ func dropStrayColors(blocks []*Block) {
 		if b.Kind == "table" {
 			normalizeSpans(b)
 		}
+		if len(b.Comments) > 0 && (len(b.Children) > 0 || b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "rule" || b.Kind == "image") {
+			b.Comments = nil
+		}
 		dropStrayColors(b.Children)
 	}
 }
@@ -270,11 +273,20 @@ func (e *Engine) replace(a, z int, text string) {
 	before := SliceRuns(first.Block.Runs, 0, a-first.Start)
 	after := SliceRuns(last.Block.Runs, z-last.Start, last.End-last.Start)
 	runs := Compact(append(append(before, Run{Text: normText, Style: style}), after...))
+	var mergedComments []InlineComment
+	if first.Block == last.Block {
+		mergedComments = ShiftComments(first.Block.Comments, a-first.Start, z-first.Start, Len(normText), Len(blockText(runs)))
+	} else {
+		leftC := SliceComments(first.Block.Comments, 0, a-first.Start)
+		rightC := SliceComments(last.Block.Comments, z-last.Start, last.End-last.Start)
+		mergedComments = MergeComments(leftC, (a-first.Start)+Len(normText), rightC)
+	}
 	if first.Parent != last.Parent || first.Block != last.Block && first.Block.Kind == "cell" {
 		if a == 0 && z == max(0, e.unitIndex.prefix(len(e.leaves))-1) {
 			e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
 			first = e.Doc.Leaves()[0]
 			first.Block.Runs = runs
+			first.Block.Comments = mergedComments
 		} else {
 			e.replaceAcross(a, z, normText, style)
 			return
@@ -286,13 +298,20 @@ func (e *Engine) replace(a, z int, text string) {
 			first.Block.Kind, first.Block.URL = "paragraph", ""
 		}
 		first.Block.Runs = runs
+		first.Block.Comments = mergedComments
 		*first.Parent = append((*first.Parent)[:first.Index+1], (*first.Parent)[last.Index+1:]...)
 	}
+	splitBlocks := false
 	// Code, preserved source and cells retain internal newlines. Paragraph
 	// separators split blocks and carry the marks on each side of the caret.
 	if first.Block.Kind != "code" && first.Block.Kind != "cell" && first.Block.Kind != "raw" && first.Block.Kind != "math" {
 		split := splitRunsByNewline(runs)
 		if len(split) > 1 {
+			splitBlocks = true
+			var splitComments [][]InlineComment
+			if len(mergedComments) > 0 {
+				splitComments = SplitCommentsByNewline(blockText(runs), mergedComments)
+			}
 			blocks := make([]*Block, 0, len(split))
 			for i, lineRuns := range split {
 				block := first.Block.Clone()
@@ -304,6 +323,11 @@ func (e *Engine) replace(a, z int, text string) {
 					}
 				}
 				block.Runs = lineRuns
+				if i < len(splitComments) {
+					block.Comments = splitComments[i]
+				} else {
+					block.Comments = nil
+				}
 				blocks = append(blocks, block)
 			}
 			parent, index := e.find(first.Block.ID)
@@ -314,7 +338,45 @@ func (e *Engine) replace(a, z int, text string) {
 	}
 	caret := a + Len(normText)
 	e.Anchor, e.Caret = caret, caret
-	e.Typing, e.Explicit = style, true
+	e.applyTypingAfterReplace(normText, style, splitBlocks)
+}
+
+func (e *Engine) applyTypingAfterReplace(text string, style Style, splitBlocks bool) {
+	switch {
+	case text == "":
+		e.Typing, e.Explicit = Style{}, false
+	case splitBlocks || strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\u2028"):
+		next := exitCapsuleStyle(style)
+		if next == (Style{}) {
+			e.Typing, e.Explicit = Style{}, false
+		} else {
+			e.Typing, e.Explicit = next, true
+		}
+	default:
+		e.Typing, e.Explicit = style, true
+	}
+}
+
+func exitCapsuleStyle(s Style) Style {
+	s.Kbd = false
+	s.Code = false
+	s.Script = ""
+	s.Link = ""
+	return s
+}
+
+func insertCommentsAt(existing []InlineComment, at int, inserted []InlineComment) []InlineComment {
+	out := make([]InlineComment, 0, len(existing)+len(inserted))
+	i := 0
+	for i < len(existing) && existing[i].Offset <= at {
+		out = append(out, existing[i])
+		i++
+	}
+	for _, c := range inserted {
+		out = append(out, InlineComment{Offset: c.Offset + at, Text: c.Text})
+	}
+	out = append(out, existing[i:]...)
+	return out
 }
 
 // splitRunsByNewline splits a compacted run slice on '\n' in a single O(N) pass,
@@ -370,7 +432,7 @@ func (e *Engine) autoformat(inserted string) {
 		return
 	}
 	for _, r := range SliceRuns(b.Runs, 0, prefixUnits) {
-		if r.Style.Code || r.Style.Link != "" {
+		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" {
 			return
 		}
 	}
@@ -431,6 +493,11 @@ func (e *Engine) autoformat(inserted string) {
 			rest = nil
 		}
 	}
+	if !AllowsInlineComments(kind) {
+		b.Comments = nil
+	} else {
+		b.Comments = SliceComments(b.Comments, prefixUnits, leaf.End-leaf.Start)
+	}
 	b.Kind, b.Level, b.Checked, b.Runs = kind, level, checked, rest
 	e.Anchor, e.Caret = leaf.Start, leaf.Start
 }
@@ -441,7 +508,7 @@ func (e *Engine) Enter(soft bool) {
 		return
 	}
 	leaf := e.LeafAt(e.Caret)
-	if e.enterMath(leaf) || e.enterCodeFence(leaf) || e.enterMermaidExit(leaf) || e.enterPipeTable(leaf) {
+	if e.enterMath(leaf) || e.enterCodeFence(leaf) || e.enterMermaidExit(leaf) || e.enterRawExit(leaf) || e.enterPipeTable(leaf) {
 		return
 	}
 	if leaf.Block.Kind == "image" && leaf.Parent != nil {
@@ -570,6 +637,7 @@ func (e *Engine) Fragment() *Document {
 		}
 		b := leaf.Block.Clone()
 		b.Runs = SliceRuns(b.Runs, max(0, a-leaf.Start), min(z, leaf.End)-leaf.Start)
+		b.Comments = SliceComments(leaf.Block.Comments, max(0, a-leaf.Start), min(z, leaf.End)-leaf.Start)
 		if b.Kind == "cell" || a > leaf.Start || z < leaf.End {
 			b.Kind = "paragraph"
 			b.Level, b.NoteLabel, b.ImageWidth, b.URL = 0, "", 0, ""
@@ -593,6 +661,7 @@ func (e *Engine) Paste(fragment *Document) {
 		// A formula remains a block even when it is the only copied item.
 		if len(fragment.Blocks) == 1 && len(fragment.Blocks[0].Children) == 0 && (fragment.Blocks[0].Kind == "paragraph" || isVerbatim(leaf.Block) || leaf.Block.Kind == "cell") {
 			insert := fragment.Blocks[0]
+			replaceWhole := leaf.Block.Kind == "paragraph" && a == leaf.Start && z == leaf.End
 			e.replace(a, z, insert.Text())
 			for _, target := range e.Doc.Leaves() {
 				start, end := max(a, target.Start), min(a+Len(insert.Text()), target.End)
@@ -602,6 +671,15 @@ func (e *Engine) Paste(fragment *Document) {
 				runs := target.Block.Runs
 				middle := SliceRuns(insert.Runs, start-a, end-a)
 				target.Block.Runs = Compact(append(append(SliceRuns(runs, 0, start-target.Start), middle...), SliceRuns(runs, end-target.Start, target.End-target.Start)...))
+				if replaceWhole && insert.Align != "" && target.Block.Kind == "paragraph" {
+					target.Block.Align = insert.Align
+				}
+				if len(insert.Comments) > 0 {
+					midC := SliceComments(insert.Comments, start-a, end-a)
+					if len(midC) > 0 {
+						target.Block.Comments = insertCommentsAt(target.Block.Comments, start-target.Start, midC)
+					}
+				}
 			}
 			return
 		}
@@ -611,12 +689,22 @@ func (e *Engine) Paste(fragment *Document) {
 		}
 		e.replace(a, z, "")
 		leaf = e.LeafAt(e.Caret)
-		prefix := SliceRuns(leaf.Block.Runs, 0, e.Caret-leaf.Start)
-		suffix := SliceRuns(leaf.Block.Runs, e.Caret-leaf.Start, leaf.End-leaf.Start)
+		split := e.Caret - leaf.Start
+		prefix := SliceRuns(leaf.Block.Runs, 0, split)
+		suffix := SliceRuns(leaf.Block.Runs, split, leaf.End-leaf.Start)
+		var prefixComments, suffixComments []InlineComment
+		if len(prefix) > 0 && len(suffix) > 0 {
+			prefixComments, suffixComments = SplitCommentsAt(leaf.Block.Comments, split)
+		} else if len(prefix) > 0 {
+			prefixComments = SliceComments(leaf.Block.Comments, 0, split)
+		} else if len(suffix) > 0 {
+			suffixComments = SliceComments(leaf.Block.Comments, split, leaf.End-leaf.Start)
+		}
 		var blocks []*Block
 		if len(prefix) > 0 {
 			b := leaf.Block.Clone()
 			b.Runs = prefix
+			b.Comments = prefixComments
 			blocks = append(blocks, b)
 		}
 		var fresh func(*Block)
@@ -638,6 +726,7 @@ func (e *Engine) Paste(fragment *Document) {
 		if len(suffix) > 0 {
 			b := NewBlock("paragraph", "")
 			b.Runs = suffix
+			b.Comments = suffixComments
 			blocks = append(blocks, b)
 		}
 		parent, index := e.find(leaf.Block.ID)
@@ -660,6 +749,9 @@ func (e *Engine) SetKind(kind string, level int) {
 			}
 			leaf.Block.Kind, leaf.Block.Level = kind, level
 			leaf.Block.URL = ""
+			if !AllowsInlineComments(kind) {
+				leaf.Block.Comments = nil
+			}
 		}
 	})
 }
@@ -679,17 +771,30 @@ func (e *Engine) Toggle(mark string) {
 			return &s.Underline
 		case "strike":
 			return &s.Strike
+		case "kbd":
+			return &s.Kbd
 		default:
 			return &s.Code
 		}
 	}
 	on := !*get(&style)
+	apply := func(s *Style) {
+		*get(s) = on
+		if on {
+			switch mark {
+			case "kbd":
+				s.Code = false
+			case "code":
+				s.Kbd = false
+			}
+		}
+	}
 	if e.Anchor == e.Caret {
-		*get(&style) = on
+		apply(&style)
 		e.Typing, e.Explicit = style, true
 		return
 	}
-	e.applyFormat(func(s *Style) { *get(s) = on })
+	e.applyFormat(apply)
 }
 
 // SetTextColor colors the selection's text, or what is typed next at a
@@ -760,7 +865,7 @@ func (e *Engine) applyFormat(change func(*Style)) {
 				if !slices.Equal(runs, next) {
 					e.notifyBeforeLeafChange(first.Block.ID, runs)
 					i := e.leafIDs[first.Block.ID]
-					entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, first.Block.ID, slices.Clone(runs)}
+					entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, first.Block.ID, slices.Clone(runs), slices.Clone(first.Block.Comments)}
 					first.Block.Runs = next
 					e.recordUndo(entry)
 					e.version++

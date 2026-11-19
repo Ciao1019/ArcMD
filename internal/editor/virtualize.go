@@ -445,6 +445,14 @@ func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme 
 		if style.Bold {
 			span.Weight = 600
 		}
+		if style.Kbd {
+			span.Font = "system-ui"
+			if style.Script == "" {
+				span.Size = font.Size * .84
+			}
+			span.Weight = max(span.Weight, 500)
+			span.Color = pg.InlineText
+		}
 		if style.Code {
 			span.Font, span.Size, span.Background, span.Radius = "monospace", font.Size*.875, pg.InlineFill, 4
 			span.Color = pg.InlineText
@@ -455,7 +463,7 @@ func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme 
 		if c, ok := pg.TextColors[style.Color]; ok {
 			span.Color, span.DecorationColor = c, c
 		}
-		if c, ok := pg.Highlights[style.Highlight]; ok {
+		if c, ok := pg.Highlights[style.Highlight]; ok && !style.Kbd {
 			span.Background, span.Radius = c, 2
 		}
 		switch {
@@ -474,6 +482,7 @@ func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme 
 	}
 	if b.Kind != "math" && b.Kind != "raw" {
 		spans = padAnnotations(spans, b.Runs, font.Size)
+		spans = padKeycaps(spans, b.Runs, font.Size)
 	}
 	if len(spans) == 0 {
 		spans = []ui.Span{{Text: ""}}
@@ -569,6 +578,8 @@ func (e *Editor) estimateBlockHeight(b *document.Block, font ui.Font, shapeWidth
 		mono := baseMono || run.Style.Code
 		if run.Style.Code {
 			size *= 0.875
+		} else if run.Style.Kbd && run.Style.Script == "" {
+			size *= 0.84
 		} else if run.Style.Script != "" {
 			size *= 0.72
 		}

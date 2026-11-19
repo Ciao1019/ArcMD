@@ -94,22 +94,27 @@ func (e *Engine) MergeCells(id string, r CellRange) {
 		}
 		anchor := table.Children[r.Row0].Children[r.Col0]
 		runs := anchor.Runs
+		comments := anchor.Comments
 		for ri := r.Row0; ri <= r.Row1; ri++ {
 			for ci := r.Col0; ci <= r.Col1; ci++ {
 				cell := table.Children[ri].Children[ci]
 				if cell == anchor {
 					continue
 				}
-				if cell.Text() != "" {
-					if len(runs) > 0 && strings.TrimSpace(blockText(runs)) != "" {
+				if cell.Text() != "" || len(cell.Comments) > 0 {
+					if len(runs) > 0 && strings.TrimSpace(blockText(runs)) != "" && cell.Text() != "" {
 						runs = append(runs, Run{Text: "\n"})
+					}
+					if len(cell.Comments) > 0 {
+						comments = MergeComments(comments, Len(blockText(runs)), cell.Comments)
 					}
 					runs = append(runs, cell.Runs...)
 				}
-				cell.Runs, cell.ColSpan, cell.RowSpan = nil, 0, 0
+				cell.Runs, cell.Comments, cell.ColSpan, cell.RowSpan = nil, nil, 0, 0
 			}
 		}
 		anchor.Runs = Compact(runs)
+		anchor.Comments = comments
 		anchor.ColSpan, anchor.RowSpan = r.Col1-r.Col0+1, r.Row1-r.Row0+1
 		e.FocusBlock(anchor.ID)
 	})
@@ -249,7 +254,7 @@ func normalizeSpans(table *Block) {
 	for ri, row := range table.Children {
 		for ci, cell := range row.Children {
 			if taken[[2]int{ri, ci}] {
-				cell.ColSpan, cell.RowSpan, cell.Runs = 0, 0, nil
+				cell.ColSpan, cell.RowSpan, cell.Runs, cell.Comments = 0, 0, nil, nil
 				continue
 			}
 			cols, rows := Span(cell)

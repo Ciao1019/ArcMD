@@ -172,3 +172,57 @@ func TestV03FeaturesSnapshot(t *testing.T) {
 		savePNG(t, filepath.Join(dir, "feature-versions-milestone.png"), tt)
 	})
 }
+
+const htmlKeycapSample = `# HTML 与键盘按键展示
+
+按 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> 打开命令栏，或按 <kbd>K</kbd> 跳转。
+
+长段落换行测试：第一行包含足够长的说明文字以确保后续按键自动换到第二行显示，然后按 <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Del</kbd> 验证双行键帽边框精确贴合第二行。
+
+行内 HTML：<u>下划线强调</u>、x<sup>2</sup> + H<sub>2</sub>O、<mark>高亮标记</mark> 与 <q>行内引用</q>。
+
+<hr>
+
+<div align="center">
+
+### 居中对齐多块容器
+
+第一段居中正文与 <kbd>Enter</kbd> 按键说明。
+
+第二段说明支持无损保存与纯原生绘制。
+
+</div>
+
+<center>
+单行或多行 center 容器（无多余空行）。
+</center>
+
+<!-- 审稿备注：发布前核对版本号 -->
+`
+
+func TestHTMLAndKeycapSnapshot(t *testing.T) {
+	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render HTML and keycap snapshots")
+	for _, name := range []string{"html-keycap-light", "html-keycap-dark"} {
+		t.Run(name, func(t *testing.T) {
+			a, tt := newTestApp(t)
+			tt.SetDark(name == "html-keycap-dark")
+			doc := editor.ImportMarkdown(htmlKeycapSample)
+			text, err := doc.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := vault.Write(root(a), "HtmlDemo.arcmd", text); err != nil {
+				t.Fatal(err)
+			}
+			a.refreshTree()
+			a.refreshSearch()
+			a.open("HtmlDemo.arcmd")
+			for range 4 {
+				tt.Frame()
+				tt.Advance(200 * time.Millisecond)
+			}
+			tt.Frame()
+			savePNG(t, filepath.Join(dir, "feature-"+name+".png"), tt)
+		})
+	}
+}

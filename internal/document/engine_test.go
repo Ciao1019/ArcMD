@@ -1,6 +1,7 @@
 package document
 
 import (
+	"fmt"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -102,7 +103,7 @@ func TestNestedTransactionsAndContainers(t *testing.T) {
 }
 
 func TestRejectUnsupportedOrCorruptFormat(t *testing.T) {
-	for _, text := range []string{`{"format":"arcmd","version":9,"blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":4,"icon":"🚀","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"../x.png","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"gradient:nope","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":1,"blocks":[]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"future"}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph","future":true}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph"},{"id":"a","kind":"paragraph"}]}`} {
+	for _, text := range []string{fmt.Sprintf(`{"format":"arcmd","version":%d,"blocks":[{"id":"a","kind":"paragraph"}]}`, CurrentVersion+1), `{"format":"arcmd","version":4,"icon":"🚀","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"../x.png","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":5,"cover":"gradient:nope","blocks":[{"id":"a","kind":"paragraph"}]}`, `{"format":"arcmd","version":1,"blocks":[]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"future"}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph","future":true}]}`, `{"format":"arcmd","version":1,"blocks":[{"id":"a","kind":"paragraph"},{"id":"a","kind":"paragraph"}]}`} {
 		if _, err := Decode(text); err == nil {
 			t.Fatal("accepted unsupported document", text)
 		}

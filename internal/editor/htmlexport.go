@@ -112,12 +112,15 @@ func ExportHTML(doc *document.Document) string {
 				}
 				out.WriteString("<details" + open + "><summary>" + body + "</summary>" + blocks(inner) + "</details>")
 				continue
-			case "raw", "math":
+			case "raw":
+				if isHTMLCommentBlock(b.Text()) {
+					continue
+				}
 				tag = "pre"
 				body = html.EscapeString(b.Text())
-				if b.Kind == "math" {
-					body = "$$\n" + body + "\n$$"
-				}
+			case "math":
+				tag = "pre"
+				body = "$$\n" + html.EscapeString(b.Text()) + "\n$$"
 			case "rule":
 				out.WriteString("<hr>")
 				continue
@@ -172,7 +175,11 @@ func ExportHTML(doc *document.Document) string {
 			case "footnote":
 				body = "[" + html.EscapeString(b.NoteLabel) + "] " + body
 			}
-			out.WriteString("<" + tag + ">" + body + "</" + tag + ">")
+			attrs := ""
+			if (b.Align == "center" || b.Align == "right") && tag != "pre" {
+				attrs = ` style="text-align:` + b.Align + `"`
+			}
+			out.WriteString("<" + tag + attrs + ">" + body + "</" + tag + ">")
 		}
 		return out.String()
 	}

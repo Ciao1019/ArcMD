@@ -310,6 +310,26 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 			direction = 1
 		}
 		selection := e.Selection().Range
+		if !shift && !word && !line && selection.Start == selection.End {
+			l := e.LeafAt(position)
+			if direction < 0 && position == l.Start {
+				if next, changed := exitCapsuleMarks(e.Engine.CurrentStyle(), document.Style{}); changed {
+					e.Engine.Typing, e.Engine.Explicit = next, true
+					e.reveal = true
+					return true
+				}
+			} else if direction > 0 {
+				var nextAt document.Style
+				if position < l.End {
+					nextAt = runStyleAfter(l, position)
+				}
+				if next, changed := exitCapsuleMarks(e.Engine.CurrentStyle(), nextAt); changed {
+					e.Engine.Typing, e.Engine.Explicit = next, true
+					e.reveal = true
+					return true
+				}
+			}
+		}
 		switch {
 		case !shift && selection.Start != selection.End:
 			position = selection.Start
@@ -630,4 +650,38 @@ func (e *Editor) selectWord(at int) {
 		end += n
 	}
 	e.SetSelection(a+ui.UTF16Len(text[:start]), a+ui.UTF16Len(text[:end]))
+}
+
+func runStyleAfter(l document.Leaf, docPos int) document.Style {
+	local := docPos - l.Start
+	at := 0
+	for _, r := range l.Block.Runs {
+		n := document.Len(r.Text)
+		if at+n > local {
+			return r.Style
+		}
+		at += n
+	}
+	return document.Style{}
+}
+
+func exitCapsuleMarks(cur, nextAfter document.Style) (document.Style, bool) {
+	changed := false
+	if cur.Kbd && !nextAfter.Kbd {
+		cur.Kbd = false
+		changed = true
+	}
+	if cur.Code && !nextAfter.Code {
+		cur.Code = false
+		changed = true
+	}
+	if cur.Script != "" && nextAfter.Script == "" {
+		cur.Script = ""
+		changed = true
+	}
+	if cur.Link != "" && nextAfter.Link != cur.Link {
+		cur.Link = ""
+		changed = true
+	}
+	return cur, changed
 }

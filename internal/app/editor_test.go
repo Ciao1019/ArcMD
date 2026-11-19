@@ -13,6 +13,8 @@ import (
 
 	docpkg "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/history"
+	"github.com/Ciao1019/ArcMD/internal/pdf"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -138,7 +140,7 @@ func TestSaveFailureKeepsUnsavedSource(t *testing.T) {
 
 func TestInvalidNativeDocumentCannotOverwriteFile(t *testing.T) {
 	a, tt := newTestApp(t)
-	const source = `{"format":"arcmd","version":9,"blocks":[]}`
+	const source = `{"format":"arcmd","version":99,"blocks":[]}`
 	if err := vault.Write(root(a), "Future.arcmd", source); err != nil {
 		t.Fatal(err)
 	}
@@ -469,5 +471,163 @@ func TestPaletteFollowsArrowKeysInShortWindow(t *testing.T) {
 	}
 	if r.W <= 0 || r.H < 28 || r.Y < 0 || r.Y+r.H > 320 {
 		t.Fatalf("last palette item %q rect %+v not visible in 900x320 (want H>=28)", lastTitle, r)
+	}
+}
+
+func TestAppHTMLEndToEndWorkflow(t *testing.T) {
+	a, tt := newTestApp(t)
+	const initialMD = "# HTML E2E\n\n<div align=\"center\">\n\n居中内容 <kbd>Tab</kbd>\n\n</div>\n\n<!-- 隐藏审稿注释 -->\n\n<hr>\n\n正文末尾\n"
+	if err := vault.Write(root(a), "HtmlFlow.md", initialMD); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("HtmlFlow.md")
+	ed := a.doc.ed
+	ed.SetSelection(ed.Len(), ed.Len())
+	ed.RequestFocus = true
+	tt.Frame()
+
+	// Append a new paragraph below the trailing comment block via Enter + live HTML tags.
+	tt.Key(0, ui.KeyEnter)
+	for _, r := range "<kbd>Alt</kbd>" {
+		tt.Type(string(r))
+	}
+	// Rollback -> Ctrl+Z -> Enter -> '<' must stay plain text.
+	tt.Key(0, ui.KeyBackspace)
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("<")
+	lastBlk := ed.Doc.Blocks[len(ed.Doc.Blocks)-1]
+	if lastBlk.Text() != "<" || lastBlk.Runs[0].Style.Kbd {
+		t.Fatalf("trailing new paragraph leaked Kbd onto <: %+v", lastBlk)
+	}
+
+	// Type additional live HTML inline formats on that new line.
+	tt.Key(0, ui.KeyBackspace)
+	for _, r := range "<u>重点</u> x<sup>2</sup> H<sub>2</sub>O <mark>hi</mark> <q>引</q> line1<br>line2 " {
+		tt.Type(string(r))
+	}
+	tt.Type("EnterKey")
+	end := ed.Len()
+	ed.SetSelection(end-len("EnterKey"), end)
+	tt.Frame()
+	ed.Wrap("<kbd>")
+	tt.Frame()
+
+	// Autosave and reload .md from disk to verify persistence and round-trip.
+	tt.Advance(autosaveDelay + time.Millisecond)
+	stored, err := vault.Read(root(a), "HtmlFlow.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, `<kbd>Alt</kbd>`) || !strings.Contains(stored, `<kbd>EnterKey</kbd>`) {
+		t.Fatalf("saved Markdown missing <kbd> tags:\n%s", stored)
+	}
+	if !strings.Contains(stored, `<div align="center">`) || !strings.Contains(stored, `<!-- 隐藏审稿注释 -->`) {
+		t.Fatalf("saved Markdown lost container or comment:\n%s", stored)
+	}
+
+	// Toggle Markdown preview and back without losing live editor document state.
+	a.toggleSource()
+	if !a.doc.source {
+		t.Fatal("expected Markdown preview mode to be active")
+	}
+	a.toggleSource()
+	if a.doc.source {
+		t.Fatal("expected return to rich-text editing mode")
+	}
+
+	// Verify HTML export preserves <kbd> styling and omits standalone HTML comment block.
+	htmlFrag := editor.ExportHTML(a.doc.ed.Doc)
+	if !strings.Contains(htmlFrag, `<kbd>Alt</kbd>`) || strings.Contains(htmlFrag, "隐藏审稿注释") {
+		t.Fatalf("ExportHTML unexpected output:\n%s", htmlFrag)
+	}
+	fullHTML := htmlPage("HtmlFlow", htmlFrag)
+	if !strings.Contains(fullHTML, "kbd {") {
+		t.Fatal("htmlPage missing kbd CSS rules")
+	}
+
+	// Verify vector PDF export renders without error.
+	o := editor.Options{Width: paperWidth, Theme: documentTheme(false), Page: pageStyle(false)}
+	var tops []float32
+	ui.Render(func(c *ui.Context) {
+		tops = a.doc.ed.Paginate(o, float32(paperHeight-2*paperMargin))
+	}, paperWidth, paperHeight, 1)
+	if len(tops) == 0 {
+		t.Fatal("expected at least one PDF page")
+	}
+	var pdfBuf bytes.Buffer
+	w := pdf.NewWriter(&pdfBuf, "HtmlFlow")
+	vp := w.NewVectorPage(pdf.A4Width, pdf.A4Height)
+	a.doc.ed.ExportVectorPage(vp, o, tops[0], tops[0]+float32(paperHeight-2*paperMargin), 0, len(tops), tops, paperWidth, paperHeight, paperMargin)
+	if err := w.FinishVectorPage(vp); err != nil {
+		t.Fatalf("FinishVectorPage failed: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("pdf close failed: %v", err)
+	}
+	if !bytes.HasPrefix(pdfBuf.Bytes(), []byte("%PDF-")) {
+		t.Fatal("expected valid PDF output")
+	}
+
+	// Reload saved .md file from disk into a fresh editor instance.
+	if err := vault.Write(root(a), "NoteCheckFallback.md", "# tmp\n"); err != nil {
+		t.Fatal(err)
+	}
+	a.open("NoteCheckFallback.md")
+	a.open("HtmlFlow.md")
+	reloaded := a.doc.ed.Doc.PlainText()
+	if !strings.Contains(reloaded, "Alt") || !strings.Contains(reloaded, "EnterKey") {
+		t.Fatalf("reloaded .md missing keycap text: %q", reloaded)
+	}
+
+	// Verify app-level full-text search indexes text inside <kbd> and <div align="center">.
+	a.refreshSearch()
+	if hits := a.search.index.SearchMulti("EnterKey", nil, 5); len(hits) == 0 {
+		t.Fatal("full-text search failed to index text inside <kbd>")
+	}
+	if hits := a.search.index.SearchMulti("居中内容", nil, 5); len(hits) == 0 {
+		t.Fatal("full-text search failed to index unwrapped <div align=center> content")
+	}
+
+	// Verify Find & Replace updates adjacent text without corrupting <kbd> styling.
+	ed = a.doc.ed
+	ed.OpenFind(true)
+	tt.Frame()
+	tt.Type("正文末尾")
+	if err := tt.Click("替换为"); err != nil {
+		t.Fatalf("click replace input failed: %v", err)
+	}
+	tt.Type("正尾替换")
+	if err := tt.Click("全部替换"); err != nil {
+		t.Fatalf("click replace-all failed: %v", err)
+	}
+	if !strings.Contains(ed.Doc.PlainText(), "正尾替换") {
+		t.Fatalf("Find & Replace did not update text adjacent to <kbd>: %q", ed.Doc.PlainText())
+	}
+	foundAltKbd := false
+	for _, b := range ed.Doc.Blocks {
+		for _, r := range b.Runs {
+			if r.Text == "Alt" && r.Style.Kbd {
+				foundAltKbd = true
+			}
+		}
+	}
+	if !foundAltKbd {
+		t.Fatal("Find & Replace corrupted <kbd>Alt</kbd> run")
+	}
+
+	// Verify v9 .arcmd version history milestone works cleanly with Style.Kbd.
+	encodedV9, err := ed.Doc.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := history.SaveMilestone(root(a), "HtmlFlow.md", encodedV9, "v9-kbd", time.Now().Add(-time.Minute)); err != nil {
+		t.Fatalf("history.SaveMilestone failed on v9 document: %v", err)
+	}
+	a.openVersions()
+	tt.Frame()
+	if len(a.versions.versions) == 0 {
+		t.Fatal("expected v9 milestone version entry")
 	}
 }

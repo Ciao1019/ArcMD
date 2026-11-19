@@ -7,6 +7,8 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/egoist/mygo/ui"
+	xhtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // smartRollback remembers the most recent automatic typography or inline
@@ -43,7 +45,7 @@ func (e *Editor) trySmartInput(r *ui.TextInputRange, text string) bool {
 		return false
 	}
 	l := e.LeafAt(e.Caret)
-	if literalBlock(l.Block.Kind) || e.CurrentStyle().Code || e.inlineMath.blockID != "" {
+	if literalBlock(l.Block.Kind) || e.CurrentStyle().Code || e.CurrentStyle().Kbd || e.inlineMath.blockID != "" {
 		return false
 	}
 	raw := l.Block.Text()
@@ -66,6 +68,13 @@ func (e *Editor) trySmartInput(r *ui.TextInputRange, text string) bool {
 		return false
 	}
 
+	if inOpenHTMLComment(raw[:bytePos]) {
+		if text == ">" {
+			return e.tryLiveHTMLCommentClose(l, raw, lineStartByte, bytePos)
+		}
+		return false
+	}
+
 	switch text {
 	case "-":
 		return e.trySmartDash(l, lineBefore)
@@ -73,28 +82,56 @@ func (e *Editor) trySmartInput(r *ui.TextInputRange, text string) bool {
 		return e.trySmartEllipsis(l, lineBefore)
 	case "*", "~", "`":
 		return e.tryLiveInlineMarkdown(l, raw, lineStartByte, bytePos, text)
+	case ">":
+		return e.tryLiveHTMLTag(l, raw, lineStartByte, bytePos)
 	}
 	return false
+}
+
+func inOpenHTMLComment(s string) bool {
+	idx := strings.LastIndex(s, "<!--")
+	return idx >= 0 && !strings.Contains(s[idx+4:], "-->")
+}
+
+func (e *Editor) tryLiveHTMLCommentClose(l document.Leaf, raw string, lineStartByte, caretByte int) bool {
+	if idx := strings.LastIndex(raw[:caretByte], "\u2028"); idx >= 0 && idx+len("\u2028") > lineStartByte {
+		lineStartByte = idx + len("\u2028")
+	}
+	line := raw[lineStartByte:caretByte]
+	if strings.HasSuffix(line, `\`) || !strings.HasSuffix(line, "--") {
+		return false
+	}
+	openIdx := strings.LastIndex(raw[:caretByte], "<!--")
+	if openIdx < 0 || caretByte-openIdx < 6 || strings.Contains(raw[openIdx+4:caretByte], "-->") {
+		return false
+	}
+	if l.Block.Kind == "paragraph" && l.Block.ID == l.Owner && e.Caret == l.End && strings.TrimSpace(raw[:openIdx]) == "" {
+		return e.promoteParagraphBlock(l, document.NewBlock("raw", strings.TrimLeft(raw, " \t")+">"))
+	}
+	return false
+}
+
+func (e *Editor) promoteParagraphBlock(l document.Leaf, first *document.Block) bool {
+	e.smartBack = smartRollback{}
+	e.Engine.Edit(func() {
+		parent, index := l.Parent, l.Index
+		if parent == nil {
+			return
+		}
+		next := document.NewBlock("paragraph", "")
+		*parent = append(append(append([]*document.Block(nil), (*parent)[:index]...), first, next), (*parent)[index+1:]...)
+		e.Engine.FocusBlock(next.ID)
+	})
+	e.sync()
+	e.pairs = nil
+	return true
 }
 
 func (e *Editor) trySmartDash(l document.Leaf, lineBefore string) bool {
 	// Third hyphen right after an em-dash on an otherwise empty paragraph
 	// compiles "---" into a horizontal divider rule.
 	if l.Block.Kind == "paragraph" && l.Block.ID == l.Owner && l.Block.Text() == "—" && e.Caret == l.End {
-		e.smartBack = smartRollback{}
-		e.Engine.Edit(func() {
-			parent, index := l.Parent, l.Index
-			if parent == nil {
-				return
-			}
-			rule := document.NewBlock("rule", "")
-			next := document.NewBlock("paragraph", "")
-			*parent = append(append(append([]*document.Block(nil), (*parent)[:index]...), rule, next), (*parent)[index+1:]...)
-			e.Engine.FocusBlock(next.ID)
-		})
-		e.sync()
-		e.pairs = nil
-		return true
+		return e.promoteParagraphBlock(l, document.NewBlock("rule", ""))
 	}
 	// "--" → "—" when preceded by a single hyphen (not "---" or "<!-").
 	if !strings.HasSuffix(lineBefore, "-") || strings.HasSuffix(lineBefore, "--") || strings.HasSuffix(lineBefore, "<!-") {
@@ -283,9 +320,9 @@ func (e *Editor) tryLiveInlineMarkdown(l document.Leaf, raw string, lineStartByt
 	blockInnerEndU16 := document.Len(raw[:innerEndByte])
 	blockCloseEndU16 := document.Len(raw[:closeEndByte])
 
-	// Ensure no part of the delimiter or content sits inside an existing code or math span.
+	// Ensure no part of the delimiter or content sits inside an existing code, kbd, or link span.
 	for _, run := range document.SliceRuns(l.Block.Runs, blockOpenU16, blockCloseEndU16) {
-		if run.Style.Code || run.Style.Link != "" {
+		if run.Style.Code || run.Style.Kbd || run.Style.Link != "" {
 			return false
 		}
 	}
@@ -420,6 +457,7 @@ func (e *Editor) promoteParagraphToMath(l document.Leaf, formula, literal string
 	e.smartBack = smartRollback{}
 	e.Engine.Edit(func() {
 		l.Block.Kind = "math"
+		l.Block.Comments = nil
 		if formula == "" {
 			l.Block.Runs = nil
 		} else {
@@ -559,4 +597,362 @@ func (e *Editor) paintTabOutBadge(p *ui.Painter, frame ui.Rect, t *ui.Theme) {
 	p.Fill(pill, e.page.Popover, bh/2)
 	p.Stroke(pill, t.Accent.Alpha(0.4), bh/2, 1)
 	p.RichText(pill.X+(pill.W-tw)/2, pill.Y+(pill.H-th)/2, 0, span)
+}
+
+func (e *Editor) tryLiveHTMLTag(l document.Leaf, raw string, lineStartByte, caretByte int) bool {
+	if idx := strings.LastIndex(raw[:caretByte], "\u2028"); idx >= 0 && idx+len("\u2028") > lineStartByte {
+		lineStartByte = idx + len("\u2028")
+	}
+	line := raw[lineStartByte:caretByte]
+	if strings.HasSuffix(line, `\`) {
+		return false
+	}
+	lastLT := strings.LastIndexByte(line, '<')
+	if lastLT < 0 || strings.IndexByte(line[lastLT:], '>') >= 0 {
+		return false
+	}
+	tagStartByte := lineStartByte + lastLT
+	if tagStartByte > 0 && raw[tagStartByte-1] == '\\' {
+		return false
+	}
+	tagSrc := line[lastLT:] + ">"
+	z := xhtml.NewTokenizer(strings.NewReader(tagSrc))
+	tt := z.Next()
+	tok := z.Token()
+	if tt == xhtml.ErrorToken || z.Next() != xhtml.ErrorToken {
+		return false
+	}
+
+	switch tt {
+	case xhtml.StartTagToken, xhtml.SelfClosingTagToken:
+		switch tok.DataAtom {
+		case atom.Br:
+			if len(tok.Attr) != 0 {
+				return false
+			}
+			blockTagStartU16 := document.Len(raw[:tagStartByte])
+			blockTagEndU16 := document.Len(raw[:caretByte])
+			for _, run := range document.SliceRuns(l.Block.Runs, blockTagStartU16, blockTagEndU16) {
+				if run.Style.Code || run.Style.Kbd || run.Style.Link != "" {
+					return false
+				}
+			}
+			for _, itok := range inlineTokens(raw) {
+				ta, tz := document.Len(raw[:itok.start]), document.Len(raw[:itok.end])
+				if blockTagStartU16 < tz && blockTagEndU16 > ta {
+					return false
+				}
+			}
+			brText := "\u2028"
+			if l.Block.Kind == "cell" {
+				brText = "\n"
+			}
+			docStart := l.Start + blockTagStartU16
+			docEnd := l.Start + blockTagEndU16
+			brLen := document.Len(brText)
+			baseTyping := e.CurrentStyle()
+			e.shiftPairs(ui.TextInputRange{Start: docStart, End: docEnd}, brLen)
+			totalU16 := l.End - l.Start
+			runs := l.Block.Runs
+			nextRuns := append(append(document.SliceRuns(runs, 0, blockTagStartU16), document.Run{Text: brText, Style: baseTyping}), document.SliceRuns(runs, blockTagEndU16, totalU16)...)
+			newCaret := docStart + brLen
+			e.Engine.ReplaceBlockRuns(l.Block.ID, nextRuns, newCaret, newCaret, baseTyping, true)
+			e.sync()
+			e.pairRevision = e.Revision()
+			e.smartBack = smartRollback{
+				rev:          e.Revision(),
+				blockID:      l.Block.ID,
+				start:        docStart,
+				end:          newCaret,
+				caret:        newCaret,
+				restoreCaret: docStart + document.Len(tagSrc),
+				literal:      tagSrc,
+			}
+			return true
+
+		case atom.Hr:
+			if len(tok.Attr) != 0 || l.Block.Kind != "paragraph" || l.Block.ID != l.Owner || e.Caret != l.End || strings.TrimSpace(raw[:tagStartByte]) != "" {
+				return false
+			}
+			return e.promoteParagraphBlock(l, document.NewBlock("rule", ""))
+
+		default:
+			if tt != xhtml.StartTagToken || !isLivePairedHTMLAtom(tok.DataAtom) {
+				return false
+			}
+			lineEndByte := len(raw)
+			if idx := strings.IndexByte(raw[caretByte:], '\n'); idx >= 0 {
+				lineEndByte = caretByte + idx
+			}
+			if idx := strings.Index(raw[caretByte:lineEndByte], "\u2028"); idx >= 0 {
+				lineEndByte = caretByte + idx
+			}
+			relCloseStart, relCloseEnd, ok := findMatchingHTMLCloser(raw[caretByte:lineEndByte], strings.ToLower(tok.Data), tok.DataAtom)
+			if !ok {
+				return false
+			}
+			return e.compileLiveHTMLPair(l, raw, tagStartByte, caretByte, caretByte+relCloseStart, caretByte+relCloseEnd, tok, true)
+		}
+
+	case xhtml.EndTagToken:
+		if !isLivePairedHTMLAtom(tok.DataAtom) {
+			return false
+		}
+		openRelStart, openRelEnd, openTok, ok := findMatchingHTMLOpener(line[:lastLT], strings.ToLower(tok.Data), tok.DataAtom)
+		if !ok {
+			return false
+		}
+		return e.compileLiveHTMLPair(l, raw, lineStartByte+openRelStart, lineStartByte+openRelEnd, tagStartByte, caretByte, openTok, false)
+	}
+	return false
+}
+
+func (e *Editor) compileLiveHTMLPair(l document.Leaf, raw string, openStartByte, openEndByte, closeStartByte, closeEndByte int, openTok xhtml.Token, forward bool) bool {
+	if openEndByte >= closeStartByte {
+		return false
+	}
+	inner := raw[openEndByte:closeStartByte]
+	if inner == "" {
+		return false
+	}
+	openNode := &xhtml.Node{
+		Type:     xhtml.ElementNode,
+		DataAtom: openTok.DataAtom,
+		Data:     strings.ToLower(openTok.Data),
+		Attr:     openTok.Attr,
+	}
+	if openTok.DataAtom == atom.Span && (attr(openNode, "data-emoji") != "" || attr(openNode, "data-align") != "") {
+		return false
+	}
+	added := applyElementTagStyle(openNode, applyNodeRichStyle(openNode, styled(openNode, document.Style{})))
+	if openTok.DataAtom != atom.Q && added == (document.Style{}) {
+		return false
+	}
+
+	blockOpenStartU16 := document.Len(raw[:openStartByte])
+	blockOpenEndU16 := document.Len(raw[:openEndByte])
+	blockCloseStartU16 := document.Len(raw[:closeStartByte])
+	blockCloseEndU16 := document.Len(raw[:closeEndByte])
+
+	if hasForbiddenSpan(document.SliceRuns(l.Block.Runs, blockOpenStartU16, blockOpenEndU16)) ||
+		hasForbiddenSpan(document.SliceRuns(l.Block.Runs, blockCloseStartU16, blockCloseEndU16)) {
+		return false
+	}
+	if (added.Code || added.Kbd) && hasForbiddenSpan(document.SliceRuns(l.Block.Runs, blockOpenEndU16, blockCloseStartU16)) {
+		return false
+	}
+	for _, itok := range inlineTokens(raw) {
+		ta, tz := document.Len(raw[:itok.start]), document.Len(raw[:itok.end])
+		if blockOpenStartU16 < tz && blockCloseEndU16 > ta {
+			return false
+		}
+	}
+
+	docOpenStart := l.Start + blockOpenStartU16
+	docCloseEnd := l.Start + blockCloseEndU16
+	innerLen := blockCloseStartU16 - blockOpenEndU16
+	replacementLen := innerLen
+	if openTok.DataAtom == atom.Q {
+		replacementLen += document.Len("“") + document.Len("”")
+	}
+	baseTyping := e.CurrentStyle()
+	e.shiftPairs(ui.TextInputRange{Start: docOpenStart, End: docCloseEnd}, replacementLen)
+	totalU16 := l.End - l.Start
+	runs := l.Block.Runs
+	prefix := document.SliceRuns(runs, 0, blockOpenStartU16)
+	middle := document.SliceRuns(runs, blockOpenEndU16, blockCloseStartU16)
+	suffix := document.SliceRuns(runs, blockCloseEndU16, totalU16)
+	for i := range middle {
+		middle[i].Style = applyElementTagStyle(openNode, applyNodeRichStyle(openNode, styled(openNode, middle[i].Style)))
+	}
+	if openTok.DataAtom == atom.Q {
+		quoteStyle := baseTyping
+		if len(middle) > 0 {
+			quoteStyle = middle[0].Style
+		}
+		qOpen := document.Run{Text: "“", Style: quoteStyle}
+		qClose := document.Run{Text: "”", Style: quoteStyle}
+		middle = append(append([]document.Run{qOpen}, middle...), qClose)
+	}
+	nextStyle := clearHTMLAddedStyle(baseTyping, added)
+	nextRuns := append(append(prefix, middle...), suffix...)
+	var literal string
+	var newCaret, restoreCaret int
+	if forward {
+		literal = raw[openStartByte:openEndByte] + ">" + raw[openEndByte:closeEndByte]
+		newCaret = docOpenStart
+		if openTok.DataAtom == atom.Q {
+			newCaret += document.Len("“")
+		}
+		restoreCaret = docOpenStart + document.Len(raw[openStartByte:openEndByte]) + 1
+	} else {
+		literal = raw[openStartByte:closeEndByte] + ">"
+		newCaret = docOpenStart + replacementLen
+		restoreCaret = docOpenStart + document.Len(literal)
+	}
+	e.Engine.ReplaceBlockRuns(l.Block.ID, nextRuns, newCaret, newCaret, nextStyle, true)
+	e.sync()
+	e.pairRevision = e.Revision()
+	e.smartBack = smartRollback{
+		rev:          e.Revision(),
+		blockID:      l.Block.ID,
+		start:        docOpenStart,
+		end:          docOpenStart + replacementLen,
+		caret:        newCaret,
+		restoreCaret: restoreCaret,
+		literal:      literal,
+		clearMark:    "html",
+	}
+	return true
+}
+
+func findMatchingHTMLCloser(s, name string, target atom.Atom) (start, end int, ok bool) {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] != '<' {
+			continue
+		}
+		if i > 0 && s[i-1] == '\\' {
+			continue
+		}
+		gt := findTagClose(s, i+1)
+		if gt < 0 {
+			continue
+		}
+		cand := s[i : gt+1]
+		z := xhtml.NewTokenizer(strings.NewReader(cand))
+		tt := z.Next()
+		t := z.Token()
+		if tt == xhtml.ErrorToken || z.Next() != xhtml.ErrorToken || t.DataAtom != target || !strings.EqualFold(t.Data, name) {
+			i = gt
+			continue
+		}
+		switch tt {
+		case xhtml.StartTagToken:
+			depth++
+			i = gt
+		case xhtml.EndTagToken:
+			if depth > 0 {
+				depth--
+				i = gt
+				continue
+			}
+			return i, gt + 1, true
+		}
+	}
+	return 0, 0, false
+}
+
+func isLivePairedHTMLAtom(a atom.Atom) bool {
+	switch a {
+	case atom.Kbd, atom.U, atom.Ins, atom.Sup, atom.Sub, atom.Mark,
+		atom.B, atom.Strong, atom.I, atom.Em,
+		atom.S, atom.Del, atom.Strike, atom.Code, atom.Q,
+		atom.Span, atom.Font:
+		return true
+	}
+	return false
+}
+
+func hasForbiddenSpan(runs []document.Run) bool {
+	for _, r := range runs {
+		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func clearHTMLAddedStyle(base, added document.Style) document.Style {
+	if added.Bold {
+		base.Bold = false
+	}
+	if added.Italic {
+		base.Italic = false
+	}
+	if added.Underline {
+		base.Underline = false
+	}
+	if added.Strike {
+		base.Strike = false
+	}
+	if added.Code {
+		base.Code = false
+	}
+	if added.Kbd {
+		base.Kbd = false
+	}
+	if added.Script != "" {
+		base.Script = ""
+	}
+	if added.Highlight != "" {
+		base.Highlight = ""
+	}
+	if added.Color != "" {
+		base.Color = ""
+	}
+	if added.Annotation != "" {
+		base.Annotation = ""
+		base.AnnotationColor = ""
+	}
+	if added.Link != "" {
+		base.Link = ""
+	}
+	return base
+}
+
+func findMatchingHTMLOpener(s, name string, target atom.Atom) (start, end int, tok xhtml.Token, ok bool) {
+	depth := 0
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] != '<' {
+			continue
+		}
+		if i > 0 && s[i-1] == '\\' {
+			continue
+		}
+		gt := findTagClose(s, i+1)
+		if gt < 0 {
+			continue
+		}
+		cand := s[i : gt+1]
+		z := xhtml.NewTokenizer(strings.NewReader(cand))
+		tt := z.Next()
+		t := z.Token()
+		if tt == xhtml.ErrorToken || z.Next() != xhtml.ErrorToken || t.DataAtom != target || !strings.EqualFold(t.Data, name) {
+			continue
+		}
+		switch tt {
+		case xhtml.EndTagToken:
+			depth++
+		case xhtml.StartTagToken:
+			if depth > 0 {
+				depth--
+				continue
+			}
+			return i, gt + 1, t, true
+		}
+	}
+	return 0, 0, xhtml.Token{}, false
+}
+
+func findTagClose(s string, from int) int {
+	var quote byte
+	for i := from; i < len(s); i++ {
+		ch := s[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '"', '\'':
+			quote = ch
+		case '<':
+			return -1
+		case '>':
+			return i
+		}
+	}
+	return -1
 }

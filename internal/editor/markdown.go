@@ -85,6 +85,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 
 	var topSpans []rawSpan
 	var tailItem document.ListPlacement
+	explicitLeft := make(map[*document.Block]bool)
 
 	var blocks func(int, string, int) []*document.Block
 	blocks = func(parent int, context string, indent int) []*document.Block {
@@ -107,7 +108,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 						}
 						continue
 					}
-					if split := splitObsidianImageParagraph(text, node.Start, node.End, in, indent, nextID); len(split) > 0 {
+					if split := splitObsidianImageParagraph(text, node.Start, node.End, in, indent, nextID, explicitLeft); len(split) > 0 {
 						out = append(out, split...)
 						if !forSearch && parent == 0 && len(out) > startCount {
 							for k := startCount; k < len(out); k++ {
@@ -124,7 +125,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 						continue
 					}
 				}
-				b.Runs = importRuns(in, document.Style{})
+				b.Runs, b.Comments = importRunsAndComments(in, document.Style{})
 				if context != "" {
 					b.Kind = context
 				}
@@ -136,6 +137,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					b.Kind, b.URL = "image", in[0].Dest
 					b.ImageWidth = width
 					b.Runs = []document.Run{{Text: alt}}
+					b.Comments = nil
 				}
 			case parser.Quote:
 				children := blocks(index, "quote", indent)
@@ -147,6 +149,9 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 						}
 					}
 					if len(children) > 1 && children[0].Text() == "" {
+						if len(children[0].Comments) > 0 {
+							children[1].Comments = document.MergeComments(children[0].Comments, 0, children[1].Comments)
+						}
 						children = children[1:]
 					}
 				}
@@ -220,11 +225,17 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 				continue
 			case parser.FootnoteDefinition:
 				b.Kind, b.NoteLabel = "footnote", node.Label()
+				u16Len := 0
 				for i, child := range blocks(index, "", 0) {
 					if i > 0 {
 						b.Runs = append(b.Runs, document.Run{Text: "\u2028"})
+						u16Len++
+					}
+					if len(child.Comments) > 0 {
+						b.Comments = document.MergeComments(b.Comments, u16Len, child.Comments)
 					}
 					b.Runs = append(b.Runs, child.Runs...)
+					u16Len += runsU16Len(child.Runs)
 				}
 			case parser.CodeBlock:
 				if !forSearch && node.Fenced && previousListEnd >= 0 && previousListEnd <= node.Start &&
@@ -243,10 +254,12 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					tr := &document.Block{ID: nextID(), Kind: "row"}
 					col := 0
 					for cell := range parsed.Children(row) {
+						runs, comments := importRunsAndComments(parsed.Inlines(cell), document.Style{})
 						td := &document.Block{
-							ID:   nextID(),
-							Kind: "cell",
-							Runs: importRuns(parsed.Inlines(cell), document.Style{}),
+							ID:       nextID(),
+							Kind:     "cell",
+							Runs:     runs,
+							Comments: comments,
 						}
 						if col < len(node.Align) {
 							switch node.Align[col] {
@@ -266,12 +279,26 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 				b.Runs = []document.Run{{Text: strings.TrimSpace(parsed.Lines(index))}}
 			default:
 				raw := text[node.Start:node.End]
-				if hb, ok := tryImportHTMLBlock(raw, indent); ok {
-					b = hb
-				} else {
-					b.Kind = "raw"
-					b.Runs = []document.Run{{Text: raw}}
+				if hbs, ok := tryImportHTMLBlocks(raw, indent, explicitLeft); ok && len(hbs) > 0 {
+					if context != "" && len(hbs) == 1 && hbs[0].Kind == "paragraph" && strings.HasPrefix(strings.TrimSpace(raw), "<!--") {
+						hbs[0].Kind = context
+					}
+					out = append(out, hbs...)
+					if !forSearch && parent == 0 {
+						if len(hbs) == 1 {
+							topSpans = append(topSpans, rawSpan{hbs[0], node.Start, node.End})
+						} else {
+							topSpans = append(topSpans, rawSpan{hbs[0], node.Start, -1})
+							for _, mid := range hbs[1 : len(hbs)-1] {
+								topSpans = append(topSpans, rawSpan{mid, -1, -1})
+							}
+							topSpans = append(topSpans, rawSpan{hbs[len(hbs)-1], -1, node.End})
+						}
+					}
+					continue
 				}
+				b.Kind = "raw"
+				b.Runs = []document.Run{{Text: raw}}
 			}
 			out = append(out, b)
 			if !forSearch && parent == 0 {
@@ -304,7 +331,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 	}
 
 	rawBlocks := blocks(0, "", 0)
-	structured, chunks := buildStructuredBlocks(rawBlocks, topSpans, text, forSearch)
+	structured, chunks := buildStructuredBlocks(rawBlocks, topSpans, text, forSearch, explicitLeft)
 	result.Blocks = structured
 	if len(result.Blocks) == 0 {
 		result.Blocks = []*document.Block{document.NewBlock("paragraph", strings.TrimRight(text, "\r\n"))}
@@ -315,7 +342,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 
 // buildStructuredBlocks resolves multi-block HTML wrappers (columns, details,
 // aligned containers) while tracking source byte ranges for top-level chunks.
-func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text string, forSearch bool) ([]*document.Block, []importedChunk) {
+func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text string, forSearch bool, explicitLeft map[*document.Block]bool) ([]*document.Block, []importedChunk) {
 	var spanStart, spanEnd map[*document.Block]int
 	if !forSearch {
 		spanStart = make(map[*document.Block]int, len(spans))
@@ -326,9 +353,9 @@ func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text strin
 		}
 	}
 
-	blocks = importAlignedWrappers(blocks, spanStart, spanEnd)
-	blocks = importColumns(blocks, spanStart, spanEnd)
+	blocks = importColumns(blocks, spanStart, spanEnd, explicitLeft)
 	blocks = importDetails(blocks, spanStart, spanEnd)
+	blocks = importAlignedWrappers(blocks, spanStart, spanEnd, explicitLeft)
 
 	if forSearch {
 		return blocks, nil
@@ -593,7 +620,7 @@ func parseObsidianImageEmbed(line string) (url, alt string, width float32, ok bo
 	return target, alt, width, true
 }
 
-func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline, indent int, nextID func() string) []*document.Block {
+func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline, indent int, nextID func() string, explicitLeft map[*document.Block]bool) []*document.Block {
 	raw := strings.TrimRight(text[start:end], "\r\n")
 	if !strings.Contains(raw, "![[") {
 		return nil
@@ -632,11 +659,13 @@ func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline
 						continue
 					}
 				}
+				runs, comments := importRunsAndComments(cIn, document.Style{})
 				b := &document.Block{
-					ID:     nextID(),
-					Kind:   "paragraph",
-					Indent: indent,
-					Runs:   importRuns(cIn, document.Style{}),
+					ID:       nextID(),
+					Kind:     "paragraph",
+					Indent:   indent,
+					Runs:     runs,
+					Comments: comments,
 				}
 				if cNode.Kind == parser.Heading {
 					b.Kind, b.Level = "heading", cNode.Level
@@ -648,8 +677,8 @@ func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline
 				blocks = append(blocks, &document.Block{ID: nextID(), Kind: "math", Indent: indent, Runs: []document.Run{{Text: strings.TrimSpace(sub.Lines(cIdx))}}})
 			default:
 				rawChunk := snippet[cNode.Start:cNode.End]
-				if hb, ok := tryImportHTMLBlock(rawChunk, indent); ok {
-					blocks = append(blocks, hb)
+				if hbs, ok := tryImportHTMLBlocks(rawChunk, indent, explicitLeft); ok && len(hbs) > 0 {
+					blocks = append(blocks, hbs...)
 				} else {
 					blocks = append(blocks, &document.Block{ID: nextID(), Kind: "raw", Indent: indent, Runs: []document.Run{{Text: rawChunk}}})
 				}
@@ -724,7 +753,66 @@ func parseSingleImgTag(raw, align string) (*document.Block, bool) {
 	return b, true
 }
 
-func tryImportHTMLBlock(raw string, baseIndent int) (*document.Block, bool) {
+// tryImportLeadingCommentParagraph converts a CommonMark type-2 HTML block
+// consisting of one or more leading comments followed by single-line inline
+// prose (such as "<!-- note -->Visible") into a paragraph with preserved hidden
+// inline comments, while leaving standalone comment blocks and block/media HTML
+// untouched as raw blocks.
+func tryImportLeadingCommentParagraph(trimmed string, baseIndent int) (*document.Block, bool) {
+	if !strings.HasPrefix(trimmed, "<!--") || isHTMLCommentBlock(trimmed) {
+		return nil, false
+	}
+	rest := trimmed
+	for strings.HasPrefix(rest, "<!--") {
+		end := strings.Index(rest[4:], "-->")
+		if end < 0 {
+			return nil, false
+		}
+		rest = strings.TrimLeft(rest[4+end+3:], " \t")
+	}
+	if rest == "" || strings.ContainsAny(rest, "\r\n") {
+		return nil, false
+	}
+	ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(rest), ctx)
+	if err != nil {
+		return nil, false
+	}
+	wrap := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+	for _, n := range nodes {
+		wrap.AppendChild(n)
+	}
+	if hasBlockElementChild(wrap) || hasUnsupportedInlineMedia(wrap) {
+		return nil, false
+	}
+	sub := parser.New(parser.Default | parser.ExtDollarMath)
+	sub.Set("<span></span>" + trimmed)
+	paraIdx := -1
+	count := 0
+	for idx := range sub.Children(0) {
+		count++
+		if sub.Block(idx).Kind == parser.Paragraph {
+			paraIdx = idx
+		}
+	}
+	if count != 1 || paraIdx < 0 {
+		return nil, false
+	}
+	runs, comments := importRunsAndComments(sub.Inlines(paraIdx), document.Style{})
+	if len(comments) == 0 {
+		return nil, false
+	}
+	b := document.NewBlock("paragraph", "")
+	b.Indent = baseIndent
+	b.Runs = runs
+	b.Comments = comments
+	if len(b.Runs) == 0 {
+		b.Runs = []document.Run{{Text: ""}}
+	}
+	return b, true
+}
+
+func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.Block]bool) ([]*document.Block, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, false
@@ -732,12 +820,18 @@ func tryImportHTMLBlock(raw string, baseIndent int) (*document.Block, bool) {
 	// Structural multi-block wrappers are handled by importColumns / importDetails / importAlignedWrappers.
 	if detailsOpen.MatchString(trimmed) || detailsClose.MatchString(trimmed) ||
 		columnsOpenRe.MatchString(trimmed) || columnOpenRe.MatchString(trimmed) || divCloseRe.MatchString(trimmed) ||
-		alignedDivOpenRe.MatchString(trimmed) {
+		centerCloseRe.MatchString(trimmed) {
+		return nil, false
+	}
+	if _, _, ok := parseAlignedWrapperOpen(trimmed); ok {
 		return nil, false
 	}
 	if b, ok := parseSingleImgTag(trimmed, ""); ok {
 		b.Indent = baseIndent
-		return b, true
+		return []*document.Block{b}, true
+	}
+	if b, ok := tryImportLeadingCommentParagraph(trimmed, baseIndent); ok {
+		return []*document.Block{b}, true
 	}
 
 	ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Body, Data: "body"}
@@ -760,36 +854,42 @@ func tryImportHTMLBlock(raw string, baseIndent int) (*document.Block, bool) {
 	}
 	el := elems[0]
 	switch el.DataAtom {
+	case atom.Hr:
+		b := document.NewBlock("rule", "")
+		b.Indent = baseIndent
+		return []*document.Block{b}, true
 	case atom.Table:
 		if tb := tableOfMode(el, true); tb != nil {
 			tb.Indent = baseIndent
-			return tb, true
+			return []*document.Block{tb}, true
 		}
-	case atom.Center:
-		if img := singleChildImg(el); img != nil {
-			if b, ok := imgNodeToBlock(img, "center"); ok {
-				b.Indent = baseIndent
-				return b, true
-			}
+	case atom.Div:
+		if attr(el, "class") != "" {
+			return nil, false
 		}
-		b := document.NewBlock("paragraph", "")
-		b.Align = "center"
-		b.Indent = baseIndent
-		b.Runs = parseInlineHTMLNodes(el, document.Style{})
-		if len(b.Runs) == 0 {
-			b.Runs = []document.Run{{Text: ""}}
-		}
-		return b, true
-	case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		align := parseBlockAlign(el)
+		if align == "" {
+			return nil, false
+		}
+		return importAlignedHTMLContainer(el, align, baseIndent, explicitLeft)
+	case atom.Center:
+		return importAlignedHTMLContainer(el, "center", baseIndent, explicitLeft)
+	case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
+		align, explicit := parseBlockAlignExplicit(el)
 		ind, hasInd := parseBlockIndent(el)
 		if img := singleChildImg(el); img != nil && el.DataAtom == atom.P {
 			if b, ok := imgNodeToBlock(img, align); ok {
 				b.Indent = min(12, baseIndent+ind)
-				return b, true
+				if explicit && align == "" && explicitLeft != nil {
+					explicitLeft[b] = true
+				}
+				return []*document.Block{b}, true
 			}
 		}
-		if align == "" && !hasInd {
+		if !explicit && !hasInd {
+			return nil, false
+		}
+		if hasBlockElementChild(el) || hasUnsupportedInlineMedia(el) {
 			return nil, false
 		}
 		kind, level := "paragraph", 0
@@ -801,13 +901,189 @@ func tryImportHTMLBlock(raw string, baseIndent int) (*document.Block, bool) {
 		b.Level = level
 		b.Align = align
 		b.Indent = min(12, baseIndent+ind)
-		b.Runs = parseInlineHTMLNodes(el, document.Style{})
+		b.Runs, b.Comments = parseInlineHTMLNodesWithBreak(el, document.Style{}, "\u2028")
 		if len(b.Runs) == 0 {
 			b.Runs = []document.Run{{Text: ""}}
 		}
-		return b, true
+		if explicit && align == "" && explicitLeft != nil {
+			explicitLeft[b] = true
+		}
+		return []*document.Block{b}, true
 	}
 	return nil, false
+}
+
+func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, explicitLeft map[*document.Block]bool) ([]*document.Block, bool) {
+	if img := singleChildImg(el); img != nil {
+		if b, ok := imgNodeToBlock(img, align); ok {
+			b.Indent = baseIndent
+			if align == "" && explicitLeft != nil {
+				explicitLeft[b] = true
+			}
+			return []*document.Block{b}, true
+		}
+	}
+	if !hasBlockElementChild(el) {
+		if hasUnsupportedInlineMedia(el) {
+			return nil, false
+		}
+		b := document.NewBlock("paragraph", "")
+		b.Align = align
+		b.Indent = baseIndent
+		b.Runs, b.Comments = parseInlineHTMLNodesWithBreak(el, document.Style{}, "\u2028")
+		if len(b.Runs) == 0 {
+			b.Runs = []document.Run{{Text: ""}}
+		}
+		if align == "" && explicitLeft != nil {
+			explicitLeft[b] = true
+		}
+		return []*document.Block{b}, true
+	}
+	var out []*document.Block
+	var inlineBuf []*xhtml.Node
+	flushInline := func() {
+		if len(inlineBuf) == 0 {
+			return
+		}
+		runs, comments := parseInlineHTMLNodeSlice(inlineBuf, document.Style{}, "\u2028", false)
+		inlineBuf = nil
+		if len(runs) == 0 && len(comments) == 0 {
+			return
+		}
+		if len(runs) == 0 {
+			runs = []document.Run{{Text: ""}}
+		}
+		b := document.NewBlock("paragraph", "")
+		b.Align = align
+		b.Indent = baseIndent
+		b.Runs = runs
+		b.Comments = comments
+		if align == "" && explicitLeft != nil {
+			explicitLeft[b] = true
+		}
+		out = append(out, b)
+	}
+	for c := el.FirstChild; c != nil; c = c.NextSibling {
+		switch c.Type {
+		case xhtml.TextNode:
+			if strings.TrimSpace(c.Data) == "" && len(inlineBuf) == 0 {
+				continue
+			}
+			inlineBuf = append(inlineBuf, c)
+		case xhtml.CommentNode:
+			if len(inlineBuf) == 0 {
+				out = append(out, document.NewBlock("raw", "<!--"+c.Data+"-->"))
+			} else {
+				inlineBuf = append(inlineBuf, c)
+			}
+		case xhtml.ElementNode:
+			switch c.DataAtom {
+			case atom.Hr:
+				flushInline()
+				b := document.NewBlock("rule", "")
+				b.Indent = baseIndent
+				out = append(out, b)
+			case atom.Img:
+				flushInline()
+				b, ok := imgNodeToBlock(c, align)
+				if !ok {
+					return nil, false
+				}
+				b.Indent = baseIndent
+				if align == "" && explicitLeft != nil {
+					explicitLeft[b] = true
+				}
+				out = append(out, b)
+			case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
+				flushInline()
+				if hasBlockElementChild(c) {
+					return nil, false
+				}
+				childAlign, explicit := parseBlockAlignExplicit(c)
+				if !explicit {
+					childAlign = align
+				}
+				ind, _ := parseBlockIndent(c)
+				if c.DataAtom == atom.P {
+					if img := singleChildImg(c); img != nil {
+						if b, ok := imgNodeToBlock(img, childAlign); ok {
+							b.Indent = min(12, baseIndent+ind)
+							if childAlign == "" && explicitLeft != nil {
+								explicitLeft[b] = true
+							}
+							out = append(out, b)
+							continue
+						}
+					}
+				}
+				if hasUnsupportedInlineMedia(c) {
+					return nil, false
+				}
+				kind, level := "paragraph", 0
+				if c.DataAtom != atom.P {
+					kind = "heading"
+					level = int(c.Data[1] - '0')
+				}
+				b := document.NewBlock(kind, "")
+				b.Level = level
+				b.Align = childAlign
+				b.Indent = min(12, baseIndent+ind)
+				b.Runs, b.Comments = parseInlineHTMLNodesWithBreak(c, document.Style{}, "\u2028")
+				if len(b.Runs) == 0 {
+					b.Runs = []document.Run{{Text: ""}}
+				}
+				if childAlign == "" && explicitLeft != nil {
+					explicitLeft[b] = true
+				}
+				out = append(out, b)
+			case atom.Div:
+				if attr(c, "class") != "" {
+					return nil, false
+				}
+				flushInline()
+				childAlign, explicit := parseBlockAlignExplicit(c)
+				if !explicit {
+					childAlign = align
+				}
+				sub, ok := importAlignedHTMLContainer(c, childAlign, baseIndent, explicitLeft)
+				if !ok {
+					return nil, false
+				}
+				out = append(out, sub...)
+			case atom.Center:
+				flushInline()
+				sub, ok := importAlignedHTMLContainer(c, "center", baseIndent, explicitLeft)
+				if !ok {
+					return nil, false
+				}
+				out = append(out, sub...)
+			case atom.Table:
+				flushInline()
+				tb := tableOfMode(c, true)
+				if tb == nil {
+					return nil, false
+				}
+				tb.Indent = baseIndent
+				out = append(out, tb)
+			case atom.Span, atom.Mark, atom.Font,
+				atom.B, atom.Strong, atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn,
+				atom.U, atom.Ins, atom.S, atom.Del, atom.Strike,
+				atom.Sup, atom.Sub, atom.Code, atom.Kbd, atom.Samp, atom.Tt,
+				atom.A, atom.Small, atom.Abbr, atom.Q, atom.Br:
+				if hasBlockElementChild(c) || hasUnsupportedInlineMedia(c) {
+					return nil, false
+				}
+				inlineBuf = append(inlineBuf, c)
+			default:
+				return nil, false
+			}
+		}
+	}
+	flushInline()
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
 }
 
 func singleChildImg(el *xhtml.Node) *xhtml.Node {
@@ -858,16 +1134,18 @@ func parseBlockIndent(el *xhtml.Node) (int, bool) {
 }
 
 type runAccumulator struct {
-	runs  []document.Run
-	has   bool
-	style document.Style
-	buf   strings.Builder
+	runs   []document.Run
+	has    bool
+	style  document.Style
+	buf    strings.Builder
+	u16Len int
 }
 
 func (a *runAccumulator) add(text string, style document.Style) {
 	if text == "" {
 		return
 	}
+	a.u16Len += document.Len(text)
 	if !a.has {
 		a.has = true
 		a.style = style
@@ -897,11 +1175,17 @@ func (a *runAccumulator) finish() []document.Run {
 }
 
 func importRuns(in []parser.Inline, base document.Style) []document.Run {
+	runs, _ := importRunsAndComments(in, base)
+	return runs
+}
+
+func importRunsAndComments(in []parser.Inline, base document.Style) ([]document.Run, []document.InlineComment) {
 	if len(in) == 0 {
-		return nil
+		return nil, nil
 	}
 	var acc runAccumulator
 	acc.runs = make([]document.Run, 0, min(len(in), 8))
+	var comments []document.InlineComment
 	var walk func(int, int, document.Style)
 	walk = func(start, stop int, initial document.Style) {
 		style := initial
@@ -910,7 +1194,10 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 			node := in[i]
 			end := min(stop, max(i+1, node.Next))
 			if node.Kind == parser.HTML {
-				if handled, emit := applyInlineHTMLToken(node.Text, &stack, &style); handled {
+				if handled, emit, comment := applyInlineHTMLToken(node.Text, &stack, &style); handled {
+					if comment != "" {
+						comments = append(comments, document.InlineComment{Offset: acc.u16Len, Text: comment})
+					}
 					acc.add(emit, style)
 					i = end
 					continue
@@ -936,7 +1223,7 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 			}
 			if end > i+1 && node.Kind != parser.Image {
 				walk(i+1, end, next)
-			} else if node.Kind == parser.Text && !next.Code {
+			} else if node.Kind == parser.Text && !next.Code && !next.Kbd {
 				writeHighlightSyntax(&acc, node.Text, next)
 			} else {
 				text := node.Text
@@ -956,7 +1243,7 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 		}
 	}
 	walk(0, len(in), base)
-	return acc.finish()
+	return acc.finish(), comments
 }
 
 // splitHighlightSyntax parses Obsidian/Textus ==highlight== spans in plain text
@@ -1328,7 +1615,7 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 	padCols, num := advanceListState(b, numberedSeq, listCols)
 	pad := strings.Repeat(" ", padCols)
 
-	inline := exportRuns(b.Runs)
+	inline := exportRunsWithComments(b.Runs, b.Comments, b.Kind != "heading")
 	switch b.Kind {
 	case "toggle":
 		var body []*document.Block
@@ -1342,7 +1629,7 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		if !b.Folded {
 			open = "<details open>"
 		}
-		summary := exportHTMLRuns(b.Runs, true)
+		summary := exportHTMLRunsWithComments(b.Runs, b.Comments, true)
 		text = open + "\n<summary>" + summary + "</summary>\n\n"
 		if len(body) > 0 {
 			text += renderMarkdownBlockList(body) + "\n"
@@ -1352,14 +1639,14 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		text = "[^" + b.NoteLabel + "]: " + strings.ReplaceAll(inline, "\n", "\n    ")
 	case "paragraph":
 		if align != "" || b.Indent > 0 {
-			text = formatAlignedBlockHTML("p", align, b.Indent, exportHTMLRuns(b.Runs, true))
+			text = formatAlignedBlockHTML("p", align, b.Indent, exportHTMLRunsWithComments(b.Runs, b.Comments, true))
 		} else {
 			text = inline
 		}
 	case "heading":
 		lvl := max(1, min(6, b.Level))
 		if align != "" || b.Indent > 0 {
-			text = formatAlignedBlockHTML(fmt.Sprintf("h%d", lvl), align, b.Indent, exportHTMLRuns(b.Runs, true))
+			text = formatAlignedBlockHTML(fmt.Sprintf("h%d", lvl), align, b.Indent, exportHTMLRunsWithComments(b.Runs, b.Comments, true))
 		} else {
 			text = strings.Repeat("#", lvl) + " " + inline
 		}
@@ -1507,6 +1794,11 @@ func isSimpleMarkdownTable(b *document.Block) bool {
 			if cell.ColSpan > 1 || cell.RowSpan > 1 || cell.Background != "" {
 				return false
 			}
+			for _, cm := range cell.Comments {
+				if strings.ContainsAny(cm.Text, "|\r\n") {
+					return false
+				}
+			}
 			if r > 0 && c < len(head) && normCellAlign(cell.Align) != normCellAlign(head[c].Align) {
 				return false
 			}
@@ -1520,7 +1812,7 @@ func exportPipeTable(b *document.Block) string {
 	for i, row := range b.Children {
 		var cells []string
 		for _, cell := range row.Children {
-			cells = append(cells, strings.ReplaceAll(strings.ReplaceAll(exportRuns(cell.Runs), "|", "\\|"), "\n", "<br>"))
+			cells = append(cells, strings.ReplaceAll(strings.ReplaceAll(exportRunsWithComments(cell.Runs, cell.Comments, false), "|", "\\|"), "\n", "<br>"))
 		}
 		rows = append(rows, "| "+strings.Join(cells, " | ")+" |")
 		if i == 0 {
@@ -1589,7 +1881,7 @@ func exportRichHTMLTable(b *document.Block) string {
 			} else {
 				out.WriteString("<" + tag + ">")
 			}
-			out.WriteString(exportHTMLRuns(cell.Runs, true))
+			out.WriteString(exportHTMLRunsWithComments(cell.Runs, cell.Comments, true))
 			out.WriteString("</" + tag + ">")
 		}
 		out.WriteString("</tr>\n")
@@ -1609,6 +1901,90 @@ func exportRuns(runs []document.Run) string {
 	return renderMarkdownRunSlice(runs, 0, 0)
 }
 
+func sortedInlineComments(comments []document.InlineComment, totalLen int) []document.InlineComment {
+	sorted := make([]document.InlineComment, len(comments))
+	for i, c := range comments {
+		c.Offset = max(0, min(totalLen, c.Offset))
+		sorted[i] = c
+	}
+	slices.SortStableFunc(sorted, func(a, b document.InlineComment) int {
+		return a.Offset - b.Offset
+	})
+	return sorted
+}
+
+// atMarkdownLineStart reports whether writing "<!--" at the end of s would
+// trigger a CommonMark type-2 HTML block (0-3 spaces at the start of a line).
+func atMarkdownLineStart(s string, guardFirstLine bool) bool {
+	if nl := strings.LastIndexByte(s, '\n'); nl >= 0 {
+		s = s[nl+1:]
+	} else if !guardFirstLine {
+		return false
+	}
+	if len(s) > 3 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+func exportRunsWithComments(runs []document.Run, comments []document.InlineComment, guardFirstLine bool) string {
+	runs = document.Compact(runs)
+	if len(comments) == 0 {
+		return renderMarkdownRunSlice(runs, 0, 0)
+	}
+	totalLen := runsU16Len(runs)
+	sorted := sortedInlineComments(comments, totalLen)
+	var out strings.Builder
+	prevOff := 0
+	var prevRune rune
+	for _, c := range sorted {
+		if c.Offset > prevOff {
+			seg := document.Compact(document.SliceRuns(runs, prevOff, c.Offset))
+			out.WriteString(renderMarkdownRunSlice(seg, prevRune, '<'))
+			prevOff = c.Offset
+		}
+		if atMarkdownLineStart(out.String(), guardFirstLine) {
+			out.WriteString("<span></span>")
+		}
+		out.WriteString(c.Text)
+		prevRune = '>'
+	}
+	if prevOff < totalLen {
+		seg := document.Compact(document.SliceRuns(runs, prevOff, totalLen))
+		out.WriteString(renderMarkdownRunSlice(seg, prevRune, 0))
+	}
+	return out.String()
+}
+
+func exportHTMLRunsWithComments(runs []document.Run, comments []document.InlineComment, preserveNoMath bool) string {
+	runs = document.Compact(runs)
+	if len(comments) == 0 {
+		return renderHTMLRunSlice(runs, preserveNoMath)
+	}
+	totalLen := runsU16Len(runs)
+	sorted := sortedInlineComments(comments, totalLen)
+	var out strings.Builder
+	prevOff := 0
+	for _, c := range sorted {
+		if c.Offset > prevOff {
+			seg := document.Compact(document.SliceRuns(runs, prevOff, c.Offset))
+			out.WriteString(renderHTMLRunSlice(seg, preserveNoMath))
+			prevOff = c.Offset
+		}
+		out.WriteString(c.Text)
+	}
+	if prevOff < totalLen {
+		seg := document.Compact(document.SliceRuns(runs, prevOff, totalLen))
+		out.WriteString(renderHTMLRunSlice(seg, preserveNoMath))
+	}
+	return out.String()
+}
+
 func firstRuneOfRuns(runs []document.Run) rune {
 	for _, r := range runs {
 		for _, ch := range r.Text {
@@ -1626,7 +2002,7 @@ func lastRuneOfString(s string) rune {
 	return last
 }
 
-var markdownMarkOrder = []string{"link", "underline", "script", "span", "strike", "italic", "bold"}
+var markdownMarkOrder = []string{"link", "kbd", "underline", "script", "span", "strike", "italic", "bold"}
 
 func chooseOuterMarkdownMark(runs []document.Run, i int) (kind, val string, end int) {
 	for _, k := range markdownMarkOrder {
@@ -1650,13 +2026,17 @@ func chooseOuterMarkdownMark(runs []document.Run, i int) (kind, val string, end 
 }
 
 func renderMarkdownRunSlice(runs []document.Run, before, after rune) string {
+	return renderMarkdownRuns(runs, before, after, false)
+}
+
+func renderMarkdownRuns(runs []document.Run, before, after rune, inKbd bool) string {
 	var out strings.Builder
 	prev := before
 	for i := 0; i < len(runs); {
 		r := runs[i]
 		kind, val, j := chooseOuterMarkdownMark(runs, i)
 		if kind == "" {
-			leaf := formatMarkdownLeafRun(r)
+			leaf := formatMarkdownLeafRun(r, inKbd)
 			out.WriteString(leaf)
 			if lr := lastRuneOfString(leaf); lr != 0 {
 				prev = lr
@@ -1667,6 +2047,9 @@ func renderMarkdownRunSlice(runs []document.Run, before, after rune) string {
 		sub := make([]document.Run, j-i)
 		for k := i; k < j; k++ {
 			sub[k-i] = clearHTMLMark(runs[k], kind)
+			if kind == "kbd" {
+				sub[k-i].Style.NoMath = true
+			}
 		}
 		next := after
 		if j < len(runs) {
@@ -1678,18 +2061,20 @@ func renderMarkdownRunSlice(runs []document.Run, before, after rune) string {
 		switch kind {
 		case "link":
 			innerPrev, innerNext = '[', ']'
-		case "underline", "script", "span":
+		case "kbd", "underline", "script", "span":
 			innerPrev, innerNext = '>', '<'
 		case "bold", "italic":
 			innerPrev, innerNext = '*', '*'
 		case "strike":
 			innerPrev, innerNext = '~', '~'
 		}
-		inner := renderMarkdownRunSlice(sub, innerPrev, innerNext)
+		inner := renderMarkdownRuns(sub, innerPrev, innerNext, inKbd || kind == "kbd")
 		var chunk string
 		switch kind {
 		case "link":
 			chunk = fmt.Sprintf("[%s](%s)", inner, val)
+		case "kbd":
+			chunk = "<kbd>" + inner + "</kbd>"
 		case "bold":
 			if canUseMarkdownDelim(inner, prev, next, "**") {
 				chunk = "**" + inner + "**"
@@ -1733,7 +2118,7 @@ func renderMarkdownRunSlice(runs []document.Run, before, after rune) string {
 // display math, whereas an unmatched ']' after '\[...' stays literal text.
 var markdownEscape = strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "`", "\\`", "<", "&lt;")
 
-func formatMarkdownLeafRun(run document.Run) string {
+func formatMarkdownLeafRun(run document.Run, skipWiki bool) string {
 	if run.Style.Code {
 		fence := "`"
 		for strings.Contains(run.Text, fence) {
@@ -1751,11 +2136,11 @@ func formatMarkdownLeafRun(run document.Run) string {
 		if run.Style.NoMath && token.note == "" {
 			continue
 		}
-		escaped.WriteString(escapePlainSegment(source[pos:token.start]))
+		escaped.WriteString(escapePlainSegment(source[pos:token.start], skipWiki))
 		escaped.WriteString(source[token.start:token.end])
 		pos = token.end
 	}
-	escaped.WriteString(escapePlainSegment(source[pos:]))
+	escaped.WriteString(escapePlainSegment(source[pos:], skipWiki))
 	text := escaped.String()
 	if run.Style.NoMath {
 		text = strings.ReplaceAll(text, "$", `\$`)
@@ -1763,7 +2148,10 @@ func formatMarkdownLeafRun(run document.Run) string {
 	return text
 }
 
-func escapePlainSegment(s string) string {
+func escapePlainSegment(s string, skipWiki bool) string {
+	if skipWiki {
+		return escapeMarkdownPlain(s)
+	}
 	links := wiki.Links(s)
 	if len(links) == 0 {
 		return escapeMarkdownPlain(s)
@@ -1879,7 +2267,9 @@ func alertMetadata(children []*document.Block) (color, emoji, align string, ok b
 		}
 	}
 	start := document.Len(text) - document.Len(trimmed)
-	first.Runs = document.SliceRuns(first.Runs, start, document.Len(text))
+	endLen := document.Len(text)
+	first.Runs = document.SliceRuns(first.Runs, start, endLen)
+	first.Comments = document.SliceComments(first.Comments, start, endLen)
 	return color, emoji, align, true
 }
 
@@ -1893,25 +2283,194 @@ var (
 	divNextColumnRe  = regexp.MustCompile(`(?is)^\s*</div>\s*<div\b[^>]*>\s*$`)
 	divDoubleCloseRe = regexp.MustCompile(`(?is)^\s*</div>\s*</div>\s*$`)
 	divCloseRe       = regexp.MustCompile(`(?i)^\s*</div>\s*$`)
-	alignedDivOpenRe = regexp.MustCompile(`(?is)^\s*<div\s+align\s*=\s*["'](center|right)["']\s*>\s*$`)
+	centerCloseRe    = regexp.MustCompile(`(?i)^\s*</center\s*>\s*$`)
 )
 
-func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int) []*document.Block {
+func isHTMLCommentBlock(s string) bool {
+	rest := strings.TrimSpace(s)
+	if rest == "" {
+		return false
+	}
+	found := false
+	for rest != "" {
+		if !strings.HasPrefix(rest, "<!--") {
+			return false
+		}
+		end := strings.Index(rest[4:], "-->")
+		if end < 0 {
+			return false
+		}
+		found = true
+		rest = strings.TrimSpace(rest[4+end+3:])
+	}
+	return found
+}
+
+func hasBlockElementChild(n *xhtml.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != xhtml.ElementNode {
+			continue
+		}
+		switch c.DataAtom {
+		case atom.Div, atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6,
+			atom.Ul, atom.Ol, atom.Blockquote, atom.Pre, atom.Table, atom.Hr, atom.Details, atom.Center:
+			return true
+		}
+		if hasBlockElementChild(c) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUnsupportedInlineMedia(n *xhtml.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != xhtml.ElementNode {
+			continue
+		}
+		switch c.DataAtom {
+		case atom.Img, atom.Svg, atom.Video, atom.Audio, atom.Iframe,
+			atom.Picture, atom.Canvas, atom.Input, atom.Button,
+			atom.Object, atom.Embed, atom.Form, atom.Select,
+			atom.Textarea, atom.Script, atom.Style:
+			return true
+		}
+		if hasUnsupportedInlineMedia(c) {
+			return true
+		}
+	}
+	return false
+}
+
+func divTagDelta(s string) int {
+	z := xhtml.NewTokenizer(strings.NewReader(s))
+	delta := 0
+	for {
+		switch z.Next() {
+		case xhtml.ErrorToken:
+			return delta
+		case xhtml.StartTagToken:
+			if z.Token().DataAtom == atom.Div {
+				delta++
+			}
+		case xhtml.EndTagToken:
+			if z.Token().DataAtom == atom.Div {
+				delta--
+			}
+		}
+	}
+}
+
+func isHTMLOpenTag(raw string, want atom.Atom) (*xhtml.Node, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, false
+	}
+	z := xhtml.NewTokenizer(strings.NewReader(trimmed))
+	if z.Next() != xhtml.StartTagToken {
+		return nil, false
+	}
+	tok := z.Token()
+	if tok.DataAtom != want {
+		return nil, false
+	}
+	for {
+		next := z.Next()
+		if next == xhtml.ErrorToken {
+			break
+		}
+		if next == xhtml.TextToken && strings.TrimSpace(z.Token().Data) == "" {
+			continue
+		}
+		return nil, false
+	}
+	return &xhtml.Node{Type: xhtml.ElementNode, DataAtom: tok.DataAtom, Data: tok.Data, Attr: tok.Attr}, true
+}
+
+func parseAlignedWrapperOpen(raw string) (align, closeTag string, ok bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || detailsOpen.MatchString(trimmed) || columnsOpenRe.MatchString(trimmed) || columnOpenRe.MatchString(trimmed) {
+		return "", "", false
+	}
+	if _, isCenter := isHTMLOpenTag(trimmed, atom.Center); isCenter {
+		return "center", "center", true
+	}
+	if node, isDiv := isHTMLOpenTag(trimmed, atom.Div); isDiv && attr(node, "class") == "" {
+		if a := parseBlockAlign(node); a != "" {
+			return a, "div", true
+		}
+	}
+	return "", "", false
+}
+
+func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int, explicitLeft map[*document.Block]bool) []*document.Block {
 	var out []*document.Block
 	for i := 0; i < len(blocks); i++ {
 		b := blocks[i]
 		if b.Kind == "raw" {
-			if m := alignedDivOpenRe.FindStringSubmatch(b.Text()); m != nil && i+2 < len(blocks) && blocks[i+2].Kind == "raw" && divCloseRe.MatchString(blocks[i+2].Text()) {
-				inner := blocks[i+1]
-				if inner.Kind != "raw" && inner.Kind != "table" && inner.Kind != "columns" {
-					inner.Align = strings.ToLower(m[1])
-					if spanStart != nil {
-						spanStart[inner] = spanStart[b]
-						spanEnd[inner] = spanEnd[blocks[i+2]]
+			if align, closeTag, ok := parseAlignedWrapperOpen(b.Text()); ok {
+				closeIdx := -1
+				depth := 1
+				for j := i + 1; j < len(blocks); j++ {
+					if blocks[j].Kind == "raw" {
+						txt := blocks[j].Text()
+						if closeTag == "center" {
+							if centerCloseRe.MatchString(txt) {
+								depth--
+							} else if _, isOpen := isHTMLOpenTag(txt, atom.Center); isOpen {
+								depth++
+							}
+						} else {
+							if divCloseRe.MatchString(txt) {
+								depth--
+							} else if _, isOpen := isHTMLOpenTag(txt, atom.Div); isOpen {
+								depth++
+							}
+						}
+						if depth == 0 {
+							closeIdx = j
+							break
+						}
 					}
-					out = append(out, inner)
-					i += 2
-					continue
+				}
+				if closeIdx > i+1 {
+					inner := blocks[i+1 : closeIdx]
+					valid := true
+					for _, child := range inner {
+						if child.Kind == "raw" && !isHTMLCommentBlock(child.Text()) {
+							valid = false
+							break
+						}
+					}
+					if valid {
+						for _, child := range inner {
+							if child.Align == "" && !explicitLeft[child] && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" {
+								child.Align = align
+							}
+						}
+						if spanStart != nil {
+							openStart, hasOpen := spanStart[b]
+							closeEnd, hasClose := spanEnd[blocks[closeIdx]]
+							if hasOpen && hasClose && openStart >= 0 && closeEnd >= openStart {
+								if len(inner) == 1 {
+									spanStart[inner[0]] = openStart
+									spanEnd[inner[0]] = closeEnd
+								} else {
+									spanStart[inner[0]] = openStart
+									spanEnd[inner[0]] = -1
+									for k := 1; k < len(inner)-1; k++ {
+										spanStart[inner[k]] = -1
+										spanEnd[inner[k]] = -1
+									}
+									spanStart[inner[len(inner)-1]] = -1
+									spanEnd[inner[len(inner)-1]] = closeEnd
+								}
+							}
+						}
+						out = append(out, inner...)
+						i = closeIdx
+						continue
+					}
 				}
 			}
 		}
@@ -1920,7 +2479,7 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 	return out
 }
 
-func importColumns(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int) []*document.Block {
+func importColumns(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int, explicitLeft map[*document.Block]bool) []*document.Block {
 	var out []*document.Block
 	for i := 0; i < len(blocks); i++ {
 		b := blocks[i]
@@ -1933,7 +2492,7 @@ func importColumns(blocks []*document.Block, spanStart, spanEnd map[*document.Bl
 			out = append(out, b)
 			continue
 		}
-		cols, nextIdx, ok := parseColumnsGroup(blocks, i, m[1] != "", spanStart, spanEnd)
+		cols, nextIdx, ok := parseColumnsGroup(blocks, i, m[1] != "", spanStart, spanEnd, explicitLeft)
 		if !ok {
 			out = append(out, b)
 			continue
@@ -2003,13 +2562,15 @@ func parseColumnsOpenWidths(tag string, expected int) []float32 {
 	return parseDataWidthsAttr(m[1], expected)
 }
 
-func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool, spanStart, spanEnd map[*document.Block]int) (*document.Block, int, bool) {
+func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool, spanStart, spanEnd map[*document.Block]int, explicitLeft map[*document.Block]bool) (*document.Block, int, bool) {
 	var columns []*document.Block
 	var cur []*document.Block
 	inCol := firstColOpened
+	nestedDivs := 0
 
 	finishCol := func() {
 		inner := importDetails(cur, spanStart, spanEnd)
+		inner = importAlignedWrappers(inner, spanStart, spanEnd, explicitLeft)
 		if len(inner) == 0 {
 			inner = []*document.Block{document.NewBlock("paragraph", "")}
 		}
@@ -2020,12 +2581,34 @@ func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool,
 		})
 		cur = nil
 		inCol = false
+		nestedDivs = 0
 	}
 
 	for j := start + 1; j < len(blocks); j++ {
 		b := blocks[j]
 		if b.Kind == "raw" {
 			txt := b.Text()
+			if inCol && nestedDivs > 0 {
+				if divCloseRe.MatchString(txt) {
+					nestedDivs--
+					cur = append(cur, b)
+					continue
+				}
+				if divDoubleCloseRe.MatchString(txt) {
+					if nestedDivs == 1 {
+						nestedDivs = 0
+						cur = append(cur, document.NewBlock("raw", "</div>"))
+						finishCol()
+						continue
+					}
+					nestedDivs -= 2
+					cur = append(cur, b)
+					continue
+				}
+				nestedDivs = max(0, nestedDivs+divTagDelta(txt))
+				cur = append(cur, b)
+				continue
+			}
 			if inCol && divDoubleCloseRe.MatchString(txt) {
 				finishCol()
 				if len(columns) >= 2 && len(columns) <= 5 {
@@ -2072,6 +2655,11 @@ func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool,
 				}
 				return nil, 0, false
 			}
+			if inCol {
+				if d := divTagDelta(txt); d > 0 {
+					nestedDivs += d
+				}
+			}
 		}
 		if !inCol {
 			return nil, 0, false
@@ -2095,7 +2683,7 @@ func importDetails(blocks []*document.Block, spanStart, spanEnd map[*document.Bl
 		if b.Kind == "raw" {
 			if m := detailsOpen.FindStringSubmatch(b.Text()); m != nil {
 				t := document.NewBlock("toggle", "")
-				t.Runs = parseInlineHTMLFragment(strings.TrimSpace(m[2]))
+				t.Runs, t.Comments = parseInlineHTMLFragment(strings.TrimSpace(m[2]))
 				t.Indent = len(open)
 				t.Folded = m[1] == ""
 				if spanStart != nil {
@@ -2166,6 +2754,9 @@ func sameBlockSemantics(a, b *document.Block) bool {
 	if !sameRunsSemantics(a.Runs, b.Runs) {
 		return false
 	}
+	if !slices.Equal(a.Comments, b.Comments) {
+		return false
+	}
 	return sameBlockSliceSemantics(a.Children, b.Children)
 }
 
@@ -2221,6 +2812,9 @@ func fnvMixStyle(h uint64, st document.Style) uint64 {
 	if st.Code {
 		flags |= 32
 	}
+	if st.Kbd {
+		flags |= 64
+	}
 	h = fnvMixByte(h, flags)
 	h = fnvMixString(h, st.Script)
 	h = fnvMixString(h, st.Link)
@@ -2269,6 +2863,11 @@ func blockSemanticHash(b *document.Block) uint64 {
 		h = fnvMixUint32(h, math.Float32bits(w))
 	}
 	h = hashNormalizedRuns(h, b.Runs)
+	h = fnvMixUint64(h, uint64(len(b.Comments)))
+	for _, c := range b.Comments {
+		h = fnvMixUint64(h, uint64(c.Offset))
+		h = fnvMixString(h, c.Text)
+	}
 	h = fnvMixUint64(h, uint64(len(b.Children)))
 	for _, child := range b.Children {
 		h = fnvMixUint64(h, blockSemanticHash(child))

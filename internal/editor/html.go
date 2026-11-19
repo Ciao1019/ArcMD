@@ -42,6 +42,7 @@ type htmlImporter struct {
 	kind    string
 	level   int
 	indent  int
+	align   string
 	checked *bool
 	// lists are the kinds of the lists the text is in, innermost last.
 	lists []string
@@ -107,7 +108,11 @@ func (h *htmlImporter) text(s string, style document.Style) {
 		if kind == "" {
 			kind = "paragraph"
 		}
-		h.cur = &document.Block{ID: document.NewID(), Kind: kind, Level: h.level, Indent: h.indent}
+		align := ""
+		if kind == "paragraph" || kind == "heading" {
+			align = h.align
+		}
+		h.cur = &document.Block{ID: document.NewID(), Kind: kind, Level: h.level, Indent: h.indent, Align: align}
 		if h.checked != nil {
 			h.cur.Kind, h.cur.Checked = "task", *h.checked
 		}
@@ -123,6 +128,17 @@ func (h *htmlImporter) block(kind string, level int, inside func()) {
 	inside()
 	h.flush()
 	h.kind, h.level = saved, savedLevel
+}
+
+func (h *htmlImporter) withAlign(align string, explicit bool, inside func()) {
+	if !explicit {
+		inside()
+		return
+	}
+	saved := h.align
+	h.align = align
+	inside()
+	h.align = saved
 }
 
 func attr(n *html.Node, name string) string {
@@ -186,7 +202,7 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		return
 	case atom.B, atom.Strong:
 		style.Bold = true
-	case atom.I, atom.Em, atom.Cite:
+	case atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn:
 		style.Italic = true
 	case atom.Sup:
 		style.Script = "sup"
@@ -196,10 +212,21 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		style.Underline = true
 	case atom.S, atom.Del, atom.Strike:
 		style.Strike = true
-	case atom.Code, atom.Kbd, atom.Samp, atom.Tt:
+	case atom.Kbd:
+		if !h.pre {
+			style.Kbd = true
+			style.Code = false
+		}
+	case atom.Code, atom.Samp, atom.Tt:
 		if !h.pre {
 			style.Code = true
+			style.Kbd = false
 		}
+	case atom.Q:
+		h.text("“", style)
+		h.children(n, style)
+		h.text("”", style)
+		return
 	case atom.A:
 		if href := attr(n, "href"); href != "" && !strings.HasPrefix(strings.ToLower(href), "javascript:") {
 			style.Link = href
@@ -215,7 +242,10 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		return
 	case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		level := int(n.Data[1] - '0')
-		h.block("heading", level, func() { h.children(n, style) })
+		align, explicit := parseBlockAlignExplicit(n)
+		h.withAlign(align, explicit, func() {
+			h.block("heading", level, func() { h.children(n, style) })
+		})
 		return
 	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav, atom.Figure, atom.Figcaption, atom.Dt, atom.Dd, atom.Address, atom.Center:
 		if h.pre {
@@ -242,14 +272,20 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 			h.pre = false
 			return
 		}
-		if h.kind == "quote" || h.kind == "bullet" || h.kind == "numbered" {
-			// Paragraphs inside a quote or a list item stay what they are in.
-			h.flush()
-			h.children(n, style)
-			h.flush()
-			return
+		align, explicit := parseBlockAlignExplicit(n)
+		if n.DataAtom == atom.Center {
+			align, explicit = "center", true
 		}
-		h.block(h.kind, h.level, func() { h.children(n, style) })
+		h.withAlign(align, explicit, func() {
+			if h.kind == "quote" || h.kind == "bullet" || h.kind == "numbered" {
+				// Paragraphs inside a quote or a list item stay what they are in.
+				h.flush()
+				h.children(n, style)
+				h.flush()
+				return
+			}
+			h.block(h.kind, h.level, func() { h.children(n, style) })
+		})
 		return
 	case atom.Blockquote:
 		h.block("quote", 0, func() { h.children(n, style) })
@@ -501,8 +537,12 @@ func tableOfMode(n *html.Node, exactWhitespace bool) *document.Block {
 			}
 			cell := document.NewBlock("cell", "")
 			if exactWhitespace {
-				if runs := parseInlineHTMLNodes(td, document.Style{}); len(runs) > 0 {
+				runs, comments := parseInlineHTMLNodesExact(td, document.Style{})
+				if len(runs) > 0 {
 					cell.Runs = runs
+				}
+				if len(comments) > 0 {
+					cell.Comments = comments
 				}
 			} else {
 				inner := &htmlImporter{kind: "paragraph"}
@@ -588,18 +628,23 @@ func parseHTMLWidth(n *html.Node) float32 {
 	return float32(v)
 }
 
-func parseBlockAlign(n *html.Node) string {
+func parseBlockAlignExplicit(n *html.Node) (string, bool) {
 	a := strings.ToLower(strings.TrimSpace(attr(n, "align")))
 	if a == "" {
 		a = strings.ToLower(strings.TrimSpace(parseCSSProps(attr(n, "style"))["text-align"]))
 	}
 	switch a {
 	case "center", "right":
-		return a
+		return a, true
 	case "left":
-		return ""
+		return "", true
 	}
-	return ""
+	return "", false
+}
+
+func parseBlockAlign(n *html.Node) string {
+	a, _ := parseBlockAlignExplicit(n)
+	return a
 }
 
 func parseCellBackground(n *html.Node) string {

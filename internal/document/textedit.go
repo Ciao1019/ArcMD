@@ -22,9 +22,10 @@ func (e *Engine) TextChangeSince(revision uint64) (TextChange, bool) {
 // Text-only history owns a copy of the affected runs. Structural transactions
 // retain full snapshots; neither representation aliases mutable document data.
 type historyEntry struct {
-	state   Snapshot
-	blockID string
-	runs    []Run
+	state    Snapshot
+	blockID  string
+	runs     []Run
+	comments []InlineComment
 }
 
 func (e *Engine) recordUndo(entry historyEntry) {
@@ -39,7 +40,7 @@ func (e *Engine) recordUndo(entry historyEntry) {
 func (e *Engine) captureHistory(id string) historyEntry {
 	if id != "" {
 		if leaf, ok := e.LeafByID(id); ok {
-			return historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(leaf.Block.Runs)}
+			return historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(leaf.Block.Runs), slices.Clone(leaf.Block.Comments)}
 		}
 	}
 	return historyEntry{state: e.Capture()}
@@ -62,6 +63,7 @@ func (e *Engine) restoreHistory(entry historyEntry) {
 	e.notifyBeforeLeafChange(leaf.Block.ID, leaf.Block.Runs)
 	before := leaf.Block.Text()
 	leaf.Block.Runs = slices.Clone(entry.runs)
+	leaf.Block.Comments = slices.Clone(entry.comments)
 	e.publishTextChange(i, before, leaf.Block.Text())
 	e.Anchor, e.Caret, e.Typing, e.Explicit = entry.state.Anchor, entry.state.Caret, entry.state.Typing, entry.state.Explicit
 }
@@ -71,6 +73,7 @@ func (e *Engine) restoreHistory(entry historyEntry) {
 type LeafState struct {
 	BlockID       string
 	Runs          []Run
+	Comments      []InlineComment
 	Anchor, Caret int
 	Typing        Style
 	Explicit      bool
@@ -113,18 +116,20 @@ func (e *Engine) replaceTextWithOptions(a, z int, text string, committed, allowA
 	if allowAutoformat && text == " " && (b.Kind == "paragraph" || b.Kind == "bullet") && a-first.Start <= 9 {
 		return false
 	}
+	nextComments := ShiftComments(b.Comments, a-first.Start, z-first.Start, Len(text), (first.End-first.Start)-(z-a)+Len(text))
 	var entry historyEntry
 	if committed {
-		entry = historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, b.ID, slices.Clone(b.Runs)}
+		entry = historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, b.ID, slices.Clone(b.Runs), slices.Clone(b.Comments)}
 	}
 	e.Anchor, e.Caret = a+Len(text), a+Len(text)
-	e.Typing, e.Explicit = style, true
-	if slices.Equal(b.Runs, runs) {
+	e.applyTypingAfterReplace(text, style, false)
+	if slices.Equal(b.Runs, runs) && slices.Equal(b.Comments, nextComments) {
 		return true
 	}
 	e.notifyBeforeLeafChange(b.ID, b.Runs)
 	i := e.leafIDs[first.Block.ID]
 	b.Runs = runs
+	b.Comments = nextComments
 	if committed {
 		e.recordUndo(entry)
 		e.version++
@@ -151,6 +156,7 @@ func (e *Engine) CaptureLeaf(a, z int) (LeafState, bool) {
 	return LeafState{
 		BlockID:  b.ID,
 		Runs:     slices.Clone(b.Runs),
+		Comments: slices.Clone(b.Comments),
 		Anchor:   e.Anchor,
 		Caret:    e.Caret,
 		Typing:   e.Typing,
@@ -179,6 +185,7 @@ func (e *Engine) RestoreLeaf(s LeafState) bool {
 	e.notifyBeforeLeafChange(leaf.Block.ID, leaf.Block.Runs)
 	before := leaf.Block.Text()
 	leaf.Block.Runs = slices.Clone(s.Runs)
+	leaf.Block.Comments = slices.Clone(s.Comments)
 	e.Anchor, e.Caret = s.Anchor, s.Caret
 	e.Typing, e.Explicit = s.Typing, s.Explicit
 	e.publishTextChange(i, before, leaf.Block.Text())
@@ -218,21 +225,23 @@ func (e *Engine) CommitLeaf(s LeafState, a, z int, text string) bool {
 	style := e.CurrentStyle()
 	style.NoMath = false
 	runs := Compact(append(append(SliceRuns(b.Runs, 0, a-leaf.Start), Run{Text: text, Style: style}), SliceRuns(b.Runs, z-leaf.Start, leaf.End-leaf.Start)...))
+	nextComments := ShiftComments(b.Comments, a-leaf.Start, z-leaf.Start, Len(text), (leaf.End-leaf.Start)-(z-a)+Len(text))
 	e.Anchor, e.Caret = a+Len(text), a+Len(text)
-	e.Typing, e.Explicit = style, true
+	e.applyTypingAfterReplace(text, style, false)
 
-	netChanged := !slices.Equal(s.Runs, runs)
-	previewChanged := !slices.Equal(b.Runs, runs)
+	netChanged := !slices.Equal(s.Runs, runs) || !slices.Equal(s.Comments, nextComments)
+	previewChanged := !slices.Equal(b.Runs, runs) || !slices.Equal(b.Comments, nextComments)
 	if netChanged || previewChanged {
 		e.notifyBeforeLeafChange(s.BlockID, s.Runs)
 	}
 	if netChanged {
-		entry := historyEntry{Snapshot{Anchor: s.Anchor, Caret: s.Caret, Typing: s.Typing, Explicit: s.Explicit}, s.BlockID, slices.Clone(s.Runs)}
+		entry := historyEntry{Snapshot{Anchor: s.Anchor, Caret: s.Caret, Typing: s.Typing, Explicit: s.Explicit}, s.BlockID, slices.Clone(s.Runs), slices.Clone(s.Comments)}
 		e.recordUndo(entry)
 		e.version++
 	}
 	if previewChanged {
 		b.Runs = runs
+		b.Comments = nextComments
 	}
 	if previewChanged || netChanged {
 		// Even when UnmarkText commits identical preview text (netChanged && !previewChanged),
@@ -259,15 +268,28 @@ func (e *Engine) ReplaceBlockRuns(id string, runs []Run, anchor, caret int, typi
 	if !slices.Equal(b.Runs, next) {
 		e.notifyBeforeLeafChange(id, b.Runs)
 		before := b.Text()
-		entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(b.Runs)}
+		after := blockText(next)
+		nextComments := shiftCommentsByDiff(b.Comments, before, after)
+		entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(b.Runs), slices.Clone(b.Comments)}
 		b.Runs = next
+		b.Comments = nextComments
 		e.recordUndo(entry)
 		e.version++
-		e.publishTextChange(i, before, b.Text())
+		e.publishTextChange(i, before, after)
 	}
 	e.Anchor, e.Caret = anchor, caret
 	e.Typing, e.Explicit = typing, explicit
 	return true
+}
+
+func shiftCommentsByDiff(comments []InlineComment, before, after string) []InlineComment {
+	if len(comments) == 0 {
+		return nil
+	}
+	prefU16, suffU16 := commonPrefixSuffixU16(before, after)
+	beforeLen := Len(before)
+	afterLen := Len(after)
+	return ShiftComments(comments, prefU16, beforeLen-suffU16, afterLen-prefU16-suffU16, afterLen)
 }
 
 func (e *Engine) publishTextChange(index int, before, after string) {

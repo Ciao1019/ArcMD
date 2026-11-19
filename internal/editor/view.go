@@ -1003,6 +1003,9 @@ func (e *Editor) layout(o Options) {
 		if hidden[b.ID] != "" {
 			continue
 		}
+		if e.printing && b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
+			continue
+		}
 		start := len(e.rows)
 		if b.ID == anchor.id && len(b.Children) == 0 {
 			// Place a top-level reading anchor before shaping the viewport.
@@ -1159,6 +1162,9 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 	}
 	var blockLayout func(*document.Block, float32, float32, float32) float32
 	blockLayout = func(b *document.Block, x, y, w float32) float32 {
+		if e.printing && b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
+			return 0
+		}
 		if b.Kind == "columns" {
 			return e.layoutColumns(b, x, y, w, hidden, blockLayout)
 		}
@@ -1249,6 +1255,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 						d.kind, d.label, d.id, d.mermaidHidden = "mermaid", b.Language, b.ID, true
 					} else if b.Kind == "code" {
 						d.label, d.id = b.Language, b.ID
+					} else if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
+						d.label = i18n.T("HTML 注释")
 					}
 					if b.Kind == "callout" {
 						d.tone, d.id, d.label = b.Color, b.ID, b.Emoji
@@ -1310,6 +1318,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 				d.mermaidHidden, d.mermaidWellOff = row.mermaidHidden, mermaidWellOff
 			} else if b.Kind == "code" {
 				d.label, d.id = b.Language, b.ID
+			} else if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
+				d.label = i18n.T("HTML 注释")
 			}
 			if b.Kind == "callout" {
 				d.tone, d.id, d.label = b.Color, b.ID, b.Emoji
@@ -1500,7 +1510,8 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 					e.paintLanguage(p, lb, d, t)
 					e.paintLineNumbers(p, ui.Rect{X: bounds.X + ddx, Y: bounds.Y + ddy, W: bounds.W, H: bounds.H}, d)
 				} else if d.label != "" {
-					p.Text(r.X+20, r.Y+10, d.label, 11, pg.Caption)
+					lw, _ := p.MeasureText(0, ui.Span{Text: d.label, Font: "system-ui", Size: 11})
+					p.Text(r.X+r.W-lw-14, r.Y+10, d.label, 11, pg.Caption)
 				}
 			case "mermaid":
 				e.paintMermaidDecoration(p, bounds, d, ddx, ddy, t)
@@ -1598,6 +1609,8 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 			}
 			e.paintMarker(p, bounds, r, t)
 			paintRowBody := func(scrollX float32) {
+				shiftedBounds := ui.Rect{X: bounds.X + dx - scrollX, Y: bounds.Y + dy, W: bounds.W, H: bounds.H}
+				e.paintKeycaps(p, shiftedBounds, r)
 				if e.focused && len(e.blocks.ids) == 0 && selection.End > r.leaf.Start && selection.Start < r.leaf.End && e.inlineMath.blockID != r.leaf.Block.ID {
 					if r.mathHidden && r.math != nil {
 						w, h := r.math.W*r.mathScale, (r.math.Ascent+r.math.Descent)*r.mathScale
@@ -1624,10 +1637,11 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				if e.paintWhiteboardRow(p, bounds, r, t) {
 					return
 				}
-				shiftedBounds := ui.Rect{X: bounds.X + dx - scrollX, Y: bounds.Y + dy, W: bounds.W, H: bounds.H}
 				e.paintAnnotations(p, shiftedBounds, r, true)
 				textColor := t.Text
 				if r.leaf.Block.Kind == "image" && e.imageCaptionID != r.leaf.Block.ID {
+					textColor = e.page.Caption
+				} else if r.leaf.Block.Kind == "raw" && isHTMLCommentBlock(r.leaf.Block.Text()) {
 					textColor = e.page.Caption
 				}
 				if !e.printing && !e.reduceMotion && e.motion.foldFade != nil {
@@ -2399,3 +2413,37 @@ func bodyFamily(family string) string {
 // Padding is the page's margin either side of its text column, as last
 // laid out.
 func (e *Editor) Padding() float32 { return e.padding }
+
+// paintKeycaps draws 3-layer rounded 3D keycap surfaces behind Style.Kbd stretches.
+func (e *Editor) paintKeycaps(p *ui.Painter, bounds ui.Rect, r row) {
+	if r.layout == nil || r.mathHidden || r.mermaidHidden || r.leaf.Block == nil || r.leaf.Block.Kind == "code" || r.leaf.Block.Kind == "math" || r.leaf.Block.Kind == "raw" {
+		return
+	}
+	runs := kbdRuns(r.leaf.Block.Runs)
+	if len(runs) == 0 {
+		return
+	}
+	size := r.size
+	if size <= 0 {
+		size = 16
+	}
+	for _, kr := range runs {
+		rects := r.layout.SelectionRects(ui.TextInputRange{Start: kr.start, End: kr.end})
+		if k := len(rects) - 1; k >= 0 && kr.trimLast {
+			rects[k].W -= kbdPad * size
+		}
+		for _, rect := range rects {
+			if rect.W < 1 || rect.H <= 0 {
+				continue
+			}
+			faceX := bounds.X + r.x + rect.X - 3.5
+			faceW := rect.W + 7
+			faceH := min(rect.H-1, max(15, size*0.84*1.55))
+			faceY := bounds.Y + r.y + rect.Y + (rect.H-faceH)/2 - 0.5
+			const rad = float32(4.5)
+			p.Fill(ui.Rect{X: faceX, Y: faceY + 1.5, W: faceW, H: faceH}, e.page.CodeBorder, rad)
+			p.Fill(ui.Rect{X: faceX, Y: faceY, W: faceW, H: faceH}, e.page.Popover, rad)
+			p.Stroke(ui.Rect{X: faceX, Y: faceY, W: faceW, H: faceH}, e.page.CodeBorder, rad, 1)
+		}
+	}
+}

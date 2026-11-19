@@ -8,7 +8,7 @@ import (
 func TestImportHTML(t *testing.T) {
 	doc := ImportHTML(`<meta charset="utf-8"><style>p{}</style>
 <h1>Title</h1>
-<p>Some <b>bold</b>, <span style="font-style: italic">italic</span> and <a href="https://go.dev">a link</a>.<br>Second line</p>
+<p>Some <b>bold</b>, <span style="font-style: italic">italic</span>, <kbd>Ctrl</kbd>, <q>quoted</q> and <a href="https://go.dev">a link</a>.<br>Second line</p>
 <ul><li>one<ul><li>nested</li></ul></li><li><input type="checkbox" checked> done</li></ul>
 <ol><li>first</li></ol>
 <blockquote><p>quoted</p></blockquote>
@@ -22,7 +22,7 @@ func TestImportHTML(t *testing.T) {
 		got = append(got, b.Kind+":"+b.Text())
 	}
 	want := []string{
-		"heading:Title", "paragraph:Some bold, italic and a link.", "paragraph:Second line",
+		"heading:Title", "paragraph:Some bold, italic, Ctrl, “quoted” and a link.", "paragraph:Second line",
 		"bullet:one", "bullet:nested", "task:done", "numbered:first", "quote:quoted",
 		`code:fmt.Println("hi")`, "rule:", "table:", "paragraph:pic",
 	}
@@ -34,7 +34,7 @@ func TestImportHTML(t *testing.T) {
 		t.Errorf("attributes: level %d indent %d checked %v lang %q", b[0].Level, b[4].Indent, b[5].Checked, b[8].Language)
 	}
 	runs := b[1].Runs
-	if !runs[1].Style.Bold || !runs[3].Style.Italic || runs[5].Style.Link != "https://go.dev" {
+	if !runs[1].Style.Bold || !runs[3].Style.Italic || !runs[5].Style.Kbd || runs[5].Style.Code || runs[7].Style.Link != "https://go.dev" {
 		t.Errorf("styles %+v", runs)
 	}
 	table := b[10]

@@ -9,7 +9,7 @@ func SingleLineDisplayMath(b *Block) (string, bool) {
 		return "", false
 	}
 	for _, r := range b.Runs {
-		if r.Style.Code || r.Style.Link != "" || r.Style.NoMath {
+		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" || r.Style.NoMath {
 			return "", false
 		}
 	}
@@ -39,7 +39,7 @@ func SingleLineDisplayMath(b *Block) (string, bool) {
 // enterMath recognizes display fences and trailing double-Enter exits without
 // reparsing the document or changing ordinary Enter inside multiline TeX.
 func (e *Engine) enterMath(leaf Leaf) bool {
-	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code {
+	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code || e.CurrentStyle().Kbd {
 		return false
 	}
 	b := leaf.Block
@@ -48,7 +48,7 @@ func (e *Engine) enterMath(leaf Leaf) bool {
 		lead := len(source) - len(strings.TrimLeft(source, " "))
 		if lead <= 3 && strings.TrimRight(source[lead:], " \t") == "$$" {
 			e.Edit(func() {
-				b.Kind, b.Runs = "math", nil
+				b.Kind, b.Runs, b.Comments = "math", nil, nil
 				e.Anchor, e.Caret = leaf.Start, leaf.Start
 				e.Typing, e.Explicit = Style{}, false
 			})
@@ -59,6 +59,7 @@ func (e *Engine) enterMath(leaf Leaf) bool {
 				e.Edit(func() {
 					b.Kind = "math"
 					b.Runs = []Run{{Text: formula}}
+					b.Comments = nil
 					next := NewBlock("paragraph", "")
 					next.Indent = b.Indent
 					parent, index := leaf.Parent, leaf.Index+1
@@ -97,7 +98,7 @@ func (e *Engine) enterMath(leaf Leaf) bool {
 // enterPipeTable compiles a single-line pipe header row such as
 // "| Port | Low | High" into a two-row table when Enter is pressed at its end.
 func (e *Engine) enterPipeTable(leaf Leaf) bool {
-	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code {
+	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code || e.CurrentStyle().Kbd {
 		return false
 	}
 	b := leaf.Block
@@ -213,7 +214,7 @@ func isPipeRuleCell(s string) bool {
 // enterCodeFence converts a paragraph holding a fenced code header such as
 // "```go" or "```mermaid" into a code block when Enter is pressed at its end.
 func (e *Engine) enterCodeFence(leaf Leaf) bool {
-	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code {
+	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code || e.CurrentStyle().Kbd {
 		return false
 	}
 	b := leaf.Block
@@ -244,6 +245,7 @@ func (e *Engine) enterCodeFence(leaf Leaf) bool {
 		b.Kind = "code"
 		b.Language = lang
 		b.Runs = nil
+		b.Comments = nil
 		e.Anchor, e.Caret = leaf.Start, leaf.Start
 		e.Typing, e.Explicit = Style{}, false
 	})
@@ -253,13 +255,26 @@ func (e *Engine) enterCodeFence(leaf Leaf) bool {
 // enterMermaidExit exits a Mermaid block when Enter is pressed on a trailing
 // empty line (double-Enter), matching display math behavior.
 func (e *Engine) enterMermaidExit(leaf Leaf) bool {
-	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code {
+	if leaf.Block.Kind != "code" || !strings.EqualFold(strings.TrimSpace(leaf.Block.Language), "mermaid") {
+		return false
+	}
+	return e.exitTrailingNewlineBlock(leaf)
+}
+
+// enterRawExit exits a raw HTML block when Enter is pressed on a trailing empty
+// line (double-Enter), inserting a new paragraph below it.
+func (e *Engine) enterRawExit(leaf Leaf) bool {
+	if leaf.Block.Kind != "raw" {
+		return false
+	}
+	return e.exitTrailingNewlineBlock(leaf)
+}
+
+func (e *Engine) exitTrailingNewlineBlock(leaf Leaf) bool {
+	if e.Anchor != e.Caret || e.Caret != leaf.End || e.CurrentStyle().Code || e.CurrentStyle().Kbd {
 		return false
 	}
 	b := leaf.Block
-	if b.Kind != "code" || !strings.EqualFold(strings.TrimSpace(b.Language), "mermaid") {
-		return false
-	}
 	source := b.Text()
 	lastNL := strings.LastIndexByte(source, '\n')
 	if lastNL < 0 || strings.Trim(source[lastNL+1:], " \t") != "" || leaf.Parent == nil {

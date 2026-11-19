@@ -219,9 +219,12 @@ func (e *Engine) replaceAcross(a, z int, text string, style Style) {
 		if leaf.End < a || leaf.Start > z || covered[leaf.Owner] {
 			continue
 		}
-		prefix := SliceRuns(leaf.Block.Runs, 0, max(0, a-leaf.Start))
-		suffix := SliceRuns(leaf.Block.Runs, max(0, z-leaf.Start), leaf.End-leaf.Start)
+		localA := max(0, a-leaf.Start)
+		localZ := min(leaf.End-leaf.Start, max(0, z-leaf.Start))
+		prefix := SliceRuns(leaf.Block.Runs, 0, localA)
+		suffix := SliceRuns(leaf.Block.Runs, localZ, leaf.End-leaf.Start)
 		leaf.Block.Runs = Compact(append(prefix, suffix...))
+		leaf.Block.Comments = ShiftComments(leaf.Block.Comments, localA, localZ, 0, Len(blockText(leaf.Block.Runs)))
 	}
 	// The covered structures go; the first one's place takes the text if
 	// nothing else can.
@@ -244,7 +247,13 @@ func (e *Engine) replaceAcross(a, z int, text string, style Style) {
 	case !covered[first.Owner]:
 		target, offset = first.Block, max(0, a-first.Start)
 		if firstTop >= 0 && lastTop >= 0 && first.Block != last.Block {
+			firstLen := Len(blockText(first.Block.Runs))
 			first.Block.Runs = Compact(append(first.Block.Runs, last.Block.Runs...))
+			if AllowsInlineComments(first.Block.Kind) {
+				first.Block.Comments = MergeComments(first.Block.Comments, firstLen, last.Block.Comments)
+			} else {
+				first.Block.Comments = nil
+			}
 			e.Doc.Blocks = append(e.Doc.Blocks[:lastTop], e.Doc.Blocks[lastTop+1:]...)
 		}
 	case !covered[last.Owner]:
@@ -257,6 +266,7 @@ func (e *Engine) replaceAcross(a, z int, text string, style Style) {
 	}
 	runs := target.Runs
 	target.Runs = Compact(append(append(SliceRuns(runs, 0, offset), Run{Text: text, Style: style}), SliceRuns(runs, offset, Len(blockText(runs)))...))
+	target.Comments = ShiftComments(target.Comments, offset, offset, Len(text), Len(blockText(target.Runs)))
 	if len(e.Doc.Blocks) == 0 {
 		e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
 	}
@@ -265,7 +275,7 @@ func (e *Engine) replaceAcross(a, z int, text string, style Style) {
 			e.Anchor, e.Caret = leaf.Start+offset+Len(text), leaf.Start+offset+Len(text)
 		}
 	}
-	e.Typing, e.Explicit = style, true
+	e.applyTypingAfterReplace(text, style, false)
 }
 
 func blockText(runs []Run) string {
