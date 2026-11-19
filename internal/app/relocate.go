@@ -212,6 +212,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	if cleanupErr := history.Forget(src.Root, rel); cleanupErr != nil {
 		a.notify("文档和历史已移动；原位置的历史副本未能清理。%v", cleanupErr)
 	}
+	a.invalidateResolvedImages()
 	return to, copied, nil
 }
 

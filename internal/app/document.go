@@ -1171,6 +1171,11 @@ func resolveSpaceImage(sp *space.Space, rel, url string) (string, error) {
 	}
 	decoded := unescapeImagePath(url)
 	if hasParentSegment(decoded) {
+		if matches := attachmentMatches(sp, root, docRel, url); len(matches) > 0 {
+			if full, ok := existingFile(root, matches[0]); ok {
+				return full, nil
+			}
+		}
 		return direct, nil
 	}
 	if cand, rErr := vault.Resolve(root, decoded); rErr == nil {
@@ -1178,7 +1183,7 @@ func resolveSpaceImage(sp *space.Space, rel, url string) (string, error) {
 			return cand, nil
 		}
 	}
-	if matches := attachmentMatches(sp, root, url); len(matches) > 0 {
+	if matches := attachmentMatches(sp, root, docRel, url); len(matches) > 0 {
 		if full, ok := existingFile(root, matches[0]); ok {
 			return full, nil
 		}

@@ -132,8 +132,12 @@ func (a *App) openPalette() {
 						continue
 					}
 					if sp := a.state.Get(res.id); sp != nil {
-						arrangeNodes(sp, "", res.nodes)
-						a.pageTrees[res.id] = pageTree{res.nodes, res.err}
+						nodes := res.nodes
+						if res.err == nil {
+							nodes = dropTreeFolder(nodes, attachmentFolder(sp))
+						}
+						arrangeNodes(sp, "", nodes)
+						a.pageTrees[res.id] = pageTree{nodes, res.err}
 					}
 				}
 			})

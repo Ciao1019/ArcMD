@@ -67,22 +67,33 @@ func docRelativeURL(docDir, fileRel string) string {
 }
 
 // slashRel is a clean slash path target seen from the clean slash folder
-// base ("" for the root): inside it without segments, otherwise ../ once
-// per folder level.
+// base ("" for the root), sharing common directory segments before adding ../
+// once per remaining folder level.
 func slashRel(base, target string) (string, bool) {
-	if target == "" || strings.HasPrefix(target, "../") || target == ".." {
+	if target == "" || target == "." || target == ".." || strings.HasPrefix(target, "../") {
+		return "", false
+	}
+	target = path.Clean(target)
+	if target == "" || target == "." || target == ".." || strings.HasPrefix(target, "../") {
 		return "", false
 	}
 	if base == "" || base == "." {
 		return target, true
 	}
-	if strings.HasPrefix(target, base+"/") {
-		return target[len(base)+1:], true
+	base = path.Clean(base)
+	if base == "." {
+		return target, true
 	}
 	if base == ".." || strings.HasPrefix(base, "../") {
 		return "", false
 	}
-	return strings.Repeat("../", strings.Count(base, "/")+1) + target, true
+	bSegs := strings.Split(base, "/")
+	tSegs := strings.Split(target, "/")
+	common := 0
+	for common < len(bSegs) && common < len(tSegs)-1 && bSegs[common] == tSegs[common] {
+		common++
+	}
+	return strings.Repeat("../", len(bSegs)-common) + strings.Join(tSegs[common:], "/"), true
 }
 
 // escapeImagePath keeps URLs Markdown links can hold: spaces become %20,
@@ -191,7 +202,7 @@ func (a *App) setAttachmentsFolder(sp *space.Space, dir string) {
 // stripped, and finally any file of that name in the folder, shallowest and
 // exact-case first. These candidates are for reading only; rewriting needs
 // a recorded move, since a unique basename does not establish ownership.
-func attachmentMatches(sp *space.Space, root, url string) []string {
+func attachmentMatches(sp *space.Space, root, docRel, url string) []string {
 	folder := attachmentFolder(sp)
 	if folder == "" || sp.IsExternal() {
 		return nil
@@ -202,6 +213,9 @@ func attachmentMatches(sp *space.Space, root, url string) []string {
 		return nil
 	}
 	clean := path.Clean(decoded)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		clean = path.Clean(path.Join(path.Dir(filepath.ToSlash(docRel)), decoded))
+	}
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return nil
 	}
@@ -220,6 +234,9 @@ func attachmentMatches(sp *space.Space, root, url string) []string {
 		}
 	}
 	add(path.Join(folder, clean))
+	if folder != "." && strings.HasPrefix(clean, folder+"/") {
+		add(path.Join(folder, strings.TrimPrefix(clean, folder+"/")))
+	}
 	add(path.Join(folder, base))
 	if strings.HasPrefix(clean, assetsDir+"/") {
 		add(path.Join(folder, strings.TrimPrefix(clean, assetsDir+"/")))

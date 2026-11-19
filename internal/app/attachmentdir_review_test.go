@@ -438,3 +438,106 @@ func TestAttachmentMoveTargetChainsAndCycles(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachmentReviewCrossSpaceInvalidatesImageCache(t *testing.T) {
+	a, _ := dropApp(t)
+	src := a.state.ActiveSpace()
+	testAttachmentFolder(t, a, "附件")
+	data := encodeTestPNG(t, 40, 20)
+	if err := vault.Write(src.Root, "附件/shot.png", string(data)); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(src.Root, "Doc.md", "# Doc\n\n![s](附件/shot.png)\n"); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("Doc.md")
+	res := a.imageResourceFor(a.doc, "附件/shot.png")
+	if res.Bitmap == nil {
+		t.Fatal("source image failed to load before cross-space move")
+	}
+	dst := a.state.Add("Other", filepath.Join(t.TempDir(), "space"))
+	if err := os.MkdirAll(filepath.Join(dst.Root, "附件"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst.SetAttachmentsDir("附件")
+	if a.moveAcross(src.ID, "Doc.md", dst.ID, "") == "" {
+		t.Fatal("moveAcross failed")
+	}
+	// Remove the source copy so hitting a stale src entry in imgResolved fails immediately.
+	_ = os.Remove(filepath.Join(src.Root, "附件", "shot.png"))
+	res = a.imageResourceFor(a.doc, "附件/shot.png")
+	if res.Bitmap == nil {
+		t.Fatal("imageResourceFor returned stale source cache after cross-space move")
+	}
+	resolved := a.imgResolved[imageKey{doc: a.doc, url: "附件/shot.png"}]
+	wantFull := filepath.Join(dst.Root, "附件", "shot.png")
+	if resolved.err != nil {
+		t.Fatalf("resolved error after move: %v", resolved.err)
+	}
+	gotInfo, err1 := os.Stat(resolved.full)
+	wantInfo, err2 := os.Stat(wantFull)
+	if err1 != nil || err2 != nil || !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("resolved path = %q, want %q", resolved.full, wantFull)
+	}
+}
+
+func TestAttachmentReviewSubfolderParentFallbackAndSharedPrefix(t *testing.T) {
+	if got, ok := slashRel("Journal/2026", "Journal/附件/x.png"); !ok || got != "../附件/x.png" {
+		t.Fatalf("slashRel shared prefix = %q, %v; want ../附件/x.png", got, ok)
+	}
+	a, _ := dropApp(t)
+	sp := a.state.ActiveSpace()
+	testAttachmentFolder(t, a, "附件")
+	if err := vault.Write(sp.Root, "附件/2026/pic.png", string(encodeTestPNG(t, 24, 24))); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(sp.Root, "附件/outside.png", string(encodeTestPNG(t, 24, 24))); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(sp.Root, "Journal/Ideas.md", "# Ideas\n\n![p](../附件/pic.png)\n\n![o](../../outside.png)\n"); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("Journal/Ideas.md")
+	if a.doc.loadImage("../附件/pic.png") == nil {
+		t.Fatal("subfolder ../ reference did not fall back to organized subfolder in attachments dir")
+	}
+	if a.doc.loadImage("../../outside.png") != nil {
+		t.Fatal("escaping ../../ reference matched inside attachments dir")
+	}
+}
+
+func TestAttachmentReviewInactiveSpacePageTreeDropsAttachmentsDir(t *testing.T) {
+	a, _ := dropApp(t)
+	sp2 := a.state.Add("Second", filepath.Join(t.TempDir(), "second"))
+	if err := vault.Write(sp2.Root, "Note.md", "# Second\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(sp2.Root, "附件/Sketch.excalidraw.svg", "<svg/>"); err != nil {
+		t.Fatal(err)
+	}
+	sp2.SetAttachmentsDir("附件")
+	updates := make(chan func(), 8)
+	prevAsync := a.search.async
+	a.search.async = true
+	a.runAsync = func(fn func()) { updates <- fn }
+	defer func() {
+		a.search.async = prevAsync
+		a.runAsync = nil
+	}()
+	a.openPalette()
+	for range 2 {
+		attachmentUpdate(t, updates)()
+	}
+	got := a.pageTrees[sp2.ID]
+	if got.err != nil {
+		t.Fatalf("inactive space scan error: %v", got.err)
+	}
+	if vault.Find(got.nodes, "附件") != nil {
+		t.Fatalf("inactive space pageTrees exposed attachments dir: %+v", got.nodes)
+	}
+	if vault.Find(got.nodes, "Note.md") == nil {
+		t.Fatalf("inactive space pageTrees missing Note.md: %+v", got.nodes)
+	}
+}
