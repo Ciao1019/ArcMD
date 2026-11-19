@@ -34,6 +34,7 @@ type Listing struct {
 	Description string       `json:"description,omitempty"`
 	Author      string       `json:"author,omitempty"`
 	Homepage    string       `json:"homepage,omitempty"`
+	Icon        string       `json:"icon,omitempty"`
 	Tags        []string     `json:"tags,omitempty"`
 	Permissions []Permission `json:"permissions,omitempty"`
 	// Download is the URL of the release's zip, holding the manifest at
@@ -58,6 +59,60 @@ func FetchIndex(ctx context.Context, client *http.Client, url string) (*Index, e
 	return &idx, nil
 }
 
+// InspectArchive validates a plugin zip archive's paths, size limits, and
+// root manifest without installing it, returning the parsed manifest and the
+// archive's hex SHA-256 digest for permission confirmation.
+func InspectArchive(b []byte) (*Manifest, string, error) {
+	if int64(len(b)) > MaxPackageSize {
+		return nil, "", fmt.Errorf("plugin: archive exceeds %d bytes", MaxPackageSize)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return nil, "", fmt.Errorf("plugin: %w", err)
+	}
+	var total int64
+	var manifestBytes []byte
+	for _, f := range zr.File {
+		name := path.Clean(f.Name)
+		if strings.Contains(f.Name, `\`) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || (name == "." && !f.FileInfo().IsDir()) {
+			return nil, "", fmt.Errorf("plugin: unsafe path %q in the package", f.Name)
+		}
+		if f.Mode()&os.ModeSymlink != 0 {
+			return nil, "", fmt.Errorf("plugin: symbolic link %q in the package", f.Name)
+		}
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		total += int64(f.UncompressedSize64)
+		if total > MaxPackageSize {
+			return nil, "", fmt.Errorf("plugin: the package unpacks to more than %d bytes", MaxPackageSize)
+		}
+		if name == ManifestFile {
+			r, err := f.Open()
+			if err != nil {
+				return nil, "", err
+			}
+			manifestBytes, err = io.ReadAll(io.LimitReader(r, 1<<20+1))
+			_ = r.Close()
+			if err != nil {
+				return nil, "", err
+			}
+			if len(manifestBytes) > 1<<20 {
+				return nil, "", fmt.Errorf("plugin: %s is too large", ManifestFile)
+			}
+		}
+	}
+	if len(manifestBytes) == 0 {
+		return nil, "", fmt.Errorf("plugin: the package has no %s at its root", ManifestFile)
+	}
+	man, err := ParseManifest(manifestBytes)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(b)
+	return man, hex.EncodeToString(sum[:]), nil
+}
+
 // Install downloads the listing's zip, checks its digest and manifest, and
 // unpacks it into the plugins folder, replacing an older version.
 func (m *Manager) Install(ctx context.Context, client *http.Client, l Listing) (*Installed, error) {
@@ -67,6 +122,18 @@ func (m *Manager) Install(ctx context.Context, client *http.Client, l Listing) (
 	b, err := get(ctx, client, l.Download, MaxPackageSize)
 	if err != nil {
 		return nil, err
+	}
+	return m.InstallArchive(b, l)
+}
+
+// InstallArchive verifies b's SHA-256 digest against l.SHA256, validates the
+// archive entries and manifest against l.ID/l.Version, and installs it atomically.
+func (m *Manager) InstallArchive(b []byte, l Listing) (*Installed, error) {
+	if !idPattern.MatchString(l.ID) {
+		return nil, fmt.Errorf("plugin: invalid id %q", l.ID)
+	}
+	if int64(len(b)) > MaxPackageSize {
+		return nil, fmt.Errorf("plugin: %s: the package exceeds %d bytes", l.ID, MaxPackageSize)
 	}
 	sum := sha256.Sum256(b)
 	if !strings.EqualFold(hex.EncodeToString(sum[:]), l.SHA256) {
@@ -91,7 +158,7 @@ func (m *Manager) installZip(b []byte, l Listing) (*Installed, error) {
 	var total int64
 	for _, f := range zr.File {
 		name := path.Clean(f.Name)
-		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, `\`) {
+		if strings.Contains(f.Name, `\`) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || (name == "." && !f.FileInfo().IsDir()) {
 			return nil, fmt.Errorf("plugin: %s: unsafe path %q in the package", l.ID, f.Name)
 		}
 		if f.Mode()&os.ModeSymlink != 0 {

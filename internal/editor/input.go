@@ -26,6 +26,7 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if ev.Button != 0 {
 			return false
 		}
+		e.pendingLink = linkSpan{}
 		e.UnmarkText()
 		e.clearBlocks()
 		at, ok := e.IndexForPoint(ui.Point{X: ev.X, Y: ev.Y})
@@ -33,15 +34,15 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			return false
 		}
 		if ev.Mods&ui.Cmd != 0 {
-			if link := e.linkAt(at); link != "" && open != nil {
-				open(link)
+			if span, ok := e.linkAtPoint(ev.X, ev.Y, false); ok && open != nil {
+				open(span.url)
 				return true
 			}
-			if name := e.wikiAt(at); name != "" && e.openWiki != nil {
+			if name := e.wikiAtPoint(ev.X, ev.Y); name != "" && e.openWiki != nil {
 				e.openWiki(name)
 				return true
 			}
-			if tag := e.tagAt(at); tag != "" && e.openTag != nil {
+			if tag := e.tagAtPoint(ev.X, ev.Y); tag != "" && e.openTag != nil {
 				e.openTag(tag)
 				return true
 			}
@@ -49,17 +50,20 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if e.inlineClick(ev.X, ev.Y) {
 			return true
 		}
-		if !e.ReadOnly && ev.Mods == 0 && ev.Clicks < 2 && e.linkAt(at) != "" {
-			e.SetSelection(at, at)
-			e.EditLink()
-			return true
-		}
 		if e.toggleTask(at, ev.X) {
 			return true
 		}
+		if !e.ReadOnly && ev.Mods == 0 && ev.Clicks < 2 {
+			if span, ok := e.linkAtPoint(ev.X, ev.Y, true); ok {
+				e.pendingLink = span
+				e.pendingLinkDown = ui.Point{X: ev.X, Y: ev.Y}
+			}
+		}
 		e.markPop = markPopover{}
 		if ev.Mods == 0 && ev.Clicks < 2 {
-			e.openMarkPopover(at)
+			if run, ok := e.annotationAt(at); ok && e.pointInTextRange(ev.X, ev.Y, run.start, run.end) {
+				e.openMarkPopover(at)
+			}
 		}
 		e.dragging, e.reveal = true, false
 		e.selectionDrag = selectionDrag{scrollY: e.Scroll.Y, at: ev.Time}
@@ -93,13 +97,28 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			e.selectionDrag.at = ev.Time
 		}
 		e.selectionDrag.moved = true
+		dx, dy := ev.X-e.pendingLinkDown.X, ev.Y-e.pendingLinkDown.Y
+		if dx*dx+dy*dy > 9 {
+			e.pendingLink = linkSpan{}
+		}
 		e.extendSelection(ev.X, min(max(ev.Y, e.Scroll.Y), e.Scroll.Y+e.viewport))
+		if e.Anchor != e.Caret {
+			e.pendingLink = linkSpan{}
+		}
 		return true
 	case ui.InputPointerUp:
 		if !e.dragging {
 			return false
 		}
 		e.dragging = false
+		if span := e.pendingLink; span.url != "" {
+			e.pendingLink = linkSpan{}
+			if !e.ReadOnly && e.Anchor == e.Caret {
+				if hit, ok := e.linkAtPoint(ev.X, ev.Y, true); ok && hit == span {
+					e.openLinkSpan(span)
+				}
+			}
+		}
 		return true
 	case ui.InputSelect:
 		runes := []rune(e.displayText())

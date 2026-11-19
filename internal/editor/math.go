@@ -28,9 +28,10 @@ const mathFont = "KaTeX_Main, Times New Roman, STIX Two Text, Noto Serif, serif"
 
 // mathShape is a math block's formula, laid out for its TeX.
 type mathShape struct {
-	src string
-	box tex.Box
-	err error
+	src   string
+	width float32
+	box   tex.Box
+	err   error
 }
 
 // watchMath notes the math block the caret is in, which shows its TeX.
@@ -111,14 +112,18 @@ func (e *Editor) measureMath(text string, size float32, italic, bold bool) (w, a
 // formula lays out the formula of a math block, kept while its TeX is
 // unchanged.
 func (e *Editor) formula(id, src string) mathShape {
-	if s, ok := e.maths[id]; ok && s.src == src {
+	return e.formulaWidth(id, src, 0)
+}
+
+func (e *Editor) formulaWidth(id, src string, lineWidth float32) mathShape {
+	if s, ok := e.maths[id]; ok && s.src == src && s.width == lineWidth {
 		return s
 	}
 	if e.maths == nil {
 		e.maths = map[string]mathShape{}
 	}
-	box, err := tex.Layout(src, mathSize, e.measureMath)
-	s := mathShape{src: src, box: box, err: err}
+	box, err := tex.LayoutWidth(src, mathSize, lineWidth, e.measureMath)
+	s := mathShape{src: src, width: lineWidth, box: box, err: err}
 	e.maths[id] = s
 	return s
 }
@@ -135,7 +140,15 @@ func (e *Editor) mathRow(r *row, textH float32) float32 {
 
 	previewH := float32(26)
 	if src != "" {
-		shape := e.formula(b.ID, src)
+		width := r.rect.W
+		if !r.mathHidden {
+			width = max(24, width-2*mathPaddingX)
+		}
+		lineW := width
+		if e.mapMathPreview {
+			lineW = 0
+		}
+		shape := e.formulaWidth(b.ID, src, lineW)
 		if shape.err != nil {
 			r.mathErr = i18n.T("公式有误：") + strings.TrimPrefix(shape.err.Error(), "tex: ")
 			r.mathError = ui.ShapeText(r.mathErr, ui.Font{Family: "system-ui", Size: 12}, max(24, r.rect.W-2*mathPaddingX))
@@ -147,10 +160,6 @@ func (e *Editor) mathRow(r *row, textH float32) float32 {
 		} else {
 			box := shape.box
 			r.math = &box
-			width := r.rect.W
-			if !r.mathHidden {
-				width = max(24, min(width, mathPreviewW)-2*mathPaddingX)
-			}
 			if box.W > width {
 				r.mathScale = max(1, width) / box.W
 			}

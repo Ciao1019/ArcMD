@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,9 @@ func newTestApp(t testing.TB) (*App, *ui.Tester) {
 	// Tests never reach a model service: listing models fails unless a
 	// test lists them itself.
 	a.qa.listModels = func(agent.Settings) ([]string, error) { return nil, errors.New("offline") }
+	a.pluginsUI.sync = true
+	a.pluginsUI.httpClient = &http.Client{Transport: offlineTransport{}}
+	t.Cleanup(a.closePlugins)
 	tt := ui.NewTester(a.View, 1200, 760)
 	tt.SetLocale("zh-Hans")
 	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 78})
@@ -232,4 +236,10 @@ func TestBadSpaceColorFallsBack(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.state.ActiveSpace().Color = "not a color"
 	tt.Frame() // must not panic
+}
+
+type offlineTransport struct{}
+
+func (offlineTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("offline")
 }

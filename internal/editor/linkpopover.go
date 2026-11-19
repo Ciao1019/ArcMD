@@ -9,6 +9,94 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+type linkSpan struct {
+	url        string
+	start, end int
+}
+
+func linkSpansInLeaf(leaf document.Leaf) []linkSpan {
+	if leaf.Block == nil || literalBlock(leaf.Block.Kind) {
+		return nil
+	}
+	var out []linkSpan
+	at := leaf.Start
+	for _, run := range leaf.Block.Runs {
+		n := document.Len(run.Text)
+		if link := run.Style.Link; link != "" && n > 0 {
+			if k := len(out) - 1; k >= 0 && out[k].end == at && out[k].url == link {
+				out[k].end = at + n
+			} else {
+				out = append(out, linkSpan{url: link, start: at, end: at + n})
+			}
+		}
+		at += n
+	}
+	return out
+}
+
+func (e *Editor) linkSpanAt(at int) (linkSpan, bool) {
+	leaf := e.Engine.LeafAt(at)
+	for _, s := range linkSpansInLeaf(leaf) {
+		if s.start < at && at < s.end || (s.end-s.start == 1 && at == s.start) {
+			return s, true
+		}
+	}
+	return linkSpan{}, false
+}
+
+func (e *Editor) pointInTextRange(x, y float32, start, end int) bool {
+	if start >= end {
+		return false
+	}
+	r := e.rowAt(start)
+	if r == nil || r.leaf.Block == nil || r.layout == nil || start < r.leaf.Start || end > r.leaf.End {
+		return false
+	}
+	px, py := x-r.x, y-r.y
+	if _, _, _, _, scrollX, noWrap := e.codeScrollFor(*r); noWrap {
+		px += scrollX
+	}
+	for _, rect := range r.layout.SelectionRects(ui.TextInputRange{Start: start - r.leaf.Start, End: end - r.leaf.Start}) {
+		if px >= rect.X && px <= rect.X+rect.W && py >= rect.Y && py <= rect.Y+rect.H {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Editor) linkAtPoint(x, y float32, strictInterior bool) (linkSpan, bool) {
+	at, ok := e.IndexForPoint(ui.Point{X: x, Y: y})
+	if !ok {
+		return linkSpan{}, false
+	}
+	leaf := e.Engine.LeafAt(at)
+	for _, s := range linkSpansInLeaf(leaf) {
+		if !e.pointInTextRange(x, y, s.start, s.end) {
+			continue
+		}
+		if strictInterior && s.end-s.start >= 2 && (at <= s.start || at >= s.end) {
+			continue
+		}
+		return s, true
+	}
+	return linkSpan{}, false
+}
+
+func (e *Editor) openLinkSpan(span linkSpan) {
+	if e.ReadOnly || span.url == "" {
+		return
+	}
+	e.UnmarkText()
+	e.sync()
+	r := ui.TextInputRange{Start: span.start, End: span.end}
+	e.linkRange = r
+	e.SetSelection(r.Start, r.End)
+	e.linkText = e.slice(r.Start, r.End)
+	e.linkURL = span.url
+	e.linkOpen, e.linkOpened = true, false
+	e.linkRevision = e.Revision()
+}
+
 func (e *Editor) EditLink() {
 	if e.ReadOnly {
 		return
@@ -17,29 +105,9 @@ func (e *Editor) EditLink() {
 	e.sync()
 	r := e.Selection().Range
 	if r.Start == r.End {
-		l := e.LeafAt(r.Start)
-		at := l.Start
-		link := e.linkAt(r.Start)
-		if link != "" {
-			start, end := -1, -1
-			for _, run := range l.Block.Runs {
-				z := at + document.Len(run.Text)
-				if run.Style.Link == link {
-					if start < 0 {
-						start = at
-					}
-					end = z
-					if r.Start >= start && r.Start <= end {
-						r = ui.TextInputRange{Start: start, End: end}
-					}
-				} else {
-					if start >= 0 && e.Caret >= start && e.Caret <= end {
-						break
-					}
-					start, end = -1, -1
-				}
-				at = z
-			}
+		if span, ok := e.linkSpanAt(r.Start); ok {
+			e.openLinkSpan(span)
+			return
 		}
 	}
 	e.linkRange = r
@@ -164,7 +232,7 @@ func (e *Editor) wikiPreview(c *ui.Context, surface ui.Element, load func(string
 	at := 0
 	if e.pointerInside && surface.Hovered() {
 		at, _ = e.IndexForPoint(e.pointer)
-		name = e.wikiAt(at)
+		name = e.wikiAtPoint(e.pointer.X, e.pointer.Y)
 	}
 	if name == "" && hover.open {
 		if hover.over {

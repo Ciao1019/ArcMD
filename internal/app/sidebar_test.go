@@ -45,6 +45,68 @@ func TestSidebarDoubleClickDoesNotRename(t *testing.T) {
 	}
 }
 
+func TestSidebarRenameTextContrastOnSelectedRow(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		mode := "light"
+		if dark {
+			mode = "dark"
+		}
+		t.Run(mode, func(t *testing.T) {
+			a, tt := newTestApp(t)
+			tt.SetDark(dark)
+			if err := tt.Click("Ideas"); err != nil {
+				t.Fatal(err)
+			}
+			// Ideas is now the active, highlighted row (Selected=true).
+			if err := tt.RightClick("Ideas"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.ChooseMenuItem("重命名…"); err != nil {
+				t.Fatal(err)
+			}
+			if a.renaming == "" {
+				t.Fatal("expected Ideas to enter rename state")
+			}
+			// Hide blinking caret at phase=blink so only glyph ink is sampled on the left half.
+			tt.Advance(600 * time.Millisecond)
+			tt.Frame()
+
+			field, ok := tt.Find("名称")
+			if !ok || field.W < 40 || field.H < 16 {
+				t.Fatalf("rename field bounds invalid: %+v, ok=%v", field, ok)
+			}
+			img := tt.Image()
+			bounds := img.Bounds()
+			scaleX := float32(bounds.Dx()) / 1200
+			scaleY := float32(bounds.Dy()) / 760
+			// Sample interior of the input box where "Ideas" glyphs sit (excluding border & caret).
+			x0 := bounds.Min.X + int((field.X+5)*scaleX)
+			x1 := bounds.Min.X + int((field.X+42)*scaleX)
+			y0 := bounds.Min.Y + int((field.Y+4)*scaleY)
+			y1 := bounds.Min.Y + int((field.Y+field.H-4)*scaleY)
+
+			minLum, maxLum := 255.0, 0.0
+			for y := y0; y < y1; y++ {
+				for x := x0; x < x1; x++ {
+					r, g, b, _ := img.At(x, y).RGBA()
+					lum := (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 257.0
+					if lum < minLum {
+						minLum = lum
+					}
+					if lum > maxLum {
+						maxLum = lum
+					}
+				}
+			}
+			// Before the fix, Selected(true) set TextColor(AccentText=#ffffff) on the row,
+			// drawing white text on a ~#f4f4f5 surface (maxLum-minLum < 15).
+			if maxLum-minLum < 90 {
+				t.Fatalf("%s rename field lacks readable text contrast: minLum=%.1f maxLum=%.1f", mode, minLum, maxLum)
+			}
+		})
+	}
+}
+
 func TestSidebarWidthAndPinning(t *testing.T) {
 	a, tt := newTestApp(t)
 	back, ok := tt.Find("后退")

@@ -357,7 +357,7 @@ func (e *Editor) bookmarkSection(c *ui.Context) {
 			if block.Kind == "math" && strings.TrimSpace(block.Text()) != "" {
 				// The excerpt is for searching and recovering the bookmark;
 				// render from the complete source, never its shortened text.
-				s := e.formula(id, strings.TrimSpace(block.Text()))
+				s := e.formulaWidth("bookmark:"+id, strings.TrimSpace(block.Text()), 0)
 				if s.err == nil && s.box.W > 0 {
 					formula = &s.box
 					height = max(height, min(64, (s.box.Ascent+s.box.Descent)*14/mathSize+8))

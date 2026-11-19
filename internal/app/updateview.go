@@ -1,14 +1,27 @@
 package app
 
 import (
+	_ "embed"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/update"
 	"github.com/egoist/mygo/ui"
 )
+
+//go:embed assets/community-qr.jpg
+var communityQRBytes []byte
+
+var communityQRBitmap = sync.OnceValue(func() *ui.Bitmap {
+	bm, err := ui.DecodeBitmap(communityQRBytes)
+	if err != nil {
+		panic(err)
+	}
+	return bm
+})
 
 // The update banners, toast and window, ported from Cra's UpdateBanner,
 // ShinyToast and UpdaterWindow (MIT) with their measurements of Arc 1.171:
@@ -19,8 +32,8 @@ import (
 //     arrow lifts, dips and springs back while a heart-shaped ripple grows
 //     to 129% and fades (Arc's 2 s timing); it plays when the card appears
 //     and loops while it is hovered.
-//   - Updated ("ArcMD 已更新！"): a 102 DIP card, title 14 medium with
-//     twinkling sparkles, a ✕, and two rows with an icon on a faint tile
+//   - Updated ("ArcMD 已更新！"): a 134 DIP card, title 14 medium with
+//     twinkling sparkles, a ✕, and three rows with an icon on a faint tile
 //     and a drawn arrow. It pops in with a slight tilt that settles.
 //   - The toast says the ready card's news at the top right of the page
 //     while the sidebar is hidden, with its button and a ✕.
@@ -29,7 +42,7 @@ import (
 
 const (
 	readyCardHeight   = 56
-	updatedCardHeight = 102
+	updatedCardHeight = 134
 	// heartCycle is one beat of the heart, Arc's 120 frames at 60 fps.
 	heartCycle = 2 * time.Second
 	// heartDelay holds the first beat until the card has slid in.
@@ -167,13 +180,15 @@ func (a *App) updatedCard(c *ui.Context, bl bannerLook, entering bool) {
 		for i, row := range []struct {
 			key, label string
 			icon       *ui.SVG
-			url        string
+			role       ui.Role
+			act        func()
 		}{
-			{"whats-new", i18n.T("新功能"), iconHeart, update.ReleaseURL(version)},
-			{"star", i18n.T("在 GitHub 上点星"), iconStar, update.Repository},
+			{"whats-new", i18n.T("新功能"), iconHeart, ui.RoleLink, func() { a.openUpdatePage(update.ReleaseURL(version)) }},
+			{"star", i18n.T("在 GitHub 上点星"), iconStar, ui.RoleLink, func() { a.openUpdatePage(update.Repository) }},
+			{"community", i18n.T("进入交流群"), iconUsers, ui.RoleButton, a.openCommunityGroup},
 		} {
 			r := ui.Row(c.Key(row.key)).Absolute().Left(4).Right(4).Top(49.4 + float32(i)*31.7 - 15).Height(30).
-				AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleLink).Label(row.label)
+				AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(row.role).Label(row.label)
 			hovered := r.Hovered()
 			icon, ink := bl.icon, bl.secondary
 			if hovered {
@@ -189,7 +204,7 @@ func (a *App) updatedCard(c *ui.Context, bl bannerLook, entering bool) {
 				})
 			})
 			if r.Clicked() {
-				a.openUpdatePage(row.url)
+				row.act()
 			}
 		}
 	})
@@ -648,6 +663,66 @@ func releaseNotes(c *ui.Context, lines []string) {
 			ui.Text(c.Key(i), l).FontSize(12).LineHeight(1.6).Selectable()
 		}
 	})
+}
+
+// communityGroupView displays the community group QR code card opened from
+// the post-update banner.
+func (a *App) communityGroupView(c *ui.Context) {
+	u := &a.updates
+	if !u.communityOpen {
+		return
+	}
+	const qrW, qrH float32 = 244, 311
+	panel := a.spaceModal(c, "community-group", &u.communityOpen, func(mt *ui.Theme) {
+		ui.Column(c.Key("community-body")).Width(qrW).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Row(c.Key("community-header")).AlignSelf(ui.Stretch).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(26, 26)
+				ui.Text(c, i18n.T("ArcMD 交流群")).Grow(1).TextAlign(ui.Center).FontSize(16).FontWeight(600).TextColor(mt.Text)
+				closeBtn := ui.Box(c.Key("community-close")).Size(26, 26).Radius(7).Center().
+					Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).
+					Label(i18n.T("关闭")).Tooltip(i18n.T("关闭 (Esc)"))
+				if closeBtn.Hovered() {
+					closeBtn.Background(hoverFill(mt))
+				}
+				closeBtn.Children(func() {
+					ui.Icon(c, iconX).FontSize(14).TextColor(mt.Text.Alpha(0.65))
+				})
+				if closeBtn.Clicked() {
+					u.communityOpen = false
+				}
+			})
+
+			ui.Box(c.Key("community-qr")).Size(qrW, qrH).Radius(12).
+				Background(white).Border(1, mt.Border).Shadow(0, 4, 14, 0, cardShadow(mt)).Clip().
+				Children(func() {
+					ui.Image(c, communityQRBitmap()).Size(qrW, qrH)
+				})
+
+			ui.Column(c.Key("community-note")).Width(qrW).Padding(10, 12).Gap(5).Radius(10).
+				Background(glass(mt)).Border(1, mt.Border.Alpha(0.7)).AlignItems(ui.Center).
+				Children(func() {
+					ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, i18n.T("扫一扫，备注")).FontSize(13).FontWeight(500).TextColor(mt.Text)
+						badge := ui.Row(c.Key("community-remark")).Padding(2, 7).Radius(5).AlignItems(ui.Center).
+							Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).
+							Label("ArcMD").Tooltip(i18n.T("点击复制备注 ArcMD"))
+						alpha := float32(0.14)
+						if badge.Hovered() {
+							alpha = 0.22
+						}
+						badge.Background(mt.Accent.Alpha(alpha)).Border(1, mt.Accent.Alpha(0.28)).Children(func() {
+							ui.Text(c, "ArcMD").FontSize(12.5).FontWeight(600).TextColor(mt.Accent)
+						})
+						if badge.Clicked() {
+							c.WriteClipboard("ArcMD")
+							c.Toast(i18n.T("已复制备注「ArcMD」"))
+						}
+					})
+					ui.Text(c, i18n.T("添加之后拉你进群")).FontSize(12).TextColor(mt.TextMuted).TextAlign(ui.Center)
+				})
+		})
+	})
+	panel.Padding(16, 20, 20, 20)
 }
 
 // byteSize is a size for people: "1.4 MB".

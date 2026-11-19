@@ -33,19 +33,14 @@ images independently check the rendered rest, pointer, jump and state poses.
 Material interpolation and native antialiasing mean pixels are not identical
 to a browser render; this is a native visual port, not a React runtime.
 
-## Regeneration
+## Verification
 
-`tools/ghost-assets.mjs` fetches the pinned original TypeScript and generates
-both assets and independent reference fixtures in a browser. It needs a
-local esbuild executable and an ego-browser Page, for example from an
-`ego-browser nodejs` session (replace all absolute paths):
+The material sprite sheets in `internal/app/assets/ghost` and the independent
+reference fixtures in `internal/app/testdata/qabot` were captured offline from
+the pinned upstream TypeScript Canvas renderer at commit
+`387b049ca8fe97b5d72999b5bf61a19ab1ccff81` (`1152` material views, `600` motion
+poses, and `8` reference PNGs).
 
-```js
-const task = await taskSpace('Regenerate native ghost');
-const { generateGhostAssets } = await import('file:///absolute/path/ArcMD/tools/ghost-assets.mjs');
-console.log(await generateGhostAssets(task.page('p1'), '/absolute/path/ArcMD', '/absolute/path/esbuild'));
-await task.finish({ keep: [] });
-```
-
-Run `CGO_ENABLED=0 go test ./internal/app -run 'TestGhost|TestBotMotion'`
-after regeneration. Set `ARCMD_SNAPSHOT` to compare the resulting native PNGs.
+Run `CGO_ENABLED=0 go test ./internal/app -run 'TestGhost|TestBotMotion'` to
+verify the native port against those fixtures. Set `ARCMD_SNAPSHOT` to compare
+the resulting native PNGs.

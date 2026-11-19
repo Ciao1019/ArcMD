@@ -273,3 +273,29 @@ func TestDoubleDollarPredictsDisplayMath(t *testing.T) {
 		t.Fatalf("NoAutoPair $$ + space did not open display math: kind=%s row=%+v", e2.Doc.Blocks[0].Kind, e2.rows[0])
 	}
 }
+
+func TestDisplayMathTagRendersFlushRight(t *testing.T) {
+	if err := loadMathFonts(); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := newTester("$$\nE = mc^2 \\tag{3.1}\n$$")
+	if len(e.rows) != 1 || e.rows[0].math == nil || e.rows[0].mathErr != "" {
+		t.Fatalf("tagged formula failed to lay out: %+v", e.rows)
+	}
+	box := e.rows[0].math
+	if box.W != e.rows[0].rect.W {
+		t.Fatalf("expected tagged formula box to span column width %v, got %v", e.rows[0].rect.W, box.W)
+	}
+	var sawTag bool
+	for _, op := range box.Ops {
+		if op.Error {
+			t.Fatalf("unexpected error token in tagged formula: %q", op.Text)
+		}
+		if op.Text == "3.1" && op.X > box.W*0.85 {
+			sawTag = true
+		}
+	}
+	if !sawTag {
+		t.Fatalf("expected right-aligned tag '3.1' near right edge of box (%v), ops=%+v", box.W, box.Ops)
+	}
+}

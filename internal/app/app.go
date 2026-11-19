@@ -34,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.2"
+const Version = "0.2.3"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -81,11 +81,14 @@ type App struct {
 	// again (bookmarks.go).
 	bookmarkGen uint64
 
-	cfg     Config
-	win     *mygo.Window
-	store   *space.Store
-	state   *space.State
-	plugins *plugin.Manager
+	cfg                 Config
+	win                 *mygo.Window
+	quitting            bool
+	hideAfterFullScreen bool
+	store               *space.Store
+	state               *space.State
+	plugins             *plugin.Manager
+	pluginsUI           pluginState
 
 	installed     []*plugin.Installed
 	brokenPlugins []plugin.Broken
@@ -141,6 +144,11 @@ type App struct {
 	renameFocused bool
 	// renameSpace is the ID of the space holding the item being renamed.
 	renameSpace string
+	// picks are the sidebar rows picked with Cmd/Shift-click in picksSpace,
+	// and pickAnchor where the next Shift-click range starts (multiselect.go).
+	picks      map[string]bool
+	picksSpace string
+	pickAnchor string
 
 	palette palette
 	// qa is the panel of questions about the space (qa.go).
@@ -234,8 +242,10 @@ type App struct {
 	focus, narrow, narrowShown bool
 	// versions is the history window (versions.go); bin keeps what was
 	// deleted recently, which the library lists (trash.go).
-	versions versionsState
-	bin      trashbin.Bin
+	versions   versionsState
+	gitChanges gitChangesState
+	mergeUI    threeWayMergeState
+	bin        trashbin.Bin
 	// printFile, when set, takes the PDF to print in place of the system's
 	// viewer: tests answer it.
 	pdfExport *pdfExport
@@ -316,6 +326,7 @@ func New(cfg Config) (*App, error) {
 		}
 	}
 	a.startUpdates()
+	a.initPlugins()
 	a.reloadPlugins()
 	a.syncTree()
 	if sp := a.state.ActiveSpace(); sp != nil && sp.LastOpen != "" {
@@ -364,10 +375,25 @@ func (a *App) Run() error {
 	}
 	open := func(file string) {
 		if a.openSystemFile(file) {
-			a.win.Show()
-			a.win.Focus()
+			a.showMainWindow()
 			_ = mygo.App.AddRecentDocument(file)
 		}
+	}
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		a.quitting = true
+	})
+	mygo.App.OnQuitCanceled(func() {
+		a.quitting = false
+	})
+	if runtime.GOOS == "darwin" {
+		// Standard macOS lifecycle: closing all windows with ⌘W or the red
+		// button leaves ArcMD running in the Dock until ⌘Q.
+		mygo.App.OnWindowAllClosed(func() {})
+		mygo.App.OnActivate(func(hasVisibleWindows bool) {
+			if !hasVisibleWindows {
+				a.showMainWindow()
+			}
+		})
 	}
 	mygo.App.OnOpenFile(func(file string) {
 		if a.win == nil {
@@ -387,34 +413,55 @@ func (a *App) Run() error {
 				}
 			}
 		}
-		if a.win != nil {
-			a.win.Show()
-			a.win.Focus()
-		}
+		a.showMainWindow()
 	})
 	mygo.App.SetLanguages(i18n.Languages...)
 	a.systemLanguage = i18n.Pick(mygo.App.PreferredLanguages())
 	a.applyLanguage()
 	mygo.App.WhenReady(func() {
+		windowItems := []*mygo.MenuItem{
+			{Role: mygo.RoleMinimize},
+			{Role: mygo.RoleZoom},
+		}
+		if runtime.GOOS == "darwin" {
+			windowItems = append([]*mygo.MenuItem{
+				{Label: i18n.T("主窗口"), Accelerator: "CmdOrCtrl+0", Click: func(*mygo.MenuItem, *mygo.Window) {
+					a.showMainWindow()
+				}},
+				mygo.Separator(),
+			}, windowItems...)
+			mygo.App.Dock.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+				{Label: i18n.T("主窗口"), Click: func(*mygo.MenuItem, *mygo.Window) {
+					a.showMainWindow()
+				}},
+				{Label: i18n.T("新建文档"), Click: func(*mygo.MenuItem, *mygo.Window) {
+					a.showMainWindow()
+					if a.win != nil {
+						a.win.Update(func() { a.newDoc(a.currentDir()) })
+					}
+				}},
+			}))
+		}
+		windowItems = append(windowItems,
+			mygo.Separator(),
+			&mygo.MenuItem{Label: i18n.T("下一个空间"), Accelerator: "CmdOrCtrl+Alt+Right", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.showMainWindow()
+				a.win.Update(func() { a.stepSpace(1) })
+			}},
+			&mygo.MenuItem{Label: i18n.T("上一个空间"), Accelerator: "CmdOrCtrl+Alt+Left", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.showMainWindow()
+				a.win.Update(func() { a.stepSpace(-1) })
+			}},
+			mygo.Separator(),
+			&mygo.MenuItem{Role: mygo.RoleFront},
+		)
 		mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 			a.appMenu(),
 			{Role: mygo.RoleFileMenu},
 			{Role: mygo.RoleEditMenu},
 			{Role: mygo.RoleFormatMenu},
 			{Role: mygo.RoleViewMenu},
-			{Role: mygo.RoleWindow, Submenu: []*mygo.MenuItem{
-				{Role: mygo.RoleMinimize},
-				{Role: mygo.RoleZoom},
-				mygo.Separator(),
-				{Label: i18n.T("下一个空间"), Accelerator: "CmdOrCtrl+Alt+Right", Click: func(*mygo.MenuItem, *mygo.Window) {
-					a.win.Update(func() { a.stepSpace(1) })
-				}},
-				{Label: i18n.T("上一个空间"), Accelerator: "CmdOrCtrl+Alt+Left", Click: func(*mygo.MenuItem, *mygo.Window) {
-					a.win.Update(func() { a.stepSpace(-1) })
-				}},
-				mygo.Separator(),
-				{Role: mygo.RoleFront},
-			}},
+			{Role: mygo.RoleWindow, Submenu: windowItems},
 		}))
 		a.watchFiles = a.watchFolder
 		a.win = mygo.NewWindow(mygo.WindowOptions{
@@ -428,6 +475,14 @@ func (a *App) Run() error {
 			TrafficLightPosition: &mygo.Point{X: 18, Y: 20},
 			Vibrancy:             mygo.VibrancySidebar,
 			Content:              a.Content(),
+		})
+		a.win.OnLeaveFullScreen(func() {
+			if a.hideAfterFullScreen {
+				a.hideAfterFullScreen = false
+				if !a.quitting {
+					a.win.Hide()
+				}
+			}
 		})
 		if len(pending) > 0 {
 			files := pending
@@ -444,18 +499,65 @@ func (a *App) Run() error {
 		a.refreshSearch()
 		a.updates.svc, a.updates.async = mygoUpdates{}, true
 		a.win.OnClose(func(event *mygo.CloseEvent) {
-			if !a.flush() {
+			if !a.closeMain(a.win, runtime.GOOS) {
 				event.PreventDefault()
-			} else {
-				a.cancelPDF()
-				a.finishSpaceEdit()
-				if a.captureSplits() {
-					a.saveState()
-				}
 			}
 		})
 	})
 	return mygo.App.Run()
+}
+
+type mainWindow interface {
+	Show()
+	Hide()
+	Focus()
+	IsFullScreen() bool
+	SetFullScreen(bool)
+}
+
+func (a *App) showMainWindow() {
+	if a.win != nil {
+		a.showMain(a.win)
+	}
+}
+
+func (a *App) showMain(w mainWindow) {
+	if w == nil {
+		return
+	}
+	a.hideAfterFullScreen = false
+	w.Show()
+	w.Focus()
+}
+
+// closeMain flushes unsaved state when the main window is asked to close. On
+// macOS, closing the window with ⌘W or the red close button hides it so the
+// app stays running in the Dock until an explicit Quit (⌘Q).
+func (a *App) closeMain(w mainWindow, goos string) bool {
+	if !a.flush() {
+		if w != nil {
+			a.showMain(w)
+		}
+		return false
+	}
+	a.finishSpaceEdit()
+	if a.captureSplits() {
+		a.saveState()
+	}
+	if goos == "darwin" && !a.quitting {
+		if w != nil {
+			if w.IsFullScreen() {
+				a.hideAfterFullScreen = true
+				w.SetFullScreen(false)
+			} else {
+				w.Hide()
+			}
+		}
+		return false
+	}
+	a.cancelPDF()
+	a.closePlugins()
+	return true
 }
 
 // appMenu is the application menu, with "检查更新…" after About on macOS
@@ -468,10 +570,12 @@ func (a *App) appMenu() *mygo.MenuItem {
 	return &mygo.MenuItem{Label: "ArcMD", Submenu: []*mygo.MenuItem{
 		{Role: mygo.RoleAbout},
 		{Label: i18n.T("检查更新…"), Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.showMainWindow()
 			a.win.Update(a.checkForUpdates)
 		}},
 		mygo.Separator(),
 		{Label: i18n.T("设置…"), Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.showMainWindow()
 			a.win.Update(func() { a.openSettings(tabGeneral) })
 		}},
 		mygo.Separator(),
@@ -631,6 +735,7 @@ func (a *App) syncTree() {
 		}
 	}
 	walk(a.tree)
+	a.prunePicks(sp, a.tree)
 }
 
 // open shows the document at rel of the active space, adding it to the
@@ -641,6 +746,7 @@ func (a *App) open(rel string) { a.openIn(a.state.ActiveSpace(), rel) }
 // space, as Arc opens a favorite in any space.
 func (a *App) openFavorite(f space.Favorite) {
 	if sp := a.state.Get(f.Space); sp != nil && a.canEnter(sp.Root) {
+		a.clearPicks("")
 		a.openIn(sp, f.Path)
 	}
 }
@@ -912,6 +1018,7 @@ func (a *App) newDocAt(dir string, index int) {
 		sp.Place(dir, names, path.Base(rel), index)
 		a.saveState()
 	}
+	a.clearPicks("")
 	a.refreshTree()
 	a.open(rel)
 	if d := a.doc; d != nil && d.rel == rel && d.loadErr == nil {
@@ -1025,6 +1132,7 @@ func (a *App) newFolder(dir string) {
 		sp.SetExpanded(dir, true)
 		a.saveState()
 	}
+	a.clearPicks("")
 	a.refreshTree()
 	a.startRename(rel)
 }
@@ -1117,6 +1225,7 @@ func (a *App) moved(sp *space.Space, from, to string) {
 	if a.dragGrab.active && a.dragGrab.space == sp.ID && a.dragGrab.rel == from {
 		a.dragGrab.rel = to
 	}
+	a.followPicks(sp.ID, from, to)
 	a.followOpen(sp.ID, from, sp.ID, to)
 	a.followSplitPaths(sp.ID, from, sp.ID, to)
 	a.saveState()
@@ -1132,6 +1241,9 @@ func (a *App) switchSpaceOnly(id string) bool {
 	next := a.state.Get(id)
 	if next == nil || !a.canEnter(next.Root) || !a.flush() {
 		return false
+	}
+	if a.carrying == nil && a.carried == nil {
+		a.clearPicks("")
 	}
 	a.finishSpaceEdit()
 	from := a.pagerShown(a.now)
@@ -1267,6 +1379,7 @@ func (a *App) trash(rel string) {
 			a.replaceReferences(d, nil)
 		}
 	}
+	a.forgetPicks(sp.ID, rel)
 	a.state.Forget(sp.ID, rel)
 	a.saveState()
 	a.refreshTree()
@@ -1294,6 +1407,7 @@ func (a *App) reloadPlugins() {
 	if err != nil {
 		a.notify("读取插件文件夹失败。%v", err)
 	}
+	a.syncPluginInstances()
 }
 
 // defaultRoot returns the folder a new space named name gets by default.

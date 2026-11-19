@@ -22,6 +22,7 @@ type smartRollback struct {
 	restoreCaret int
 	literal      string
 	clearMark    string
+	prevComments []document.InlineComment
 }
 
 // mathFenceRollback remembers an automatic promotion from a paragraph to a
@@ -105,10 +106,71 @@ func (e *Editor) tryLiveHTMLCommentClose(l document.Leaf, raw string, lineStartB
 	if openIdx < 0 || caretByte-openIdx < 6 || strings.Contains(raw[openIdx+4:caretByte], "-->") {
 		return false
 	}
-	if l.Block.Kind == "paragraph" && l.Block.ID == l.Owner && e.Caret == l.End && strings.TrimSpace(raw[:openIdx]) == "" {
+	if openIdx > 0 && raw[openIdx-1] == '\\' {
+		return false
+	}
+	if l.Block.Kind == "paragraph" && l.Block.ID == l.Owner && e.Caret == l.End && strings.TrimSpace(raw[:openIdx]) == "" && len(l.Block.Comments) == 0 {
 		return e.promoteParagraphBlock(l, document.NewBlock("raw", strings.TrimLeft(raw, " \t")+">"))
 	}
-	return false
+	if !document.AllowsInlineComments(l.Block.Kind) {
+		return false
+	}
+	commentText := raw[openIdx:caretByte] + ">"
+	if !document.ValidInlineComment(commentText) {
+		return false
+	}
+	blockOpenU16 := document.Len(raw[:openIdx])
+	blockCaretU16 := document.Len(raw[:caretByte])
+	if hasForbiddenSpan(document.SliceRuns(l.Block.Runs, blockOpenU16, blockCaretU16)) {
+		return false
+	}
+	for _, itok := range inlineTokens(raw) {
+		ta, tz := document.Len(raw[:itok.start]), document.Len(raw[:itok.end])
+		if blockOpenU16 < tz && blockCaretU16 > ta {
+			return false
+		}
+	}
+	prevComments := append([]document.InlineComment(nil), l.Block.Comments...)
+	docOpen := l.Start + blockOpenU16
+	docCaret := l.Start + blockCaretU16
+	baseTyping := e.CurrentStyle()
+	e.shiftPairs(ui.TextInputRange{Start: docOpen, End: docCaret}, 0)
+	totalU16 := l.End - l.Start
+	runs := l.Block.Runs
+	nextRuns := append(document.SliceRuns(runs, 0, blockOpenU16), document.SliceRuns(runs, blockCaretU16, totalU16)...)
+	shifted := document.ShiftComments(prevComments, blockOpenU16, blockCaretU16, 0, runsU16Len(nextRuns))
+	nextComments := insertLiveInlineComment(shifted, blockOpenU16, commentText)
+	e.Engine.ReplaceBlockRunsAndComments(l.Block.ID, nextRuns, nextComments, docOpen, docOpen, baseTyping, true)
+	e.sync()
+	e.pairRevision = e.Revision()
+	e.smartBack = smartRollback{
+		rev:          e.Revision(),
+		blockID:      l.Block.ID,
+		start:        docOpen,
+		end:          docOpen,
+		caret:        docOpen,
+		restoreCaret: docOpen + document.Len(commentText),
+		literal:      commentText,
+		clearMark:    "comment",
+		prevComments: prevComments,
+	}
+	return true
+}
+
+func insertLiveInlineComment(comments []document.InlineComment, offset int, text string) []document.InlineComment {
+	out := make([]document.InlineComment, 0, len(comments)+1)
+	inserted := false
+	for _, c := range comments {
+		if !inserted && c.Offset > offset {
+			out = append(out, document.InlineComment{Offset: offset, Text: text})
+			inserted = true
+		}
+		out = append(out, c)
+	}
+	if !inserted {
+		out = append(out, document.InlineComment{Offset: offset, Text: text})
+	}
+	return out
 }
 
 func (e *Editor) promoteParagraphBlock(l document.Leaf, first *document.Block) bool {
@@ -562,7 +624,16 @@ func (e *Editor) rollbackSmartInput() bool {
 	e.smartBack = smartRollback{}
 	rep := ui.TextInputRange{Start: sb.start, End: sb.end}
 	e.shiftPairs(rep, document.Len(sb.literal))
-	if sb.clearMark != "" {
+	if sb.clearMark == "comment" {
+		runs := l.Block.Runs
+		a, z := sb.start-l.Start, sb.end-l.Start
+		total := l.End - l.Start
+		plain := document.Style{}
+		nextRuns := append(append(document.SliceRuns(runs, 0, a), document.Run{Text: sb.literal, Style: plain}), document.SliceRuns(runs, z, total)...)
+		pos := sb.restoreCaret
+		e.Engine.ReplaceBlockRunsAndComments(l.Block.ID, nextRuns, sb.prevComments, pos, pos, plain, true)
+		e.sync()
+	} else if sb.clearMark != "" {
 		runs := l.Block.Runs
 		a, z := sb.start-l.Start, sb.end-l.Start
 		total := l.End - l.Start
@@ -725,7 +796,7 @@ func (e *Editor) compileLiveHTMLPair(l document.Leaf, raw string, openStartByte,
 		return false
 	}
 	added := applyElementTagStyle(openNode, applyNodeRichStyle(openNode, styled(openNode, document.Style{})))
-	if openTok.DataAtom != atom.Q && added == (document.Style{}) {
+	if openTok.DataAtom != atom.Q && openTok.DataAtom != atom.Small && openTok.DataAtom != atom.Abbr && added == (document.Style{}) {
 		return false
 	}
 
@@ -846,9 +917,9 @@ func findMatchingHTMLCloser(s, name string, target atom.Atom) (start, end int, o
 func isLivePairedHTMLAtom(a atom.Atom) bool {
 	switch a {
 	case atom.Kbd, atom.U, atom.Ins, atom.Sup, atom.Sub, atom.Mark,
-		atom.B, atom.Strong, atom.I, atom.Em,
-		atom.S, atom.Del, atom.Strike, atom.Code, atom.Q,
-		atom.Span, atom.Font:
+		atom.B, atom.Strong, atom.I, atom.Em, atom.Var, atom.Dfn, atom.Cite,
+		atom.S, atom.Del, atom.Strike, atom.Code, atom.Samp, atom.Tt, atom.Q,
+		atom.Small, atom.Abbr, atom.Span, atom.Font:
 		return true
 	}
 	return false

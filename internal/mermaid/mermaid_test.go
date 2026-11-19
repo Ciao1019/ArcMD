@@ -264,3 +264,80 @@ func TestSequenceExplicitActivateAndParErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestComplexMultiPhaseSequenceCompactWidthAndRectColors(t *testing.T) {
+	src := `sequenceDiagram
+  participant User as Client
+  participant CoreSvc as CoreService
+  participant Gateway as Gateway
+  participant MQ as MessageQueue
+  participant Worker as RemoteWorker
+
+  rect rgb(200,250,200)
+  note over User,CoreSvc: Authoring Phase
+    User ->> CoreSvc: 1.1 Create item
+    CoreSvc ->> CoreSvc: 1.2 Attach resources / configure parameters
+    User ->> CoreSvc: 1.3 Save draft
+
+    User ->> CoreSvc: 2.1 Submit for review
+    alt Restricted pattern detected
+      ScriptSvc ->> User: 2.2 Reject publication
+    else Passed check
+      CoreSvc ->> User: 2.3 Publish succeeded
+    end
+  end
+  rect rgb(200,200,250)
+    note over User,Worker: Testing Phase
+    User ->> CoreSvc: 3.1 Trigger test run
+    CoreSvc ->> Gateway: 3.2 RPC invoke
+    Gateway ->> Worker: 3.3 HTTP request
+    Worker -->> Worker: 3.4 Execute asynchronously
+    Worker ->> Gateway: 3.5 RPC response
+    Gateway ->> MQ: 3.6 Publish test result
+    MQ -->> CoreSvc: 3.7 Consume message
+    CoreSvc ->> CoreSvc: 3.8 Update test status
+    CoreSvc ->> User: 3.9 View test result in monitor
+  end
+  rect rgb(134, 190, 220)
+    note over User,CoreSvc: Release Phase
+    User ->> CoreSvc: 4.1 Export bundle
+    CoreSvc ->> User: 4.2 Download archive
+    User ->> CoreSvc: 4.3 Import bundle to target environment
+    CoreSvc ->> CoreSvc: 4.4 Parse, persist, and auto-publish
+  end
+  rect rgb(200,250,250)
+    note over User,Worker: Production Execution Phase
+    User ->> CoreSvc: 5.1 Submit execution job
+    CoreSvc ->> Gateway: 5.2 RPC invoke
+    Gateway ->> Worker: 5.3 HTTP request
+    Worker ->> Worker: 5.4 Execute asynchronously
+    Worker ->> Gateway: 5.5 RPC response
+    Gateway ->> MQ: 5.6 Publish job result
+    MQ -->> CoreSvc: 5.7 Consume message
+    CoreSvc ->> CoreSvc: 5.8 Update job status
+    CoreSvc ->> User: 5.9 View execution result in monitor
+  end`
+
+	d, err := ParseAndLayout(src, nil)
+	if err != nil {
+		t.Fatalf("ParseAndLayout failed: %v", err)
+	}
+	assertDiagramBounds(t, d)
+
+	// Wrapping self-loops and adjacent labels keeps the 6-participant diagram compact.
+	if d.W > 1050 {
+		t.Fatalf("expected compact diagram width <= 1050 for 6 participants, got %.1f", d.W)
+	}
+	if d.H < 1200 {
+		t.Fatalf("expected full multi-phase vertical height >= 1200, got %.1f", d.H)
+	}
+	coloredRects := 0
+	for _, s := range d.Shapes {
+		if s.Role == RoleFragment && s.Fill[3] > 0 {
+			coloredRects++
+		}
+	}
+	if coloredRects != 4 {
+		t.Fatalf("expected 4 colored rect phases, got %d", coloredRects)
+	}
+}

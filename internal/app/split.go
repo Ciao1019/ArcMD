@@ -472,6 +472,9 @@ func (a *App) runPaletteAction(act action) {
 	}
 	a.palette.open = false
 	a.palette.pane = nil
+	if act.doc.rel != "" {
+		a.clearPicks("")
+	}
 	if pane != nil && act.doc.rel != "" {
 		if a.fillPane(pane, act.doc.space, act.doc.rel) && act.kind == i18n.T("内容") && a.doc.loadErr == nil {
 			a.doc.ed.FindTextWithFallback(strings.TrimSpace(a.palette.query), act.findTerm)

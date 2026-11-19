@@ -100,9 +100,10 @@ type updateState struct {
 	// dismissed hides the ready banner until the next launch.
 	dismissed bool
 	// window shows the update window on phase; failure is why it failed.
-	window  bool
-	phase   updatePhase
-	failure string
+	window        bool
+	communityOpen bool
+	phase         updatePhase
+	failure       string
 	// told is the last notice toasted, toast the one showing.
 	told, toast *update.Notice
 	toastFrames int
@@ -374,6 +375,11 @@ func (a *App) openUpdatePage(url string) {
 		return
 	}
 	mygo.Shell.OpenExternal(url)
+}
+
+// openCommunityGroup opens the community QR code dialog from the post-update banner.
+func (a *App) openCommunityGroup() {
+	a.updates.communityOpen = true
 }
 
 // updateToastTick toasts the banner's news while the sidebar is hidden.

@@ -241,7 +241,7 @@ func TestUpdatedCardAfterRestart(t *testing.T) {
 	tt.SetTitleBar(ui.TitleBar{Height: 46, Left: 78})
 	tt.Frame()
 	tt.Advance(time.Second)
-	if !tt.HasText("ArcMD 已更新！") || !tt.HasText("新功能") {
+	if !tt.HasText("ArcMD 已更新！") || !tt.HasText("新功能") || !tt.HasText("进入交流群") {
 		t.Fatalf("the updated card: %q", tt.Texts())
 	}
 	if p, _ := store.Load(); p.PendingUpdate != "" {
@@ -251,6 +251,21 @@ func TestUpdatedCardAfterRestart(t *testing.T) {
 	tt.Frame()
 	if len(*opened) != 1 || (*opened)[0] != update.ReleaseURL(Version) {
 		t.Fatalf("opened %q", *opened)
+	}
+	tt.Click("进入交流群")
+	tt.Frame()
+	if !a.updates.communityOpen || !tt.HasText("ArcMD 交流群") || !tt.HasText("扫一扫，备注") || !tt.HasText("添加之后拉你进群") {
+		t.Fatalf("community modal: %q", tt.Texts())
+	}
+	tt.Click("ArcMD")
+	tt.Frame()
+	if got := tt.Clipboard(); got != "ArcMD" {
+		t.Fatalf("remark clipboard %q", got)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.updates.communityOpen {
+		t.Fatal("Esc closes the community modal")
 	}
 	tt.Click("关闭")
 	tt.Frame()
@@ -309,7 +324,7 @@ func TestArrowCutsOutOfHeart(t *testing.T) {
 
 func TestSnapshotUpdates(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the update banners")
-	for _, name := range []string{"ready", "available", "updated", "toast", "window-found", "window-ready", "ready@dark", "updated@dark", "settings"} {
+	for _, name := range []string{"ready", "available", "updated", "community", "toast", "window-found", "window-ready", "ready@dark", "updated@dark", "community@dark", "settings"} {
 		t.Run(name, func(t *testing.T) {
 			a, tt := newTestApp(t)
 			withUpdates(a, &fakeUpdates{})
@@ -325,6 +340,9 @@ func TestSnapshotUpdates(t *testing.T) {
 				a.updates.found, a.updates.release = "0.2.0", rel
 			case "updated", "updated-dark":
 				a.updates.updatedTo = Version
+			case "community", "community-dark":
+				a.updates.updatedTo = Version
+				a.updates.communityOpen = true
 			case "toast":
 				a.updates.ready = "0.2.0"
 				a.toggleSidebar()

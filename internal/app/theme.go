@@ -349,22 +349,26 @@ func favoriteRim(t *ui.Theme) ui.Color {
 // dragCardLook are the colors of a sidebar row lifted on its floating card
 // while dragged or settling back into place (treedrag.go).
 type dragCardLook struct {
-	fill, rim, shadow ui.Color
+	fill, rim, shadow, badgeFill, badgeText ui.Color
 }
 
 func dragCardColors(t *ui.Theme, l spaceLook) dragCardLook {
 	face := l.opaqueTop()
 	if t.Dark {
 		return dragCardLook{
-			fill:   face.Mix(white, 0.12).Alpha(0.96),
-			rim:    white.Alpha(0.16),
-			shadow: black.Alpha(0.42),
+			fill:      face.Mix(white, 0.12).Alpha(0.96),
+			rim:       white.Alpha(0.16),
+			shadow:    black.Alpha(0.42),
+			badgeFill: white.Alpha(0.15),
+			badgeText: t.Text,
 		}
 	}
 	return dragCardLook{
-		fill:   face.Mix(white, 0.86).Alpha(0.97),
-		rim:    black.Alpha(0.10),
-		shadow: black.Alpha(0.16),
+		fill:      face.Mix(white, 0.86).Alpha(0.97),
+		rim:       black.Alpha(0.10),
+		shadow:    black.Alpha(0.16),
+		badgeFill: black.Alpha(0.08),
+		badgeText: t.Text,
 	}
 }
 
@@ -390,6 +394,104 @@ func field(t *ui.Theme) ui.Color {
 // of the chrome's ink.
 func librarySearch(t *ui.Theme) ui.Color {
 	return pick(t, black.Alpha(0.05), white.Alpha(0.07))
+}
+
+// pluginGlassSheen, pluginCardRimGradient and paintPluginGlassCard paint a
+// translucent frosted glass card in the library: an angled white frost sheen
+// with fine sandblasted grain and a directional specular rim, letting the
+// space's color glow softly through instead of turning opaque white.
+func pluginGlassSheen(t *ui.Theme) ui.LinearGradient {
+	return ui.LinearGradient{
+		Angle: 140,
+		Stops: []ui.GradientStop{
+			{Color: pick(t, white.Alpha(0.56), white.Alpha(0.14)), At: 0},
+			{Color: pick(t, white.Alpha(0.28), white.Alpha(0.06)), At: 0.52},
+			{Color: pick(t, white.Alpha(0.42), white.Alpha(0.10)), At: 1},
+		},
+	}
+}
+
+func pluginCardRimGradient(t *ui.Theme) ui.LinearGradient {
+	return ui.LinearGradient{
+		Angle: 140,
+		Stops: []ui.GradientStop{
+			{Color: pick(t, white.Alpha(0.95), white.Alpha(0.28)), At: 0},
+			{Color: pick(t, white.Alpha(0.28), white.Alpha(0.07)), At: 0.5},
+			{Color: pick(t, white.Alpha(0.68), white.Alpha(0.18)), At: 1},
+		},
+	}
+}
+
+func paintPluginGlassCard(p *ui.Painter, t *ui.Theme, r ui.Rect, radius float32) {
+	p.FillGradient(r, pluginGlassSheen(t), radius)
+	paintGrainTint(p, r, radius, pick(t, white.Alpha(0.07), white.Alpha(0.04)), false)
+}
+
+// pluginCardShadow is the soft ambient shadow under a glass plugin card.
+func pluginCardShadow(t *ui.Theme) ui.Color {
+	return pick(t, black.Alpha(0.08), black.Alpha(0.30))
+}
+
+// pluginTileSheen and pluginTileRim paint the frosted icon squircle inside
+// a glass plugin card.
+func pluginTileSheen(t *ui.Theme) ui.LinearGradient {
+	return ui.LinearGradient{
+		Angle: 145,
+		Stops: []ui.GradientStop{
+			{Color: pick(t, white.Alpha(0.66), white.Alpha(0.16)), At: 0},
+			{Color: pick(t, white.Alpha(0.36), white.Alpha(0.07)), At: 1},
+		},
+	}
+}
+
+func pluginTileRim(t *ui.Theme) ui.LinearGradient {
+	return ui.LinearGradient{
+		Angle: 145,
+		Stops: []ui.GradientStop{
+			{Color: pick(t, white.Alpha(0.92), white.Alpha(0.26)), At: 0},
+			{Color: pick(t, white.Alpha(0.35), white.Alpha(0.08)), At: 1},
+		},
+	}
+}
+
+// pluginButtonSheen and pluginButtonRimGradient paint frosted pill buttons
+// inside a glass plugin card.
+func pluginButtonSheen(t *ui.Theme, hovered, pressed bool) ui.LinearGradient {
+	switch {
+	case pressed:
+		return ui.LinearGradient{
+			Angle: 180,
+			Stops: []ui.GradientStop{
+				{Color: pick(t, white.Alpha(0.42), white.Alpha(0.08)), At: 0},
+				{Color: pick(t, white.Alpha(0.52), white.Alpha(0.12)), At: 1},
+			},
+		}
+	case hovered:
+		return ui.LinearGradient{
+			Angle: 155,
+			Stops: []ui.GradientStop{
+				{Color: pick(t, white.Alpha(0.84), white.Alpha(0.24)), At: 0},
+				{Color: pick(t, white.Alpha(0.58), white.Alpha(0.14)), At: 1},
+			},
+		}
+	}
+	return ui.LinearGradient{
+		Angle: 155,
+		Stops: []ui.GradientStop{
+			{Color: pick(t, white.Alpha(0.68), white.Alpha(0.17)), At: 0},
+			{Color: pick(t, white.Alpha(0.42), white.Alpha(0.09)), At: 1},
+		},
+	}
+}
+
+func pluginButtonRimGradient(t *ui.Theme) ui.LinearGradient {
+	return ui.LinearGradient{
+		Angle: 145,
+		Stops: []ui.GradientStop{
+			{Color: pick(t, white.Alpha(0.95), white.Alpha(0.28)), At: 0},
+			{Color: pick(t, white.Alpha(0.38), white.Alpha(0.10)), At: 1},
+		},
+	}
 }
 
 // cardShadow is the shadow under the content card.
@@ -897,4 +999,168 @@ func versionDiffHighlight(dark, added bool) ui.Color {
 		return ui.Hex("#16A34A").Alpha(0.24)
 	}
 	return ui.Hex("#DC2626").Alpha(0.22)
+}
+
+// spaceModalTheme derives a Space-tinted theme for floating dialogs and merge
+// workspaces so buttons, segmented controls, popovers, and scrollbars harmonize
+// with the active Space's palette instead of rendering pure white or pure black.
+func spaceModalTheme(base *ui.Theme, l spaceLook) *ui.Theme {
+	cp := *base
+	face := l.opaqueTop()
+	if cp.Dark {
+		cp.Background = face.Over(ui.Hex("#26222E")).Mix(ui.Hex("#221E29"), 0.32)
+		cp.Surface = white.Alpha(0.09)
+		cp.SurfaceHover = white.Alpha(0.15)
+		cp.SurfacePressed = white.Alpha(0.06)
+		cp.Border = white.Alpha(0.13)
+	} else {
+		cp.Background = face.Mix(white, 0.44)
+		cp.Surface = white.Alpha(0.54)
+		cp.SurfaceHover = white.Alpha(0.76)
+		cp.SurfacePressed = white.Alpha(0.38)
+		cp.Border = l.text.Alpha(0.12)
+	}
+	return &cp
+}
+
+// paintSpaceModal paints a translucent Space-themed frosted glass modal shell:
+// the Space's own gradient stops gently frosted (never pure white or pure black),
+// diagonal specular glass sheen, and Arc's fine grain texture.
+func paintSpaceModal(p *ui.Painter, r ui.Rect, radius float32, t *ui.Theme, l spaceLook) {
+	n := len(l.stops)
+	if n == 0 {
+		p.Fill(r, t.Background.Alpha(0.88), radius)
+		return
+	}
+	stops := make([]ui.GradientStop, max(n, 2))
+	if n == 1 {
+		c := l.stops[0]
+		if l.Solid {
+			c = c.Over(materialGrey(l.systemDark))
+		}
+		var topCol, botCol ui.Color
+		if t.Dark {
+			base := c.Over(ui.Hex("#272230"))
+			topCol = base.Mix(white, 0.05).Alpha(0.88)
+			botCol = base.Mix(ui.Hex("#1E1A26"), 0.35).Alpha(0.90)
+		} else {
+			topCol = c.Mix(white, 0.40).Alpha(0.84)
+			botCol = c.Mix(white, 0.52).Alpha(0.86)
+		}
+		stops[0] = ui.GradientStop{Color: topCol, At: 0}
+		stops[1] = ui.GradientStop{Color: botCol, At: 1}
+	} else {
+		for i, c := range l.stops {
+			if l.Solid {
+				c = c.Over(materialGrey(l.systemDark))
+			}
+			var col ui.Color
+			if t.Dark {
+				col = c.Over(ui.Hex("#272230")).Mix(ui.Hex("#201C28"), 0.28).Alpha(0.89)
+			} else {
+				col = c.Mix(white, 0.42).Alpha(0.85)
+			}
+			stops[i] = ui.GradientStop{Color: col, At: float32(i) / float32(n-1)}
+		}
+	}
+	p.FillGradient(r, ui.LinearGradient{Angle: 168, Stops: stops}, radius)
+	p.FillGradient(r, pluginGlassSheen(t), radius)
+	paintGrain(p, r, radius, max(l.Noise, 0.18), l.darkness)
+}
+
+// gitDiffLook holds the color tokens for the Git-style collapsible diff cards
+// (modeled after fredrikalindh/ui's DiffViewer & CollapsibleCard, tinted to the Space theme).
+type gitDiffLook struct {
+	cardBg, cardBorder, headerHover ui.Color
+	skipBg, skipHover, skipText     ui.Color
+	lineNum, codeText               ui.Color
+	addBar, addRow, addWord, addInk ui.Color
+	delBar, delRow, delWord, delInk ui.Color
+	modBadgeBg, modBadgeInk         ui.Color
+	conflictBadgeBg, conflictInk    ui.Color
+}
+
+func gitDiffColors(t *ui.Theme, l spaceLook) gitDiffLook {
+	face := l.opaqueTop()
+	added := ui.Hex("#22C55E")
+	removed := ui.Hex("#EA580C")
+	return gitDiffLook{
+		cardBg:          pick(t, face.Mix(white, 0.72).Alpha(0.68), face.Over(ui.Hex("#26222E")).Mix(white, 0.04).Alpha(0.66)),
+		cardBorder:      pick(t, l.text.Alpha(0.11), white.Alpha(0.12)),
+		headerHover:     pick(t, white.Alpha(0.32), white.Alpha(0.06)),
+		skipBg:          pick(t, face.Mix(black, 0.03).Alpha(0.32), black.Alpha(0.22)),
+		skipHover:       pick(t, face.Mix(black, 0.07).Alpha(0.44), white.Alpha(0.08)),
+		skipText:        t.TextMuted,
+		lineNum:         t.Text.Alpha(0.45),
+		codeText:        t.Text,
+		addBar:          added.Alpha(0.75),
+		addRow:          pick(t, added.Alpha(0.12), added.Alpha(0.16)),
+		addWord:         pick(t, added.Alpha(0.26), added.Alpha(0.34)),
+		addInk:          pick(t, ui.Hex("#15803D"), ui.Hex("#4ADE80")),
+		delBar:          removed.Alpha(0.84),
+		delRow:          pick(t, removed.Alpha(0.11), removed.Alpha(0.17)),
+		delWord:         pick(t, removed.Alpha(0.25), removed.Alpha(0.34)),
+		delInk:          pick(t, ui.Hex("#C2410C"), ui.Hex("#FB923C")),
+		modBadgeBg:      pick(t, t.Accent.Alpha(0.14), t.Accent.Alpha(0.22)),
+		modBadgeInk:     t.Accent,
+		conflictBadgeBg: pick(t, ui.Hex("#EF4444").Alpha(0.15), ui.Hex("#F87171").Alpha(0.22)),
+		conflictInk:     pick(t, ui.Hex("#DC2626"), ui.Hex("#FCA5A5")),
+	}
+}
+
+// mergeLook holds the color tokens for the IntelliJ IDEA-style 3-way merge view,
+// layered translucently over the active Space's theme.
+type mergeLook struct {
+	paneBg, centerBg, headerBg, gutterBg, border ui.Color
+	lineNum, text, muted                         ui.Color
+
+	conflictRow, conflictWord, conflictRibbon, conflictStroke, conflictInk ui.Color
+	modRow, modWord, modRibbon, modStroke                                  ui.Color
+	insRow, insWord, insRibbon, insStroke, insInk                          ui.Color
+	delRow, delRibbon, delStroke                                           ui.Color
+	actionBg, actionHover, actionInk                                       ui.Color
+}
+
+func ideaMergeColors(t *ui.Theme, l spaceLook) mergeLook {
+	face := l.opaqueTop()
+	red := ui.Hex("#EF4444")
+	blue := ui.Hex("#3B82F6")
+	green := ui.Hex("#22C55E")
+	slate := ui.Hex("#64748B")
+
+	return mergeLook{
+		paneBg:   pick(t, face.Mix(white, 0.62).Alpha(0.46), white.Alpha(0.035)),
+		centerBg: pick(t, face.Mix(white, 0.80).Alpha(0.64), white.Alpha(0.075)),
+		headerBg: pick(t, face.Mix(white, 0.34).Alpha(0.55), white.Alpha(0.06)),
+		gutterBg: pick(t, face.Mix(black, 0.04).Alpha(0.34), black.Alpha(0.20)),
+		border:   pick(t, l.text.Alpha(0.12), white.Alpha(0.12)),
+		lineNum:  t.Text.Alpha(0.42),
+		text:     t.Text,
+		muted:    t.TextMuted,
+
+		conflictRow:    pick(t, red.Alpha(0.14), red.Alpha(0.22)),
+		conflictWord:   pick(t, red.Alpha(0.28), red.Alpha(0.38)),
+		conflictRibbon: pick(t, red.Alpha(0.24), red.Alpha(0.30)),
+		conflictStroke: pick(t, red.Alpha(0.66), ui.Hex("#F87171").Alpha(0.72)),
+		conflictInk:    pick(t, ui.Hex("#DC2626"), ui.Hex("#FCA5A5")),
+
+		modRow:    pick(t, blue.Alpha(0.13), blue.Alpha(0.20)),
+		modWord:   pick(t, blue.Alpha(0.26), blue.Alpha(0.36)),
+		modRibbon: pick(t, blue.Alpha(0.20), blue.Alpha(0.26)),
+		modStroke: pick(t, blue.Alpha(0.56), ui.Hex("#60A5FA").Alpha(0.64)),
+
+		insRow:    pick(t, green.Alpha(0.13), green.Alpha(0.19)),
+		insWord:   pick(t, green.Alpha(0.26), green.Alpha(0.35)),
+		insRibbon: pick(t, green.Alpha(0.21), green.Alpha(0.26)),
+		insStroke: pick(t, green.Alpha(0.58), ui.Hex("#4ADE80").Alpha(0.64)),
+		insInk:    pick(t, ui.Hex("#15803D"), ui.Hex("#4ADE80")),
+
+		delRow:    pick(t, slate.Alpha(0.13), slate.Alpha(0.22)),
+		delRibbon: pick(t, slate.Alpha(0.19), slate.Alpha(0.26)),
+		delStroke: pick(t, slate.Alpha(0.48), slate.Alpha(0.56)),
+
+		actionBg:    pick(t, white.Alpha(0.72), white.Alpha(0.14)),
+		actionHover: pick(t, white.Alpha(0.92), white.Alpha(0.24)),
+		actionInk:   t.Text,
+	}
 }

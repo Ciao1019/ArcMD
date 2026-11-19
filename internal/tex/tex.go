@@ -56,12 +56,24 @@ func Layout(src string, size float32, m Measure) (Box, error) {
 	return layoutMode(src, size, m, true)
 }
 
+// LayoutWidth typesets src as display math within a column of lineWidth DIPs,
+// placing equation tags (\tag, \tag*) flush right while keeping the formula
+// centered. When lineWidth <= 0 or no tag is present, the box keeps its
+// natural width.
+func LayoutWidth(src string, size, lineWidth float32, m Measure) (Box, error) {
+	return layoutModeWidth(src, size, lineWidth, m, true)
+}
+
 // LayoutInline uses text-style operators and side limits within a sentence.
 func LayoutInline(src string, size float32, m Measure) (Box, error) {
 	return layoutMode(src, size, m, false)
 }
 
 func layoutMode(src string, size float32, m Measure, display bool) (Box, error) {
+	return layoutModeWidth(src, size, 0, m, display)
+}
+
+func layoutModeWidth(src string, size, lineWidth float32, m Measure, display bool) (Box, error) {
 	p := &parser{src: src}
 	lines, err := p.lines(nil)
 	if err != nil {
@@ -71,11 +83,7 @@ func layoutMode(src string, size float32, m Measure, display bool) (Box, error) 
 		return Box{}, fmt.Errorf("tex: unexpected %q", p.src[p.pos:])
 	}
 	l := &layouter{m: m}
-	var boxes []Box
-	for _, line := range lines {
-		boxes = append(boxes, l.list(line, size, display))
-	}
-	return l.stack(boxes, size, alignCenter), nil
+	return l.lines(lines, size, lineWidth, display), nil
 }
 
 // node is a parsed piece of a formula.
@@ -197,7 +205,7 @@ func (p *parser) list() ([]*node, string, error) {
 			case "right", "end":
 				p.pos = save
 				return out, `\` + name, nil
-			case "limits", "nolimits", "displaystyle", "textstyle":
+			case "limits", "nolimits", "displaystyle", "textstyle", "notag", "nonumber":
 				if name == "limits" && len(out) > 0 {
 					out[len(out)-1].limits = true
 				}
@@ -379,6 +387,8 @@ func (p *parser) commandNode(name string) (*node, error) {
 			n.limits = body[0].limits
 		}
 		return n, nil
+	case "tag":
+		return p.tagNode()
 	case "frac", "dfrac", "tfrac", "binom", "cfrac":
 		num, err := p.argument()
 		if err != nil {
@@ -521,4 +531,159 @@ func mapRunes(s string, table map[rune]rune) string {
 		}
 		return r
 	}, s)
+}
+
+// tagNode parses \tag{...} or \tag*{...} in upright text mode (supporting
+// spaces, escaped punctuation, text styling commands, and embedded $...$ math).
+func (p *parser) tagNode() (*node, error) {
+	starred := false
+	p.skipSpace()
+	if p.peek() == '*' {
+		p.pos++
+		starred = true
+	}
+	inner, err := p.textArgument()
+	if err != nil {
+		return nil, err
+	}
+	if !starred {
+		wrapped := make([]*node, 0, len(inner)+2)
+		wrapped = append(wrapped, &node{kind: "text", text: "("})
+		wrapped = append(wrapped, inner...)
+		wrapped = append(wrapped, &node{kind: "text", text: ")"})
+		inner = wrapped
+	}
+	return &node{kind: "tag", args: [][]*node{inner}}, nil
+}
+
+func (p *parser) textArgument() ([]*node, error) {
+	p.skipSpace()
+	if p.pos >= len(p.src) {
+		return nil, errors.New("tex: missing argument")
+	}
+	switch p.peek() {
+	case '{':
+		p.pos++
+		return p.textGroup()
+	case '}', '^', '_', '&':
+		return nil, errors.New("tex: missing argument")
+	case '\\':
+		return p.textEscape()
+	default:
+		r, n := utf8.DecodeRuneInString(p.src[p.pos:])
+		p.pos += n
+		return []*node{{kind: "text", text: string(r)}}, nil
+	}
+}
+
+func (p *parser) textGroup() ([]*node, error) {
+	var out []*node
+	var buf strings.Builder
+	flush := func() {
+		if buf.Len() > 0 {
+			out = append(out, &node{kind: "text", text: buf.String()})
+			buf.Reset()
+		}
+	}
+	for {
+		if p.pos >= len(p.src) {
+			return nil, errors.New("tex: unbalanced braces")
+		}
+		switch p.peek() {
+		case '}':
+			p.pos++
+			flush()
+			return out, nil
+		case '{':
+			p.pos++
+			flush()
+			sub, err := p.textGroup()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, sub...)
+		case '$':
+			p.pos++
+			flush()
+			start := p.pos
+			closed := false
+			for p.pos < len(p.src) {
+				if p.src[p.pos] == '\\' && p.pos+1 < len(p.src) {
+					p.pos += 2
+					continue
+				}
+				if p.src[p.pos] == '$' {
+					closed = true
+					break
+				}
+				p.pos++
+			}
+			if !closed {
+				return nil, errors.New("tex: unclosed $ in text")
+			}
+			mathSrc := p.src[start:p.pos]
+			p.pos++ // closing $
+			sub := &parser{src: mathSrc}
+			mathNodes, end, err := sub.list()
+			if err != nil {
+				return nil, err
+			}
+			if end != "" || sub.pos < len(sub.src) {
+				return nil, fmt.Errorf("tex: unexpected %q in tag math", end)
+			}
+			out = append(out, &node{kind: "group", args: [][]*node{mathNodes}})
+		case '\\':
+			flush()
+			esc, err := p.textEscape()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, esc...)
+		default:
+			r, n := utf8.DecodeRuneInString(p.src[p.pos:])
+			p.pos += n
+			if r == '\n' || r == '\r' || r == '\t' {
+				r = ' '
+			}
+			buf.WriteRune(r)
+		}
+	}
+}
+
+func (p *parser) textEscape() ([]*node, error) {
+	cmd := p.command()
+	switch cmd {
+	case "{", "}", "#", "%", "&", "_", "$":
+		return []*node{{kind: "text", text: cmd}}, nil
+	case " ":
+		return []*node{{kind: "text", text: " "}}, nil
+	case "textbf", "mathbf":
+		sub, err := p.textArgument()
+		if err != nil {
+			return nil, err
+		}
+		return []*node{{kind: "bold", args: [][]*node{sub}}}, nil
+	case "textit", "emph", "mathit":
+		sub, err := p.textArgument()
+		if err != nil {
+			return nil, err
+		}
+		for _, sn := range sub {
+			if sn.kind == "text" {
+				sn.italic = true
+			}
+		}
+		return sub, nil
+	case "text", "textrm", "mathrm", "mbox", "mathsf", "mathtt":
+		return p.textArgument()
+	default:
+		if w, ok := spaces[cmd]; ok {
+			return []*node{{kind: "space", space: w}}, nil
+		}
+		cn, err := p.commandNode(cmd)
+		if err != nil {
+			return nil, err
+		}
+		return []*node{cn}, nil
+	}
 }

@@ -194,6 +194,50 @@ func (a *App) actions() []action {
 	danger := func(title, hint string, run func()) {
 		out = append(out, action{kind: i18n.T("命令"), title: title, hint: hint, run: run, danger: true})
 	}
+	if group := a.activePickedGroup(); len(group) > 1 {
+		sp := a.state.ActiveSpace()
+		raw := a.activePickedRaw()
+		anyDir := false
+		var docPaths []string
+		for _, p := range raw {
+			node := vault.Find(a.tree, p)
+			if node != nil && node.Dir {
+				anyDir = true
+			} else if vault.IsDocument(p) {
+				docPaths = append(docPaths, p)
+			}
+		}
+		if !sp.IsExternal() {
+			g := slices.Clone(group)
+			cmd(fmt.Sprintf(i18n.T("新建包含这 %d 项的文件夹"), len(g)), "", func() { a.newFolderWithGroup(g) })
+			for _, f := range collectFolders(a.tree) {
+				invalid := false
+				allThere := true
+				for _, p := range g {
+					if under(f.Path, p) {
+						invalid = true
+						break
+					}
+					if parentDir(p) != f.Path || sp.IsPinned(p) {
+						allThere = false
+					}
+				}
+				if !invalid && !allThere {
+					dst := f.Path
+					cmd(fmt.Sprintf(i18n.T("将已选 %d 项移到「%s」"), len(g), folderMenuLabel(dst)), "", func() {
+						a.placeEntries(g, dst, len(a.childrenOf(dst)))
+					})
+				}
+			}
+		}
+		if !anyDir && len(docPaths) >= 2 && len(docPaths) <= splitLimit {
+			docs := slices.Clone(docPaths)
+			cmd(i18n.T("在分屏中打开已选文档"), "", func() { a.openPickedInSplit(sp, docs) })
+		}
+		g := slices.Clone(group)
+		cmd(fmt.Sprintf(i18n.T("将已选 %d 项移到废纸篓"), len(g)), "", func() { a.trashGroup(g) })
+		cmd(i18n.T("取消侧边栏多选"), "Esc", func() { a.clearPicks("") })
+	}
 	if a.doc != nil {
 		cmd(i18n.T("添加分屏"), a.keyLabel("split-add"), a.addSplitPane)
 	}
@@ -308,6 +352,7 @@ func (a *App) actions() []action {
 		cmd(i18n.T("上一个空间"), a.keyLabel("prev-space"), func() { a.stepSpace(-1) })
 	}
 	cmd(i18n.T("插件…"), "", a.openPlugins)
+	cmd(i18n.T("变更与冲突 (Git Diff)…"), "", a.openGitChanges)
 	cmd(i18n.T("设置…"), a.keyLabel("settings"), func() { a.openSettings(tabGeneral) })
 	cmd(i18n.T("键盘快捷键"), "", func() { a.openSettings(tabShortcuts) })
 	cmd(i18n.T("关于 ArcMD"), "", func() { a.openSettings(tabAbout) })
@@ -358,11 +403,18 @@ func (a *App) actions() []action {
 		}
 		switch {
 		case a.doc.conflict:
+			if !a.doc.isWhiteboard() {
+				cmd(i18n.T("三栏合并当前冲突…"), "", func() { a.openMergeForDiskConflict(a.doc) })
+			}
 			cmd(i18n.T("保留我的修改"), "", a.keepMine)
 			danger(i18n.T("使用磁盘上的版本（放弃我的修改）"), "⌘R", a.useDisk)
 		case a.doc.missing:
 			cmd(i18n.T("重新保存到原位置"), "", a.keepMine)
 			danger(i18n.T("放弃修改并关闭"), "", a.useDisk)
+		default:
+			if cf, ok := a.findConflictForDoc(a.doc); ok {
+				cmd(i18n.T("三栏合并当前冲突…"), "", func() { a.openMergeForConflict(cf) })
+			}
 		}
 		if a.doc.isWhiteboard() {
 			cmd(i18n.T("导出 SVG 文件"), "", func() { a.exportWhiteboardSVG(a.doc) })
@@ -397,10 +449,31 @@ func (a *App) actions() []action {
 		if !p.Enabled {
 			continue
 		}
-		for _, pc := range p.Manifest.Contributes.Commands {
-			name := p.Manifest.Name
-			out = append(out, action{kind: i18n.T("插件"), title: pc.Title, hint: name, run: func() {
-				a.notify("%s 需要插件运行时支持，该功能正在开发中。", name)
+		pluginPtr := p
+		pluginName := i18n.T(pluginPtr.Manifest.Name)
+		for _, pc := range pluginPtr.Manifest.Contributes.Commands {
+			switch pc.When {
+			case "document":
+				if a.doc == nil || a.doc.loadErr != nil {
+					continue
+				}
+			case "selection":
+				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.ed == nil {
+					continue
+				}
+				s, e := a.doc.ed.Positions()
+				if s == e {
+					continue
+				}
+			}
+			cmdID := pc.ID
+			out = append(out, action{kind: i18n.T("插件"), title: i18n.T(pc.Title), hint: pluginName, run: func() {
+				a.runPluginCommand(pluginPtr, cmdID, nil, false)
+			}})
+		}
+		if len(pluginPtr.Manifest.Contributes.Settings) > 0 {
+			out = append(out, action{kind: i18n.T("插件"), title: pluginName + i18n.T("：设置…"), hint: pluginName, run: func() {
+				a.openPluginSettings(pluginPtr.Manifest.ID)
 			}})
 		}
 	}

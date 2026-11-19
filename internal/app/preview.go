@@ -130,7 +130,7 @@ func (a *App) previewView(c *ui.Context) {
 	now := c.Now()
 	hover := p.hover
 	p.hover = nil
-	if a.listDragging || a.carrying != nil || a.dragSettle.active || a.insertSeam.index >= 0 || a.listDrop != nil || a.favDrop != nil || a.renaming != "" || a.spaceForm.open {
+	if a.listDragging || a.carrying != nil || a.dragSettle.active || a.insertSeam.index >= 0 || a.listDrop != nil || a.favDrop != nil || a.renaming != "" || a.spaceForm.open || len(a.picks) > 0 || c.Modifiers()&(ui.Cmd|ui.Shift) != 0 {
 		hover = nil
 	}
 	// The pointer resting: a new row starts the wait, the same row ends it.

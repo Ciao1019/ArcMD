@@ -304,13 +304,16 @@ func (e *Editor) wordCount() int {
 	if e.wordsReady && e.wordsRevision == e.Revision() {
 		return e.words
 	}
-	if change, ok := e.TextChangeSince(e.wordsRevision); ok && e.wordsReady {
-		e.words += countWords(change.After) - countWords(change.Before)
-	} else {
-		e.sync()
-		han, words := e.countEngineWordStats()
-		e.words = han + words
+	if change, ok := e.TextChangeSince(e.wordsRevision); ok && e.wordsReady && !isHTMLCommentBlock(change.Before) && !isHTMLCommentBlock(change.After) {
+		if leaf, exists := e.Engine.LeafByID(change.ID); !exists || leaf.Block.Kind != "raw" {
+			e.words += countWords(change.After) - countWords(change.Before)
+			e.wordsRevision, e.wordsReady = e.Revision(), true
+			return e.words
+		}
 	}
+	e.sync()
+	han, words := e.countEngineWordStats()
+	e.words = han + words
 	e.wordsRevision, e.wordsReady = e.Revision(), true
 	return e.words
 }
@@ -329,6 +332,9 @@ func (e *Editor) countEngineWordStats() (han, words int) {
 	for i := 0; i < n; i++ {
 		leaf := e.Engine.LeafAtIndex(i)
 		b := leaf.Block
+		if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
+			continue
+		}
 		stamp := makeRunsStamp(b.Runs)
 		if c, ok := e.wordCache[b.ID]; ok && c.stamp == stamp {
 			han += c.han

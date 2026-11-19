@@ -35,6 +35,11 @@ func (a *App) View(c *ui.Context) {
 	a.splitResizing = false
 	a.qa.resizing = false
 	a.carried, a.carrying = a.carrying, nil
+	if a.carrying == nil && a.carried == nil && a.picksSpace != "" {
+		if active := a.state.ActiveSpace(); active == nil || a.picksSpace != active.ID {
+			a.clearPicks("")
+		}
+	}
 	a.syncOpen()
 	a.overClosed, a.overClose = a.overClose, place{}
 	clear(a.tour.marks)
@@ -70,7 +75,14 @@ func (a *App) View(c *ui.Context) {
 	post := a.asyncPost()
 	for _, d := range a.residentDocuments() {
 		a.withDocument(d, func() { d.autosaveWith(c, post); a.syncSavedSearch(d); a.followTitle(); a.syncExcerpts(a.doc) })
+		if d.justSaved {
+			d.justSaved = false
+			if d.space != nil {
+				a.onDocumentSaved(d.space.ID)
+			}
+		}
 	}
+	a.pluginSyncTick(c)
 	for _, n := range a.notices {
 		c.Toast(n)
 	}
@@ -147,7 +159,13 @@ func (a *App) View(c *ui.Context) {
 	a.tagRenameView(c)
 	a.versionsView(c)
 	a.updateWindowView(c)
+	a.communityGroupView(c)
 	a.pdfExportView(c)
+	a.pluginSettingsView(c)
+	a.pluginInstallConfirmView(c)
+	a.pluginMarkdownView(c)
+	a.gitChangesView(c)
+	a.mergeView(c)
 	a.tourView(c)
 	if a.captureSplits() {
 		a.saveState()
@@ -158,6 +176,10 @@ func (a *App) View(c *ui.Context) {
 func (a *App) shortcuts(c *ui.Context) {
 	if a.recording != "" || a.tour.open {
 		return // the settings take the next key, the tour its own
+	}
+	if len(a.picks) > 0 && !a.modalOrOverlayBlocksEsc() && c.Shortcut(0, ui.KeyEscape) {
+		a.clearPicks("")
+		return
 	}
 	switch {
 	case a.pressed(c, "palette"):
@@ -415,6 +437,7 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 	}
 	page.Children(func() {
 		a.conflictBarFor(c, d)
+		a.syncConflictBarFor(c, d)
 		if d.isWhiteboard() {
 			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
 		} else {
@@ -460,6 +483,7 @@ func (a *App) toolbar(c *ui.Context) {
 		a.address(c)
 		ui.Box(c).Width(8)
 		a.documentCorner(c, a.doc)
+		a.gitToolbarButton(c)
 		ask := iconButton(c, "ask", iconAsk, i18n.T("问答"), a.withKey(i18n.T("向当前空间提问"), "ask"), a.state.ActiveSpace() == nil)
 		if a.qa.open {
 			ask.Background(glass(c.Theme()))

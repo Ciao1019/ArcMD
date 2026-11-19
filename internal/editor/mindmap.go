@@ -145,7 +145,7 @@ func shouldSkipMapBlock(b *document.Block) bool {
 	if b == nil {
 		return true
 	}
-	if b.Kind == "rule" {
+	if b.Kind == "rule" || (b.Kind == "raw" && isHTMLCommentBlock(b.Text())) {
 		return true
 	}
 	return b.Kind == "paragraph" && strings.TrimSpace(b.Text()) == ""
@@ -321,7 +321,7 @@ func truncateMapRuns(runs []document.Run, maxRunes, maxNewlines int) ([]document
 	openRun, openByte := -1, -1
 	for ri := range kept {
 		r := kept[ri]
-		if r.Style.Code || r.Style.Link != "" || r.Style.NoMath {
+		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" || r.Style.NoMath {
 			continue
 		}
 		s := r.Text
@@ -587,6 +587,7 @@ func (b *mapBody) measure(o Options) {
 	}
 	ed := FromOwnedDocument(&document.Document{Blocks: []*document.Block{block}})
 	ed.mapTablePreview = block.Kind == "table"
+	ed.mapMathPreview = block.Kind == "math"
 	o.Width = b.w + 92 // native page layout reserves 46 DIP on each side
 	o.FontSize = 14
 	ed.Paginate(o, 1e8)

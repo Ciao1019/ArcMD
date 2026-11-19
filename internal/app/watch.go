@@ -354,6 +354,12 @@ func (a *App) conflictBarFor(c *ui.Context, d *document) {
 		Background(t.Warning.Alpha(0.14)).Role(ui.RoleStatus).Children(func() {
 		ui.Icon(c, iconAlert).FontSize(15).TextColor(t.Warning)
 		ui.Text(c, msg).Grow(1).MinWidth(0)
+		if d.conflict && !d.missing && !d.isWhiteboard() {
+			if ui.Button(c.Key("merge3"), i18n.T("三栏合并…")).Clicked() {
+				a.activateDocument(d)
+				a.openMergeForDiskConflict(d)
+			}
+		}
 		if ui.Button(c.Key("theirs"), theirs).Clicked() {
 			a.activateDocument(d)
 			a.useDisk()

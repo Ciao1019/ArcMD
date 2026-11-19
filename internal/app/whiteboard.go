@@ -70,6 +70,7 @@ func (a *App) newWhiteboard(dir string) {
 		sp.SetExpanded(dir, true)
 		a.saveState()
 	}
+	a.clearPicks("")
 	a.refreshTree()
 	a.open(rel)
 	if d := a.doc; d != nil && d.rel == rel && d.board != nil {

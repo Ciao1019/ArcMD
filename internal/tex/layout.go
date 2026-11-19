@@ -178,7 +178,10 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		inner := l.list(n.args[0], size, display)
 		base = l.delimited(inner, n.open, n.close, size)
 	case "matrix":
-		base = l.matrix(n, size, display)
+		base = l.matrixWithWidth(n, size, 0, display)
+	case "tag":
+		tb := l.list(n.args[0], size, false)
+		base.place(tb, size*0.8, 0)
 	}
 	if !n.hasSup && !n.hasSub {
 		return base
@@ -460,6 +463,99 @@ const (
 	alignRight
 )
 
+// extractTags splits \tag / \tag* nodes out of a node list so the equation body
+// and its right-hand tag can be positioned independently.
+func extractTags(nodes []*node) (clean, tag []*node) {
+	hasTag := false
+	for _, n := range nodes {
+		if n.kind == "tag" {
+			hasTag = true
+			break
+		}
+	}
+	if !hasTag {
+		return nodes, nil
+	}
+	clean = make([]*node, 0, len(nodes))
+	for _, n := range nodes {
+		if n.kind == "tag" {
+			if len(tag) > 0 {
+				tag = append(tag, &node{kind: "text", text: " "})
+			}
+			tag = append(tag, n.args[0]...)
+			continue
+		}
+		clean = append(clean, n)
+	}
+	return clean, tag
+}
+
+func tagLineColumns(mathW, tagW, size, lineWidth float32, display bool) (totalW, mathX float32) {
+	minGap := size * 1.5
+	if display && lineWidth > 0 && mathW+minGap+tagW <= lineWidth {
+		return lineWidth, min((lineWidth-mathW)/2, lineWidth-tagW-minGap-mathW)
+	}
+	return mathW + size*2 + tagW, 0
+}
+
+// lines lays out top-level lines separated by \\, placing any \tag flush right.
+func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bool) Box {
+	if len(rawLines) == 1 {
+		clean0, tag0 := extractTags(rawLines[0])
+		if len(tag0) == 0 && len(clean0) == 1 && clean0[0].kind == "matrix" && !clean0[0].hasSup && !clean0[0].hasSub {
+			return l.matrixWithWidth(clean0[0], size, lineWidth, display)
+		}
+	}
+
+	mathBoxes := make([]Box, len(rawLines))
+	tagBoxes := make([]Box, len(rawLines))
+	hasTags := make([]bool, len(rawLines))
+	anyTag := false
+	for i, line := range rawLines {
+		clean, tagNodes := extractTags(line)
+		mathBoxes[i] = l.list(clean, size, display)
+		if len(tagNodes) > 0 {
+			tagBoxes[i] = l.list(tagNodes, size, false)
+			hasTags[i] = true
+			anyTag = true
+		}
+	}
+	if !anyTag {
+		return l.stack(mathBoxes, size, alignCenter)
+	}
+
+	maxMathW, maxTagW := float32(0), float32(0)
+	for i, mb := range mathBoxes {
+		maxMathW = max(maxMathW, mb.W)
+		if hasTags[i] {
+			maxTagW = max(maxTagW, tagBoxes[i].W)
+		}
+	}
+	totalW, blockX := tagLineColumns(maxMathW, maxTagW, size, lineWidth, display)
+
+	out := Box{}
+	y := float32(0)
+	prevD := float32(0)
+	for i, mb := range mathBoxes {
+		curA, curD := mb.Ascent, mb.Descent
+		if hasTags[i] {
+			curA = max(curA, tagBoxes[i].Ascent)
+			curD = max(curD, tagBoxes[i].Descent)
+		}
+		if i > 0 {
+			y += prevD + size*0.3 + curA
+		}
+		out.place(mb, blockX+(maxMathW-mb.W)/2, y)
+		if hasTags[i] {
+			tb := tagBoxes[i]
+			out.place(tb, totalW-tb.W, y)
+		}
+		prevD = curD
+	}
+	out.W = totalW
+	return out
+}
+
 // stack sets lines one above the other, baseline of the box the first's.
 func (l *layouter) stack(lines []Box, size float32, align alignment) Box {
 	if len(lines) == 1 {
@@ -488,14 +584,30 @@ func (l *layouter) stack(lines []Box, size float32, align alignment) Box {
 	return out
 }
 
-// matrix lays a matrix, cases or aligned equations out, centered on the
-// math axis, in its delimiters.
-func (l *layouter) matrix(n *node, size float32, display bool) Box {
+// matrixWithWidth lays a matrix, cases or aligned equations out, centered on
+// the math axis, in its delimiters, with optional per-row \tag labels.
+func (l *layouter) matrixWithWidth(n *node, size, lineWidth float32, display bool) Box {
 	rows := make([][]Box, len(n.rows))
+	rowTags := make([]Box, len(n.rows))
+	hasRowTag := make([]bool, len(n.rows))
+	anyTag := false
 	cols := 0
 	for i, row := range n.rows {
+		var rowTagNodes []*node
 		for _, cell := range row {
-			rows[i] = append(rows[i], l.list(cell, size, display))
+			cleanCell, tagNodes := extractTags(cell)
+			if len(tagNodes) > 0 {
+				if len(rowTagNodes) > 0 {
+					rowTagNodes = append(rowTagNodes, &node{kind: "text", text: " "})
+				}
+				rowTagNodes = append(rowTagNodes, tagNodes...)
+			}
+			rows[i] = append(rows[i], l.list(cleanCell, size, display))
+		}
+		if len(rowTagNodes) > 0 {
+			rowTags[i] = l.list(rowTagNodes, size, false)
+			hasRowTag[i] = true
+			anyTag = true
 		}
 		cols = max(cols, len(row))
 	}
@@ -508,7 +620,7 @@ func (l *layouter) matrix(n *node, size float32, display bool) Box {
 	gap := size
 	align := func(j int) alignment { return alignCenter }
 	switch n.env {
-	case "aligned", "align", "align*", "split", "gathered":
+	case "aligned", "align", "align*", "split", "gathered", "gather", "gather*", "equation", "equation*":
 		gap = 0
 		align = func(j int) alignment {
 			if j%2 == 0 {
@@ -516,11 +628,31 @@ func (l *layouter) matrix(n *node, size float32, display bool) Box {
 			}
 			return alignLeft
 		}
-		if n.env == "gathered" {
+		switch n.env {
+		case "gathered", "gather", "gather*", "equation", "equation*":
 			align = func(int) alignment { return alignCenter }
 		}
 	case "cases", "lines":
 		align = func(int) alignment { return alignLeft }
+	}
+	gridW := gap * float32(max(0, cols-1))
+	for _, w := range widths {
+		gridW += w
+	}
+	totalW, gridX := gridW, float32(0)
+	canFlushTags := anyTag && n.env != "pmatrix" && n.env != "bmatrix" && n.env != "Bmatrix" && n.env != "vmatrix" && n.env != "Vmatrix" && n.env != "cases"
+	if anyTag {
+		maxTagW := float32(0)
+		for i, tb := range rowTags {
+			if hasRowTag[i] {
+				maxTagW = max(maxTagW, tb.W)
+			}
+		}
+		lw := float32(0)
+		if canFlushTags {
+			lw = lineWidth
+		}
+		totalW, gridX = tagLineColumns(gridW, maxTagW, size, lw, display)
 	}
 	out := Box{}
 	y := float32(0)
@@ -529,10 +661,14 @@ func (l *layouter) matrix(n *node, size float32, display bool) Box {
 		for _, b := range row {
 			a, d = max(a, b.Ascent), max(d, b.Descent)
 		}
+		if hasRowTag[i] {
+			a = max(a, rowTags[i].Ascent)
+			d = max(d, rowTags[i].Descent)
+		}
 		if i > 0 {
 			y += a + size*0.25
 		}
-		x := float32(0)
+		x := gridX
 		for j, b := range row {
 			cx := x
 			switch align(j) {
@@ -544,16 +680,18 @@ func (l *layouter) matrix(n *node, size float32, display bool) Box {
 			out.place(b, cx, y)
 			x += widths[j] + gap
 		}
+		if hasRowTag[i] {
+			tb := rowTags[i]
+			out.place(tb, totalW-tb.W, y)
+		}
 		y += d
 	}
-	out.W = gap * float32(max(0, cols-1))
-	for _, w := range widths {
-		out.W += w
-	}
+	out.W = totalW
 	// Center the rows on the math axis.
 	shift := (out.Descent-out.Ascent)/2 + size*axisHeight
 	centered := Box{}
 	centered.place(out, 0, -shift)
+	centered.W = totalW
 	switch n.env {
 	case "pmatrix":
 		return l.delimited(centered, "(", ")", size)

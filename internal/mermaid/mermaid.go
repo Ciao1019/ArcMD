@@ -75,6 +75,7 @@ type ShapeOp struct {
 	H      float32
 	Radius float32
 	Dashed bool
+	Fill   [4]uint8 // Optional RGBA tint (Fill[3] > 0); zero uses theme role colors.
 }
 
 // PathOp describes an open polyline or smooth curve with optional endpoints.

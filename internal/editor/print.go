@@ -15,6 +15,7 @@ import (
 // pages, each at most height tall, in the page's coordinates.
 func (e *Editor) Paginate(o Options, height float32) []float32 {
 	e.printing = true
+	e.printPageH = height
 	e.ready = false
 	e.mathEditing, e.mermaidEditing, e.inlineEditing, e.boardEditing = "", "", "", ""
 	e.loadWhiteboard = o.LoadWhiteboard

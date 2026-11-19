@@ -254,7 +254,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					tr := &document.Block{ID: nextID(), Kind: "row"}
 					col := 0
 					for cell := range parsed.Children(row) {
-						runs, comments := importRunsAndComments(parsed.Inlines(cell), document.Style{})
+						runs, comments := importRunsAndCommentsWithBreak(parsed.Inlines(cell), document.Style{}, "\n")
 						td := &document.Block{
 							ID:       nextID(),
 							Kind:     "cell",
@@ -1180,6 +1180,10 @@ func importRuns(in []parser.Inline, base document.Style) []document.Run {
 }
 
 func importRunsAndComments(in []parser.Inline, base document.Style) ([]document.Run, []document.InlineComment) {
+	return importRunsAndCommentsWithBreak(in, base, "\u2028")
+}
+
+func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, hardBreak string) ([]document.Run, []document.InlineComment) {
 	if len(in) == 0 {
 		return nil, nil
 	}
@@ -1194,7 +1198,7 @@ func importRunsAndComments(in []parser.Inline, base document.Style) ([]document.
 			node := in[i]
 			end := min(stop, max(i+1, node.Next))
 			if node.Kind == parser.HTML {
-				if handled, emit, comment := applyInlineHTMLToken(node.Text, &stack, &style); handled {
+				if handled, emit, comment := applyInlineHTMLToken(node.Text, &stack, &style, hardBreak); handled {
 					if comment != "" {
 						comments = append(comments, document.InlineComment{Offset: acc.u16Len, Text: comment})
 					}
@@ -1217,7 +1221,9 @@ func importRunsAndComments(in []parser.Inline, base document.Style) ([]document.
 			case parser.Link:
 				next.Link = node.Dest
 			case parser.Code:
-				next.Code = true
+				if !next.Kbd {
+					next.Code = true
+				}
 			case parser.Text:
 				next.NoMath = strings.Contains(node.Text, "$")
 			}
@@ -1228,7 +1234,9 @@ func importRunsAndComments(in []parser.Inline, base document.Style) ([]document.
 			} else {
 				text := node.Text
 				switch node.Kind {
-				case parser.SoftBreak, parser.LineBreak:
+				case parser.LineBreak:
+					text = hardBreak
+				case parser.SoftBreak:
 					text = "\n"
 				case parser.FootnoteRef:
 					text = "[^" + node.Text + "]"
@@ -1651,14 +1659,16 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 			text = strings.Repeat("#", lvl) + " " + inline
 		}
 	case "bullet":
-		text = pad + "- " + inline
+		cont := strings.Repeat(" ", listCols[b.Indent])
+		text = pad + "- " + strings.ReplaceAll(inline, "\n", "\n"+cont)
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
 			isList = true
 		}
 	case "numbered":
-		text = fmt.Sprintf("%s%d. %s", pad, num, inline)
+		cont := strings.Repeat(" ", listCols[b.Indent])
+		text = fmt.Sprintf("%s%d. %s", pad, num, strings.ReplaceAll(inline, "\n", "\n"+cont))
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
@@ -1669,7 +1679,8 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		if b.Checked {
 			check = "x"
 		}
-		text = pad + "- [" + check + "] " + inline
+		cont := strings.Repeat(" ", listCols[b.Indent])
+		text = pad + "- [" + check + "] " + strings.ReplaceAll(inline, "\n", "\n"+cont)
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
@@ -2444,7 +2455,7 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 					}
 					if valid {
 						for _, child := range inner {
-							if child.Align == "" && !explicitLeft[child] && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" {
+							if child.Align == "" && !explicitLeft[child] && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" && child.Kind != "code" && child.Kind != "math" && child.Kind != "rule" {
 								child.Align = align
 							}
 						}

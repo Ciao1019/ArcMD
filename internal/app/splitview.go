@@ -365,7 +365,13 @@ func (a *App) splitDropTargetFor(c *ui.Context, target ui.Element, index int) {
 	if !over && !ok {
 		return
 	}
-	if !vault.IsDocument(d.rel) {
+	var docRels []string
+	for _, p := range a.rawGroupFor(d.space, d.rel) {
+		if vault.IsDocument(p) {
+			docRels = append(docRels, p)
+		}
+	}
+	if len(docRels) == 0 {
 		return
 	}
 	r := target.Bounds()
@@ -383,7 +389,12 @@ func (a *App) splitDropTargetFor(c *ui.Context, target ui.Element, index int) {
 			if index >= 0 {
 				a.focusPane(index, false)
 			}
-			a.boardDropDocCard(targetDoc, x, y, d.space, d.rel)
+			for k, rel := range docRels {
+				a.boardDropDocCard(targetDoc, x+float32(k*20), y+float32(k*20), d.space, rel)
+			}
+			if len(docRels) > 1 {
+				a.clearPicks("")
+			}
 			return
 		}
 		fill, rim := splitDropColors(c.Theme())
@@ -413,7 +424,16 @@ func (a *App) splitDropTargetFor(c *ui.Context, target ui.Element, index int) {
 		if index >= 0 {
 			a.focusPane(index, false)
 		}
-		a.openSplit(a.state.Get(d.space), d.rel, leading, vertical)
+		sp := a.state.Get(d.space)
+		for _, rel := range docRels {
+			if a.split != nil && len(a.split.panes) >= splitLimit {
+				break
+			}
+			a.openSplit(sp, rel, leading, vertical)
+		}
+		if len(docRels) > 1 {
+			a.clearPicks("")
+		}
 		return
 	}
 	fill, rim := splitDropColors(c.Theme())

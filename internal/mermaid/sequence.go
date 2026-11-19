@@ -49,6 +49,7 @@ type seqFragClause struct {
 type seqFragment struct {
 	kind     string
 	title    string
+	fill     [4]uint8
 	titleW   float32
 	titleH   float32
 	kwW      float32
@@ -226,7 +227,7 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		}
 
 		// Fragment starters & clauses.
-		if kind, title, isStart := parseFragStart(trimmed); isStart {
+		if kind, title, fill, isStart := parseFragStart(trimmed); isStart {
 			parent := -1
 			if len(fStack) > 0 {
 				parent = fStack[len(fStack)-1]
@@ -235,6 +236,7 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 			frags = append(frags, &seqFragment{
 				kind:   kind,
 				title:  title,
+				fill:   fill,
 				depth:  len(fStack),
 				parent: parent,
 			})
@@ -330,13 +332,37 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		maxHeaderH = max(maxHeaderH, p.h)
 	}
 
-	// Measure events & fragment headers.
+	nParts := len(parts)
+	outerMargin := outerPad
+	baseGap := float32(44)
+	msgPad := float32(56)
+	if nParts >= 5 {
+		outerMargin = 16
+		baseGap = 28
+		msgPad = 36
+	}
+
+	// Measure events & fragment headers, wrapping overly wide labels on
+	// self-loops and dense multi-participant single-hop arrows so complex
+	// diagrams keep compact column widths instead of shrinking all text.
 	for _, ev := range events {
 		if ev.kind == seqEventMsg {
 			if ev.text != "" {
+				if ev.from == ev.to {
+					wrapW := float32(180)
+					if nParts >= 5 {
+						wrapW = 148
+					}
+					ev.text = wrapLabelText(ev.text, msgFontSize, wrapW, measure)
+				} else if nParts >= 5 && absSeqInt(ev.from-ev.to) == 1 {
+					ev.text = wrapLabelText(ev.text, msgFontSize, 148, measure)
+				}
 				ev.lw, ev.lh = measure(ev.text, msgFontSize, false)
 			}
 		} else {
+			if ev.notePos != seqNoteOver || ev.from == ev.to {
+				ev.text = wrapLabelText(ev.text, noteFontSize, 190, measure)
+			}
 			ev.lw, ev.lh = measure(ev.text, noteFontSize, false)
 			ev.boxW = max(72, ev.lw+20)
 			ev.boxH = max(28, ev.lh+14)
@@ -356,10 +382,9 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 	}
 
 	// Compute horizontal center X coordinates for each participant.
-	nParts := len(parts)
 	gaps := make([]float32, max(0, nParts-1))
 	for i := 0; i < nParts-1; i++ {
-		gaps[i] = parts[i].w/2 + 44 + parts[i+1].w/2
+		gaps[i] = parts[i].w/2 + baseGap + parts[i+1].w/2
 	}
 
 	ensureSpan := func(l, r int, reqSpan float32) {
@@ -383,13 +408,13 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		case seqEventMsg:
 			if ev.from == ev.to {
 				if ev.from+1 < nParts {
-					// Keep room for self-loop and label before next lifeline.
-					ensureSpan(ev.from, ev.from+1, 44+ev.lw+28)
+					// Self-message label sits above the loop arm starting near the lifeline.
+					ensureSpan(ev.from, ev.from+1, max(48, 8+ev.lw+22))
 				}
 				continue
 			}
 			l, r := min(ev.from, ev.to), max(ev.from, ev.to)
-			ensureSpan(l, r, ev.lw+56)
+			ensureSpan(l, r, ev.lw+msgPad)
 
 		case seqEventNote:
 			switch ev.notePos {
@@ -421,7 +446,7 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 			if ev.from == ev.to {
 				cx := parts[ev.from].x
 				ev.minX = cx - 8
-				ev.maxX = cx + 38 + ev.lw + 12
+				ev.maxX = cx + max(38, 8+ev.lw+12)
 			} else {
 				x1, x2 := parts[ev.from].x, parts[ev.to].x
 				ev.minX = min(x1, x2) - 16
@@ -540,9 +565,13 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		case stepMsg:
 			ev := events[st.evIdx]
 			if ev.from == ev.to {
-				msgY := curY + 4
+				labelRoom := float32(6)
+				if ev.text != "" {
+					labelRoom = ev.lh + 6
+				}
+				msgY := curY + labelRoom
 				ev.y = msgY
-				curY += max(float32(46), ev.lh+22)
+				curY = msgY + 22 + 18
 				lastMsgY = msgY
 			} else {
 				msgY := curY + ev.lh + 6
@@ -677,6 +706,7 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 			H:      f.endY - f.startY,
 			Radius: 4,
 			Dashed: f.kind == "box",
+			Fill:   f.fill,
 		})
 		if f.kwW > 0 {
 			diag.Shapes = append(diag.Shapes, ShapeOp{
@@ -816,13 +846,13 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		case seqEventMsg:
 			if ev.from == ev.to {
 				sx := edgeAtY(ev.from, ev.y, true)
-				ex := edgeAtY(ev.from, ev.y+26, true)
+				ex := edgeAtY(ev.from, ev.y+22, true)
 				diag.Paths = append(diag.Paths, PathOp{
 					Points: [][2]float32{
 						{sx, ev.y},
-						{sx + 34, ev.y},
-						{sx + 34, ev.y + 26},
-						{ex, ev.y + 26},
+						{sx + 30, ev.y},
+						{sx + 30, ev.y + 22},
+						{ex, ev.y + 22},
 					},
 					Style:     ev.style,
 					EndMarker: ev.endM,
@@ -831,8 +861,8 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 				if ev.text != "" {
 					diag.Labels = append(diag.Labels, LabelOp{
 						Text:  ev.text,
-						X:     sx + 40,
-						Y:     ev.y + 13 - ev.lh/2,
+						X:     sx + 5,
+						Y:     ev.y - ev.lh - 4,
 						W:     ev.lw + 4,
 						H:     ev.lh,
 						Size:  msgFontSize,
@@ -919,8 +949,8 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		expandBox(lb.X, lb.Y, lb.W, lb.H)
 	}
 
-	dx := outerPad - minX
-	dy := outerPad - minY
+	dx := outerMargin - minX
+	dy := outerMargin - minY
 	for i := range diag.Shapes {
 		diag.Shapes[i].X += dx
 		diag.Shapes[i].Y += dy
@@ -935,9 +965,44 @@ func layoutSequence(lines []string, measure MeasureFunc) (Diagram, error) {
 		diag.Labels[i].X += dx
 		diag.Labels[i].Y += dy
 	}
-	diag.W = (maxX - minX) + outerPad*2
-	diag.H = (maxY - minY) + outerPad*2
+	diag.W = (maxX - minX) + outerMargin*2
+	diag.H = (maxY - minY) + outerMargin*2
 	return diag, nil
+}
+
+func absSeqInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func wrapLabelText(text string, size, maxW float32, measure MeasureFunc) string {
+	if text == "" || strings.Contains(text, "\n") {
+		return text
+	}
+	w, _ := measure(text, size, false)
+	if w <= maxW {
+		return text
+	}
+	words := strings.Fields(text)
+	if len(words) <= 1 {
+		return text
+	}
+	var lines []string
+	cur := words[0]
+	for _, word := range words[1:] {
+		cand := cur + " " + word
+		cw, _ := measure(cand, size, false)
+		if cw <= maxW {
+			cur = cand
+		} else {
+			lines = append(lines, cur)
+			cur = word
+		}
+	}
+	lines = append(lines, cur)
+	return strings.Join(lines, "\n")
 }
 
 func parseParticipantDecl(rest string) (id, label string) {
@@ -970,25 +1035,83 @@ func parseParticipantDecl(rest string) (id, label string) {
 	return id, id
 }
 
-func parseFragStart(trimmed string) (kind, title string, ok bool) {
+func parseFragStart(trimmed string) (kind, title string, fill [4]uint8, ok bool) {
 	fields := strings.Fields(trimmed)
 	if len(fields) == 0 {
-		return "", "", false
+		return "", "", [4]uint8{}, false
 	}
 	kw := strings.ToLower(fields[0])
 	switch kw {
 	case "loop", "alt", "opt", "par", "critical", "break", "rect", "box":
 		rest := strings.TrimSpace(trimmed[len(fields[0]):])
 		if kw == "rect" {
-			// Drop optional "rgb(...)" / "rgba(...)" / color word so the box renders cleanly.
-			lowRest := strings.ToLower(rest)
-			if strings.HasPrefix(lowRest, "rgb(") || strings.HasPrefix(lowRest, "rgba(") || strings.HasPrefix(lowRest, "#") {
+			if c, okCol := parseRectColor(rest); okCol {
+				fill = c
+				rest = ""
+			} else if lowRest := strings.ToLower(rest); strings.HasPrefix(lowRest, "rgb(") || strings.HasPrefix(lowRest, "rgba(") || strings.HasPrefix(lowRest, "#") {
 				rest = ""
 			}
 		}
-		return kw, normalizeLabel(rest), true
+		return kw, normalizeLabel(rest), fill, true
 	}
-	return "", "", false
+	return "", "", [4]uint8{}, false
+}
+
+func parseRectColor(s string) ([4]uint8, bool) {
+	s = strings.TrimSpace(s)
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "rgb(") && strings.HasSuffix(s, ")") {
+		parts := strings.Split(s[4:len(s)-1], ",")
+		if len(parts) != 3 {
+			return [4]uint8{}, false
+		}
+		r, ok1 := parseColorByte(parts[0])
+		g, ok2 := parseColorByte(parts[1])
+		b, ok3 := parseColorByte(parts[2])
+		if ok1 && ok2 && ok3 {
+			return [4]uint8{r, g, b, 255}, true
+		}
+		return [4]uint8{}, false
+	}
+	if strings.HasPrefix(low, "rgba(") && strings.HasSuffix(s, ")") {
+		parts := strings.Split(s[5:len(s)-1], ",")
+		if len(parts) != 4 {
+			return [4]uint8{}, false
+		}
+		r, ok1 := parseColorByte(parts[0])
+		g, ok2 := parseColorByte(parts[1])
+		b, ok3 := parseColorByte(parts[2])
+		af, err := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
+		if !ok1 || !ok2 || !ok3 || err != nil {
+			return [4]uint8{}, false
+		}
+		if af > 1 {
+			af = af / 255
+		}
+		a := uint8(max(0, min(255, int(af*255+0.5))))
+		return [4]uint8{r, g, b, max(1, a)}, true
+	}
+	if strings.HasPrefix(s, "#") {
+		hex := s[1:]
+		if len(hex) == 3 {
+			hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+		}
+		if len(hex) == 6 {
+			v, err := strconv.ParseUint(hex, 16, 32)
+			if err == nil {
+				return [4]uint8{uint8(v >> 16), uint8(v >> 8), uint8(v), 255}, true
+			}
+		}
+	}
+	return [4]uint8{}, false
+}
+
+func parseColorByte(s string) (uint8, bool) {
+	v, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, false
+	}
+	return uint8(max(0, min(255, v))), true
 }
 
 func parseFragClause(trimmed string) (clause string, ok bool) {

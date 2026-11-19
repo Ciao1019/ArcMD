@@ -70,3 +70,58 @@ func TestDocumentInItsOwnWindow(t *testing.T) {
 		t.Fatal("back in the main window")
 	}
 }
+
+type fakeMainWindow struct {
+	shown, hidden, focused int
+	fullScreen             bool
+}
+
+func (w *fakeMainWindow) Show()                { w.shown++ }
+func (w *fakeMainWindow) Hide()                { w.hidden++ }
+func (w *fakeMainWindow) Focus()               { w.focused++ }
+func (w *fakeMainWindow) IsFullScreen() bool   { return w.fullScreen }
+func (w *fakeMainWindow) SetFullScreen(v bool) { w.fullScreen = v }
+
+func TestMacOSMainWindowCloseHidesInsteadOfQuitting(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.Frame()
+	a.doc.ed.SetSelection(0, 0)
+	a.doc.ed.ReplaceText(nil, "自动保存后隐藏 ")
+
+	mw := &fakeMainWindow{}
+	// 1. On macOS, ⌘W / red close button flushes edits and hides the window without destroying/quitting.
+	if a.closeMain(mw, "darwin") {
+		t.Fatal("expected darwin closeMain without quit to prevent window destruction")
+	}
+	if mw.hidden != 1 {
+		t.Fatalf("expected window to hide once, got %d", mw.hidden)
+	}
+	saved, err := vault.Read(root(a), "Welcome.md")
+	if err != nil || !strings.Contains(saved, "自动保存后隐藏") {
+		t.Fatalf("expected closeMain to flush unsaved edits before hiding: %q (%v)", saved, err)
+	}
+
+	// 2. Re-activating from the Dock or ⌘0 restores and focuses the main window.
+	a.showMain(mw)
+	if mw.shown != 1 || mw.focused != 1 {
+		t.Fatalf("expected showMain to show and focus window: shown=%d focused=%d", mw.shown, mw.focused)
+	}
+
+	// 3. Full-screen close on macOS exits full-screen first before hiding.
+	mw.fullScreen = true
+	if a.closeMain(mw, "darwin") {
+		t.Fatal("expected darwin full-screen close to prevent window destruction")
+	}
+	if mw.fullScreen || !a.hideAfterFullScreen || mw.hidden != 1 {
+		t.Fatalf("expected full-screen exit before hide: fullScreen=%v hideAfter=%v hidden=%d", mw.fullScreen, a.hideAfterFullScreen, mw.hidden)
+	}
+
+	// 4. Explicit quit (⌘Q) on macOS or normal close on Windows/Linux allows window destruction.
+	if !a.closeMain(mw, "windows") {
+		t.Fatal("expected Windows closeMain to allow window close")
+	}
+	a.quitting = true
+	if !a.closeMain(mw, "darwin") {
+		t.Fatal("expected darwin closeMain during ⌘Q quit to allow window close")
+	}
+}

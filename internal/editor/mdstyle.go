@@ -746,8 +746,8 @@ type htmlStyleFrame struct {
 // applyInlineHTMLToken handles an inline HTML tag inside Markdown text,
 // maintaining a tag stack so nested <span>, <mark>, <strong>, <u>, <sup>, <a>
 // open and close cleanly. It reports whether raw was consumed as markup (with
-// optional replacement text such as "\n" for <br>, or preserved comment text).
-func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.Style) (handled bool, emit, comment string) {
+// optional replacement text such as hardBreak for <br>, or preserved comment text).
+func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.Style, hardBreak string) (handled bool, emit, comment string) {
 	z := xhtml.NewTokenizer(strings.NewReader(raw))
 	tt := z.Next()
 	switch tt {
@@ -760,7 +760,7 @@ func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.S
 		tok := z.Token()
 		name := strings.ToLower(tok.Data)
 		if tok.DataAtom == atom.Br {
-			return true, "\n", ""
+			return true, hardBreak, ""
 		}
 		node := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: tok.DataAtom, Data: name, Attr: tok.Attr}
 		if tok.DataAtom == atom.Span && (attr(node, "data-emoji") != "" || attr(node, "data-align") != "") {

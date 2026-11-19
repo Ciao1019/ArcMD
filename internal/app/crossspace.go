@@ -53,7 +53,7 @@ func (a *App) spaceIconDrag(c *ui.Context, b ui.Element, s *space.Space, on bool
 		a.spaceSpring = spaceSpring{}
 		a.dragGrab.consumed = true
 		if d.space != s.ID {
-			a.moveAcross(d.space, d.rel, s.ID, "")
+			a.moveGroupAcross(d.space, a.dragGroup(d.space, d.rel), s.ID, "")
 		}
 		return false
 	}
@@ -180,8 +180,8 @@ func (a *App) followTo(sp *space.Space) {
 	delete(a.pageTrees, sp.ID)
 }
 
-// dropForeign moves the row d of another space where the list's drop says,
-// into this space.
+// dropForeign moves the row d of another space (and any companion picks)
+// where the list's drop says, into this space.
 func (a *App) dropForeign(d dragged, drop *listDrop) {
 	sp := a.state.ActiveSpace()
 	if drop == nil || drop.kind == 0 {
@@ -191,10 +191,20 @@ func (a *App) dropForeign(d dragged, drop *listDrop) {
 	if dir == pinRoot {
 		dir = "" // pinned, it sits in the root
 	}
-	to := a.moveAcross(d.space, d.rel, sp.ID, dir)
-	if to == "" {
+	group := a.dragGroup(d.space, d.rel)
+	if len(group) <= 1 {
+		to := a.moveAcross(d.space, d.rel, sp.ID, dir)
+		a.clearPicks("")
+		if to == "" {
+			return
+		}
+		drop.rel = to
+		a.applyDrop(drop)
 		return
 	}
-	drop.rel = to
-	a.applyDrop(drop)
+	moved := a.moveGroupAcross(d.space, group, sp.ID, dir)
+	if len(moved) == 0 {
+		return
+	}
+	a.applyGroupDrop(moved, drop)
 }

@@ -144,6 +144,42 @@ func (e *Editor) tagAt(at int) string {
 	return ""
 }
 
+func (e *Editor) wikiAtPoint(x, y float32) string {
+	at, ok := e.IndexForPoint(ui.Point{X: x, Y: y})
+	if !ok {
+		return ""
+	}
+	text, start, ok := e.runAt(at)
+	if !ok {
+		return ""
+	}
+	for _, l := range wiki.Links(text) {
+		a, z := start+document.Len(text[:l.Start]), start+document.Len(text[:l.End])
+		if at >= a && at <= z && e.pointInTextRange(x, y, a, z) {
+			return l.Target
+		}
+	}
+	return ""
+}
+
+func (e *Editor) tagAtPoint(x, y float32) string {
+	at, ok := e.IndexForPoint(ui.Point{X: x, Y: y})
+	if !ok {
+		return ""
+	}
+	text, start, ok := e.runAt(at)
+	if !ok {
+		return ""
+	}
+	for _, tg := range wiki.Tags(text) {
+		a, z := start+document.Len(text[:tg.Start]), start+document.Len(text[:tg.End])
+		if at >= a && at <= z && e.pointInTextRange(x, y, a, z) {
+			return tg.Name
+		}
+	}
+	return ""
+}
+
 // watchWiki opens the completion list while a [[link]] is typed before a
 // collapsed caret.
 func (e *Editor) watchWiki(suggest func(string) []WikiItem) {

@@ -62,3 +62,50 @@ func TestIsMissingFile(t *testing.T) {
 		t.Fatal("expected nil error to return false")
 	}
 }
+
+func TestWriteFileAtomicPreservesHardLinks(t *testing.T) {
+	dir := t.TempDir()
+	primary := filepath.Join(dir, "primary.md")
+	linked := filepath.Join(dir, "linked.md")
+
+	if err := WriteFileAtomic(primary, []byte("initial content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(primary, linked); err != nil {
+		t.Skipf("hard links are unavailable on this filesystem: %v", err)
+	}
+
+	// Test both expanding and truncating in-place writes so no trailing bytes leak.
+	for _, want := range []string{
+		"much longer updated content across both hard-linked entries\nsecond line\n",
+		"short\n",
+		"",
+		"restored after empty\n",
+	} {
+		if err := WriteFileAtomic(primary, []byte(want), 0o644); err != nil {
+			t.Fatalf("WriteFileAtomic(%q): %v", want, err)
+		}
+		fi1, err := os.Stat(primary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fi2, err := os.Stat(linked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(fi1, fi2) {
+			t.Fatalf("hard link broke after saving %q", want)
+		}
+		for _, p := range []string{primary, linked} {
+			got, err := os.ReadFile(p)
+			if err != nil || string(got) != want {
+				t.Fatalf("read %s = %q (%v), want %q", p, string(got), err, want)
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("unexpected directory entries: %v, %v", entries, err)
+	}
+}

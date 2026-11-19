@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"path"
 	"slices"
 	"strings"
@@ -230,6 +231,7 @@ type dragGrab struct {
 	active     bool
 	consumed   bool
 	space, rel string
+	count      int
 	dir        bool
 	openFolder bool
 	holdsOpen  bool
@@ -247,6 +249,7 @@ type dragGrab struct {
 type dragSettle struct {
 	active     bool
 	space, rel string
+	count      int
 	dir        bool
 	openFolder bool
 	holdsOpen  bool
@@ -309,6 +312,24 @@ func parentDir(rel string) string {
 // nothing.
 func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop {
 	const half = 1
+	sp := a.state.ActiveSpace()
+	foreign := strings.HasPrefix(rel, "\x00")
+	var group []string
+	if !foreign && sp != nil {
+		group = a.dragGroup(sp.ID, rel)
+	}
+	inDragged := func(candidate string) bool {
+		if foreign {
+			return under(candidate, rel)
+		}
+		for _, m := range group {
+			if under(candidate, m) {
+				return true
+			}
+		}
+		return false
+	}
+
 	d := &listDrop{rel: rel}
 	var hit *rowFrame
 	for i := range rows {
@@ -351,7 +372,7 @@ func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop
 		before := func() { d.kind, d.parent, d.index = dropInsert, hit.parent, hit.index }
 		after := func() { d.kind, d.parent, d.index = dropInsert, hit.parent, hit.index+1 }
 		switch {
-		case under(hit.rel, rel):
+		case inDragged(hit.rel):
 			return nil
 		case hit.dir && f < 0.25:
 			before()
@@ -385,23 +406,58 @@ func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop
 			}
 		}
 	}
-	sp := a.state.ActiveSpace()
-	pinned := sp.IsPinned(rel)
+	if foreign {
+		return d
+	}
 	if d.kind == dropInto {
-		if parentDir(rel) == d.parent && !pinned || under(d.parent, rel) {
-			return nil // already there, or into itself
+		if inDragged(d.parent) {
+			return nil
+		}
+		allThere := true
+		for _, m := range group {
+			if parentDir(m) != d.parent || sp.IsPinned(m) {
+				allThere = false
+				break
+			}
+		}
+		if allThere {
+			return nil // already there
 		}
 		return d
 	}
-	if under(d.parent, rel) {
+	if inDragged(d.parent) {
 		return nil
 	}
 	kids := a.childrenOf(d.parent)
-	if d.parent == pinRoot && pinned || d.parent != pinRoot && !pinned && parentDir(rel) == d.parent {
-		old := slices.IndexFunc(kids, func(n *vault.Node) bool { return n.Path == rel })
-		if d.index == old || d.index == old+1 {
-			return nil // next to itself
+	if len(group) <= 1 {
+		pinned := sp.IsPinned(rel)
+		if d.parent == pinRoot && pinned || d.parent != pinRoot && !pinned && parentDir(rel) == d.parent {
+			old := slices.IndexFunc(kids, func(n *vault.Node) bool { return n.Path == rel })
+			if d.index == old || d.index == old+1 {
+				return nil // next to itself
+			}
 		}
+		return d
+	}
+	sameRun := true
+	firstOld := -1
+	for i, m := range group {
+		mPin := sp.IsPinned(m)
+		if (d.parent == pinRoot) != mPin || (d.parent != pinRoot && parentDir(m) != d.parent) {
+			sameRun = false
+			break
+		}
+		idx := slices.IndexFunc(kids, func(n *vault.Node) bool { return n.Path == m })
+		if idx < 0 || (i > 0 && idx != firstOld+i) {
+			sameRun = false
+			break
+		}
+		if i == 0 {
+			firstOld = idx
+		}
+	}
+	if sameRun && firstOld >= 0 && d.index >= firstOld && d.index <= firstOld+len(group) {
+		return nil
 	}
 	return d
 }
@@ -477,7 +533,7 @@ func (a *App) listDrag(c *ui.Context, e ui.Element, rows []rowFrame) sidebarDrag
 		}
 		a.listDrop, a.springOpen = nil, springOpen{}
 		if drop != nil {
-			a.applyDrop(drop)
+			a.applyGroupDrop(a.dragGroup(sp.ID, d.rel), drop)
 		}
 		return nil
 	}
@@ -631,14 +687,23 @@ func (a *App) dropSection(d *listDrop) int {
 	if d.parent == pinRoot || a.pinnedSection(d.parent) && d.parent != "" {
 		lands = sectionPinned
 	}
-	from := sectionToday
-	if a.pinnedSection(d.rel) {
-		from = sectionPinned
-	}
-	if lands == from {
+	if strings.HasPrefix(d.rel, "\x00") {
+		if lands == sectionPinned {
+			return sectionPinned
+		}
 		return 0
 	}
-	return lands
+	sp := a.state.ActiveSpace()
+	for _, m := range a.dragGroup(sp.ID, d.rel) {
+		from := sectionToday
+		if a.pinnedSection(m) {
+			from = sectionPinned
+		}
+		if lands != from {
+			return lands
+		}
+	}
+	return 0
 }
 
 // The sections of the list.
@@ -646,6 +711,31 @@ const (
 	sectionPinned = iota + 1
 	sectionToday
 )
+
+// applyGroupDrop moves every item in group where the drop says, delegating
+// single-item drops to applyDrop.
+func (a *App) applyGroupDrop(group []string, d *listDrop) {
+	if len(group) <= 1 {
+		a.applyDrop(d)
+		return
+	}
+	sp := a.state.ActiveSpace()
+	if sp == nil || d == nil || d.kind == 0 {
+		return
+	}
+	if d.parent == pinRoot {
+		a.pinGroup(sp, group, d.index)
+		return
+	}
+	switch d.kind {
+	case dropInsert:
+		a.placeEntries(group, d.parent, d.index)
+	case dropInto:
+		a.placeEntries(group, d.parent, len(a.childrenOf(d.parent)))
+		sp.SetExpanded(d.parent, true)
+		a.saveState()
+	}
+}
 
 // applyDrop moves the dragged file or folder where the drop says: among
 // the pins it is pinned there, elsewhere it leaves the pins for the place.
@@ -752,7 +842,7 @@ func (a *App) dragOverlayView(c *ui.Context) {
 		}
 		into := a.listDrop != nil && a.listDrop.kind == dropInto
 		ui.Overlay(c, func() {
-			a.floatingDragCard(c, g.x, g.y, g.cardW, lift, into, g.dir, g.openFolder, g.holdsOpen, g.dim, g.rel, g.title, true)
+			a.floatingDragCard(c, g.x, g.y, g.cardW, lift, into, g.dir, g.openFolder, g.holdsOpen, g.dim, g.rel, g.title, max(1, g.count), true)
 		})
 	case a.dragSettle.active:
 		s := &a.dragSettle
@@ -768,13 +858,15 @@ func (a *App) dragOverlayView(c *ui.Context) {
 		w := s.fromW + (s.toRect.W-s.fromW)*k
 		lift := 1 - k
 		ui.Overlay(c, func() {
-			a.floatingDragCard(c, x, y, w, lift, false, s.dir, s.openFolder, s.holdsOpen, s.dim, s.rel, s.title, false)
+			a.floatingDragCard(c, x, y, w, lift, false, s.dir, s.openFolder, s.holdsOpen, s.dim, s.rel, s.title, max(1, s.count), false)
 		})
 	}
 }
 
-// floatingDragCard draws a lifted row card at (x, y) above the window.
-func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder, dir, openFolder, holdsOpen, dim bool, rel, title string, label bool) {
+// floatingDragCard draws a lifted row card at (x, y) above the window; when
+// count > 1, stacked companion cards peek behind it and a count pill shows
+// how many items move together.
+func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder, dir, openFolder, holdsOpen, dim bool, rel, title string, count int, label bool) {
 	t := c.Theme()
 	look := dragCardColors(t, a.look)
 	gap := float32(10)
@@ -792,6 +884,21 @@ func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder,
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		grow := 1.5 * lift
 		fr := ui.Rect{X: r.X - grow, Y: r.Y + 2 - grow*0.6, W: r.W + 2*grow, H: r.H - 4 + 1.2*grow}
+		if count > 1 && lift > 0.01 {
+			layers := min(count-1, 2)
+			for layer := layers; layer >= 1; layer-- {
+				lf := float32(layer) * lift
+				sr := ui.Rect{
+					X: fr.X + 3*lf,
+					Y: fr.Y + 4*lf,
+					W: max(32, fr.W-6*lf),
+					H: fr.H,
+				}
+				p.Shadow(sr, 10, 0, 1+3*lift, 2+8*lift, 0, scaleAlpha(look.shadow, 0.45*lift))
+				p.Fill(sr, scaleAlpha(look.fill, 0.92), 10)
+				p.Stroke(sr, scaleAlpha(look.rim, 0.85*lift), 10, 1)
+			}
+		}
 		p.Shadow(fr, 10, 0, 1+5*lift, 3+15*lift, 0, scaleAlpha(look.shadow, 0.2+0.8*lift))
 		p.Fill(fr, look.fill, 10)
 		if lift > 0.01 {
@@ -808,9 +915,15 @@ func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder,
 		if dim {
 			ink = closedInk(t)
 		}
-		name := ui.Text(c, docName(title)).FontSize(14).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
+		name := ui.Text(c, docName(title)).FontSize(14).TextColor(ink).SingleLine().Shrink(1).MinWidth(0)
 		if dir {
 			name.FontWeight(500)
+		}
+		if count > 1 {
+			ui.Box(c.Key("drag-count")).Height(19).MinWidth(19).PaddingX(6).Radius(9.5).Shrink(0).
+				Center().Background(look.badgeFill).Children(func() {
+				ui.Text(c, fmt.Sprint(count)).FontSize(11).FontWeight(600).TextColor(look.badgeText).NoWrap()
+			})
 		}
 	})
 }

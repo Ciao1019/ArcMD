@@ -76,18 +76,20 @@ The primary file is a standard `.md` Markdown document, edited and autosaved
 directly in place. Rich ArcMD attributes that exceed basic CommonMark—page
 icons, covers and word goals (YAML frontmatter), text colors, highlights and
 hand-drawn annotations (`<mark>` / `<span>` with CSS fallbacks and `data-*`
-attributes), callouts with custom emoji (`> [!NOTE]` alerts), disclosures
+attributes), `<kbd>` keycaps, inline and block HTML comments, callouts with
+custom emoji (`> [!NOTE]` alerts), disclosures
 (`<details>`), resized or aligned figures, rich tables (`<table>` with widths,
 spans and cell backgrounds) and multi-column layouts (`<div class="arcmd-columns">`)—
 round-trip losslessly through `internal/editor/markdown.go` while degrading
 cleanly in other Markdown readers. Unmodified top-level blocks retain their
 original author Markdown bytes via `ImportSource` chunk matching. Legacy
-`.arcmd` JSON files (with format marker, version and stable block IDs) remain
-supported in place for backwards compatibility. `internal/document` contains
+`.arcmd` JSON files (format `"arcmd"`, version `9` with v1–v9 migration and
+stable block IDs) remain supported in place for backwards compatibility.
+`internal/document` contains
 the model, validation, cloning, structural editing and one shared undo history.
 It uses the standard library and can be tested without the UI toolkit.
 
-Text blocks contain runs with bold, italic, underline, strike, code and link
+Text blocks contain runs with bold, italic, underline, strike, code, keycap (`kbd`) and link
 attributes. Tables contain rows and cells. Column groups contain column
 containers and their child blocks. UTF-16 ranges form the native text-service
 view of the tree. A transaction changes the model and selection atomically.

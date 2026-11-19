@@ -135,6 +135,8 @@ type Editor struct {
 	linkText                  string
 	linkRange                 ui.TextInputRange
 	linkOpened                bool
+	pendingLink               linkSpan
+	pendingLinkDown           ui.Point
 	inlineEditing, laidInline string
 	notes                     map[string]noteTarget
 	noteReturn                int
@@ -174,7 +176,9 @@ type Editor struct {
 	// printing paints for paper: no caret, hints, controls or hover
 	// (print.go).
 	printing        bool
+	printPageH      float32
 	mapTablePreview bool // compact cell metrics for read-only document map previews
+	mapMathPreview  bool // compact formula width (no full-column \tag stretch) in document map
 	// typewriter keeps the caret's line at the middle of the page; dim
 	// fades the blocks but the caret's, as focus mode does.
 	typewriter, dim bool
@@ -211,6 +215,7 @@ type Editor struct {
 	mathGlyphs                  map[string]*ui.TextLayout
 	mermaids                    map[string]mermaidShape
 	mermaidLayouts              map[string]*ui.TextLayout
+	mermaidViewer               mermaidViewer
 	codeLex                     map[string]*codeLexCache
 	spaceWidths                 map[ui.Font]float32
 	codeNoWrap                  bool
@@ -878,6 +883,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.headerPopups(c, surface)
 	}
 	e.imagePreview(c)
+	e.mermaidPreview(c)
 	e.cropView(c)
 	e.wikiPreview(c, surface, o.PreviewWiki)
 	e.boardModalView(c, o)
@@ -1887,6 +1893,8 @@ func (e *Editor) hoverControl(x, y float32) bool {
 			e.langOpen = !(e.langOpen && e.langID == d.id)
 			e.langID, e.langAt = d.id, mermaidLanguageButton(d)
 			return true
+		case d.kind == "mermaid" && d.id != "" && d.mermaidHidden && in(mermaidZoomButton(d, e.ReadOnly)) && e.hovered(d.rect, 0):
+			return e.openMermaidPreview(d.id)
 		case d.kind == "mermaid" && d.id != "" && d.mermaidHidden && in(mermaidEditButton(d)) && e.hovered(d.rect, 0):
 			return e.focusBlockStart(d.id)
 		case d.kind == "mermaid" && d.id != "" && in(mermaidCopyButton(d)) && e.hovered(d.rect, 0):
@@ -2091,13 +2099,8 @@ func (e *Editor) insertAfter(id string) {
 }
 
 func (e *Editor) linkAt(at int) string {
-	leaf := e.Engine.LeafAt(at)
-	offset := leaf.Start
-	for _, run := range leaf.Block.Runs {
-		offset += document.Len(run.Text)
-		if at <= offset {
-			return run.Style.Link
-		}
+	if span, ok := e.linkSpanAt(at); ok {
+		return span.url
 	}
 	return ""
 }
@@ -2130,9 +2133,15 @@ func (e *Editor) structuralPointer(ev ui.InputEvent) bool {
 					continue
 				}
 				if d.kind == "mermaid" {
+					if d.mermaidHidden && in(mermaidZoomButton(d, true)) && e.hovered(d.rect, 0) {
+						return e.openMermaidPreview(d.id)
+					}
 					if in(mermaidCopyButton(d)) && e.hovered(d.rect, 0) {
 						e.copyBlock(d.id)
 						return true
+					}
+					if d.mermaidHidden && ev.Clicks >= 2 && in(d.rect) {
+						return e.openMermaidPreview(d.id)
 					}
 					continue
 				}
@@ -2430,7 +2439,7 @@ func (e *Editor) paintKeycaps(p *ui.Painter, bounds ui.Rect, r row) {
 	for _, kr := range runs {
 		rects := r.layout.SelectionRects(ui.TextInputRange{Start: kr.start, End: kr.end})
 		if k := len(rects) - 1; k >= 0 && kr.trimLast {
-			rects[k].W -= kbdPad * size
+			rects[k].W -= trailingPadAt(r.leaf.Block.Runs, kr.end, size)
 		}
 		for _, rect := range rects {
 			if rect.W < 1 || rect.H <= 0 {

@@ -34,6 +34,19 @@ type mermaidShape struct {
 	err  error
 }
 
+type mermaidViewer struct {
+	open       bool
+	fitAll     bool
+	needsAlign bool
+	zoom       float32
+	pan        ui.Point
+	shownScale float32
+	shownPan   ui.Point
+	zoomAtTime time.Time
+	title      string
+	diag       mermaid.Diagram
+}
+
 // watchMermaid tracks the Mermaid block currently under the caret so it opens
 // its live-preview editor card while focused.
 func (e *Editor) watchMermaid() {
@@ -206,8 +219,17 @@ func (e *Editor) mermaidRow(r *row, textH, gap float32) (total float32, wellOff 
 			if diag.W > availW {
 				scale = availW / diag.W
 			}
-			if diag.H*scale > mermaidMaxH {
-				scale = min(scale, mermaidMaxH/diag.H)
+			if !r.mermaidHidden {
+				if diag.H*scale > mermaidMaxH {
+					scale = min(scale, mermaidMaxH/diag.H)
+				}
+			} else if e.printing && e.printPageH > 0 && e.printPageH < 1e6 {
+				// Fit a printed diagram onto a single A4 page, while interactive
+				// reading lets tall sequence diagrams flow naturally at full width.
+				const mermaidPrintMaxH = float32(850)
+				if diag.H*scale > mermaidPrintMaxH {
+					scale = min(scale, mermaidPrintMaxH/diag.H)
+				}
 			}
 			r.mermaidScale = max(0.1, scale)
 			previewH = max(36, diag.H*r.mermaidScale)
@@ -247,6 +269,43 @@ func mermaidEditButton(d decoration) ui.Rect {
 		return ui.Rect{}
 	}
 	return ui.Rect{X: d.rect.X + d.rect.W - 138, Y: d.rect.Y + 6, W: 62, H: 22}
+}
+
+func mermaidZoomButton(d decoration, readOnly bool) ui.Rect {
+	if !d.mermaidHidden {
+		return ui.Rect{}
+	}
+	x := d.rect.X + d.rect.W - 206
+	if readOnly {
+		x = d.rect.X + d.rect.W - 138
+	}
+	return ui.Rect{X: x, Y: d.rect.Y + 6, W: 62, H: 22}
+}
+
+func (e *Editor) openMermaidPreview(id string) bool {
+	b := e.blockByID(id)
+	if b == nil || !isMermaidBlock(b) {
+		return false
+	}
+	src := strings.TrimSpace(b.Text())
+	if src == "" {
+		return false
+	}
+	shape := e.diagram(id, src)
+	if shape.err != nil {
+		return false
+	}
+	title := i18n.T("流程图")
+	if shape.diag.Kind == "sequence" {
+		title = i18n.T("时序图")
+	}
+	e.mermaidViewer = mermaidViewer{
+		open:       true,
+		needsAlign: true,
+		title:      title,
+		diag:       shape.diag,
+	}
+	return true
 }
 
 func (e *Editor) focusBlockStart(id string) bool {
@@ -320,6 +379,21 @@ func (e *Editor) paintMermaidHover(p *ui.Painter, bounds ui.Rect, d decoration, 
 	hoveredCard := e.hovered(d.rect, 0)
 	if !copied && !hoveredCard {
 		return
+	}
+
+	if d.mermaidHidden && hoveredCard && d.rect.W >= 220 {
+		zrDoc := mermaidZoomButton(d, e.ReadOnly)
+		if zrDoc.W > 0 {
+			zr := offset(zrDoc)
+			if e.hovered(zrDoc, 0) {
+				p.Fill(zr, e.page.Hover, 4)
+			}
+			fg := e.page.Caption
+			p.Icon(iconMaximize, ui.Rect{X: zr.X + 4, Y: zr.Y + 4, W: 14, H: 14}, fg)
+			span := ui.Span{Text: i18n.T("放大"), Size: 13, Color: fg}
+			_, th := p.MeasureText(0, span)
+			p.RichText(zr.X+22, zr.Y+(zr.H-th)/2, 0, span)
+		}
 	}
 
 	if d.mermaidHidden && hoveredCard && !e.ReadOnly {
@@ -406,9 +480,16 @@ func (e *Editor) paintMermaid(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme)
 	return r.mermaidHidden
 }
 
+func mermaidBlueCallout(pg Page) Callout {
+	if c, ok := pg.Callouts[""]; ok && c.Fill.A > 0 {
+		return c
+	}
+	return pg.Callouts["blue"]
+}
+
 func (e *Editor) paintMermaidDiagram(p *ui.Painter, diag mermaid.Diagram, ox, oy float32, t *ui.Theme) {
 	pg := e.page
-	blue := pg.Callouts["blue"]
+	blue := mermaidBlueCallout(pg)
 	yellow := pg.Callouts["yellow"]
 
 	// 1. Background containers (subgraphs & fragments).
@@ -443,48 +524,43 @@ func (e *Editor) paintMermaidDiagram(p *ui.Painter, diag mermaid.Diagram, ox, oy
 			p.Fill(pill, t.Background.Alpha(0.92), 4)
 		}
 		tl := e.mermaidTextLayout(lb.Text, lb.Size, lb.Bold, lb.Align, max(8, lb.W))
-		tw, th := tl.Size()
-		drawX := lx
-		if lb.Align == 0 {
-			drawX = lx + (lb.W-tw)/2
-		} else if lb.Align > 0 {
-			drawX = lx + lb.W - tw
-		}
+		_, th := tl.Size()
 		drawY := ly + (lb.H-th)/2
-		p.TextLayout(tl, drawX, drawY, fg)
+		p.TextLayout(tl, lx, drawY, fg)
+	}
+}
+
+func mermaidShapeColors(s mermaid.ShapeOp, t *ui.Theme, pg Page, blue, yellow Callout) (fill, border ui.Color, strokeW float32) {
+	strokeW = 1.25
+	switch s.Role {
+	case mermaid.RoleSubgraph, mermaid.RoleFragment:
+		if s.Kind == mermaid.ShapePentagon {
+			return pg.CodeHover.Alpha(0.28), pg.CodeBorder, 1
+		}
+		if s.Fill[3] > 0 {
+			raw := ui.RGB(s.Fill[0], s.Fill[1], s.Fill[2])
+			a := float32(s.Fill[3]) / 255
+			if t.Dark {
+				return t.Background.Mix(raw, 0.18*a), raw.Alpha(0.40), 1
+			}
+			return t.Background.Mix(raw, 0.45*a), raw.Mix(t.Text, 0.22).Alpha(0.55), 1
+		}
+		return pg.CodeFill.Alpha(0.50), pg.CodeBorder, 1
+	case mermaid.RoleActor:
+		return blue.Fill, blue.Border, strokeW
+	case mermaid.RoleNote:
+		return yellow.Fill, yellow.Border, strokeW
+	case mermaid.RoleActivation:
+		return t.Accent.Alpha(0.18), t.Accent.Alpha(0.68), 1
+	default:
+		return pg.CodeFill, t.Accent.Alpha(0.45), strokeW
 	}
 }
 
 func (e *Editor) paintMermaidShape(p *ui.Painter, s mermaid.ShapeOp, ox, oy float32, t *ui.Theme, pg Page, blue, yellow Callout) {
 	x, y, w, h := ox+s.X, oy+s.Y, s.W, s.H
 	r := ui.Rect{X: x, Y: y, W: w, H: h}
-
-	var fill, border ui.Color
-	strokeW := float32(1.25)
-	switch s.Role {
-	case mermaid.RoleSubgraph, mermaid.RoleFragment:
-		if s.Kind == mermaid.ShapePentagon {
-			fill = pg.CodeHover.Alpha(0.28)
-			border = pg.CodeBorder
-		} else {
-			fill = pg.CodeFill.Alpha(0.50)
-			border = pg.CodeBorder
-		}
-		strokeW = 1
-	case mermaid.RoleActor:
-		fill = blue.Fill
-		border = blue.Border
-	case mermaid.RoleNote:
-		fill = yellow.Fill
-		border = yellow.Border
-	case mermaid.RoleActivation:
-		fill = t.Accent.Alpha(0.18)
-		border = t.Accent.Alpha(0.68)
-		strokeW = 1
-	default:
-		fill = pg.CodeFill
-		border = t.Accent.Alpha(0.45)
-	}
+	fill, border, strokeW := mermaidShapeColors(s, t, pg, blue, yellow)
 
 	strokeOutline := func(path *ui.Path) {
 		if s.Dashed {
@@ -749,4 +825,199 @@ func segDirLen(a, b [2]float32) (ux, uy, dist float32) {
 func segUnit(a, b [2]float32) (ux, uy float32, ok bool) {
 	u, v, d := segDirLen(a, b)
 	return u, v, d >= 0.001
+}
+
+func (v *mermaidViewer) scaleFor(w, h float32) float32 {
+	if v.zoom > 0 {
+		return v.zoom
+	}
+	dw, dh := max(1, v.diag.W), max(1, v.diag.H)
+	if v.fitAll {
+		return min(float32(1), (w-32)/dw, (h-32)/dh)
+	}
+	// Default to full readable width (up to 100%) so tall sequence diagrams
+	// start crisp and scroll vertically instead of shrinking to fit height.
+	return min(float32(1), (w-32)/dw)
+}
+
+func (v *mermaidViewer) clampPan(w, h float32) {
+	scale := v.scaleFor(w, h)
+	mx := max(0, (v.diag.W*scale+32-w)/2)
+	my := max(0, (v.diag.H*scale+32-h)/2)
+	v.pan.X = max(-mx, min(mx, v.pan.X))
+	v.pan.Y = max(-my, min(my, v.pan.Y))
+}
+
+func (v *mermaidViewer) zoomAt(scale, x, y, w, h float32) {
+	old := v.scaleFor(w, h)
+	next := max(float32(0.1), min(8, scale))
+	ratio := next / old
+	v.pan.X = (v.pan.X-(x-w/2))*ratio + (x - w/2)
+	v.pan.Y = (v.pan.Y-(y-h/2))*ratio + (y - h/2)
+	v.zoom = next
+	v.fitAll = false
+	v.clampPan(w, h)
+}
+
+func (e *Editor) mermaidPreview(c *ui.Context) {
+	v := &e.mermaidViewer
+	if !v.open || v.diag.W <= 0 || v.diag.H <= 0 {
+		return
+	}
+	w, h := c.Size()
+	w, h = max(220, w-48), max(180, h-48)
+	vw, vh := max(48, w-24), max(48, h-66)
+	if v.needsAlign {
+		v.needsAlign = false
+		s := v.scaleFor(vw, vh)
+		if v.diag.H*s+32 > vh {
+			// Start at the top of tall diagrams so participants read first.
+			v.pan.Y = (v.diag.H*s + 32 - vh) / 2
+		}
+		v.clampPan(vw, vh)
+		v.shownScale, v.shownPan = s, v.pan
+	}
+
+	ui.DialogBase(c.Key("mermaid-preview"), &v.open, func(backdrop, panel ui.Element) {
+		backdrop.Background(e.page.Scrim).Transition(ui.ElementTransition{
+			Duration: 150 * time.Millisecond,
+			Enter:    &ui.Motion{Opacity: 0},
+		})
+		panel.Size(w, h).Padding(12).Gap(10).Radius(12).Background(c.Theme().Background).Label(i18n.T("图表预览")).
+			Transition(ui.ElementTransition{
+				Duration: 165 * time.Millisecond,
+				Enter:    &ui.Motion{Opacity: 0, Scale: 0.97},
+			})
+		ui.Row(c).Height(32).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, v.title).Grow(1).MinWidth(0).MaxLines(1).FontSize(14).FontWeight(600)
+			fitLabel := i18n.T("适应窗口")
+			if v.fitAll && v.zoom == 0 {
+				fitLabel = i18n.T("原始大小")
+			}
+			if ui.Button(c, fitLabel).Clicked() {
+				if v.fitAll && v.zoom == 0 {
+					v.fitAll = false
+					v.zoom = 1
+					v.pan = ui.Point{}
+					if v.diag.H+32 > vh {
+						v.pan.Y = (v.diag.H + 32 - vh) / 2
+					}
+				} else {
+					v.fitAll = true
+					v.zoom = 0
+					v.pan = ui.Point{}
+				}
+				v.clampPan(vw, vh)
+			}
+			if ui.Button(c, "−").Label(i18n.T("缩小图表")).Clicked() {
+				v.zoomAt(v.scaleFor(vw, vh)/1.2, vw/2, vh/2, vw, vh)
+			}
+			ui.Text(c, fmt.Sprintf("%.0f%%", v.scaleFor(vw, vh)*100)).FontSize(12).Width(44).TextAlign(ui.Center)
+			if ui.Button(c, "+").Label(i18n.T("放大图表")).Clicked() {
+				v.zoomAt(v.scaleFor(vw, vh)*1.2, vw/2, vh/2, vw, vh)
+			}
+			if ui.Button(c, i18n.T("关闭")).Tooltip(i18n.T("关闭 (Esc)")).Clicked() {
+				v.open = false
+			}
+		})
+		e.mermaidPreviewCanvas(c, vw, vh)
+	})
+}
+
+func (e *Editor) mermaidPreviewCanvas(c *ui.Context, w, h float32) {
+	v := &e.mermaidViewer
+	canvas := ui.Box(c.Key("mermaid-preview-canvas")).Size(w, h).Clip().Focusable().
+		Role(ui.RoleImage).Label(i18n.T("图表预览画布：滚轮缩放，拖动平移")).Cursor(ui.CursorGrab)
+	if dx, dy, held := canvas.Dragged(); held {
+		v.pan.X += dx
+		v.pan.Y += dy
+		v.clampPan(w, h)
+		v.shownPan = v.pan
+		canvas.Cursor(ui.CursorGrabbing)
+	}
+	canvas.HandleInput(func(ev ui.InputEvent) bool {
+		switch ev.Kind {
+		case ui.InputZoom:
+			v.zoomAt(v.scaleFor(w, h)*ev.Scale, ev.X, ev.Y, w, h)
+			v.shownScale = v.scaleFor(w, h)
+			v.shownPan = v.pan
+			return true
+		case ui.InputScroll:
+			if ev.Mods&(ui.Cmd|ui.Ctrl) != 0 {
+				v.zoomAt(v.scaleFor(w, h)*float32(math.Exp(-float64(ev.DY)*0.003)), ev.X, ev.Y, w, h)
+			} else {
+				v.pan.X -= ev.DX
+				v.pan.Y -= ev.DY
+				v.clampPan(w, h)
+				v.shownPan = v.pan
+			}
+			return true
+		case ui.InputKeyDown:
+			switch ev.Key {
+			case ui.KeyEqual:
+				v.zoomAt(v.scaleFor(w, h)*1.2, w/2, h/2, w, h)
+			case ui.KeyMinus:
+				v.zoomAt(v.scaleFor(w, h)/1.2, w/2, h/2, w, h)
+			case ui.KeyLeft:
+				v.pan.X += 40
+			case ui.KeyRight:
+				v.pan.X -= 40
+			case ui.KeyUp:
+				v.pan.Y += 40
+			case ui.KeyDown:
+				v.pan.Y -= 40
+			case ui.Key0:
+				v.zoom, v.fitAll, v.pan = 0, false, ui.Point{}
+				s := v.scaleFor(w, h)
+				if v.diag.H*s+32 > h {
+					v.pan.Y = (v.diag.H*s + 32 - h) / 2
+				}
+			default:
+				return false
+			}
+			v.clampPan(w, h)
+			return true
+		}
+		return false
+	})
+	v.clampPan(w, h)
+	targetScale := v.scaleFor(w, h)
+	targetPan := v.pan
+	now := c.Now()
+	if v.shownScale <= 0 || c.Preferences().ReduceMotion {
+		v.shownScale, v.shownPan, v.zoomAtTime = targetScale, targetPan, now
+	} else {
+		dt := now.Sub(v.zoomAtTime).Seconds()
+		v.zoomAtTime = now
+		if dt > 0 && dt < 0.25 {
+			alpha := 1 - float32(math.Exp(-dt/0.036))
+			v.shownScale += (targetScale - v.shownScale) * alpha
+			v.shownPan.X += (targetPan.X - v.shownPan.X) * alpha
+			v.shownPan.Y += (targetPan.Y - v.shownPan.Y) * alpha
+		}
+		if math.Abs(float64(targetScale-v.shownScale)) < 0.0015 &&
+			math.Abs(float64(targetPan.X-v.shownPan.X)) < 0.35 &&
+			math.Abs(float64(targetPan.Y-v.shownPan.Y)) < 0.35 {
+			v.shownScale, v.shownPan = targetScale, targetPan
+		} else {
+			c.AnimationFrame()
+		}
+	}
+	t := c.Theme()
+	canvas.Draw(func(p *ui.Painter, r ui.Rect) {
+		scale, pan := v.shownScale, v.shownPan
+		if scale <= 0 {
+			scale = targetScale
+		}
+		pw, ph := v.diag.W*scale, v.diag.H*scale
+		ox := r.X + (w-pw)/2 + pan.X
+		oy := r.Y + (h-ph)/2 + pan.Y
+		if scale != 1 {
+			p.Transform(ui.Scaling(scale, scale), ox, oy, func() {
+				e.paintMermaidDiagram(p, v.diag, ox, oy, t)
+			})
+		} else {
+			e.paintMermaidDiagram(p, v.diag, ox, oy, t)
+		}
+	})
 }

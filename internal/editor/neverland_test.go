@@ -9,6 +9,7 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/pdf"
+	"github.com/Ciao1019/ArcMD/internal/wiki"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
@@ -1366,7 +1367,7 @@ func TestReviewCommentInvariantsRegression(t *testing.T) {
 				Runs:     []document.Run{{Text: "Line1\u2028Line2"}},
 				Comments: []document.InlineComment{{Offset: document.Len("Line1\u2028"), Text: "<!-- secret -->"}},
 			},
-			text: "Line1\nLine2",
+			text: "Line1\u2028Line2",
 		},
 		{
 			name: "quote",
@@ -1550,5 +1551,125 @@ func TestReviewCommentInvariantsRegression(t *testing.T) {
 	}
 	if htmlOut := ExportHTML(legacy); strings.Contains(htmlOut, "paste-anchor") || strings.Contains(htmlOut, "quote-anchor") || strings.Contains(htmlOut, "standalone") {
 		t.Fatalf("legacy leading comments leaked into ExportHTML:\n%s", htmlOut)
+	}
+}
+
+func TestPostMergePR28Remediation(t *testing.T) {
+	// 1. <br> and Markdown hard line breaks ("  \n") in prose import as soft
+	// line breaks ("\u2028") and do not split into separate paragraphs on Enter.
+	for _, md := range []string{"Line1<br>Line2\n", "Line1  \nLine2\n"} {
+		e, tt := newTester(md)
+		focus(e, tt)
+		e.SetSelection(e.Len(), e.Len())
+		tt.Key(0, ui.KeyEnter)
+		typeKeys(tt, "Line3")
+		if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Text() != "Line1\u2028Line2" || e.Doc.Blocks[1].Text() != "Line3" {
+			t.Fatalf("prose <br> split paragraph on Enter for %q: %+v", md, e.Doc.Blocks)
+		}
+	}
+
+	// 2. Live typing inline HTML comments in prose and list items hides them in
+	// Block.Comments with Backspace rollback and unescaped Markdown export.
+	{
+		e, tt := newTester("")
+		focus(e, tt)
+		typeKeys(tt, "Hello <!-- secret -->")
+		if e.Doc.Blocks[0].Text() != "Hello " || len(e.Doc.Blocks[0].Comments) != 1 || e.Doc.Blocks[0].Comments[0].Text != "<!-- secret -->" {
+			t.Fatalf("inline comment did not compile live: runs=%+v comments=%+v", e.Doc.Blocks[0].Runs, e.Doc.Blocks[0].Comments)
+		}
+		tt.Key(0, ui.KeyBackspace)
+		if e.Doc.Blocks[0].Text() != "Hello <!-- secret -->" || len(e.Doc.Blocks[0].Comments) != 0 {
+			t.Fatalf("Backspace did not roll back live inline comment: text=%q comments=%+v", e.Doc.Blocks[0].Text(), e.Doc.Blocks[0].Comments)
+		}
+		// Re-type in a bullet list item and verify Markdown export stays unescaped.
+		e2, tt2 := newTester("- ")
+		focus(e2, tt2)
+		e2.SetSelection(e2.Len(), e2.Len())
+		typeKeys(tt2, "Item <!-- list-note --> done")
+		exported := ExportMarkdown(e2.Doc)
+		if strings.Contains(exported, "&lt;!--") || !strings.Contains(exported, "Item <!-- list-note --> done") {
+			t.Fatalf("list inline comment escaped on export: %q", exported)
+		}
+	}
+
+	// 3. Semantic inline HTML tags (<var>, <dfn>, <cite>, <samp>, <tt>, <small>, <abbr>) compile live.
+	for _, tc := range []struct {
+		input  string
+		want   string
+		italic bool
+		code   bool
+	}{
+		{"<var>x</var>", "x", true, false},
+		{"<dfn>term</dfn>", "term", true, false},
+		{"<cite>book</cite>", "book", true, false},
+		{"<samp>out</samp>", "out", false, true},
+		{"<tt>mono</tt>", "mono", false, true},
+		{"<small>note</small>", "note", false, false},
+		{`<abbr title="HyperText">HTML</abbr>`, "HTML", false, false},
+	} {
+		e, tt := newTester("")
+		focus(e, tt)
+		typeKeys(tt, tc.input)
+		if len(e.Doc.Blocks[0].Runs) != 1 {
+			t.Fatalf("live tag %s runs=%+v", tc.input, e.Doc.Blocks[0].Runs)
+		}
+		r := e.Doc.Blocks[0].Runs[0]
+		if r.Text != tc.want || r.Style.Italic != tc.italic || r.Style.Code != tc.code {
+			t.Fatalf("live tag %s got run=%+v", tc.input, r)
+		}
+		if md := ExportMarkdown(e.Doc); strings.Contains(md, "&lt;") {
+			t.Fatalf("live tag %s escaped on export: %q", tc.input, md)
+		}
+	}
+
+	// 4 & 5. Standalone HTML comment cards reserve header space above text and
+	// stay excluded from tags, wiki links, word count, and mind map nodes.
+	{
+		e, tt := newTester("正文两字\n\n<!-- " + strings.Repeat("长单行注释内容 ", 12) + "#secret-tag [[SecretDoc]] -->\n")
+		tt.Frame()
+		if got := e.wordCount(); got != 4 {
+			t.Fatalf("standalone HTML comment counted toward words: got %d, want 4", got)
+		}
+		if tags := wiki.Tags(e.Doc.PlainText()); len(tags) != 0 {
+			t.Fatalf("standalone HTML comment leaked tags: %+v", tags)
+		}
+		if links := wiki.Links(e.Doc.PlainText()); len(links) != 0 {
+			t.Fatalf("standalone HTML comment leaked wiki links: %+v", links)
+		}
+		if !shouldSkipMapBlock(e.Doc.Blocks[1]) {
+			t.Fatal("standalone HTML comment block should be skipped in mind map")
+		}
+		if len(e.rows) < 2 || len(e.decorations) == 0 {
+			t.Fatalf("expected laid out comment row and decoration: rows=%d decs=%d", len(e.rows), len(e.decorations))
+		}
+		if gap := e.rows[1].y - e.decorations[0].rect.Y; gap < 32 {
+			t.Fatalf("standalone HTML comment text lacks top clearance for badge: gap=%v", gap)
+		}
+	}
+
+	// 6. Edge cases: <kbd>`Ctrl`</kbd> mutual exclusion, <div align="center"> skipping
+	// code/math/rule, MindMap truncateMapRuns with Style.Kbd '$', and overlapping box+kbd padding.
+	{
+		kbdCode := ImportMarkdown("<kbd>`Ctrl`</kbd>\n")
+		if r := kbdCode.Blocks[0].Runs[0]; !r.Style.Kbd || r.Style.Code {
+			t.Fatalf("<kbd>`Ctrl`</kbd> should be Kbd without Code: %+v", r)
+		}
+		aligned := ImportMarkdown("<div align=\"center\">\n\n# Title\n\n```go\nfmt.Println(1)\n```\n\n$$\nx=1\n$$\n\n</div>\n")
+		if len(aligned.Blocks) != 3 || aligned.Blocks[0].Align != "center" || aligned.Blocks[1].Align != "" || aligned.Blocks[2].Align != "" {
+			t.Fatalf("code/math inside <div align=center> should remain unaligned: %+v", aligned.Blocks)
+		}
+		runs := []document.Run{
+			{Text: "按 "},
+			{Text: "$", Style: document.Style{Kbd: true}},
+			{Text: " 触发公式，" + strings.Repeat("后文内容", 85)},
+		}
+		kept, clipped := truncateMapRuns(runs, mapMaxProseRunes, mapMaxProseLines)
+		if !clipped || len(kept) < 3 || !strings.Contains(kept[2].Text, "后文内容") {
+			t.Fatalf("truncateMapRuns truncated at <kbd>$</kbd>: %+v", kept)
+		}
+		both := []document.Run{{Text: "Ctrl", Style: document.Style{Kbd: true, Annotation: "box"}}}
+		if pad := trailingPadAt(both, 4, 16); pad != 0.4*16 {
+			t.Fatalf("overlapping box+kbd trailingPadAt got %v, want %v", pad, 0.4*16)
+		}
 	}
 }

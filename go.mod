@@ -11,6 +11,7 @@ require (
 
 require (
 	github.com/egoist/mygo v0.10.0
+	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.46.0
 	golang.org/x/net v0.59.0
 )

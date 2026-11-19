@@ -591,7 +591,7 @@ func (e *Editor) exportVectorMermaid(
 	vp *pdf.VectorPage, diag mermaid.Diagram, docX, docY, scale float32,
 	sx, sy, sc float64, top, paperMargin float32, t *ui.Theme, pg Page,
 ) {
-	blue := pg.Callouts["blue"]
+	blue := mermaidBlueCallout(pg)
 	yellow := pg.Callouts["yellow"]
 	px := func(x float32) float64 { return float64(docX+x*scale) * sx }
 	py := func(y float32) float64 { return float64(docY+y*scale-top+paperMargin) * sy }
@@ -634,32 +634,13 @@ func (e *Editor) exportVectorMermaid(
 	}
 }
 
-func mermaidColorsFor(role mermaid.Role, kind mermaid.ShapeKind, t *ui.Theme, pg Page, blue, yellow Callout) (fill, border ui.Color, strokeW float32) {
-	strokeW = 1.25
-	switch role {
-	case mermaid.RoleSubgraph, mermaid.RoleFragment:
-		if kind == mermaid.ShapePentagon {
-			return pg.CodeHover.Alpha(0.28), pg.CodeBorder, 1
-		}
-		return pg.CodeFill.Alpha(0.50), pg.CodeBorder, 1
-	case mermaid.RoleActor:
-		return blue.Fill, blue.Border, strokeW
-	case mermaid.RoleNote:
-		return yellow.Fill, yellow.Border, strokeW
-	case mermaid.RoleActivation:
-		return t.Accent.Alpha(0.18), t.Accent.Alpha(0.68), 1
-	default:
-		return pg.CodeFill, t.Accent.Alpha(0.45), strokeW
-	}
-}
-
 func exportMermaidShape(
 	vp *pdf.VectorPage, s mermaid.ShapeOp,
 	px, py func(float32) float64,
 	sx, sy, sc float64,
 	t *ui.Theme, pg Page, blue, yellow Callout,
 ) {
-	fill, border, sw := mermaidColorsFor(s.Role, s.Kind, t, pg, blue, yellow)
+	fill, border, sw := mermaidShapeColors(s, t, pg, blue, yellow)
 	fc, bc := pdfRGBA(fill), pdfRGBA(border)
 	lw := float64(sw) * sc
 	x, y, w, h := px(s.X), py(s.Y), float64(s.W)*sx, float64(s.H)*sy
@@ -952,7 +933,7 @@ func (e *Editor) exportVectorRowText(
 			}
 			rects := r.layout.SelectionRects(ui.TextInputRange{Start: a, End: z})
 			if k := len(rects) - 1; k >= 0 && z == kr.end && kr.trimLast {
-				rects[k].W -= kbdPad * font.Size
+				rects[k].W -= trailingPadAt(r.leaf.Block.Runs, kr.end, font.Size)
 			}
 			for _, rc := range rects {
 				if rc.W < 1 || rc.H <= 0 {
@@ -1279,8 +1260,8 @@ func (e *Editor) exportVectorAnnotations(
 		}
 		color := e.annotationColor(run.variant, run.color)
 		rects := r.layout.SelectionRects(ui.TextInputRange{Start: run.start, End: run.end})
-		if k := len(rects) - 1; k >= 0 && look.pad > 0 {
-			rects[k].W -= look.pad * size
+		if k := len(rects) - 1; k >= 0 {
+			rects[k].W -= trailingPadAt(r.leaf.Block.Runs, run.end, size)
 		}
 		for i, rect := range rects {
 			if rect.W < 1 {

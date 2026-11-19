@@ -152,3 +152,78 @@ func TestIntegralLimitsClearUpperHook(t *testing.T) {
 		t.Fatal("integral limits do not follow its slant")
 	}
 }
+
+func TestEquationTags(t *testing.T) {
+	// 1. \tag{1.2a} wraps in upright parentheses and centers formula in LayoutWidth.
+	b, err := LayoutWidth(`E = mc^2 \tag{1.2a}`, 20, 600, fixed)
+	if err != nil {
+		t.Fatalf("LayoutWidth tag failed: %v", err)
+	}
+	if b.W != 600 {
+		t.Fatalf("expected full line width 600, got %v", b.W)
+	}
+	for _, op := range b.Ops {
+		if op.Error {
+			t.Fatalf("unexpected error token in tagged formula: %+v", op)
+		}
+	}
+	got := strings.Join(texts(b), "")
+	if got != "E=mc2(1.2a)" {
+		t.Fatalf("tagged texts = %q, want %q", got, "E=mc2(1.2a)")
+	}
+	var eOp, closeParen Op
+	for _, op := range b.Ops {
+		switch op.Text {
+		case "E":
+			eOp = op
+		case ")":
+			closeParen = op
+		case "1.2a":
+			if op.Italic {
+				t.Fatalf("tag label %q should be upright, got Italic=true", op.Text)
+			}
+		}
+	}
+	// Formula centered around 300, closing paren flush right at 600.
+	if eOp.X < 200 || eOp.X > 300 {
+		t.Fatalf("expected centered formula start around ~250, got E.X=%v", eOp.X)
+	}
+	if closeParen.X < 585 {
+		t.Fatalf("expected flush-right tag near 600, got ').X=%v", closeParen.X)
+	}
+
+	// 2. \tag*{[A-1]} omits outer parentheses and preserves spaces/hyphens.
+	starred := layout(t, `a + b = c \tag*{[eq. A-1]}`)
+	if s := strings.Join(texts(starred), ""); s != "a+b=c[eq. A-1]" {
+		t.Fatalf("starred tag = %q, want %q", s, "a+b=c[eq. A-1]")
+	}
+
+	// 3. Multi-row align with per-row \tag and \notag.
+	aligned, err := LayoutWidth(`\begin{align} x + y &= 1 \tag{1} \\ x - y &= 3 \notag \\ 2x &= 4 \tag{2} \end{align}`, 20, 600, fixed)
+	if err != nil {
+		t.Fatalf("aligned tags failed: %v", err)
+	}
+	var tag1Y, tag2Y float32
+	var saw1, saw2 bool
+	for _, op := range aligned.Ops {
+		if op.Error {
+			t.Fatalf("unexpected error in aligned tags: %+v", op)
+		}
+		if op.Text == "1" && op.X > 500 {
+			saw1, tag1Y = true, op.Y
+		}
+		if op.Text == "2" && op.X > 500 {
+			saw2, tag2Y = true, op.Y
+		}
+	}
+	if !saw1 || !saw2 || tag2Y <= tag1Y+20 {
+		t.Fatalf("expected per-row right-aligned tags (1) above (2): saw1=%v y1=%v saw2=%v y2=%v", saw1, tag1Y, saw2, tag2Y)
+	}
+
+	// 4. Malformed \tag reports parse error.
+	for _, bad := range []string{`x = 1 \tag`, `x = 1 \tag{1`, `x = 1 \tag*`} {
+		if _, err := Layout(bad, 20, fixed); err == nil {
+			t.Errorf("expected parse error for %q", bad)
+		}
+	}
+}

@@ -148,35 +148,15 @@ type annotationReveal struct {
 	at         time.Time
 }
 
-// padAnnotations opens the space the original's wrapper pads a circle,
-// bracket or box with: the character before the stretch and its last
-// character each get that much letter spacing, which follows a character,
-// so the stretch's text sits between two gaps its decoration fills.
+// padDecoratedSpans opens breathing room around padded hand-drawn annotations
+// (circle, bracket, box) and 3D <kbd> keycaps in a single pass so overlapping
+// marks share max padding and adjacent marks sum cleanly without double-counting.
+func padDecoratedSpans(spans []ui.Span, runs []document.Run, size float32) []ui.Span {
+	return applySpanGaps(spans, runs, decoratedGaps(runs, size))
+}
+
 func padAnnotations(spans []ui.Span, runs []document.Run, size float32) []ui.Span {
-	needsPad := false
-	for i := range runs {
-		if v := runs[i].Style.Annotation; v != "" {
-			if look, ok := lookOf(v); ok && look.pad != 0 {
-				needsPad = true
-				break
-			}
-		}
-	}
-	if !needsPad {
-		return spans
-	}
-	var gaps []textGap
-	for _, run := range annotationRuns(runs) {
-		look, ok := lookOf(run.variant)
-		if !ok || look.pad == 0 {
-			continue
-		}
-		if run.start > 0 {
-			gaps = append(gaps, textGap{run.start, look.pad * size})
-		}
-		gaps = append(gaps, textGap{run.end, look.pad * size})
-	}
-	return applySpanGaps(spans, runs, gaps)
+	return padDecoratedSpans(spans, runs, size)
 }
 
 const kbdPad = float32(0.22)
@@ -210,19 +190,114 @@ func kbdRuns(runs []document.Run) []kbdSpan {
 	return out
 }
 
-func padKeycaps(spans []ui.Span, runs []document.Run, size float32) []ui.Span {
-	kRuns := kbdRuns(runs)
-	if len(kRuns) == 0 {
-		return spans
+func boundaryPadEm(aRuns []annotationRun, kRuns []kbdSpan, total, at int) float32 {
+	if at <= 0 || at > total {
+		return 0
 	}
-	gaps := make([]textGap, 0, len(kRuns)*2)
-	for _, kr := range kRuns {
-		if kr.start > 0 {
-			gaps = append(gaps, textGap{kr.start, kbdPad * size})
+	var endPad, startPad float32
+	for _, run := range aRuns {
+		look, ok := lookOf(run.variant)
+		if !ok || look.pad <= 0 {
+			continue
 		}
-		gaps = append(gaps, textGap{kr.end, kbdPad * size})
+		if run.end == at && look.pad > endPad {
+			endPad = look.pad
+		}
+		if at < total && run.start == at && look.pad > startPad {
+			startPad = look.pad
+		}
 	}
-	return applySpanGaps(spans, runs, gaps)
+	for _, kr := range kRuns {
+		if kr.end == at && kbdPad > endPad {
+			endPad = kbdPad
+		}
+		if at < total && kr.start == at && kbdPad > startPad {
+			startPad = kbdPad
+		}
+	}
+	return endPad + startPad
+}
+
+func decoratedGaps(runs []document.Run, size float32) []textGap {
+	hasDecor := false
+	total := 0
+	for i := range runs {
+		total += document.Len(runs[i].Text)
+		if runs[i].Style.Kbd {
+			hasDecor = true
+		} else if v := runs[i].Style.Annotation; v != "" {
+			if look, ok := lookOf(v); ok && look.pad > 0 {
+				hasDecor = true
+			}
+		}
+	}
+	if !hasDecor || total == 0 {
+		return nil
+	}
+	aRuns := annotationRuns(runs)
+	kRuns := kbdRuns(runs)
+	seen := make(map[int]struct{}, len(aRuns)*2+len(kRuns)*2)
+	var offsets []int
+	addOff := func(off int) {
+		if off <= 0 || off > total {
+			return
+		}
+		if _, dup := seen[off]; !dup {
+			seen[off] = struct{}{}
+			offsets = append(offsets, off)
+		}
+	}
+	for _, r := range aRuns {
+		if look, ok := lookOf(r.variant); ok && look.pad > 0 {
+			addOff(r.start)
+			addOff(r.end)
+		}
+	}
+	for _, kr := range kRuns {
+		addOff(kr.start)
+		addOff(kr.end)
+	}
+	// Insertion sort keeps offsets strictly ascending without extra imports.
+	for i := 1; i < len(offsets); i++ {
+		v := offsets[i]
+		j := i - 1
+		for j >= 0 && offsets[j] > v {
+			offsets[j+1] = offsets[j]
+			j--
+		}
+		offsets[j+1] = v
+	}
+	gaps := make([]textGap, 0, len(offsets))
+	for _, off := range offsets {
+		if em := boundaryPadEm(aRuns, kRuns, total, off); em > 0 {
+			gaps = append(gaps, textGap{at: off, pad: em * size})
+		}
+	}
+	return gaps
+}
+
+// trailingPadAt returns the exact letter-spacing gap added to the character
+// ending at end so SelectionRects for annotations and keycaps trim back to the
+// glyph edge even when marks touch or overlap.
+func trailingPadAt(runs []document.Run, end int, size float32) float32 {
+	if end <= 0 || size <= 0 {
+		return 0
+	}
+	var sb strings.Builder
+	for _, r := range runs {
+		sb.WriteString(r.Text)
+	}
+	text := sb.String()
+	total := document.Len(text)
+	if end > total {
+		return 0
+	}
+	byteAt := ui.UTF16ByteOffset(text, end)
+	ch, n := utf8.DecodeLastRuneInString(text[:byteAt])
+	if n == 0 || ch == '\n' || ch == '\u2028' {
+		return 0
+	}
+	return boundaryPadEm(annotationRuns(runs), kbdRuns(runs), total, end) * size
 }
 
 func applySpanGaps(spans []ui.Span, runs []document.Run, gaps []textGap) []ui.Span {
@@ -280,11 +355,12 @@ func annotationRuns(runs []document.Run) []annotationRun {
 
 // annotationLineRects is shared by painting and by tight map-node measurement.
 func annotationLineRects(r row, run annotationRun, look annotationLook, size float32) []ui.Rect {
+	_ = look
 	rects := r.layout.SelectionRects(ui.TextInputRange{Start: run.start, End: run.end})
-	if k := len(rects) - 1; k >= 0 && look.pad > 0 {
+	if k := len(rects) - 1; k >= 0 {
 		// The last character's spacing is the gap after the text, not
 		// the text: the box pads both sides itself.
-		rects[k].W -= look.pad * size
+		rects[k].W -= trailingPadAt(r.leaf.Block.Runs, run.end, size)
 	}
 	return rects
 }

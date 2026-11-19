@@ -217,3 +217,33 @@ func TestAmphibiousWhiteboardSVGVaultAndAssetsTree(t *testing.T) {
 		t.Fatalf("MoveTo = %q, %v", dest, err)
 	}
 }
+
+func TestWritePreservesHardLinks(t *testing.T) {
+	root, peerDir := t.TempDir(), t.TempDir()
+	if err := Write(root, "Note.md", "# Original\n\nLong initial paragraph.\n"); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(root, "Note.md")
+	peer := filepath.Join(peerDir, "Mirror.md")
+	if err := os.Link(primary, peer); err != nil {
+		t.Skipf("hard links are unavailable: %v", err)
+	}
+	if err := Write(root, "Note.md", "# Short\n"); err != nil {
+		t.Fatal(err)
+	}
+	fi1, err := os.Stat(primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi2, err := os.Stat(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(fi1, fi2) {
+		t.Fatal("vault.Write broke external hard link")
+	}
+	got, err := os.ReadFile(peer)
+	if err != nil || string(got) != "# Short\n" {
+		t.Fatalf("peer content = %q (%v), want %q", string(got), err, "# Short\n")
+	}
+}

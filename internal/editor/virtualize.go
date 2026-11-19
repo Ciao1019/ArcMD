@@ -383,6 +383,8 @@ func (e *Editor) blockMetrics(b *document.Block, w float32, header bool) blockMe
 		m.left, m.right, m.top, m.bottom = 20, 20, 16, 16+m.gap
 		if b.Kind == "code" {
 			m.left, m.top, m.bottom = 60, 40, 26+m.gap
+		} else if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
+			m.top = 34
 		}
 		if b.Kind == "math" {
 			m.font.Size, m.font.LineHeight = 14.4, 22.0/14.4
@@ -481,8 +483,7 @@ func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme 
 		spans = append(spans, span)
 	}
 	if b.Kind != "math" && b.Kind != "raw" {
-		spans = padAnnotations(spans, b.Runs, font.Size)
-		spans = padKeycaps(spans, b.Runs, font.Size)
+		spans = padDecoratedSpans(spans, b.Runs, font.Size)
 	}
 	if len(spans) == 0 {
 		spans = []ui.Span{{Text: ""}}

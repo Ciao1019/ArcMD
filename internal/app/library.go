@@ -172,7 +172,7 @@ func libraryInk(t *ui.Theme) ui.Color { return pick(t, black, white) }
 // libraryView is the sidebar while the library is open, width wide.
 func (a *App) libraryView(c *ui.Context, width float32) {
 	l := &a.library
-	if c.Shortcut(0, ui.KeyEscape) && !a.palette.open && !a.settingsOpen {
+	if c.Shortcut(0, ui.KeyEscape) && !a.palette.open && !a.settingsOpen && !a.pluginModalOpen() {
 		if m := l.move; m != nil && !m.settling {
 			m.canceled = true // Escape gives up a card's drag first
 		} else {
@@ -508,12 +508,6 @@ func (a *App) cardRow(c *ui.Context, key, label string, depth int) ui.Element {
 		row.Background(hoverFill(t))
 	}
 	return row
-}
-
-// libraryPlugins is the Plugins page, empty until the market opens.
-func (a *App) libraryPlugins(c *ui.Context) {
-	ui.Box(c).Height(46).Shrink(0)
-	libraryEmpty(c, iconPlugins, i18n.T("插件市场即将开放"), i18n.T("扩展能力将以插件提供，敬请期待。"))
 }
 
 // libraryEmpty is a page with nothing on it: a glyph, a title and a line

@@ -193,19 +193,33 @@ func (e *Engine) Redo() {
 	e.version++
 }
 
+func styleAtRange(runs []Run, start, a, z int) Style {
+	at := min(a, z)
+	position := start
+	for i, run := range runs {
+		runStart := position
+		position += Len(run.Text)
+		if position > at || a == z && position == z {
+			s := run.Style
+			if a == z && s.Link != "" {
+				atLinkStart := at == runStart && (i == 0 || runs[i-1].Style.Link != s.Link)
+				atLinkEnd := at == position && (i+1 >= len(runs) || runs[i+1].Style.Link != s.Link)
+				if atLinkStart || atLinkEnd {
+					s.Link = ""
+				}
+			}
+			return s
+		}
+	}
+	return Style{}
+}
+
 func (e *Engine) CurrentStyle() Style {
 	if e.Explicit {
 		return e.Typing
 	}
 	leaf := e.LeafAt(min(e.Anchor, e.Caret))
-	position := leaf.Start
-	for _, run := range leaf.Block.Runs {
-		position += Len(run.Text)
-		if position > min(e.Anchor, e.Caret) || e.Anchor == e.Caret && position == e.Caret {
-			return run.Style
-		}
-	}
-	return Style{}
+	return styleAtRange(leaf.Block.Runs, leaf.Start, e.Anchor, e.Caret)
 }
 
 func (e *Engine) Replace(a, z int, text string) {
@@ -248,15 +262,7 @@ func (e *Engine) currentStyleIn(leaf Leaf, a, z int) Style {
 	if e.Explicit {
 		return e.Typing
 	}
-	at := min(a, z)
-	position := leaf.Start
-	for _, run := range leaf.Block.Runs {
-		position += Len(run.Text)
-		if position > at || a == z && position == z {
-			return run.Style
-		}
-	}
-	return Style{}
+	return styleAtRange(leaf.Block.Runs, leaf.Start, a, z)
 }
 
 func (e *Engine) replace(a, z int, text string) {

@@ -4,9 +4,9 @@
 //
 // Capabilities beyond editing Markdown — AI writing tools above all — are
 // meant to come from plugins, downloaded from the marketplace, not from the
-// core. Plugins never draw native UI themselves: they contribute commands
-// and panels, which ArcMD draws, and answer with edits, Markdown and
-// notifications. See docs/plugins.md.
+// core. Plugins never draw native UI themselves: they contribute commands,
+// panels and declarative settings, which ArcMD draws, and answer with edits,
+// Markdown and notifications. See docs/plugins.md.
 package plugin
 
 import (
@@ -42,10 +42,10 @@ type Permission string
 const (
 	PermDocumentRead  Permission = "document:read"  // the open document and selection
 	PermDocumentWrite Permission = "document:write" // edit the open document
-	PermSpaceRead     Permission = "space:read"     // list and read the active space's files
-	PermSpaceWrite    Permission = "space:write"    // create and change files in the active space
-	PermNetwork       Permission = "network"        // reach the network (AI providers)
-	PermSecrets       Permission = "secrets"        // keep API keys in the system keychain
+	PermSpaceRead     Permission = "space:read"     // list and read the spaces' files
+	PermSpaceWrite    Permission = "space:write"    // create and change files in the spaces
+	PermNetwork       Permission = "network"        // reach the network
+	PermSecrets       Permission = "secrets"        // keep API keys or credentials in the local secret store
 	PermUIPanel       Permission = "ui:panel"       // show a panel of Markdown in the sidebar
 )
 
@@ -71,6 +71,7 @@ type Manifest struct {
 	Author      string `json:"author,omitempty"`
 	License     string `json:"license,omitempty"` // SPDX identifier
 	Homepage    string `json:"homepage,omitempty"`
+	Icon        string `json:"icon,omitempty"`
 	// Engine is the lowest ArcMD version the plugin works with, as
 	// "0.1.0"; "" is any.
 	Engine string `json:"engine,omitempty"`
@@ -84,8 +85,9 @@ type Manifest struct {
 
 // Contributes is what a plugin adds to ArcMD's interface.
 type Contributes struct {
-	Commands []Command `json:"commands,omitempty"`
-	Panels   []Panel   `json:"panels,omitempty"`
+	Commands []Command      `json:"commands,omitempty"`
+	Panels   []Panel        `json:"panels,omitempty"`
+	Settings []SettingField `json:"settings,omitempty"`
 }
 
 // Command is an action in the command bar.
@@ -95,6 +97,10 @@ type Command struct {
 	// When limits where the command shows: "document" while a document
 	// is open, "selection" while text is selected, "" always.
 	When string `json:"when,omitempty"`
+	// Primary marks the plugin's primary quick action button on its card.
+	Primary bool `json:"primary,omitempty"`
+	// InSettings surfaces this command as a button in the plugin's settings modal.
+	InSettings bool `json:"inSettings,omitempty"`
 }
 
 // Panel is a sidebar panel whose content the plugin returns as Markdown.
@@ -104,10 +110,44 @@ type Panel struct {
 	Icon  string `json:"icon,omitempty"` // a short glyph
 }
 
+// SettingField declares one setting control rendered natively by ArcMD.
+type SettingField struct {
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description,omitempty"`
+	Group       string            `json:"group,omitempty"`
+	Type        string            `json:"type"` // "segmented", "select", "string", "secret", "bool", "spaces"
+	Placeholder string            `json:"placeholder,omitempty"`
+	Default     any               `json:"default,omitempty"`
+	Options     []SettingOption   `json:"options,omitempty"`
+	Presets     []SettingPreset   `json:"presets,omitempty"`
+	When        *SettingCondition `json:"when,omitempty"`
+}
+
+// SettingOption is a choice for "segmented" or "select" setting fields.
+type SettingOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// SettingPreset fills one or more setting fields from a menu.
+type SettingPreset struct {
+	Name   string         `json:"name"`
+	Value  string         `json:"value,omitempty"`
+	Values map[string]any `json:"values,omitempty"`
+}
+
+// SettingCondition controls when a setting field is visible.
+type SettingCondition struct {
+	Field  string `json:"field"`
+	Equals any    `json:"equals"`
+}
+
 var (
 	idPattern      = regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z0-9-]+$`)
 	versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
 	localID        = regexp.MustCompile(`^[a-z0-9][a-z0-9-_.]*$`)
+	settingID      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-_.]*$`)
 )
 
 // ParseManifest decodes and validates a manifest.
@@ -175,6 +215,36 @@ func (m *Manifest) Validate() error {
 	}
 	if len(m.Contributes.Panels) > 0 && !slices.Contains(m.Permissions, PermUIPanel) {
 		bad("panels need the %q permission", PermUIPanel)
+	}
+	for _, s := range m.Contributes.Settings {
+		if !settingID.MatchString(s.ID) || seen["s:"+s.ID] {
+			bad("setting id %q is invalid or repeated", s.ID)
+		}
+		seen["s:"+s.ID] = true
+		if strings.TrimSpace(s.Title) == "" {
+			bad("setting %q: title is missing", s.ID)
+		}
+		switch s.Type {
+		case "segmented", "select":
+			if len(s.Options) == 0 {
+				bad("setting %q: options are required for %s", s.ID, s.Type)
+			}
+			for _, o := range s.Options {
+				if strings.TrimSpace(o.Value) == "" || strings.TrimSpace(o.Label) == "" {
+					bad("setting %q: option value and label must be non-empty", s.ID)
+				}
+			}
+		case "string", "bool", "spaces":
+		case "secret":
+			if !slices.Contains(m.Permissions, PermSecrets) {
+				bad("secret setting %q needs the %q permission", s.ID, PermSecrets)
+			}
+		default:
+			bad("setting %q: unsupported type %q", s.ID, s.Type)
+		}
+		if s.When != nil && strings.TrimSpace(s.When.Field) == "" {
+			bad("setting %q: when.field is missing", s.ID)
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("plugin: invalid manifest: %w", errors.Join(errs...))

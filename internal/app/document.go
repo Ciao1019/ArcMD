@@ -84,8 +84,9 @@ type document struct {
 	historyOff     bool
 	// Background autosave state: only touched on the main thread except the
 	// buffered saveDone channel written once by the background worker.
-	saving   bool
-	saveDone chan asyncSaveResult
+	saving    bool
+	saveDone  chan asyncSaveResult
+	justSaved bool
 	// Async image decode cache keyed by document-relative URL.
 	imgCache map[string]cachedImage
 	// plain is the text search sees, for plainRev (search.go).
@@ -589,6 +590,7 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 			} else {
 				d.dirtyKnown = false
 			}
+			d.justSaved = true
 			return
 		}
 		if !res.arcmd {
@@ -620,6 +622,7 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 		if d.source {
 			d.preview = d.text()
 		}
+		d.justSaved = true
 	}
 }
 
@@ -729,6 +732,7 @@ func (d *document) write(force bool) error {
 	d.recordVersion(before)
 	d.conflict, d.missing, d.diskNow = false, false, ""
 	d.rememberBaseline(committed)
+	d.justSaved = true
 	return nil
 }
 
@@ -766,6 +770,7 @@ func (d *document) writeWhiteboard(force bool) error {
 	d.conflict, d.missing, d.diskNow = false, false, ""
 	d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.board.Revision(), true, false
 	d.dirtyVersion = d.board.Version()
+	d.justSaved = true
 	return nil
 }
 

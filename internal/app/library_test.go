@@ -90,7 +90,7 @@ func TestLibrarySpaces(t *testing.T) {
 }
 
 // The rail switches pages, and the library reopens on the page last
-// shown; the plugins page says the market is coming; it opens over a
+// shown; the plugins page lists official plugins; it opens over a
 // folded sidebar.
 func TestLibraryPages(t *testing.T) {
 	a, tt := libraryApp(t)
@@ -105,7 +105,7 @@ func TestLibraryPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	settle(tt)
-	if a.library.page != libPlugins || !tt.HasText("插件市场即将开放") {
+	if a.library.page != libPlugins || !tt.HasText("官方插件") || !tt.HasText("云端同步") {
 		t.Fatalf("page %v: %q", a.library.page, tt.Texts())
 	}
 	if err := tt.Click("最近删除"); err != nil {

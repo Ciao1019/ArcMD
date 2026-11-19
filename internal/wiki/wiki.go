@@ -20,9 +20,46 @@ type Link struct {
 	Label      string
 }
 
+// htmlCommentSpans returns [start, end) byte intervals of closed <!-- ... -->
+// HTML comments in text so comment blocks do not create backlinks or tags.
+func htmlCommentSpans(text string) [][2]int {
+	if !strings.Contains(text, "<!--") {
+		return nil
+	}
+	var out [][2]int
+	for i := 0; i < len(text); {
+		at := strings.Index(text[i:], "<!--")
+		if at < 0 {
+			break
+		}
+		start := i + at
+		end := strings.Index(text[start+4:], "-->")
+		if end < 0 {
+			break
+		}
+		stop := start + 4 + end + 3
+		out = append(out, [2]int{start, stop})
+		i = stop
+	}
+	return out
+}
+
+func inSpans(pos int, spans [][2]int) (int, bool) {
+	for _, sp := range spans {
+		if pos < sp[0] {
+			return 0, false
+		}
+		if pos < sp[1] {
+			return sp[1], true
+		}
+	}
+	return 0, false
+}
+
 // Links returns the links in text, in order. A link stays on one line and
 // holds no brackets.
 func Links(text string) []Link {
+	comments := htmlCommentSpans(text)
 	var out []Link
 	for i := 0; i < len(text); {
 		at := strings.Index(text[i:], "[[")
@@ -30,6 +67,10 @@ func Links(text string) []Link {
 			break
 		}
 		start := i + at
+		if skipTo, inside := inSpans(start, comments); inside {
+			i = skipTo
+			continue
+		}
 		rest := text[start+2:]
 		end := strings.Index(rest, "]]")
 		if end < 0 {
@@ -131,6 +172,7 @@ func tagRune(r rune) bool {
 // space or punctuation, so "C#" and "a#b" and URLs' fragments are none, and
 // its name holds a letter, so "#1" is a number, not a tag.
 func Tags(text string) []Tag {
+	comments := htmlCommentSpans(text)
 	var out []Tag
 	for i := 0; i < len(text); {
 		at := strings.IndexByte(text[i:], '#')
@@ -138,6 +180,10 @@ func Tags(text string) []Tag {
 			break
 		}
 		start := i + at
+		if skipTo, inside := inSpans(start, comments); inside {
+			i = skipTo
+			continue
+		}
 		i = start + 1
 		if start > 0 {
 			// After a space or punctuation, as "。#旅行", but not after a

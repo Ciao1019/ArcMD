@@ -282,6 +282,40 @@ func (e *Engine) ReplaceBlockRuns(id string, runs []Run, anchor, caret int, typi
 	return true
 }
 
+// ReplaceBlockRunsAndComments replaces one leaf block's runs and inline
+// comments atomically as a single undoable leaf transaction.
+func (e *Engine) ReplaceBlockRunsAndComments(id string, runs []Run, comments []InlineComment, anchor, caret int, typing Style, explicit bool) bool {
+	if e.ReadOnly || e.depth != 0 {
+		return false
+	}
+	e.ensureIndex()
+	i, ok := e.leafIDs[id]
+	if !ok {
+		return false
+	}
+	leaf := e.leafAtIndex(i)
+	b := leaf.Block
+	next := Compact(runs)
+	nextComments := slices.Clone(comments)
+	if !AllowsInlineComments(b.Kind) {
+		nextComments = nil
+	}
+	if !slices.Equal(b.Runs, next) || !slices.Equal(b.Comments, nextComments) {
+		e.notifyBeforeChange()
+		before := b.Text()
+		after := blockText(next)
+		entry := historyEntry{Snapshot{Anchor: e.Anchor, Caret: e.Caret, Typing: e.Typing, Explicit: e.Explicit}, id, slices.Clone(b.Runs), slices.Clone(b.Comments)}
+		b.Runs = next
+		b.Comments = nextComments
+		e.recordUndo(entry)
+		e.version++
+		e.publishTextChange(i, before, after)
+	}
+	e.Anchor, e.Caret = anchor, caret
+	e.Typing, e.Explicit = typing, explicit
+	return true
+}
+
 func shiftCommentsByDiff(comments []InlineComment, before, after string) []InlineComment {
 	if len(comments) == 0 {
 		return nil
