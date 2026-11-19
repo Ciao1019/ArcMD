@@ -237,6 +237,7 @@ func (a *App) closePane(index int) {
 		return
 	}
 	a.syncSplit()
+	closed := s.panes[index].doc
 	s.panes = slices.Delete(s.panes, index, index+1)
 	if index < s.active {
 		s.active--
@@ -254,6 +255,7 @@ func (a *App) closePane(index int) {
 	if a.doc != nil {
 		a.doc.ed.RequestFocus = true
 	}
+	a.retireClosedDocuments(closed)
 }
 
 func (a *App) selectSplitActive() {
@@ -275,11 +277,18 @@ func (a *App) separateSplit() {
 	a.split = nil
 	session := a.session(a.state.ActiveSpace().ID)
 	session.splitShown = false
+	var dropped []*document
 	if len(s.panes) < 2 {
+		for _, p := range s.panes {
+			dropped = append(dropped, p.doc)
+		}
 		session.split = nil
 	}
 	if a.doc != nil {
 		a.doc.ed.RequestFocus = true
+	}
+	if len(dropped) > 0 {
+		a.retireClosedDocuments(dropped...)
 	}
 }
 
@@ -390,6 +399,9 @@ func (a *App) withDocument(d *document, fn func()) {
 	}
 	if selected != d {
 		a.doc = selected
+	}
+	if a.documentContext == 0 && replacement != d {
+		a.retireClosedDocuments(d)
 	}
 }
 
@@ -512,6 +524,9 @@ func (a *App) replaceReferences(old, replacement *document) {
 				a.openDocs[place{replacement.space.ID, replacement.rel}] = replacement
 			}
 		}
+	}
+	if old != nil && old != replacement {
+		a.retireClosedDocuments(old)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -89,6 +90,9 @@ type document struct {
 	justSaved bool
 	// Async image decode cache keyed by document-relative URL.
 	imgCache map[string]cachedImage
+	// closed is set once the document is no longer resident, cancelling any
+	// queued background image decodes and releasing cached bitmaps.
+	closed atomic.Bool
 	// plain is the text search sees, for plainRev (search.go).
 	plain      string
 	plainRev   uint64
@@ -400,10 +404,11 @@ type asyncSaveResult struct {
 }
 
 type cachedImage struct {
-	modNano  int64
-	size     int64
-	loading  bool
-	resource editor.ImageResource
+	modNano        int64
+	size           int64
+	loading        bool
+	pixelsReleased bool
+	resource       editor.ImageResource
 }
 
 // changed hashes the document and compares it with the saved baseline.
@@ -1002,12 +1007,82 @@ func (d *document) startAsyncWhiteboardAutosave(post func(func())) {
 	}()
 }
 
+// imageDecodeSem bounds concurrent background image decodes so rapid navigation
+// across image-heavy documents cannot fan out hundreds of simultaneous decoders.
+var (
+	imageDecodeSem     = make(chan struct{}, 4)
+	activeImageDecodes atomic.Int32
+)
+
+func (d *document) close() {
+	if d == nil {
+		return
+	}
+	d.closed.Store(true)
+	clear(d.imgCache)
+	d.imgCache = nil
+	if d.ed != nil {
+		d.ed.ClearImages()
+	}
+}
+
+// releaseShownImagePixels drops retained CPU RGBA buffers once GPU upload has
+// had a chance to consume decoded bitmaps, keeping compressed source bytes in
+// Bitmap's remake closure for on-demand restoration if evicted from VRAM.
+func (d *document) releaseShownImagePixels(now time.Time) {
+	if d == nil || len(d.imgCache) == 0 {
+		return
+	}
+	for url, c := range d.imgCache {
+		if c.pixelsReleased || c.loading || c.resource.Bitmap == nil || c.resource.LoadedAt.IsZero() {
+			continue
+		}
+		if now.Sub(c.resource.LoadedAt) >= 200*time.Millisecond {
+			c.resource.Bitmap.ReleasePixels()
+			c.pixelsReleased = true
+			d.imgCache[url] = c
+		}
+	}
+}
+
 func (d *document) loadImage(url string) *ui.Bitmap {
 	return d.imageResource(url).Bitmap
 }
 
 func (d *document) imageResource(url string) editor.ImageResource {
 	return d.imageResourceWith(url, nil)
+}
+
+// thumbImageResource decodes local images scaled down to thumbnail dimensions
+// so sidebar hover previews never allocate full-resolution multi-megabyte
+// bitmaps or multi-frame GIF buffers.
+func (d *document) thumbImageResource(url string) editor.ImageResource {
+	full, err := d.localImage(url)
+	if err != nil {
+		problem := editor.ImageInvalid
+		if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+			problem = editor.ImageRemote
+		}
+		return editor.ImageResource{Problem: problem}
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		problem := editor.ImageUnreadable
+		if errors.Is(err, os.ErrNotExist) {
+			problem = editor.ImageMissing
+		}
+		return editor.ImageResource{Problem: problem, Local: true}
+	}
+	modNano, size := info.ModTime().UnixNano(), info.Size()
+	if d.imgCache == nil {
+		d.imgCache = make(map[string]cachedImage)
+	}
+	if c, ok := d.imgCache[url]; ok && c.modNano == modNano && c.size == size {
+		return c.resource
+	}
+	res := decodeLocalImageThumb(full)
+	d.imgCache[url] = cachedImage{modNano: modNano, size: size, resource: res}
+	return res
 }
 
 func (d *document) rawImage(url string) image.Image {
@@ -1042,6 +1117,9 @@ func (d *document) imageResourceWith(url string, post func(func())) editor.Image
 // imageResourceFrom builds the resource of a picture whose file has been
 // resolved already.
 func (d *document) imageResourceFrom(full, url string, post func(func())) editor.ImageResource {
+	if d == nil || d.closed.Load() {
+		return editor.ImageResource{}
+	}
 	if post == nil {
 		return decodeLocalImageSync(full)
 	}
@@ -1080,9 +1158,26 @@ func (d *document) imageResourceFrom(full, url string, post func(func())) editor
 		loading:  true,
 		resource: placeholder,
 	}
+	activeImageDecodes.Add(1)
 	go func() {
+		defer activeImageDecodes.Add(-1)
+		if d.closed.Load() {
+			return
+		}
+		imageDecodeSem <- struct{}{}
+		if d.closed.Load() {
+			<-imageDecodeSem
+			return
+		}
 		decoded := decodeLocalImageSync(full)
+		<-imageDecodeSem
+		if d.closed.Load() {
+			return
+		}
 		post(func() {
+			if d.closed.Load() {
+				return
+			}
 			if decoded.Bitmap != nil {
 				decoded.LoadedAt = time.Now()
 			}
@@ -1100,6 +1195,23 @@ func (d *document) imageResourceFrom(full, url string, post func(func())) editor
 		})
 	}()
 	return placeholder
+}
+
+func decodeLocalImageThumb(full string) editor.ImageResource {
+	data, err := os.ReadFile(full)
+	if err != nil {
+		problem := editor.ImageUnreadable
+		if errors.Is(err, os.ErrNotExist) {
+			problem = editor.ImageMissing
+		}
+		return editor.ImageResource{Problem: problem, Local: true}
+	}
+	bmp, err := ui.DecodeBitmapScaled(data, 640)
+	if err != nil {
+		return editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}
+	}
+	w, h := bmp.Size()
+	return editor.ImageResource{Bitmap: bmp, Width: w, Height: h, Local: true}
 }
 
 func decodeLocalImageSync(full string) editor.ImageResource {

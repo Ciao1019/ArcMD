@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
@@ -23,7 +24,10 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const untitledBoard = "未命名白板"
+const (
+	untitledBoard        = "未命名白板"
+	maxCachedWhiteboards = 16
+)
 
 type cachedWhiteboard struct {
 	modNano int64
@@ -31,6 +35,33 @@ type cachedWhiteboard struct {
 	rev     uint64
 	scene   *whiteboard.Scene
 	err     error
+}
+
+func (a *App) putCachedWhiteboard(key string, entry cachedWhiteboard) {
+	if a.wbCache == nil {
+		a.wbCache = make(map[string]cachedWhiteboard, maxCachedWhiteboards)
+	}
+	a.wbCache[key] = entry
+	if idx := slices.Index(a.wbOrder, key); idx >= 0 {
+		a.wbOrder = slices.Delete(a.wbOrder, idx, idx+1)
+	}
+	a.wbOrder = append(a.wbOrder, key)
+	evicted := false
+	for len(a.wbCache) > maxCachedWhiteboards && len(a.wbOrder) > 0 {
+		oldest := a.wbOrder[0]
+		a.wbOrder = a.wbOrder[1:]
+		if _, ok := a.wbCache[oldest]; ok {
+			delete(a.wbCache, oldest)
+			evicted = true
+		}
+	}
+	if evicted {
+		compact := make(map[string]cachedWhiteboard, len(a.wbCache))
+		for k, v := range a.wbCache {
+			compact[k] = v
+		}
+		a.wbCache = compact
+	}
 }
 
 func (d *document) isWhiteboard() bool {
@@ -230,12 +261,13 @@ func (a *App) loadWhiteboardFor(d *document, url string) (*whiteboard.Scene, uin
 	if err != nil {
 		return nil, 0, err
 	}
-	if a.wbCache == nil {
-		a.wbCache = map[string]cachedWhiteboard{}
-	}
 	key := sp.ID + "/" + rel
 	modNano, size := info.ModTime().UnixNano(), info.Size()
 	if c, exists := a.wbCache[key]; exists && c.modNano == modNano && c.size == size {
+		if idx := slices.Index(a.wbOrder, key); idx >= 0 {
+			a.wbOrder = slices.Delete(a.wbOrder, idx, idx+1)
+			a.wbOrder = append(a.wbOrder, key)
+		}
 		return c.scene, c.rev, c.err
 	}
 	text, err := readFile(sp, rel)
@@ -244,7 +276,7 @@ func (a *App) loadWhiteboardFor(d *document, url string) (*whiteboard.Scene, uin
 		scene, err = whiteboard.Decode(text)
 	}
 	rev := uint64(modNano) ^ uint64(size<<12)
-	a.wbCache[key] = cachedWhiteboard{modNano: modNano, size: size, rev: rev, scene: scene, err: err}
+	a.putCachedWhiteboard(key, cachedWhiteboard{modNano: modNano, size: size, rev: rev, scene: scene, err: err})
 	return scene, rev, err
 }
 
@@ -382,9 +414,6 @@ func (a *App) saveWhiteboardFor(d *document, url string, scene *whiteboard.Scene
 		a.notify("保存白板失败。%v", err)
 		return 0
 	}
-	if a.wbCache == nil {
-		a.wbCache = map[string]cachedWhiteboard{}
-	}
 	key := sp.ID + "/" + rel
 	prevRev := a.wbCache[key].rev
 	var modNano, size int64
@@ -394,7 +423,7 @@ func (a *App) saveWhiteboardFor(d *document, url string, scene *whiteboard.Scene
 		}
 	}
 	rev := max(prevRev+1, uint64(modNano)^uint64(size<<12))
-	a.wbCache[key] = cachedWhiteboard{modNano: modNano, size: size, rev: rev, scene: scene.Clone(), err: nil}
+	a.putCachedWhiteboard(key, cachedWhiteboard{modNano: modNano, size: size, rev: rev, scene: scene.Clone(), err: nil})
 	a.refreshSearch()
 	return rev
 }

@@ -75,6 +75,9 @@ func (a *App) View(c *ui.Context) {
 	post := a.asyncPost()
 	for _, d := range a.residentDocuments() {
 		a.withDocument(d, func() { d.autosaveWith(c, post); a.syncSavedSearch(d); a.followTitle(); a.syncExcerpts(a.doc) })
+		if a.win != nil {
+			d.releaseShownImagePixels(c.Now())
+		}
 		if d.justSaved {
 			d.justSaved = false
 			if d.space != nil {

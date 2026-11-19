@@ -600,21 +600,36 @@ func (a *App) previewWikiFor(source *document, name string) editor.WikiPreview {
 		return p
 	}
 	p.Location = sp.Name + " / " + rel
-	d := a.residentDocument(sp.ID, rel)
-	if d == nil {
-		d = a.thumbOf(sp, rel)
-	}
-	if d == nil || d.loadErr != nil {
-		p.Text = i18n.T("无法读取这篇笔记")
-		p.Missing = false
-		return p
-	}
-	var text []rune
-	if d.isWhiteboard() {
-		text = []rune(d.board.Scene.PlainText())
+	var plain string
+	if d := a.residentDocument(sp.ID, rel); d != nil {
+		if d.loadErr != nil {
+			p.Text = i18n.T("无法读取这篇笔记")
+			p.Missing = false
+			return p
+		}
+		if d.isWhiteboard() {
+			plain = d.board.Scene.PlainText()
+		} else {
+			plain = d.ed.Committed().PlainText()
+		}
+	} else if indexed, ok := a.liveIndex().TextOf(sp.ID, rel); ok {
+		plain = indexed
 	} else {
-		text = []rune(d.ed.Committed().PlainText())
+		raw, err := readFile(sp, rel)
+		if err != nil {
+			p.Text = i18n.T("无法读取这篇笔记")
+			p.Missing = false
+			return p
+		}
+		extracted, err := extractText(rel, raw)
+		if err != nil {
+			p.Text = i18n.T("无法读取这篇笔记")
+			p.Missing = false
+			return p
+		}
+		plain = extracted.Text
 	}
+	text := []rune(plain)
 	if len(text) > 500 {
 		text = append(text[:500], '…')
 	}

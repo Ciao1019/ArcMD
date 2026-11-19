@@ -56,6 +56,9 @@ func (a *App) openInWindow(sp *space.Space, rel string) {
 	}
 	d := a.residentDocument(sp.ID, rel)
 	if d != nil {
+		// Keep d marked resident while moving it out of the main window into w.
+		a.movingDoc = d
+		defer func() { a.movingDoc = nil }()
 		// It leaves the main window, which shows what it showed before.
 		if a.split != nil {
 			for i, p := range a.split.panes {
@@ -124,6 +127,7 @@ func (a *App) closeWindow(w *docWindow) bool {
 			break
 		}
 	}
+	a.retireClosedDocuments(w.doc)
 	return true
 }
 

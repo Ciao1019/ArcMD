@@ -76,6 +76,7 @@ func (a *App) isOpen(sp *space.Space, rel string) bool {
 // close. Pins change in many places (menus, drags, other spaces' moves), so
 // each frame settles it rather than each of them.
 func (a *App) syncOpen() {
+	var evicted []*document
 	for p, d := range a.openDocs {
 		sp := a.state.Get(p.space)
 		if sp == nil || !inPins(sp, p.rel) || d.space != sp || d.rel != p.rel {
@@ -83,10 +84,14 @@ func (a *App) syncOpen() {
 				_ = d.save() // never drop an edit, though kept ones are saved
 			}
 			delete(a.openDocs, p)
+			evicted = append(evicted, d)
 		}
 	}
 	if d := a.doc; d != nil && d.loadErr == nil && inPins(d.space, d.rel) {
 		a.openDocs[place{d.space.ID, d.rel}] = d
+	}
+	if len(evicted) > 0 || len(a.imgResolved) > 0 {
+		a.retireClosedDocuments(evicted...)
 	}
 }
 
@@ -100,6 +105,7 @@ func (a *App) keptDoc(sp *space.Space, rel, text string) *document {
 	}
 	if d.diskText != text || d.loadErr != nil {
 		delete(a.openDocs, p)
+		d.close()
 		return nil
 	}
 	return d
@@ -144,22 +150,26 @@ func (a *App) closeOpen(sp *space.Space, rel string) {
 	}
 	p := place{sp.ID, rel}
 	if !a.isShown(sp, rel) {
-		if d := a.openDocs[p]; d != nil && d.dirty() {
-			if err := d.save(); err != nil {
-				a.notify("保存 %s 失败。%v", d.title(), err)
+		closed := a.openDocs[p]
+		if closed != nil && closed.dirty() {
+			if err := closed.save(); err != nil {
+				a.notify("保存 %s 失败。%v", closed.title(), err)
 				return
 			}
 		}
 		delete(a.openDocs, p)
 		a.bounce = bounce{p, a.now}
+		a.retireClosedDocuments(closed)
 		return
 	}
 	if !a.flush() {
 		return
 	}
+	closed := a.doc
 	delete(a.openDocs, p)
 	a.bounce = bounce{p, a.now}
 	a.showAfter(sp, rel)
+	a.retireClosedDocuments(closed)
 }
 
 // showAfter shows, in place of the shown document at rel of the space sp
@@ -167,9 +177,11 @@ func (a *App) closeOpen(sp *space.Space, rel string) {
 // still open, as Arc selects the tab used before; with none, nothing, and
 // the space forgets it as its last document.
 func (a *App) showAfter(sp *space.Space, rel string) {
+	leaving := a.doc
 	if next, ok := a.openBefore(place{sp.ID, rel}); ok {
 		a.doc = nil // gone: showing the next must not keep it
 		if a.openIn(sp, next); a.doc != nil {
+			a.retireClosedDocuments(leaving)
 			return
 		}
 	}
@@ -178,6 +190,7 @@ func (a *App) showAfter(sp *space.Space, rel string) {
 		sp.LastOpen = ""
 		a.saveState()
 	}
+	a.retireClosedDocuments(leaving)
 }
 
 // openBefore is the document of the history, latest first, to show when

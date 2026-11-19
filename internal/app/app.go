@@ -34,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.3"
+const Version = "0.2.4"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -100,9 +100,11 @@ type App struct {
 	treeFor string
 	treeErr error
 
-	doc     *document
-	wbCache map[string]cachedWhiteboard
-	wbLib   whiteboardLibState
+	doc       *document
+	movingDoc *document
+	wbCache   map[string]cachedWhiteboard
+	wbOrder   []string
+	wbLib     whiteboardLibState
 	// split owns the visible panes; doc and history follow its focused pane.
 	split           *splitGroup
 	paneNavigation  bool
@@ -657,12 +659,88 @@ func (a *App) asyncPost() func(func()) {
 	return nil
 }
 
+// isResidentDocument reports whether d is still retained by an active or
+// suspended editor view, split pane, pinned background tab, or secondary window.
+func (a *App) isResidentDocument(d *document) bool {
+	if d == nil {
+		return false
+	}
+	if d == a.movingDoc {
+		return true
+	}
+	for _, r := range a.residentDocuments() {
+		if r == d {
+			return true
+		}
+	}
+	return false
+}
+
+// retireClosedDocuments releases decoded image bitmaps and strong map keys for
+// documents that are no longer resident anywhere in the app.
+func (a *App) retireClosedDocuments(candidates ...*document) {
+	if a.documentContext > 0 {
+		return
+	}
+	resident := make(map[*document]bool, 8)
+	for _, d := range a.residentDocuments() {
+		resident[d] = true
+	}
+	if a.movingDoc != nil {
+		resident[a.movingDoc] = true
+	}
+	if a.versions.open && a.versions.for_ != nil {
+		resident[a.versions.for_] = true
+	}
+	if a.mergeUI.open && a.mergeUI.diskConflictDoc != nil {
+		resident[a.mergeUI.diskConflictDoc] = true
+	}
+	for _, d := range candidates {
+		if d != nil && !resident[d] {
+			d.close()
+		}
+	}
+	if len(a.imgResolved) > 0 {
+		removed := 0
+		for k := range a.imgResolved {
+			if k.doc == nil || !resident[k.doc] {
+				if k.doc != nil {
+					k.doc.close()
+				}
+				delete(a.imgResolved, k)
+				removed++
+			}
+		}
+		if len(a.imgResolved) == 0 {
+			a.imgResolved = nil
+		} else if removed > 0 {
+			compact := make(map[imageKey]resolvedImage, len(a.imgResolved))
+			for k, v := range a.imgResolved {
+				compact[k] = v
+			}
+			a.imgResolved = compact
+		}
+	}
+	if a.search.hitsKey.doc != nil && !resident[a.search.hitsKey.doc] {
+		a.search.hitsKey = hitsKey{}
+		a.search.hits = nil
+	}
+	if len(a.search.liveDocs) > 0 {
+		for d := range a.search.liveDocs {
+			if !resident[d] {
+				delete(a.search.liveDocs, d)
+				a.search.overlayReady = false
+			}
+		}
+	}
+}
+
 // imageResourceFor resolves the picture's file through a cache before the
 // document decodes it. A missing picture keeps its (negative) answer, so a
 // broken reference does not walk the attachments folder again on every
-// frame; the cache is dropped whenever files change.
+// frame; the cache is dropped whenever files change or the document closes.
 func (a *App) imageResourceFor(d *document, url string) editor.ImageResource {
-	if d == nil {
+	if d == nil || d.closed.Load() {
 		return editor.ImageResource{}
 	}
 	key := imageKey{doc: d, url: url}
@@ -670,10 +748,12 @@ func (a *App) imageResourceFor(d *document, url string) editor.ImageResource {
 	if !ok {
 		full, err := d.localImage(url)
 		res = resolvedImage{full: full, err: err}
-		if a.imgResolved == nil {
-			a.imgResolved = map[imageKey]resolvedImage{}
+		if a.documentContext > 0 || a.isResidentDocument(d) {
+			if a.imgResolved == nil {
+				a.imgResolved = map[imageKey]resolvedImage{}
+			}
+			a.imgResolved[key] = res
 		}
-		a.imgResolved[key] = res
 	}
 	if res.err != nil {
 		problem := editor.ImageInvalid
@@ -831,14 +911,16 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	if a.split != nil && a.doc != nil && !a.paneNavigation {
 		a.suspendSplit()
 	}
+	prev := a.doc
 	a.syncOpen() // the document left, if pinned, stays open
+	activeSp := a.state.ActiveSpace()
 	var cached *document
 	if restoring && active {
 		cached = a.session(sp.ID).doc
-	} else if a.doc == nil && !active {
+	} else if a.doc == nil && !active && activeSp != nil {
 		// A favorite of another space the active space had open when it
 		// was left, as it was.
-		if d := a.session(a.state.ActiveSpace().ID).doc; d != nil && d.space == sp {
+		if d := a.session(activeSp.ID).doc; d != nil && d.space == sp {
 			cached = d
 		}
 	}
@@ -858,6 +940,14 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 		preferSource := cached != nil && cached.rel == rel && cached.source
 		a.doc = openDocument(sp, rel, text, preferSource)
 	}
+	var prevSessionDoc *document
+	if activeSp != nil && a.documentContext == 0 {
+		if s := a.sessions[activeSp.ID]; s != nil && s.doc != nil {
+			prevSessionDoc = s.doc
+			s.doc = nil
+		}
+	}
+	a.retireClosedDocuments(prev, prevSessionDoc)
 	if a.paneNavigation {
 		a.doc.ed.RequestFocus = true
 	}
@@ -1273,18 +1363,28 @@ func (a *App) switchSpace(id string) {
 		return
 	}
 	sp := a.state.ActiveSpace()
+	clearSessionDoc := func() {
+		if s := a.sessions[id]; s != nil && s.doc != nil {
+			old := s.doc
+			s.doc = nil
+			a.retireClosedDocuments(old)
+		}
+	}
 	if session := a.session(id); session.splitShown && session.split != nil {
 		a.restoreSplit(session.split, session.split.active)
+		clearSessionDoc()
 		return
 	}
 	if d := a.session(id).doc; d != nil && d.space != sp && a.state.IsFavorite(d.space.ID, d.rel) {
 		if a.showIn(d.space, d.rel) {
+			clearSessionDoc()
 			return
 		}
 	}
 	if sp.LastOpen != "" {
 		a.open(sp.LastOpen)
 	}
+	clearSessionDoc()
 }
 
 // switchSpaceAt switches to the space at index i, for Cmd+1…9.

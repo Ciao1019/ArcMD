@@ -937,6 +937,9 @@ func (a *App) gitToolbarButton(c *ui.Context) {
 func (a *App) gitChangesView(c *ui.Context) {
 	gc := &a.gitChanges
 	if !gc.open {
+		if len(gc.items) > 0 {
+			gc.items = nil
+		}
 		return
 	}
 	winW, winH := c.Size()
@@ -1309,6 +1312,11 @@ func (a *App) stepMergeChunk(delta int) {
 func (a *App) mergeView(c *ui.Context) {
 	ms := &a.mergeUI
 	if !ms.open || ms.session == nil {
+		if !ms.open && (ms.session != nil || ms.diskConflictDoc != nil || ms.rawResult != "") {
+			old := ms.diskConflictDoc
+			*ms = threeWayMergeState{}
+			a.retireClosedDocuments(old)
+		}
 		return
 	}
 	winW, winH := c.Size()

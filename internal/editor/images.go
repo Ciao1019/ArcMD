@@ -50,6 +50,15 @@ func (e *Editor) InvalidateImage(src string) {
 	e.ready = false
 }
 
+// ClearImages releases all cached decoded image resources owned by this editor.
+func (e *Editor) ClearImages() {
+	if e == nil || e.images == nil {
+		return
+	}
+	clear(e.images)
+	e.images = nil
+}
+
 type imageEnterState struct {
 	id      string
 	start   time.Time
