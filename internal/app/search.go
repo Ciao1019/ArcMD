@@ -25,6 +25,9 @@ type searchState struct {
 	// busy is set while a refresh runs, again when another was asked for
 	// meanwhile.
 	busy, again bool
+	// writeSeq increments when an open document writes or reloads from disk;
+	// indexedSeq records the writeSeq reflected by index.
+	writeSeq, indexedSeq uint64
 	// async refreshes on a goroutine, as the running app does; tests
 	// refresh at once.
 	async bool
@@ -95,10 +98,11 @@ func (a *App) refreshSearch() {
 		roots = append(roots, r)
 	}
 	prev := s.index
+	snapSeq := s.writeSeq
 	cachePath := a.searchCachePath()
 	s.busy = true
 	done := func(ix *search.Index) {
-		s.index, s.busy = ix, false
+		s.index, s.indexedSeq, s.busy = ix, snapSeq, false
 		if s.again {
 			s.again = false
 			a.refreshSearch()
@@ -249,6 +253,16 @@ func (a *App) recentPlaces(n int) []place {
 	return out
 }
 
+func (a *App) syncSavedSearch(d *document) {
+	if d == nil || d.savedWrites == d.notedWrites {
+		return
+	}
+	d.notedWrites = d.savedWrites
+	a.search.writeSeq++
+	d.savedSeq = a.search.writeSeq
+	a.refreshSearch()
+}
+
 func (a *App) liveIndex() *search.Index {
 	s := &a.search
 	visible := map[*document]bool{}
@@ -262,7 +276,8 @@ func (a *App) liveIndex() *search.Index {
 			continue
 		}
 		_, indexed := s.index.TextOf(d.space.ID, d.rel)
-		if !d.dirty() && (indexed || !visible[d]) {
+		stale := d.savedSeq > s.indexedSeq
+		if !d.dirty() && !stale && (indexed || !visible[d]) {
 			continue
 		}
 		docs = append(docs, d)

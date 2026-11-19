@@ -296,6 +296,11 @@ func applyNodeRichStyle(n *xhtml.Node, style document.Style) document.Style {
 	if n.DataAtom == atom.Mark {
 		style.Highlight = "light-yellow"
 	}
+	if n.DataAtom == atom.Font && style.Color == "" {
+		if c := matchTextColorCSS(attr(n, "color")); c != "" {
+			style.Color = c
+		}
+	}
 	if c := attr(n, "data-color"); validStyleName(c, document.TextColors) {
 		style.Color = c
 	}
@@ -404,6 +409,8 @@ func renderHTMLRunSlice(runs []document.Run, preserveNoMath bool) string {
 			} else {
 				out.WriteString(inner)
 			}
+		case "kbd":
+			out.WriteString("<kbd>" + inner + "</kbd>")
 		case "bold":
 			out.WriteString("<strong>" + inner + "</strong>")
 		case "italic":
@@ -431,6 +438,8 @@ func outerHTMLMark(s document.Style) (kind, val string) {
 	switch {
 	case s.Link != "":
 		return "link", s.Link
+	case s.Kbd:
+		return "kbd", "1"
 	case s.Bold:
 		return "bold", "1"
 	case s.Italic:
@@ -451,6 +460,8 @@ func hasHTMLMark(s document.Style, kind string) (bool, string) {
 	switch kind {
 	case "link":
 		return s.Link != "", s.Link
+	case "kbd":
+		return s.Kbd, "1"
 	case "bold":
 		return s.Bold, "1"
 	case "italic":
@@ -472,6 +483,8 @@ func clearHTMLMark(r document.Run, kind string) document.Run {
 	switch kind {
 	case "link":
 		r.Style.Link = ""
+	case "kbd":
+		r.Style.Kbd = false
 	case "bold":
 		r.Style.Bold = false
 	case "italic":
@@ -489,41 +502,206 @@ func clearHTMLMark(r document.Run, kind string) document.Run {
 	return r
 }
 
-// parseInlineHTMLNodes converts children of an inline/block HTML container
-// (such as <p align="center">, <summary>, <td>) into document.Runs, keeping
-// <br> as newline and preserving colors, highlights, annotations and marks.
-func parseInlineHTMLNodes(parent *xhtml.Node, base document.Style) []document.Run {
+// parseInlineHTMLNodesExact converts children of an exact-whitespace HTML cell
+// (such as an ArcMD-exported <td>) into document.Runs and preserved inline
+// comments without collapsing or trimming spaces, keeping <br> as '\n'.
+func parseInlineHTMLNodesExact(parent *xhtml.Node, base document.Style) ([]document.Run, []document.InlineComment) {
+	var children []*xhtml.Node
+	for c := parent.FirstChild; c != nil; c = c.NextSibling {
+		children = append(children, c)
+	}
+	return parseInlineHTMLNodeSlice(children, base, "\n", true)
+}
+
+// parseInlineHTMLNodesWithBreak converts children of an HTML block container
+// into document.Runs and preserved inline comments, normalizing HTML source
+// newlines/whitespace and emitting softBreak for <br> elements.
+func parseInlineHTMLNodesWithBreak(parent *xhtml.Node, base document.Style, softBreak string) ([]document.Run, []document.InlineComment) {
+	var children []*xhtml.Node
+	for c := parent.FirstChild; c != nil; c = c.NextSibling {
+		children = append(children, c)
+	}
+	return parseInlineHTMLNodeSlice(children, base, softBreak, false)
+}
+
+func parseInlineHTMLNodeSlice(nodes []*xhtml.Node, base document.Style, softBreak string, exactWhitespace bool) ([]document.Run, []document.InlineComment) {
 	var runs []document.Run
+	var comments []document.InlineComment
+	u16Len := 0
+	appendRun := func(text string, style document.Style) {
+		if text == "" {
+			return
+		}
+		runs = append(runs, document.Run{Text: text, Style: style})
+		u16Len += document.Len(text)
+	}
 	var walk func(*xhtml.Node, document.Style)
-	walk = func(n *xhtml.Node, style document.Style) {
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			switch c.Type {
-			case xhtml.TextNode:
-				if c.Data != "" {
-					runs = append(runs, document.Run{Text: c.Data, Style: style})
+	walk = func(c *xhtml.Node, style document.Style) {
+		switch c.Type {
+		case xhtml.TextNode:
+			if c.Data == "" {
+				return
+			}
+			txt := c.Data
+			if !exactWhitespace {
+				txt = collapseInlineHTMLSpace(c.Data, style.Code)
+			}
+			appendRun(txt, style)
+		case xhtml.CommentNode:
+			raw := "<!--" + c.Data + "-->"
+			if document.ValidInlineComment(raw) {
+				comments = append(comments, document.InlineComment{Offset: u16Len, Text: raw})
+			}
+		case xhtml.ElementNode:
+			next := applyNodeRichStyle(c, styled(c, style))
+			next = applyElementTagStyle(c, next)
+			switch c.DataAtom {
+			case atom.Br:
+				appendRun(softBreak, style)
+			case atom.Script, atom.Style:
+			case atom.Q:
+				appendRun("“", next)
+				for child := c.FirstChild; child != nil; child = child.NextSibling {
+					walk(child, next)
 				}
-			case xhtml.ElementNode:
-				next := applyNodeRichStyle(c, styled(c, style))
-				next = applyElementTagStyle(c, next)
-				switch c.DataAtom {
-				case atom.Br:
-					runs = append(runs, document.Run{Text: "\n", Style: style})
-				case atom.Script, atom.Style:
-				default:
-					walk(c, next)
+				appendRun("”", next)
+			default:
+				for child := c.FirstChild; child != nil; child = child.NextSibling {
+					walk(child, next)
 				}
 			}
 		}
 	}
-	walk(parent, base)
-	return document.Compact(runs)
+	for _, n := range nodes {
+		walk(n, base)
+	}
+	runs = document.Compact(runs)
+	if exactWhitespace {
+		return runs, comments
+	}
+	return trimInlineHTMLRuns(runs, comments, softBreak)
+}
+
+func collapseInlineHTMLSpace(s string, keepCodeSpaces bool) string {
+	if keepCodeSpaces {
+		return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(s)
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	space := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !space {
+				b.WriteByte(' ')
+				space = true
+			}
+			continue
+		}
+		space = false
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func runsU16Len(runs []document.Run) int {
+	n := 0
+	for _, r := range runs {
+		n += document.Len(r.Text)
+	}
+	return n
+}
+
+func trimInlineHTMLRuns(runs []document.Run, comments []document.InlineComment, softBreak string) ([]document.Run, []document.InlineComment) {
+	if len(runs) == 0 {
+		return nil, document.ShiftComments(comments, 0, 0, 0, 0)
+	}
+	// Strip whitespace immediately touching a soft break emitted from <br>\n  next.
+	if softBreak != "" {
+		sbLen := document.Len(softBreak)
+		pos := 0
+		for i := range runs {
+			for {
+				idx := strings.Index(runs[i].Text, " "+softBreak)
+				if idx < 0 {
+					break
+				}
+				at := pos + document.Len(runs[i].Text[:idx])
+				runs[i].Text = runs[i].Text[:idx] + runs[i].Text[idx+1:]
+				comments = document.ShiftComments(comments, at, at+1, 0, runsU16Len(runs))
+			}
+			for {
+				idx := strings.Index(runs[i].Text, softBreak+" ")
+				if idx < 0 {
+					break
+				}
+				at := pos + document.Len(runs[i].Text[:idx]) + sbLen
+				runs[i].Text = runs[i].Text[:idx+len(softBreak)] + runs[i].Text[idx+len(softBreak)+1:]
+				comments = document.ShiftComments(comments, at, at+1, 0, runsU16Len(runs))
+			}
+			pos += document.Len(runs[i].Text)
+		}
+		pos = 0
+		for i := 0; i < len(runs)-1; i++ {
+			runEnd := pos + document.Len(runs[i].Text)
+			if strings.HasSuffix(runs[i].Text, softBreak) {
+				trimmed := strings.TrimLeft(runs[i+1].Text, " ")
+				if diff := document.Len(runs[i+1].Text) - document.Len(trimmed); diff > 0 {
+					runs[i+1].Text = trimmed
+					comments = document.ShiftComments(comments, runEnd, runEnd+diff, 0, runsU16Len(runs))
+				}
+			}
+			if strings.HasPrefix(runs[i+1].Text, softBreak) {
+				trimmed := strings.TrimRight(runs[i].Text, " ")
+				if diff := document.Len(runs[i].Text) - document.Len(trimmed); diff > 0 {
+					runs[i].Text = trimmed
+					newEnd := pos + document.Len(trimmed)
+					comments = document.ShiftComments(comments, newEnd, runEnd, 0, runsU16Len(runs))
+					runEnd = newEnd
+				}
+			}
+			pos = runEnd
+		}
+		runs = document.Compact(runs)
+	}
+	for len(runs) > 0 {
+		trimmed := strings.TrimLeft(runs[0].Text, " ")
+		if diff := document.Len(runs[0].Text) - document.Len(trimmed); diff > 0 {
+			runs[0].Text = trimmed
+			comments = document.ShiftComments(comments, 0, diff, 0, runsU16Len(runs))
+		}
+		if runs[0].Text == "" {
+			runs = runs[1:]
+			continue
+		}
+		break
+	}
+	for len(runs) > 0 {
+		last := len(runs) - 1
+		trimmed := strings.TrimRight(runs[last].Text, " ")
+		if diff := document.Len(runs[last].Text) - document.Len(trimmed); diff > 0 {
+			totalBefore := runsU16Len(runs)
+			runs[last].Text = trimmed
+			comments = document.ShiftComments(comments, totalBefore-diff, totalBefore, 0, totalBefore-diff)
+		}
+		if runs[last].Text == "" {
+			runs = runs[:last]
+			continue
+		}
+		break
+	}
+	runs = document.Compact(runs)
+	total := runsU16Len(runs)
+	for i := range comments {
+		comments[i].Offset = max(0, min(total, comments[i].Offset))
+	}
+	return runs, comments
 }
 
 func applyElementTagStyle(n *xhtml.Node, style document.Style) document.Style {
 	switch n.DataAtom {
 	case atom.B, atom.Strong:
 		style.Bold = true
-	case atom.I, atom.Em, atom.Cite:
+	case atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn:
 		style.Italic = true
 	case atom.U, atom.Ins:
 		style.Underline = true
@@ -533,8 +711,12 @@ func applyElementTagStyle(n *xhtml.Node, style document.Style) document.Style {
 		style.Script = "sup"
 	case atom.Sub:
 		style.Script = "sub"
-	case atom.Code, atom.Kbd, atom.Samp, atom.Tt:
+	case atom.Kbd:
+		style.Kbd = true
+		style.Code = false
+	case atom.Code, atom.Samp, atom.Tt:
 		style.Code = true
+		style.Kbd = false
 	case atom.A:
 		if href := attr(n, "href"); href != "" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(href)), "javascript:") {
 			style.Link = href
@@ -543,21 +725,17 @@ func applyElementTagStyle(n *xhtml.Node, style document.Style) document.Style {
 	return style
 }
 
-func parseInlineHTMLFragment(fragment string) []document.Run {
+func parseInlineHTMLFragment(fragment string) ([]document.Run, []document.InlineComment) {
 	ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Span, Data: "span"}
 	nodes, err := xhtml.ParseFragment(strings.NewReader(fragment), ctx)
 	if err != nil {
-		return document.Compact([]document.Run{{Text: html.UnescapeString(stripTags(fragment))}})
+		return document.Compact([]document.Run{{Text: html.UnescapeString(stripTags(fragment))}}), nil
 	}
-	wrap := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Span, Data: "span"}
-	for _, n := range nodes {
-		wrap.AppendChild(n)
-	}
-	runs := parseInlineHTMLNodes(wrap, document.Style{})
+	runs, comments := parseInlineHTMLNodeSlice(nodes, document.Style{}, "\u2028", false)
 	if len(runs) == 0 {
-		return []document.Run{{Text: ""}}
+		return []document.Run{{Text: ""}}, comments
 	}
-	return runs
+	return runs, comments
 }
 
 type htmlStyleFrame struct {
@@ -568,47 +746,60 @@ type htmlStyleFrame struct {
 // applyInlineHTMLToken handles an inline HTML tag inside Markdown text,
 // maintaining a tag stack so nested <span>, <mark>, <strong>, <u>, <sup>, <a>
 // open and close cleanly. It reports whether raw was consumed as markup (with
-// optional replacement text such as "\n" for <br>).
-func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.Style) (handled bool, emit string) {
+// optional replacement text such as "\n" for <br>, or preserved comment text).
+func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.Style) (handled bool, emit, comment string) {
 	z := xhtml.NewTokenizer(strings.NewReader(raw))
 	tt := z.Next()
 	switch tt {
+	case xhtml.CommentToken:
+		trimmed := strings.TrimSpace(raw)
+		if document.ValidInlineComment(trimmed) {
+			return true, "", trimmed
+		}
 	case xhtml.StartTagToken, xhtml.SelfClosingTagToken:
 		tok := z.Token()
 		name := strings.ToLower(tok.Data)
 		if tok.DataAtom == atom.Br {
-			return true, "\n"
+			return true, "\n", ""
 		}
 		node := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: tok.DataAtom, Data: name, Attr: tok.Attr}
 		if tok.DataAtom == atom.Span && (attr(node, "data-emoji") != "" || attr(node, "data-align") != "") {
-			return false, ""
+			return false, "", ""
 		}
 		switch tok.DataAtom {
 		case atom.Span, atom.Mark, atom.Font,
-			atom.B, atom.Strong, atom.I, atom.Em, atom.Cite,
+			atom.B, atom.Strong, atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn,
 			atom.U, atom.Ins, atom.S, atom.Del, atom.Strike,
-			atom.Sup, atom.Sub, atom.Code, atom.Kbd, atom.Samp, atom.Tt, atom.A:
+			atom.Sup, atom.Sub, atom.Code, atom.Kbd, atom.Samp, atom.Tt, atom.A,
+			atom.Small, atom.Abbr, atom.Q:
 			if tt == xhtml.StartTagToken {
 				*stack = append(*stack, htmlStyleFrame{tag: name, style: *style})
 				next := applyNodeRichStyle(node, styled(node, *style))
 				next = applyElementTagStyle(node, next)
 				*style = next
+				if tok.DataAtom == atom.Q {
+					return true, "“", ""
+				}
 			}
-			return true, ""
+			return true, "", ""
 		}
 	case xhtml.EndTagToken:
 		tok := z.Token()
 		name := strings.ToLower(tok.Data)
 		switch tok.DataAtom {
 		case atom.Span, atom.Mark, atom.Font,
-			atom.B, atom.Strong, atom.I, atom.Em, atom.Cite,
+			atom.B, atom.Strong, atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn,
 			atom.U, atom.Ins, atom.S, atom.Del, atom.Strike,
-			atom.Sup, atom.Sub, atom.Code, atom.Kbd, atom.Samp, atom.Tt, atom.A:
+			atom.Sup, atom.Sub, atom.Code, atom.Kbd, atom.Samp, atom.Tt, atom.A,
+			atom.Small, atom.Abbr, atom.Q:
 			for idx := len(*stack) - 1; idx >= 0; idx-- {
 				if (*stack)[idx].tag == name {
 					*style = (*stack)[idx].style
 					*stack = (*stack)[:idx]
-					return true, ""
+					if tok.DataAtom == atom.Q {
+						return true, "”", ""
+					}
+					return true, "", ""
 				}
 			}
 			// Unmatched closing tag still clears its own mark rather than leaking markup.
@@ -619,7 +810,7 @@ func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.S
 				style.Underline = false
 			case atom.B, atom.Strong:
 				style.Bold = false
-			case atom.I, atom.Em, atom.Cite:
+			case atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn:
 				style.Italic = false
 			case atom.S, atom.Del, atom.Strike:
 				style.Strike = false
@@ -630,11 +821,14 @@ func applyInlineHTMLToken(raw string, stack *[]htmlStyleFrame, style *document.S
 				style.Annotation, style.AnnotationColor = "", ""
 			case atom.A:
 				style.Link = ""
-			case atom.Code, atom.Kbd, atom.Samp, atom.Tt:
+			case atom.Kbd:
+				style.Kbd = false
+			case atom.Code, atom.Samp, atom.Tt:
 				style.Code = false
+			case atom.Small, atom.Abbr, atom.Q:
 			}
-			return true, ""
+			return true, "", ""
 		}
 	}
-	return false, ""
+	return false, "", ""
 }

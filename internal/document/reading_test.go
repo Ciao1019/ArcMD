@@ -30,7 +30,7 @@ func TestVersionSixMigrationAndAttributes(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(decoded, e.Doc) {
 		t.Fatal("v6 round trip", err)
 	}
-	if _, err := Decode(strings.Replace(s, `"version": 8`, `"version": 5`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 5`, 1)); err == nil {
 		t.Fatal("accepted new attributes in v5")
 	}
 	e.Undo()
@@ -131,5 +131,92 @@ func TestClipboardKeepsTablesAndRebasesFootnotes(t *testing.T) {
 	e.Undo()
 	if !reflect.DeepEqual(before, e.Doc) {
 		t.Fatal("paste undo")
+	}
+}
+
+func TestKbdStyleToggleMigrationAndUndo(t *testing.T) {
+	v8 := `{"format":"arcmd","version":8,"goal":500,"blocks":[{"id":"t","kind":"toggle","runs":[{"text":"Details"}]}]}`
+	migrated, err := Decode(v8)
+	if err != nil || migrated.Version != CurrentVersion || migrated.Goal != 500 || migrated.Blocks[0].Kind != "toggle" {
+		t.Fatalf("v8 migration failed: doc=%+v err=%v", migrated, err)
+	}
+
+	e := NewEngine(New())
+	e.Replace(0, 0, "Press Ctrl")
+	e.SetSelection(6, 10)
+	e.Toggle("kbd")
+	if runs := e.Doc.Blocks[0].Runs; len(runs) != 2 || !runs[1].Style.Kbd || runs[1].Style.Code {
+		t.Fatalf("expected kbd on selection without code, got %+v", runs)
+	}
+
+	// Toggling code clears kbd; toggling kbd clears code.
+	e.Toggle("code")
+	if runs := e.Doc.Blocks[0].Runs; !runs[1].Style.Code || runs[1].Style.Kbd {
+		t.Fatalf("expected code to clear kbd, got %+v", runs)
+	}
+	e.Toggle("kbd")
+	if runs := e.Doc.Blocks[0].Runs; !runs[1].Style.Kbd || runs[1].Style.Code {
+		t.Fatalf("expected kbd to clear code, got %+v", runs)
+	}
+
+	// Collapsed caret inherits and toggles kbd cleanly.
+	e.SetSelection(10, 10)
+	e.Toggle("kbd")
+	if st := e.CurrentStyle(); st.Kbd || st.Code {
+		t.Fatalf("expected collapsed toggle to turn kbd off, got %+v", st)
+	}
+	e.Replace(10, 10, " now")
+	if last := e.Doc.Blocks[0].Runs[len(e.Doc.Blocks[0].Runs)-1]; last.Text != " now" || last.Style.Kbd {
+		t.Fatalf("expected trailing text outside kbd, got %+v", last)
+	}
+
+	s, err := e.Doc.Encode()
+	if err != nil || !strings.Contains(s, `"kbd": true`) {
+		t.Fatalf("encode failed: err=%v s=%s", err, s)
+	}
+	decoded, err := Decode(s)
+	if err != nil || !reflect.DeepEqual(decoded, e.Doc) {
+		t.Fatalf("kbd round trip mismatch: err=%v", err)
+	}
+	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 8`, 1)); err == nil {
+		t.Fatal("accepted kbd in v8 document")
+	}
+
+	e.Undo()
+	e.Undo()
+	if runs := e.Doc.Blocks[0].Runs; len(runs) != 2 || !runs[1].Style.Code || runs[1].Style.Kbd {
+		t.Fatalf("expected undo to restore previous code state, got %+v", runs)
+	}
+
+	// Pressing Enter or deleting back from a trailing <kbd> span must not leak Kbd.
+	k := NewEngine(New())
+	k.Replace(0, 0, "Alt")
+	k.SetSelection(0, 3)
+	k.Toggle("kbd")
+	k.SetSelection(3, 3) // simulated caret landing at end of <kbd>
+	k.Enter(false)
+	k.Replace(k.Caret, k.Caret, "<")
+	if len(k.Doc.Blocks) != 2 || k.Doc.Blocks[1].Runs[0].Style.Kbd {
+		t.Fatalf("Enter at end of <kbd> leaked Kbd onto new line: %+v", k.Doc.Blocks)
+	}
+
+	d := NewEngine(New())
+	d.Replace(0, 0, "Prefix ")
+	d.SetSelection(7, 7)
+	d.Toggle("kbd")
+	d.Replace(7, 7, "Alt")
+	d.Replace(7, 10, "") // delete whole <kbd> span back to "Prefix "
+	d.Replace(d.Caret, d.Caret, "<")
+	if runs := d.Doc.Blocks[0].Runs; len(runs) != 1 || runs[0].Style.Kbd || runs[0].Text != "Prefix <" {
+		t.Fatalf("deleting <kbd> span left Kbd active: %+v", runs)
+	}
+
+	empty := NewEngine(New())
+	empty.Toggle("kbd")
+	empty.Replace(0, 0, "X")
+	empty.Replace(0, 1, "") // delete sole <kbd> char to empty paragraph
+	empty.Replace(0, 0, "<")
+	if runs := empty.Doc.Blocks[0].Runs; len(runs) != 1 || runs[0].Style.Kbd || runs[0].Text != "<" {
+		t.Fatalf("emptied paragraph leaked Kbd onto <: %+v", runs)
 	}
 }

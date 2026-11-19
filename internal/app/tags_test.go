@@ -1,10 +1,14 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/vault"
+	"github.com/egoist/mygo/ui"
 )
 
 func TestRenameTagEverywhere(t *testing.T) {
@@ -49,5 +53,67 @@ func TestRenameTagEverywhere(t *testing.T) {
 	b, _ = vault.Read(root(a), "Journal/B.md")
 	if !strings.Contains(b, "#工作/2026") || !strings.Contains(a.doc.ed.Text(), "#工作 很忙") {
 		t.Fatal("undo")
+	}
+}
+
+func TestTagRenameUpdatesFooterAfterAutosaveAndReload(t *testing.T) {
+	a, tt := newTestApp(t)
+	doc := editor.ImportMarkdown("# 标签测试\n\n😀 #very-long-tag-name <!-- note -->。\n")
+	raw, err := doc.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(root(a), "TagReview.arcmd", raw); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.refreshSearch()
+	a.open("TagReview.arcmd")
+	tt.Frame()
+	if !slices.Contains(a.doc.footer.tags, "very-long-tag-name") {
+		t.Fatalf("expected initial footer tag, got %v", a.doc.footer.tags)
+	}
+
+	// Simulate real desktop async background saves & search refreshes.
+	posted := make(chan func(), 16)
+	a.search.async = true
+	a.runAsync = func(fn func()) { posted <- fn }
+
+	a.renameTag("very-long-tag-name", "short")
+	tt.Frame()
+	if !slices.Contains(a.doc.footer.tags, "short") || slices.Contains(a.doc.footer.tags, "very-long-tag-name") {
+		t.Fatalf("footer did not update right after renameTag: %v", a.doc.footer.tags)
+	}
+
+	// Drain initial refreshSearch (which read the pre-save disk file), then let async autosave write.
+	(<-posted)()
+	tt.Advance(autosaveDelay + 100*time.Millisecond)
+	tt.Frame()
+	if !a.doc.saving {
+		t.Fatal("expected async autosave to start")
+	}
+	// Apply async autosave completion WITHOUT yet finishing the post-save refreshSearch.
+	(<-posted)()
+	tt.Frame()
+	if a.doc.dirty() {
+		t.Fatal("expected document clean after async autosave")
+	}
+	if !slices.Contains(a.doc.footer.tags, "short") || slices.Contains(a.doc.footer.tags, "very-long-tag-name") {
+		t.Fatalf("footer reverted to old tag after autosave before search refresh completed: %v", a.doc.footer.tags)
+	}
+
+	// Press Ctrl+R (reload from disk) and confirm footer still shows the new tag.
+	tt.Key(ui.Cmd, ui.KeyR)
+	tt.Frame()
+	if !slices.Contains(a.doc.footer.tags, "short") || slices.Contains(a.doc.footer.tags, "very-long-tag-name") {
+		t.Fatalf("footer showed stale tag after Ctrl+R reload: %v", a.doc.footer.tags)
+	}
+	// Drain every pending background search refresh before exiting so TempDir cleanup is clean.
+	for a.search.busy || len(posted) > 0 {
+		(<-posted)()
+	}
+	tt.Frame()
+	if !slices.Contains(a.doc.footer.tags, "short") || slices.Contains(a.doc.footer.tags, "very-long-tag-name") {
+		t.Fatalf("footer stale after background search refresh settled: %v", a.doc.footer.tags)
 	}
 }

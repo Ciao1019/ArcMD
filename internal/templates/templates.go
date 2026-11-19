@@ -108,9 +108,7 @@ func Instantiate(tmpl *document.Document, now time.Time, title string) *document
 	walk = func(blocks []*document.Block) {
 		for _, b := range blocks {
 			b.ID = document.NewID()
-			for i := range b.Runs {
-				b.Runs[i].Text = Fill(b.Runs[i].Text, now, title)
-			}
+			document.MapBlockRunText(b, nil, func(s string) string { return Fill(s, now, title) })
 			walk(b.Children)
 		}
 	}

@@ -110,7 +110,7 @@ func tokenAllowed(b *document.Block, a, z int) bool {
 		return false
 	}
 	for _, r := range document.SliceRuns(b.Runs, a, z) {
-		if r.Style.Code || r.Style.Link != "" || r.Style.NoMath {
+		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" || r.Style.NoMath {
 			return false
 		}
 	}

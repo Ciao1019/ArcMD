@@ -359,3 +359,140 @@ func TestObsidianImageEmbedsImportAndRoundTrip(t *testing.T) {
 		t.Fatalf("re-import of space URL failed: %+v", reimported.Blocks[0])
 	}
 }
+
+func TestHTMLTagsKbdCenterHrAndCommentsRoundTrip(t *testing.T) {
+	src := strings.Join([]string{
+		"Press <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>&lt;</kbd>, read <small>note</small>, <abbr title=\"HyperText\">HTML</abbr>, <var>x</var>, <q>quoted</q>, and inline <!-- hidden --> text.",
+		"",
+		"<hr>",
+		"",
+		"<div align=\"center\">",
+		"",
+		"# Centered Title",
+		"",
+		"Centered paragraph <!-- inline -->.",
+		"",
+		"<!-- block comment -->",
+		"",
+		"</div>",
+		"",
+		"<center>",
+		"",
+		"Second centered line",
+		"",
+		"Tail line",
+		"",
+		"</center>",
+		"",
+		"<!-- standalone comment -->",
+		"",
+		"<div align=\"right\"><img src=\"assets/pic.png\" width=\"240\" alt=\"badge\"></div>",
+		"",
+	}, "\n")
+
+	doc := ImportMarkdown(src)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("imported doc invalid: %v", err)
+	}
+	if ExportMarkdown(doc) != src {
+		t.Fatalf("unedited HTML Markdown changed:\n got:\n%s\nwant:\n%s", ExportMarkdown(doc), src)
+	}
+
+	// Verify inline HTML tokens on paragraph 0.
+	p0 := doc.Blocks[0]
+	if p0.Kind != "paragraph" {
+		t.Fatalf("block 0 = %+v", p0)
+	}
+	foundCtrl, foundLT, foundVar := false, false, false
+	for _, r := range p0.Runs {
+		if r.Style.Kbd && !r.Style.Code && r.Text == "Ctrl" {
+			foundCtrl = true
+		}
+		if r.Style.Kbd && r.Text == "<" {
+			foundLT = true
+		}
+		if r.Style.Italic && r.Text == "x" {
+			foundVar = true
+		}
+	}
+	if !foundCtrl || !foundLT || !foundVar {
+		t.Fatalf("missing expected inline HTML styles in %+v", p0.Runs)
+	}
+	txt0 := p0.Text()
+	for _, want := range []string{"note", "HTML", "“quoted”", "inline  text."} {
+		if !strings.Contains(txt0, want) {
+			t.Fatalf("expected %q in %q", want, txt0)
+		}
+	}
+	if strings.Contains(txt0, "hidden") || strings.Contains(txt0, "<!--") {
+		t.Fatalf("inline comment leaked into text: %q", txt0)
+	}
+
+	// Verify <hr> became a native rule block.
+	if doc.Blocks[1].Kind != "rule" {
+		t.Fatalf("expected rule block for <hr>, got %+v", doc.Blocks[1])
+	}
+
+	// Verify multi-block <div align="center"> and <center> applied alignment and kept block comment.
+	if doc.Blocks[2].Kind != "heading" || doc.Blocks[2].Align != "center" || doc.Blocks[2].Text() != "Centered Title" {
+		t.Fatalf("expected centered heading, got %+v", doc.Blocks[2])
+	}
+	if doc.Blocks[3].Kind != "paragraph" || doc.Blocks[3].Align != "center" || strings.Contains(doc.Blocks[3].Text(), "<!--") {
+		t.Fatalf("expected centered paragraph without inline comment, got %+v", doc.Blocks[3])
+	}
+	if doc.Blocks[4].Kind != "raw" || !isHTMLCommentBlock(doc.Blocks[4].Text()) {
+		t.Fatalf("expected inner comment raw block, got %+v", doc.Blocks[4])
+	}
+	if doc.Blocks[5].Kind != "paragraph" || doc.Blocks[5].Align != "center" || doc.Blocks[5].Text() != "Second centered line" {
+		t.Fatalf("expected centered line from <center>, got %+v", doc.Blocks[5])
+	}
+	if doc.Blocks[6].Kind != "paragraph" || doc.Blocks[6].Align != "center" || doc.Blocks[6].Text() != "Tail line" {
+		t.Fatalf("expected second centered line from <center>, got %+v", doc.Blocks[6])
+	}
+	if doc.Blocks[7].Kind != "raw" || !isHTMLCommentBlock(doc.Blocks[7].Text()) {
+		t.Fatalf("expected standalone comment block, got %+v", doc.Blocks[7])
+	}
+	if doc.Blocks[8].Kind != "image" || doc.Blocks[8].Align != "right" || doc.Blocks[8].ImageWidth != 240 || doc.Blocks[8].URL != "assets/pic.png" {
+		t.Fatalf("expected right-aligned single-block div image, got %+v", doc.Blocks[8])
+	}
+
+	// ExportHTML omits comment blocks and emits <kbd>.
+	exportedHTML := ExportHTML(doc)
+	if !strings.Contains(exportedHTML, "<kbd>Ctrl</kbd>") || !strings.Contains(exportedHTML, "<kbd>&lt;</kbd>") {
+		t.Fatalf("ExportHTML missing <kbd>: %s", exportedHTML)
+	}
+	if strings.Contains(exportedHTML, "block comment") || strings.Contains(exportedHTML, "standalone comment") {
+		t.Fatalf("ExportHTML should omit HTML comment blocks: %s", exportedHTML)
+	}
+
+	// Partial edit inside <div align="center"> exports individual aligned blocks while keeping <center> verbatim.
+	e := document.NewEngine(doc)
+	e.Replace(e.Doc.Leaves()[3].Start, e.Doc.Leaves()[3].End, "Edited centered paragraph.")
+	partial := ExportMarkdown(e.Doc)
+	if !strings.Contains(partial, `<h1 align="center">Centered Title</h1>`) ||
+		!strings.Contains(partial, `<p align="center">Edited centered paragraph.</p>`) ||
+		!strings.Contains(partial, "<center>\n\nSecond centered line\n\nTail line\n\n</center>") {
+		t.Fatalf("unexpected partial export:\n%s", partial)
+	}
+
+	// Round-trip freshly created <kbd> without ImportSource (including nested bold and '<').
+	fresh := document.New()
+	fresh.Blocks = []*document.Block{{
+		ID:   document.NewID(),
+		Kind: "paragraph",
+		Runs: []document.Run{
+			{Text: "Hit "},
+			{Text: "Cmd", Style: document.Style{Kbd: true, Bold: true}},
+			{Text: "+"},
+			{Text: "<", Style: document.Style{Kbd: true}},
+		},
+	}}
+	md := ExportMarkdown(fresh)
+	if !strings.Contains(md, "<kbd>**Cmd**</kbd>+<kbd>&lt;</kbd>") {
+		t.Fatalf("unexpected fresh <kbd> markdown: %q", md)
+	}
+	reloaded := ImportMarkdown(md)
+	if !sameDocumentSemantics(fresh, reloaded) {
+		t.Fatalf("fresh <kbd> round-trip mismatch:\n md=%s\n got=%+v", md, reloaded.Blocks[0].Runs)
+	}
+}

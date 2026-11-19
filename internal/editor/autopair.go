@@ -77,7 +77,7 @@ func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
 		target = e.validRange(*r)
 	}
 	l := e.LeafAt(target.Start)
-	if literalBlock(l.Block.Kind) || e.CurrentStyle().Code {
+	if literalBlock(l.Block.Kind) || e.CurrentStyle().Code || e.CurrentStyle().Kbd {
 		e.pairs = nil
 		return false
 	}
@@ -116,6 +116,9 @@ func (e *Editor) pairInput(r *ui.TextInputRange, text string) bool {
 		ok = false
 	}
 	if ok && inMath && (text == "\"" || text == "'" || text == "$") {
+		ok = false
+	}
+	if ok && (text == "\"" || text == "'") && e.inOpenHTMLTag(target.Start, l.Start) {
 		ok = false
 	}
 	if !ok {
@@ -301,4 +304,26 @@ func (e *Editor) paintActivePair(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
 	last := rects[len(rects)-1]
 	lastBox := ui.Rect{X: ox + last.X - 1.5, Y: oy + last.Y + 1, W: last.W + 3, H: max(16, last.H-2)}
 	e.paintTabOutBadge(p, lastBox, t)
+}
+
+func (e *Editor) inOpenHTMLTag(pos, blockStart int) bool {
+	if pos <= blockStart {
+		return false
+	}
+	before := e.slice(blockStart, pos)
+	if inOpenHTMLComment(before) {
+		return true
+	}
+	if idx := strings.LastIndexByte(before, '\n'); idx >= 0 {
+		before = before[idx+1:]
+	}
+	if idx := strings.LastIndex(before, "\u2028"); idx >= 0 {
+		before = before[idx+len("\u2028"):]
+	}
+	lt := strings.LastIndexByte(before, '<')
+	if lt < 0 || strings.IndexByte(before[lt+1:], '>') >= 0 || lt+1 >= len(before) {
+		return false
+	}
+	next := before[lt+1]
+	return (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z')
 }

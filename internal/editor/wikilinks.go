@@ -34,7 +34,7 @@ type wikiState struct {
 // show as links and as tags; code shows them as written.
 func (e *Editor) wikiSpans(span ui.Span, run document.Run, kind string, t *ui.Theme) []ui.Span {
 	text := run.Text
-	if run.Style.Code || kind == "code" || kind == "raw" || kind == "math" || !strings.ContainsAny(text, "[#") {
+	if run.Style.Code || run.Style.Kbd || kind == "code" || kind == "raw" || kind == "math" || !strings.ContainsAny(text, "[#") {
 		return []ui.Span{span}
 	}
 	type mark struct {
@@ -104,7 +104,7 @@ func (e *Editor) runAt(at int) (string, int, bool) {
 	for _, run := range leaf.Block.Runs {
 		n := document.Len(run.Text)
 		if at <= offset+n && at >= offset {
-			if run.Style.Code {
+			if run.Style.Code || run.Style.Kbd {
 				return "", 0, false
 			}
 			return run.Text, offset, true

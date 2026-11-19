@@ -79,7 +79,7 @@ func (e *Editor) pasteSelection(read func() string) {
 		}
 	}
 	text := read()
-	if kind != "code" && kind != "raw" && !e.Engine.CurrentStyle().Code {
+	if kind != "code" && kind != "raw" && !e.Engine.CurrentStyle().Code && !e.Engine.CurrentStyle().Kbd {
 		if md, err := clipboard.Read(transfer.Markdown); err == nil && len(md) < 8<<20 && len(md) > 0 {
 			text = string(md)
 		}
@@ -88,7 +88,7 @@ func (e *Editor) pasteSelection(read func() string) {
 	// is math even when the clipboard also offers a styled HTML code block.
 	// A formula editor accepts the body alone; other literal contexts keep
 	// the text, including its delimiters.
-	if !inLiteral && kind != "cell" && !e.Engine.CurrentStyle().Code {
+	if !inLiteral && kind != "cell" && !e.Engine.CurrentStyle().Code && !e.Engine.CurrentStyle().Kbd {
 		if doc := pastedMath(text); doc != nil {
 			e.UnmarkText()
 			e.Engine.Paste(doc)
@@ -123,7 +123,7 @@ func (e *Editor) pasteSelection(read func() string) {
 			}
 		}
 	}
-	if !literalBlock(kind) && !e.CurrentStyle().Code && len(text) < 8<<20 {
+	if !literalBlock(kind) && !e.CurrentStyle().Code && !e.CurrentStyle().Kbd && len(text) < 8<<20 {
 		// Rows copied from a spreadsheet, as tab-separated lines.
 		if doc := tabTable(text); doc != nil && kind != "cell" {
 			e.UnmarkText()
@@ -169,7 +169,7 @@ func pastedMath(source string) *document.Document {
 // plain text, worth pasting as structure.
 func rich(doc *document.Document) bool {
 	for _, b := range doc.Blocks {
-		if b.Kind != "paragraph" {
+		if b.Kind != "paragraph" || b.Align != "" || len(b.Comments) > 0 {
 			return true
 		}
 		for _, r := range b.Runs {

@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // CurrentVersion is the format this ArcMD writes. Version 2 added the color
@@ -24,9 +25,9 @@ import (
 // headings and list items, cell backgrounds, merged cells and callout
 // emoji, version 5 the page's icon and cover, version 6 scripts, image widths
 // and footnotes, version 7 hand-drawn text annotations, version 8 toggle
-// blocks and the word goal. Older documents are read and migrated in memory, and written back
-// as the current version only when edited.
-const CurrentVersion = 8
+// blocks and the word goal, version 9 keyboard key marks. Older documents are
+// read and migrated in memory, and written back as the current version only when edited.
+const CurrentVersion = 9
 
 // CoverGradients are the covers drawn rather than pictured, as
 // "gradient:name" in Document.Cover.
@@ -75,6 +76,7 @@ type Style struct {
 	Underline bool   `json:"underline,omitempty"`
 	Strike    bool   `json:"strike,omitempty"`
 	Code      bool   `json:"code,omitempty"`
+	Kbd       bool   `json:"kbd,omitempty"` // Keyboard key mark (version 9).
 	Link      string `json:"link,omitempty"`
 	// Color and Highlight name a text color and a highlight, one of
 	// TextColors and TextHighlights (version 3).
@@ -99,20 +101,29 @@ type ListPlacement struct {
 	Item  bool // an otherwise empty item represented by its content block
 }
 
+// InlineComment preserves an inline HTML comment ("<!-- ... -->") hidden from
+// rendered prose at UTF-16 Offset within a leaf block's text so edits elsewhere
+// in the block never drop the comment on Markdown export (version 9).
+type InlineComment struct {
+	Offset int    `json:"offset"`
+	Text   string `json:"text"`
+}
+
 type Block struct {
-	MapList    *ListPlacement `json:"-"`
-	ImageWidth float32        `json:"imageWidth,omitempty"` // Preferred DIP width; zero is natural.
-	NoteLabel  string         `json:"noteLabel,omitempty"`  // Footnote definition label (version 6).
-	ID         string         `json:"id"`
-	Kind       string         `json:"kind"`
-	Runs       []Run          `json:"runs,omitempty"`
-	Level      int            `json:"level,omitempty"`
-	Indent     int            `json:"indent,omitempty"`
-	Checked    bool           `json:"checked,omitempty"`
-	Language   string         `json:"language,omitempty"`
-	URL        string         `json:"url,omitempty"`
-	Align      string         `json:"align,omitempty"`
-	Widths     []float32      `json:"widths,omitempty"`
+	MapList    *ListPlacement  `json:"-"`
+	ImageWidth float32         `json:"imageWidth,omitempty"` // Preferred DIP width; zero is natural.
+	NoteLabel  string          `json:"noteLabel,omitempty"`  // Footnote definition label (version 6).
+	ID         string          `json:"id"`
+	Kind       string          `json:"kind"`
+	Runs       []Run           `json:"runs,omitempty"`
+	Comments   []InlineComment `json:"comments,omitempty"` // Preserved inline HTML comments (version 9).
+	Level      int             `json:"level,omitempty"`
+	Indent     int             `json:"indent,omitempty"`
+	Checked    bool            `json:"checked,omitempty"`
+	Language   string          `json:"language,omitempty"`
+	URL        string          `json:"url,omitempty"`
+	Align      string          `json:"align,omitempty"`
+	Widths     []float32       `json:"widths,omitempty"`
 	// Color is a callout's color, one of CalloutColors (version 2).
 	Color string `json:"color,omitempty"`
 	// Folded hides what a heading or list item holds (version 4).
@@ -196,6 +207,7 @@ func (b *Block) Text() string {
 func (b *Block) Clone() *Block {
 	out := *b
 	out.Runs = append([]Run(nil), b.Runs...)
+	out.Comments = append([]InlineComment(nil), b.Comments...)
 	out.Widths = append([]float32(nil), b.Widths...)
 	if b.Children != nil {
 		out.Children = make([]*Block, len(b.Children))
@@ -365,8 +377,31 @@ func (d *Document) migrate() error {
 		}
 		return false
 	}
-	if v8(d.Blocks) || d.Goal != 0 {
+	if d.Version < 8 && (v8(d.Blocks) || d.Goal != 0) {
 		return errors.New("document: toggle blocks and word goals require version 8")
+	}
+	var v9 func([]*Block) bool
+	v9 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b == nil {
+				continue
+			}
+			if len(b.Comments) > 0 {
+				return true
+			}
+			for _, r := range b.Runs {
+				if r.Style.Kbd {
+					return true
+				}
+			}
+			if v9(b.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	if d.Version < 9 && v9(d.Blocks) {
+		return errors.New("document: keyboard keys and inline comments require version 9")
 	}
 	d.Version = CurrentVersion
 	return nil
@@ -457,11 +492,20 @@ func (dh *docHasher) runs(runs []Run) {
 		dh.bool(st.Underline)
 		dh.bool(st.Strike)
 		dh.bool(st.Code)
+		dh.bool(st.Kbd)
 		dh.str(st.Link)
 		dh.str(st.Color)
 		dh.str(st.Highlight)
 		dh.str(st.Annotation)
 		dh.str(st.AnnotationColor)
+	}
+}
+
+func (dh *docHasher) comments(comments []InlineComment) {
+	dh.uint64(uint64(len(comments)))
+	for i := range comments {
+		dh.uint64(uint64(comments[i].Offset))
+		dh.str(comments[i].Text)
 	}
 }
 
@@ -489,6 +533,9 @@ func (dh *docHasher) block(b *Block, includeLeafRuns bool, leafOverrides map[str
 	dh.str(b.Kind)
 	if len(b.Children) > 0 {
 		dh.runs(b.Runs)
+		if len(b.Comments) > 0 {
+			dh.comments(b.Comments)
+		}
 	} else if includeLeafRuns {
 		runs := b.Runs
 		if len(leafOverrides) > 0 {
@@ -497,6 +544,9 @@ func (dh *docHasher) block(b *Block, includeLeafRuns bool, leafOverrides map[str
 			}
 		}
 		dh.runs(runs)
+		if len(b.Comments) > 0 {
+			dh.comments(b.Comments)
+		}
 	}
 	dh.uint64(uint64(b.Level))
 	dh.uint64(uint64(b.Indent))
@@ -525,6 +575,24 @@ func (dh *docHasher) block(b *Block, includeLeafRuns bool, leafOverrides map[str
 func RunsDigest(runs []Run) [16]byte {
 	dh := acquireHasher()
 	dh.runs(runs)
+	sum := dh.h.Sum(dh.buf[:0])
+	var out [16]byte
+	copy(out[:], sum[:16])
+	releaseHasher(dh)
+	return out
+}
+
+// LeafDigest returns a 128-bit fingerprint of a leaf block's editable content
+// (styled runs and inline comments), matching RunsDigest when the block has no
+// inline comments.
+func LeafDigest(b *Block) [16]byte {
+	dh := acquireHasher()
+	if b != nil {
+		dh.runs(b.Runs)
+		if len(b.Comments) > 0 {
+			dh.comments(b.Comments)
+		}
+	}
 	sum := dh.h.Sum(dh.buf[:0])
 	var out [16]byte
 	copy(out[:], sum[:16])
@@ -611,10 +679,10 @@ func SameBlock(a, b *Block) bool {
 		a.Background != b.Background || a.ColSpan != b.ColSpan ||
 		a.RowSpan != b.RowSpan || a.Emoji != b.Emoji ||
 		len(a.Widths) != len(b.Widths) || len(a.Runs) != len(b.Runs) ||
-		len(a.Children) != len(b.Children) {
+		len(a.Comments) != len(b.Comments) || len(a.Children) != len(b.Children) {
 		return false
 	}
-	if !slices.Equal(a.Widths, b.Widths) || !slices.Equal(a.Runs, b.Runs) {
+	if !slices.Equal(a.Widths, b.Widths) || !slices.Equal(a.Runs, b.Runs) || !slices.Equal(a.Comments, b.Comments) {
 		return false
 	}
 	for i := range a.Children {
@@ -724,6 +792,17 @@ func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 			if r.Style.Annotation != "" && !oneOf(r.Style.Annotation, Annotations) ||
 				r.Style.AnnotationColor != "" && (r.Style.Annotation == "" || !oneOf(r.Style.AnnotationColor, TextColors)) {
 				return errors.New("document: invalid annotation")
+			}
+		}
+		if len(b.Comments) > 0 {
+			if len(b.Children) > 0 || !AllowsInlineComments(b.Kind) {
+				return errors.New("document: invalid inline comments")
+			}
+			textLen := Len(blockText(runs))
+			for _, c := range b.Comments {
+				if c.Offset < 0 || c.Offset > textLen || !ValidInlineComment(c.Text) {
+					return errors.New("document: invalid inline comment")
+				}
 			}
 		}
 		switch b.Kind {
@@ -1108,4 +1187,210 @@ func validSpansWithOverrides(table *Block, leafOverrides map[string][]Run) error
 		}
 	}
 	return nil
+}
+
+// AllowsInlineComments reports whether a leaf block of the given kind can carry
+// preserved inline HTML comments.
+func AllowsInlineComments(kind string) bool {
+	switch kind {
+	case "code", "raw", "math", "rule", "image", "table", "row", "columns", "column":
+		return false
+	default:
+		return true
+	}
+}
+
+// ValidInlineComment reports whether s is a single well-formed HTML comment
+// ("<!-- ... -->") with no embedded closing delimiter.
+func ValidInlineComment(s string) bool {
+	return len(s) >= 7 && strings.HasPrefix(s, "<!--") && strings.HasSuffix(s, "-->") && !strings.Contains(s[4:len(s)-3], "-->")
+}
+
+// SplitCommentsAt partitions inline comments at local UTF-16 offset split
+// without duplicating comments on the boundary: offsets <= split stay in left,
+// and offsets > split move to right (rebased so split becomes 0).
+func SplitCommentsAt(comments []InlineComment, split int) (left, right []InlineComment) {
+	if len(comments) == 0 {
+		return nil, nil
+	}
+	for _, c := range comments {
+		if c.Offset <= split {
+			left = append(left, c)
+		} else {
+			right = append(right, InlineComment{Offset: c.Offset - split, Text: c.Text})
+		}
+	}
+	return left, right
+}
+
+func runeU16Len(r rune) int {
+	if r >= 0x10000 {
+		return 2
+	}
+	return 1
+}
+
+func commonPrefixSuffixU16(before, after string) (prefU16, suffU16 int) {
+	bi, ai := 0, 0
+	for bi < len(before) && ai < len(after) {
+		br, bn := utf8.DecodeRuneInString(before[bi:])
+		ar, an := utf8.DecodeRuneInString(after[ai:])
+		if br != ar {
+			break
+		}
+		bi += bn
+		ai += an
+		prefU16 += runeU16Len(br)
+	}
+	bEnd, aEnd := len(before), len(after)
+	for bEnd > bi && aEnd > ai {
+		br, bn := utf8.DecodeLastRuneInString(before[bi:bEnd])
+		ar, an := utf8.DecodeLastRuneInString(after[ai:aEnd])
+		if br != ar {
+			break
+		}
+		bEnd -= bn
+		aEnd -= an
+		suffU16 += runeU16Len(br)
+	}
+	return prefU16, suffU16
+}
+
+// MapBlockRunText applies change to each run of b for which filter returns true
+// (or all runs when filter is nil) and shifts b.Comments so every inline
+// comment stays anchored and within valid UTF-16 bounds.
+func MapBlockRunText(b *Block, filter func(Run) bool, change func(string) string) {
+	if b == nil {
+		return
+	}
+	runStart := 0
+	changed := false
+	for i := range b.Runs {
+		oldText := b.Runs[i].Text
+		oldLen := Len(oldText)
+		if filter != nil && !filter(b.Runs[i]) {
+			runStart += oldLen
+			continue
+		}
+		newText := change(oldText)
+		if newText == oldText {
+			runStart += oldLen
+			continue
+		}
+		changed = true
+		newLen := Len(newText)
+		b.Runs[i].Text = newText
+		if len(b.Comments) > 0 {
+			delta := newLen - oldLen
+			pre, suf := commonPrefixSuffixU16(oldText, newText)
+			a, z := pre, oldLen-suf
+			for ci := range b.Comments {
+				off := b.Comments[ci].Offset
+				switch {
+				case off <= runStart+a:
+				case off >= runStart+z:
+					b.Comments[ci].Offset = off + delta
+				default:
+					localOff := off - runStart
+					prefixText := oldText[:ByteOffset(oldText, localOff)]
+					mapped := Len(change(prefixText))
+					b.Comments[ci].Offset = runStart + max(0, min(newLen, mapped))
+				}
+			}
+		}
+		runStart += newLen
+	}
+	if changed && len(b.Comments) > 0 {
+		totalLen := Len(b.Text())
+		for ci := range b.Comments {
+			b.Comments[ci].Offset = max(0, min(totalLen, b.Comments[ci].Offset))
+		}
+	}
+}
+
+// ShiftComments updates inline comment offsets when local UTF-16 range [a, z)
+// is replaced by inserted UTF-16 code units, producing a block of maxLen units.
+func ShiftComments(comments []InlineComment, a, z, inserted, maxLen int) []InlineComment {
+	if len(comments) == 0 {
+		return nil
+	}
+	delta := inserted - (z - a)
+	var out []InlineComment
+	for _, c := range comments {
+		if z > a && c.Offset > a && c.Offset < z {
+			continue
+		}
+		if c.Offset > a || (z > a && c.Offset >= z) {
+			c.Offset += delta
+		}
+		c.Offset = max(0, min(maxLen, c.Offset))
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// SliceComments returns inline comments inside local UTF-16 range [a, z],
+// rebased so offset a becomes 0.
+func SliceComments(comments []InlineComment, a, z int) []InlineComment {
+	if len(comments) == 0 || z < a {
+		return nil
+	}
+	var out []InlineComment
+	for _, c := range comments {
+		if c.Offset >= a && c.Offset <= z {
+			out = append(out, InlineComment{Offset: c.Offset - a, Text: c.Text})
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// MergeComments appends right's comments shifted by leftLen onto left.
+func MergeComments(left []InlineComment, leftLen int, right []InlineComment) []InlineComment {
+	if len(left) == 0 && len(right) == 0 {
+		return nil
+	}
+	out := make([]InlineComment, 0, len(left)+len(right))
+	out = append(out, left...)
+	for _, c := range right {
+		out = append(out, InlineComment{Offset: c.Offset + leftLen, Text: c.Text})
+	}
+	return out
+}
+
+// SplitCommentsByNewline distributes inline comments across '\n'-separated
+// lines of text, rebasing each comment to its destination line's start.
+func SplitCommentsByNewline(text string, comments []InlineComment) [][]InlineComment {
+	type seg struct{ start, end int }
+	var segs []seg
+	pos := 0
+	for {
+		nl := strings.IndexByte(text, '\n')
+		if nl < 0 {
+			segs = append(segs, seg{pos, pos + Len(text)})
+			break
+		}
+		end := pos + Len(text[:nl])
+		segs = append(segs, seg{pos, end})
+		pos = end + 1
+		text = text[nl+1:]
+	}
+	out := make([][]InlineComment, len(segs))
+	for _, c := range comments {
+		idx := len(segs) - 1
+		for i, s := range segs {
+			if c.Offset <= s.end {
+				idx = i
+				break
+			}
+		}
+		off := max(0, min(segs[idx].end-segs[idx].start, c.Offset-segs[idx].start))
+		out[idx] = append(out[idx], InlineComment{Offset: off, Text: c.Text})
+	}
+	return out
 }

@@ -98,6 +98,9 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 			if sub.Item(i18n.T("下标")).Checked(style.Script == "sub").Chosen() {
 				e.SetScript("sub")
 			}
+			if sub.Item(i18n.T("键盘按键")).Checked(style.Kbd).Chosen() {
+				e.Wrap("<kbd>")
+			}
 		})
 		m.Submenu(i18n.T("手绘标注"), func(sub *ui.Menu) {
 			for _, name := range document.Annotations {

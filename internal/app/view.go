@@ -69,7 +69,7 @@ func (a *App) View(c *ui.Context) {
 	a.syncWatches()
 	post := a.asyncPost()
 	for _, d := range a.residentDocuments() {
-		a.withDocument(d, func() { d.autosaveWith(c, post); a.followTitle(); a.syncExcerpts(a.doc) })
+		a.withDocument(d, func() { d.autosaveWith(c, post); a.syncSavedSearch(d); a.followTitle(); a.syncExcerpts(a.doc) })
 	}
 	for _, n := range a.notices {
 		c.Toast(n)

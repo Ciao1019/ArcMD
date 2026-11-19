@@ -27,7 +27,7 @@ func TestReplaceAcrossDocumentsAndUndo(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := vault.Write(root(a), "Broken.arcmd", `{"format":"arcmd","version":9,"blocks":[]}`); err != nil {
+	if err := vault.Write(root(a), "Broken.arcmd", `{"format":"arcmd","version":99,"blocks":[]}`); err != nil {
 		t.Fatal(err)
 	}
 	a.refreshTree()

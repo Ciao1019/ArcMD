@@ -23,7 +23,7 @@ func TestAnnotationEditUndoAndRoundTrip(t *testing.T) {
 		t.Fatal("round trip", err)
 	}
 	// An older version has no annotations: one that claims them is damaged.
-	if _, err := Decode(strings.Replace(s, `"version": 8`, `"version": 6`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 6`, 1)); err == nil {
 		t.Fatal("accepted annotations in v6")
 	}
 	// Taking the mark away clears its color and merges the runs again.

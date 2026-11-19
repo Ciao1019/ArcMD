@@ -689,6 +689,7 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("插入脚注"), "", after(ed.InsertFootnote))
 	cmd(i18n.T("上标"), "", after(func() { ed.SetScript("sup") }))
 	cmd(i18n.T("下标"), "", after(func() { ed.SetScript("sub") }))
+	cmd(i18n.T("键盘按键"), "", after(func() { ed.Wrap("<kbd>") }))
 	if ed.Doc.Icon == "" {
 		cmd(i18n.T("添加页面图标"), "", ed.EditPageIcon)
 	} else {

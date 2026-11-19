@@ -98,6 +98,7 @@ a { color: #336df4; }
 blockquote { margin: .8em 0; padding: .2em 1em; border-left: 3px solid #dee0e3; color: #646a73; }
 pre { background: #f5f6f7; border-radius: 8px; padding: 14px 16px; overflow: auto; font-size: 14px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #f2f3f5; border-radius: 4px; padding: .1em .3em; }
+kbd { font: 500 0.85em/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fff; color: #1f2329; border: 1px solid #d0d7de; border-bottom-width: 2px; border-radius: 5px; padding: .12em .4em; box-shadow: inset 0 -1px 0 #d0d7de; }
 pre code { background: none; padding: 0; }
 table { border-collapse: collapse; margin: .8em 0; }
 th, td { border: 1px solid #dee0e3; padding: 6px 12px; text-align: left; }
@@ -109,6 +110,7 @@ summary { cursor: pointer; }
 @media (prefers-color-scheme: dark) {
   body { background: #1f2023; color: #e3e4e7; }
   pre, th, code { background: #2b2c30; }
+  kbd { background: #2b2c30; color: #e3e4e7; border-color: #46484f; box-shadow: inset 0 -1px 0 #46484f; }
   blockquote { border-color: #3a3b40; color: #a6a8ad; }
   th, td, hr { border-color: #3a3b40; }
   a { color: #6b9bff; }

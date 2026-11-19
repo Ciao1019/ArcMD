@@ -288,7 +288,10 @@ func (a *App) replaceDoc(text string) {
 	} else {
 		d.ed.Scroll = old.ed.Scroll
 	}
+	a.search.writeSeq++
+	d.savedSeq = a.search.writeSeq
 	a.replaceReferences(old, d)
+	a.refreshSearch()
 }
 
 // closeMissing closes the open document whose file is gone.
@@ -326,6 +329,7 @@ func (a *App) keepMine() {
 		a.notify("保存 %s 失败。%v", d.title(), err)
 		return
 	}
+	a.syncSavedSearch(d)
 	a.refreshTree()
 }
 
