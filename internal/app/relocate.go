@@ -141,11 +141,15 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 				if folderMode {
 					destDir, useFolder = attachmentFolder(dst), true
 					clean := path.Clean(strings.ReplaceAll(unescapeImagePath(old), `\`, "/"))
+					for strings.HasPrefix(clean, "../") {
+						clean = strings.TrimPrefix(clean, "../")
+					}
+					orig = clean
 					switch {
+					case attachmentFolder(src) != "" && attachmentFolder(src) != "." && strings.HasPrefix(asset, attachmentFolder(src)+"/"):
+						orig = strings.TrimPrefix(asset, attachmentFolder(src)+"/")
 					case strings.HasPrefix(clean, assetsDir+"/"):
 						orig = strings.TrimPrefix(clean, assetsDir+"/")
-					case attachmentFolder(src) != "" && strings.HasPrefix(clean, attachmentFolder(src)+"/"):
-						orig = strings.TrimPrefix(clean, attachmentFolder(src)+"/")
 					}
 				}
 				fileRel, made, firstUsed, copyErr := publishCopy(dst.Root, destDir, orig, data, useFolder)
@@ -347,6 +351,19 @@ func relocateText(rel, text string, urls map[string]string) (string, error) {
 // first candidate was used.
 func publishCopy(root, destDir, original string, data []byte, folderMode bool) (fileRel, made string, firstUsed bool, err error) {
 	decoded := unescapeImagePath(original)
+	// Inside an attachment folder the copy keeps the name the URL points
+	// at, minus parent segments: ../top.png names the space's root of the
+	// old arrangement, and the copy belongs at the folder's top, never
+	// outside it.
+	cleaned := path.Clean(decoded)
+	if folderMode {
+		for strings.HasPrefix(cleaned, "../") {
+			cleaned = cleaned[len("../"):]
+		}
+		if cleaned == ".." {
+			cleaned = "."
+		}
+	}
 	ext := vault.FileExt(decoded)
 	stem := strings.TrimSuffix(assetName(path.Base(decoded)), ext)
 	numbered := func(i int) string {
@@ -358,8 +375,8 @@ func publishCopy(root, destDir, original string, data []byte, folderMode bool) (
 	}
 	for i := 0; ; i++ {
 		rel := numbered(i)
-		if i == 0 {
-			rel = path.Join(destDir, path.Clean(decoded))
+		if i == 0 && cleaned != "." && cleaned != "" {
+			rel = path.Join(destDir, cleaned)
 		}
 		full, resErr := vault.Resolve(root, rel)
 		if resErr != nil {

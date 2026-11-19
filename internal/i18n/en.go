@@ -808,6 +808,7 @@ var en = map[string]string{
 	"附件目录必须在空间文件夹内。":         "The attachments folder must be inside the space's folder.",
 	"附件目录已设为「%s」。":           "Attachments folder set to \u201c%s\u201d.",
 	"恢复默认附件目录":               "Reset Attachments Folder",
+	"更新图片引用失败。%v":            "Could not update image references. %v",
 	"文档旁的 assets":            "assets beside each document",
 	"文档旁的 assets（默认）":        "assets beside each document (default)",
 	"选择文档":                   "Choose Document",

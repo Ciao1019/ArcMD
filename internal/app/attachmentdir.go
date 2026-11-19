@@ -2,6 +2,7 @@ package app
 
 import (
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,6 +29,19 @@ type imageKey struct {
 type resolvedImage struct {
 	full string
 	err  error
+}
+
+// attachmentRelink serializes scans for a space. Moves received during a
+// scan are retained together, so a subsequent scan can follow chained moves.
+type attachmentRelink struct {
+	root    string
+	moves   map[string]string
+	running bool
+	again   bool
+}
+
+type attachmentRewrite struct {
+	rel, before, after string
 }
 
 // attachmentFolder is the folder the space keeps its attachments in, as a
@@ -159,7 +173,11 @@ func (a *App) setAttachmentsFolder(sp *space.Space, dir string) {
 	}
 	a.saveState()
 	a.invalidateResolvedImages()
-	a.relinkAttachments(sp, nil)
+	delete(a.attachmentRelinks, sp.ID)
+	delete(a.pageTrees, sp.ID)
+	if sp == a.state.ActiveSpace() {
+		a.refreshTree()
+	}
 	label := sp.AttachmentsDir
 	if label == "" {
 		label = i18n.T("文档旁的 assets")
@@ -171,9 +189,8 @@ func (a *App) setAttachmentsFolder(sp *space.Space, dir string) {
 // folder now, as space-relative paths of existing files, best first: the
 // path the URL names under the folder, its bare name, an assets/ prefix
 // stripped, and finally any file of that name in the folder, shallowest and
-// exact-case first. A document is rewritten only when the list holds
-// exactly one file, so two same-named pictures never bind a document to
-// another document's screenshot.
+// exact-case first. These candidates are for reading only; rewriting needs
+// a recorded move, since a unique basename does not establish ownership.
 func attachmentMatches(sp *space.Space, root, url string) []string {
 	folder := attachmentFolder(sp)
 	if folder == "" || sp.IsExternal() {
@@ -280,26 +297,6 @@ func findInAttachmentFolder(root, folder, name string) []string {
 	return out
 }
 
-// literalImageExists reports whether url still loads where the document
-// points, without the attachment-folder fallback: relative to the document,
-// or (with no parent segment) relative to the space's root.
-func literalImageExists(root, docRel, url string) bool {
-	if direct, err := localImageFile(root, docRel, url); err == nil {
-		if info, stErr := os.Stat(direct); stErr == nil && !info.IsDir() {
-			return true
-		}
-	}
-	decoded := unescapeImagePath(url)
-	decoded = strings.ReplaceAll(decoded, `\`, "/")
-	if decoded == "" || path.IsAbs(decoded) || strings.ContainsAny(decoded, `:`+"\x00") || hasParentSegment(decoded) {
-		return false
-	}
-	if _, ok := existingFile(root, decoded); ok {
-		return true
-	}
-	return false
-}
-
 // renameMoves collects the real file moves a batch of watch events made, as
 // space-relative old → new paths, so relocations follow where files went
 // instead of guessing by name. The dot-named temporaries of ArcMD's own
@@ -327,7 +324,11 @@ func renameMoves(sp *space.Space, events []mygo.FileEvent) map[string]string {
 		if moves == nil {
 			moves = map[string]string{}
 		}
-		moves[from] = to
+		if previous, ok := moves[from]; ok && previous != to {
+			moves[from] = "" // a reused source path cannot identify one old file
+		} else {
+			moves[from] = to
+		}
 	}
 	return moves
 }
@@ -336,11 +337,33 @@ func renameMoves(sp *space.Space, events []mygo.FileEvent) map[string]string {
 // itself, or the folder holding it, went from one place to another. The
 // most specific move wins.
 func moveTarget(moves map[string]string, rel string) (string, bool) {
+	seen := map[string]bool{}
+	used := map[string]bool{}
+	current := rel
+	for !seen[current] {
+		seen[current] = true
+		next, from := singleMoveTarget(moves, current, used)
+		if from == "" {
+			return current, current != rel
+		}
+		if next == "" {
+			return "", false
+		}
+		used[from] = true
+		current = next
+	}
+	return "", false // a cyclic batch cannot identify a destination
+}
+
+func singleMoveTarget(moves map[string]string, rel string, used map[string]bool) (string, string) {
 	if len(moves) == 0 || rel == "" {
-		return "", false
+		return "", ""
 	}
 	bestFrom, bestTo := "", ""
 	for from, to := range moves {
+		if used[from] {
+			continue
+		}
 		var cand string
 		switch {
 		case rel == from:
@@ -354,21 +377,21 @@ func moveTarget(moves map[string]string, rel string) (string, bool) {
 			bestFrom, bestTo = from, cand
 		}
 	}
-	return bestTo, bestFrom != ""
+	return bestTo, bestFrom
 }
 
-// attachmentRelocations maps the image URLs of a document that no longer
-// load where they point to the place they now live under the space's
-// attachment folder. A URL is rewritten only on solid ground: a recorded
-// move that carried its old file there, or exactly one file of its name in
-// the folder. Empty when nothing moved or no folder is configured.
-func (a *App) attachmentRelocations(sp *space.Space, rel string, urls []string, moves map[string]string) map[string]string {
-	if attachmentFolder(sp) == "" || sp.IsExternal() {
+// attachmentRelocations follows recorded moves only. A pre-existing broken
+// reference must never be repaired using another document's same-named file.
+func attachmentRelocations(sp *space.Space, rel string, urls []string, moves map[string]string) map[string]string {
+	if attachmentFolder(sp) == "" || sp.IsExternal() || len(moves) == 0 {
 		return nil
 	}
 	root, docRel, err := fileLocation(sp, rel)
 	if err != nil {
 		return nil
+	}
+	if canonical, err := filepath.EvalSymlinks(root); err == nil {
+		root = canonical
 	}
 	docDir := path.Dir(filepath.ToSlash(docRel))
 	var moved map[string]string
@@ -379,48 +402,33 @@ func (a *App) attachmentRelocations(sp *space.Space, rel string, urls []string, 
 		moved[url] = to
 	}
 	for _, url := range urls {
-		if url == "" || literalImageExists(root, docRel, url) {
+		direct, err := localImageFile(root, docRel, url)
+		if err != nil {
 			continue
 		}
-		// Where the reference pointed before the move: relative to the
-		// document, or (as some older documents write it) to the root.
-		var oldPlaces []string
-		if direct, dErr := localImageFile(root, docRel, url); dErr == nil {
-			if asset, rErr := filepath.Rel(root, direct); rErr == nil {
-				if asset = filepath.ToSlash(asset); asset != ".." && !strings.HasPrefix(asset, "../") {
-					oldPlaces = append(oldPlaces, asset)
-				}
-			}
-		}
-		decoded := unescapeImagePath(url)
-		if !hasParentSegment(decoded) {
-			if full, rErr := vault.Resolve(root, decoded); rErr == nil {
-				if asset, rErr := filepath.Rel(root, full); rErr == nil {
-					oldPlaces = append(oldPlaces, filepath.ToSlash(asset))
-				}
-			}
-		}
-		relocated := false
-		for _, old := range oldPlaces {
-			to, ok := moveTarget(moves, old)
-			if !ok {
-				continue
-			}
-			if _, ok := existingFile(root, to); ok {
-				if next := docRelativeURL(docDir, to); next != url {
-					set(url, next)
-				}
-				relocated = true
-				break
-			}
-		}
-		if relocated {
+		if info, err := os.Stat(direct); err == nil && !info.IsDir() {
 			continue
 		}
-		if matches := attachmentMatches(sp, root, url); len(matches) == 1 {
-			if next := docRelativeURL(docDir, matches[0]); next != url {
-				set(url, next)
-			}
+		// Only the document-relative path identifies the original file.
+		// A legacy root-relative or basename fallback is safe for reading,
+		// but cannot distinguish a missing local picture from another one.
+		old, err := filepath.Rel(root, direct)
+		if err != nil {
+			continue
+		}
+		old = filepath.ToSlash(old)
+		if old == ".." || strings.HasPrefix(old, "../") {
+			continue
+		}
+		to, ok := moveTarget(moves, old)
+		if !ok {
+			continue
+		}
+		if _, ok := existingFile(root, to); !ok {
+			continue
+		}
+		if next := docRelativeURL(docDir, to); next != url {
+			set(url, next)
 		}
 	}
 	return moved
@@ -429,11 +437,11 @@ func (a *App) attachmentRelocations(sp *space.Space, rel string, urls []string, 
 // relinkAttachments rewrites the image references of the space's documents
 // to the space's attachment folder once their files moved there by hand.
 // The documents kept open are rebased in place (their autosave writes the
-// text); the others are scanned in the background and rewritten on disk,
-// keeping a version of the previous content in the document's history.
-// Nothing is written when no reference needs it.
+// text). Enumeration, reading and parsing of closed documents run off the
+// UI thread; each proposed write is checked again on the UI thread so a
+// document opened meanwhile cannot be changed behind its editor.
 func (a *App) relinkAttachments(sp *space.Space, moves map[string]string) {
-	if sp == nil || sp.IsExternal() || attachmentFolder(sp) == "" {
+	if sp == nil || sp.IsExternal() || attachmentFolder(sp) == "" || len(moves) == 0 {
 		return
 	}
 	if folder, ok := folderPath(sp.Root, attachmentFolder(sp)); !ok || !isDir(folder) {
@@ -448,35 +456,84 @@ func (a *App) relinkAttachments(sp *space.Space, moves map[string]string) {
 		if d.loadErr != nil || d.isWhiteboard() || d.source || d.ed.ReadOnly {
 			continue
 		}
-		if moved := a.attachmentRelocations(sp, d.rel, d.ed.ImageURLs(), moves); len(moved) > 0 {
+		if moved := attachmentRelocations(sp, d.rel, d.ed.ImageURLs(), moves); len(moved) > 0 {
 			d.ed.RelocateImages(moved)
 		}
 	}
-	docs, err := vault.List(sp.Root)
-	if err != nil {
+	if a.attachmentRelinks == nil {
+		a.attachmentRelinks = map[string]*attachmentRelink{}
+	}
+	job := a.attachmentRelinks[sp.ID]
+	if job == nil || job.root != sp.Root {
+		job = &attachmentRelink{root: sp.Root, moves: map[string]string{}}
+		a.attachmentRelinks[sp.ID] = job
+	}
+	for from, to := range moves {
+		if previous, ok := job.moves[from]; ok && previous != to {
+			job.moves[from] = ""
+		} else {
+			job.moves[from] = to
+		}
+	}
+	if job.running {
+		job.again = true
 		return
 	}
-	type closed struct{ rel, text string }
-	var pending []closed
-	for _, info := range docs {
-		if resident[info.Path] || vault.IsWhiteboard(info.Path) {
-			continue
-		}
-		text, err := readFile(sp, info.Path)
-		if err != nil {
-			continue
-		}
-		pending = append(pending, closed{info.Path, text})
+	job.running = true
+	// Workers own immutable inputs and never access live application state.
+	snapshot := space.Space{ID: sp.ID, Root: sp.Root, AttachmentsDir: sp.AttachmentsDir}
+	moves = maps.Clone(job.moves)
+	post := a.runAsync
+	if post == nil && a.win != nil {
+		post = a.win.Update
 	}
-	apply := func() {
-		for _, p := range pending {
-			a.relinkClosedDoc(sp, p.rel, p.text, moves)
+	valid := func() bool {
+		return a.attachmentRelinks[sp.ID] == job && a.state.Get(sp.ID) == sp &&
+			sp.Root == snapshot.Root && sp.AttachmentsDir == snapshot.AttachmentsDir
+	}
+	deliver := func(change attachmentRewrite) {
+		if !valid() {
+			return
+		}
+		a.applyAttachmentRewrite(sp, change)
+	}
+	done := func() {
+		if a.attachmentRelinks[sp.ID] != job {
+			return
+		}
+		delete(a.attachmentRelinks, sp.ID)
+		if job.again && a.state.Get(sp.ID) == sp && sp.Root == snapshot.Root {
+			a.relinkAttachments(sp, job.moves)
 		}
 	}
-	if a.win != nil {
-		go apply()
+	scan := func() {
+		docs, _ := vault.List(snapshot.Root)
+		for _, info := range docs {
+			if resident[info.Path] || vault.IsWhiteboard(info.Path) {
+				continue
+			}
+			text, err := readFile(&snapshot, info.Path)
+			if err != nil {
+				continue
+			}
+			if change, ok := prepareAttachmentRewrite(&snapshot, info.Path, text, moves); ok {
+				if post != nil {
+					post(func() { deliver(change) })
+				} else {
+					deliver(change)
+				}
+			}
+		}
+		if post != nil {
+			post(done)
+		} else {
+			done()
+		}
+	}
+	if post != nil {
+		go scan()
 	} else {
-		apply()
+		scan() // headless tests without a main-thread dispatcher
 	}
 }
 
@@ -486,14 +543,21 @@ func (a *App) relinkAttachments(sp *space.Space, moves map[string]string) {
 // change made meanwhile is never clobbered, and the content as it was is
 // kept as a version first.
 func (a *App) relinkClosedDoc(sp *space.Space, rel, text string, moves map[string]string) {
+	if change, ok := prepareAttachmentRewrite(sp, rel, text, moves); ok {
+		a.applyAttachmentRewrite(sp, change)
+	}
+}
+
+func prepareAttachmentRewrite(sp *space.Space, rel, text string, moves map[string]string) (attachmentRewrite, bool) {
 	// Pictures are ![alt](url), ![[obsidian]] or, in legacy .arcmd JSON,
 	// "image" blocks.
-	if !strings.Contains(text, "![") && !strings.Contains(text, `"image"`) {
-		return
+	if !strings.Contains(text, "![") && !strings.Contains(text, `"image"`) &&
+		!strings.Contains(text, "cover:") && !strings.Contains(text, `"cover"`) {
+		return attachmentRewrite{}, false
 	}
 	doc, err := imageDocument(rel, text)
 	if err != nil {
-		return
+		return attachmentRewrite{}, false
 	}
 	var urls []string
 	doc.MapImages(func(url string) string {
@@ -503,25 +567,42 @@ func (a *App) relinkClosedDoc(sp *space.Space, rel, text string, moves map[strin
 		return url
 	})
 	if len(urls) == 0 {
-		return
+		return attachmentRewrite{}, false
 	}
-	moved := a.attachmentRelocations(sp, rel, urls, moves)
+	moved := attachmentRelocations(sp, rel, urls, moves)
 	if len(moved) == 0 {
-		return
+		return attachmentRewrite{}, false
 	}
 	out, err := relocateText(rel, text, moved)
 	if err != nil || out == text {
+		return attachmentRewrite{}, false
+	}
+	return attachmentRewrite{rel: rel, before: text, after: out}, true
+}
+
+func (a *App) applyAttachmentRewrite(sp *space.Space, change attachmentRewrite) {
+	if a.residentDocument(sp.ID, change.rel) != nil {
 		return
 	}
-	if now, err := readFile(sp, rel); err != nil || now != text {
+	if now, err := readFile(sp, change.rel); err != nil || now != change.before {
 		return // the reader changed it meanwhile
 	}
-	root, name, err := fileLocation(sp, rel)
+	root, name, err := fileLocation(sp, change.rel)
 	if err != nil {
 		return
 	}
-	_ = history.Record(root, rel, text, time.Now(), true)
-	_ = vault.Write(root, name, out)
+	if err := history.Record(root, change.rel, change.before, time.Now(), true); err != nil {
+		a.notify("更新图片引用失败。%v", err)
+		return
+	}
+	if now, err := readFile(sp, change.rel); err != nil || now != change.before {
+		return
+	}
+	if err := vault.Write(root, name, change.after); err != nil {
+		a.notify("更新图片引用失败。%v", err)
+		return
+	}
+	a.invalidateResolvedImages()
 }
 
 func isDir(full string) bool {
@@ -568,22 +649,10 @@ func (a *App) pruneSelfWrites() {
 	}
 }
 
-// isAttachmentName reports whether a created file is the kind an attachment
-// folder holds: a picture or a whiteboard. Documents are left out, so
-// making one never starts a relink scan.
-func isAttachmentName(p string) bool {
-	ext := strings.ToLower(vault.FileExt(p))
-	if slices.Contains(imageExtensions, strings.TrimPrefix(ext, ".")) {
-		return true
-	}
-	return ext == vault.ExtWhiteboard || ext == vault.ExtWhiteboardRaw
-}
-
 // attachmentsTouched reports whether a batch of watch events may have moved
 // attachments into the space's folder, so the documents should be relinked.
-// ArcMD's own writes are left out: plain saves (FileWrite), its atomic
-// publishes (renames of dot-named temporaries) and the attachment files it
-// just wrote.
+// Only real renames establish the old-to-new relationship. Creates, plain
+// saves and ArcMD's atomic publishes never initiate a scan.
 func (a *App) attachmentsTouched(sp *space.Space, events []mygo.FileEvent) bool {
 	folder := attachmentFolder(sp)
 	if folder == "" || sp.IsExternal() {
@@ -608,19 +677,15 @@ func (a *App) attachmentsTouched(sp *space.Space, events []mygo.FileEvent) bool 
 	a.pruneSelfWrites()
 	for _, e := range events {
 		switch e.Op {
-		case mygo.FileWrite, mygo.FileRemove:
-			continue
 		case mygo.FileRename:
 			if e.OldPath == "" || strings.HasPrefix(path.Base(e.OldPath), ".") {
-				continue
-			}
-		case mygo.FileCreate:
-			if !isAttachmentName(e.Path) {
 				continue
 			}
 			if full, err := vault.Resolve(sp.Root, filepath.ToSlash(e.Path)); err == nil && a.wroteRecently(full) {
 				continue
 			}
+		default:
+			continue // creation alone cannot identify the reference's old file
 		}
 		if under(e.Path) || under(e.OldPath) {
 			return true

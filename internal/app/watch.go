@@ -188,8 +188,17 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 				touched[d] = true
 			}
 		}
-		if e.Op == mygo.FileRename {
+		if e.Op == mygo.FileRename && e.OldPath != "" && !strings.HasPrefix(path.Base(e.OldPath), ".") {
 			a.moved(sp, e.OldPath, e.Path)
+		}
+		if e.Op == mygo.FileRemove && attachmentFolder(sp) != "" && within(sp.AttachmentsDir, e.Path) {
+			if folder, ok := folderPath(sp.Root, sp.AttachmentsDir); ok {
+				if _, err := os.Stat(folder); errors.Is(err, os.ErrNotExist) {
+					sp.SetAttachmentsDir("")
+					delete(a.attachmentRelinks, sp.ID)
+					a.saveState()
+				}
+			}
 		}
 	}
 	if structural {

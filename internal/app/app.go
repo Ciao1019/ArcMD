@@ -122,6 +122,8 @@ type App struct {
 	// selfWrites remembers the files ArcMD just wrote, so its own asset
 	// writes do not trigger attachment relinking.
 	selfWrites map[string]time.Time
+	// attachmentRelinks keeps at most one background scan per space active.
+	attachmentRelinks map[string]*attachmentRelink
 	// history is the documents shown, as a browser's; at is the one
 	// shown now.
 	history []place

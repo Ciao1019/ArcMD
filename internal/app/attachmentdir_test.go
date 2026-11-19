@@ -333,6 +333,7 @@ func TestRelinkKeepsHistorySnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.setAttachmentsFolder(sp, filepath.Join(sp.Root, "附件"))
+	a.filesChanged(sp.ID, []mygo.FileEvent{{Op: mygo.FileRename, OldPath: "assets/pic.png", Path: "附件/pic.png"}})
 	text, err := vault.Read(sp.Root, "Other.md")
 	if err != nil {
 		t.Fatal(err)
@@ -364,9 +365,9 @@ func TestAttachmentsTouchedIgnoresOwnWrites(t *testing.T) {
 	if a.attachmentsTouched(sp, own) {
 		t.Fatal("ArcMD's own writes triggered a relink scan")
 	}
-	// Someone else's new picture does.
-	if !a.attachmentsTouched(sp, []mygo.FileEvent{{Op: mygo.FileCreate, Path: "附件/other.png"}}) {
-		t.Fatal("an external copy into the folder was missed")
+	// A new picture does not identify where any old reference pointed.
+	if a.attachmentsTouched(sp, []mygo.FileEvent{{Op: mygo.FileCreate, Path: "附件/other.png"}}) {
+		t.Fatal("an external copy triggered a scan without a recorded move")
 	}
 	// A real move of the folder or of files into it does.
 	if !a.attachmentsTouched(sp, []mygo.FileEvent{{Op: mygo.FileRename, OldPath: "assets", Path: "附件/assets"}}) {
