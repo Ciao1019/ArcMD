@@ -85,10 +85,11 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	}()
 	for _, d := range docs {
 		target := to + d.rel[len(rel):]
+		targetDir := path.Dir(target)
 		for old := range d.urls {
 			if vault.IsWhiteboard(old) {
 				clean := strings.TrimPrefix(path.Clean(unescapeImagePath(old)), "/")
-				if !strings.HasPrefix(clean, assetsDir+"/") && !strings.Contains(clean, "/"+assetsDir+"/") {
+				if !underAttachmentFolder(clean, assetsDir) && !underAttachmentFolder(clean, attachmentFolder(src)) {
 					continue
 				}
 			}
@@ -101,9 +102,14 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 				return to, copied, relErr
 			}
 			asset = filepath.ToSlash(asset)
-			// Pictures inside a moved folder already live at its new path.
+			// Whether the picture belongs to the space's attachment folder,
+			// and where it ends up: pictures inside a moved folder already
+			// live at its new path, the others stay put.
+			inFolder := underAttachmentFolder(asset, attachmentFolder(src))
+			destRel := asset
 			if !copied && within(asset, sourcePath) {
-				file, resolveErr = vault.Resolve(dst.Root, to+asset[len(sourcePath):])
+				destRel = to + asset[len(sourcePath):]
+				file, resolveErr = vault.Resolve(dst.Root, destRel)
 				if resolveErr != nil {
 					return to, copied, resolveErr
 				}
@@ -115,12 +121,52 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 			if readErr != nil {
 				return to, copied, readErr
 			}
-			newURL, made, copyErr := relocateImage(dst.Root, path.Dir(target), old, data)
-			if copyErr != nil {
-				return to, copied, copyErr
-			}
-			if made != "" {
-				created = append(created, made)
+			var newURL string
+			switch {
+			case src.ID == dst.ID && inFolder:
+				// An attachment of a space with an attachment folder stays
+				// in it; only the URL follows the document's new directory,
+				// so nothing is copied twice.
+				newURL = docRelativeURL(targetDir, destRel)
+			default:
+				// The picture is copied beside the document at its new
+				// place — or into the destination space's attachment folder
+				// when that space has one — under the name it can keep, or
+				// a numbered one when the name is taken by other content.
+				// An assets/ or source-folder prefix has no meaning there
+				// and is left out.
+				folderMode := attachmentFolder(dst) != ""
+				destDir, useFolder := targetDir, false
+				orig := old
+				if folderMode {
+					destDir, useFolder = attachmentFolder(dst), true
+					clean := path.Clean(strings.ReplaceAll(unescapeImagePath(old), `\`, "/"))
+					for strings.HasPrefix(clean, "../") {
+						clean = strings.TrimPrefix(clean, "../")
+					}
+					orig = clean
+					switch {
+					case attachmentFolder(src) != "" && attachmentFolder(src) != "." && strings.HasPrefix(asset, attachmentFolder(src)+"/"):
+						orig = strings.TrimPrefix(asset, attachmentFolder(src)+"/")
+					case strings.HasPrefix(clean, assetsDir+"/"):
+						orig = strings.TrimPrefix(clean, assetsDir+"/")
+					}
+				}
+				fileRel, made, firstUsed, copyErr := publishCopy(dst.Root, destDir, orig, data, useFolder)
+				if copyErr != nil {
+					return to, copied, copyErr
+				}
+				if made != "" {
+					created = append(created, made)
+				}
+				switch {
+				case useFolder:
+					newURL = docRelativeURL(targetDir, fileRel)
+				case firstUsed:
+					newURL = old // the picture sits where the URL points
+				default:
+					newURL = path.Join(assetsDir, path.Base(fileRel))
+				}
 			}
 			d.urls[old] = newURL
 		}
@@ -296,40 +342,67 @@ func relocateText(rel, text string, urls map[string]string) (string, error) {
 	return doc.Encode()
 }
 
-func relocateImage(root, dir, original string, data []byte) (string, string, error) {
+// publishCopy copies data into the folder destDir of root at the document
+// relative path the URL decoded names, or, when that is taken by other
+// content or escapes the space, under a numbered name — inside destDir
+// itself when it is an attachment folder, in its assets folder otherwise.
+// It returns the space-relative file location, the file it created (empty
+// when the file was already there with the same content) and whether the
+// first candidate was used.
+func publishCopy(root, destDir, original string, data []byte, folderMode bool) (fileRel, made string, firstUsed bool, err error) {
 	decoded := unescapeImagePath(original)
+	// Inside an attachment folder the copy keeps the name the URL points
+	// at, minus parent segments: ../top.png names the space's root of the
+	// old arrangement, and the copy belongs at the folder's top, never
+	// outside it.
+	cleaned := path.Clean(decoded)
+	if folderMode {
+		for strings.HasPrefix(cleaned, "../") {
+			cleaned = cleaned[len("../"):]
+		}
+		if cleaned == ".." {
+			cleaned = "."
+		}
+	}
 	ext := vault.FileExt(decoded)
 	stem := strings.TrimSuffix(assetName(path.Base(decoded)), ext)
-	for i := 0; ; i++ {
-		candidate, label := path.Join(dir, decoded), original
-		if i > 0 {
-			label = path.Join(assetsDir, fmt.Sprintf("%s-%d%s", stem, i, ext))
-			candidate = path.Join(dir, label)
+	numbered := func(i int) string {
+		name := fmt.Sprintf("%s-%d%s", stem, i, ext)
+		if folderMode {
+			return path.Join(destDir, name)
 		}
-		full, err := vault.Resolve(root, candidate)
-		if err != nil {
+		return path.Join(destDir, assetsDir, name)
+	}
+	for i := 0; ; i++ {
+		rel := numbered(i)
+		if i == 0 && cleaned != "." && cleaned != "" {
+			rel = path.Join(destDir, cleaned)
+		}
+		full, resErr := vault.Resolve(root, rel)
+		if resErr != nil {
 			if i == 0 {
-				// Parent references may have been readable outside the source
-				// Space. Copy them into assets, never outside the destination.
+				// Parent references may have been readable outside the
+				// source Space. Copy them into the destination, never
+				// outside it.
 				continue
 			}
-			return "", "", err
+			return "", "", false, resErr
 		}
-		old, err := os.ReadFile(full)
-		if err == nil {
+		old, readErr := os.ReadFile(full)
+		if readErr == nil {
 			if bytes.Equal(old, data) {
-				return label, "", nil
+				return rel, "", i == 0, nil
 			}
 			continue
 		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", "", err
+		if !errors.Is(readErr, fs.ErrNotExist) {
+			return "", "", false, readErr
 		}
 		if err := fsutil.CreateFileAtomic(full, data, 0o644); errors.Is(err, fs.ErrExist) {
 			continue
 		} else if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
-		return label, full, nil
+		return rel, full, i == 0, nil
 	}
 }

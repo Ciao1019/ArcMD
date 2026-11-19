@@ -45,7 +45,9 @@ type pageTree struct {
 	err   error
 }
 
-// readTree reads the space's folder in the order the space keeps.
+// readTree reads the space's folder in the order the space keeps. The
+// space's attachment folder stays out, as vault.Tree already hides assets/:
+// it holds pictures and whiteboard files, not documents to open.
 func readTree(sp *space.Space) ([]*vault.Node, error) {
 	if sp.IsExternal() {
 		nodes := vault.Files(sp.ExternalFiles).Tree()
@@ -53,8 +55,37 @@ func readTree(sp *space.Space) ([]*vault.Node, error) {
 		return nodes, nil
 	}
 	nodes, err := vault.Tree(sp.Root)
+	if err == nil {
+		nodes = dropTreeFolder(nodes, attachmentFolder(sp))
+	}
 	arrangeNodes(sp, "", nodes)
 	return nodes, err
+}
+
+// dropTreeFolder hides the space's attachment folder from the tree, and the
+// folders it emptied that lead only to it.
+func dropTreeFolder(nodes []*vault.Node, folder string) []*vault.Node {
+	if folder == "" || folder == "." {
+		return nodes
+	}
+	var filter func(nodes []*vault.Node) []*vault.Node
+	filter = func(nodes []*vault.Node) []*vault.Node {
+		out := make([]*vault.Node, 0, len(nodes))
+		for _, n := range nodes {
+			if n.Path == folder {
+				continue
+			}
+			if n.Dir {
+				n.Children = filter(n.Children)
+				if len(n.Children) == 0 && strings.HasPrefix(folder, n.Path+"/") {
+					continue
+				}
+			}
+			out = append(out, n)
+		}
+		return out
+	}
+	return filter(nodes)
 }
 
 func arrangeNodes(sp *space.Space, dir string, nodes []*vault.Node) {

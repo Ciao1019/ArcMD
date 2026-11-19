@@ -159,6 +159,12 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 	if sp == nil {
 		return
 	}
+	a.invalidateResolvedImages()
+	// Where files moved to, and whether attachments may have moved into the
+	// space's folder — both read before a.moved follows the renames below,
+	// which also updates the space's attachment folder.
+	moves := renameMoves(sp, events)
+	attachmentsMoved := a.attachmentsTouched(sp, events)
 	docs := a.residentDocuments()
 	touched := map[*document]bool{}
 	structural := false
@@ -182,8 +188,17 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 				touched[d] = true
 			}
 		}
-		if e.Op == mygo.FileRename {
+		if e.Op == mygo.FileRename && e.OldPath != "" && !strings.HasPrefix(path.Base(e.OldPath), ".") {
 			a.moved(sp, e.OldPath, e.Path)
+		}
+		if e.Op == mygo.FileRemove && attachmentFolder(sp) != "" && within(sp.AttachmentsDir, e.Path) {
+			if folder, ok := folderPath(sp.Root, sp.AttachmentsDir); ok {
+				if _, err := os.Stat(folder); errors.Is(err, os.ErrNotExist) {
+					sp.SetAttachmentsDir("")
+					delete(a.attachmentRelinks, sp.ID)
+					a.saveState()
+				}
+			}
 		}
 	}
 	if structural {
@@ -196,6 +211,9 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 		if touched[d] {
 			a.withDocument(d, a.checkDisk)
 		}
+	}
+	if attachmentsMoved {
+		a.relinkAttachments(sp, moves)
 	}
 
 }

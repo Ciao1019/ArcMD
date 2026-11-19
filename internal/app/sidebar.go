@@ -949,7 +949,8 @@ func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 }
 
 // spaceEditMenu keeps the three independent editors available from both
-// the header and the space switcher's context menus.
+// the header and the space switcher's context menus, and the folder new
+// attachments go in.
 func (a *App) spaceEditMenu(m *ui.Menu, sp *space.Space) {
 	if m.Item(i18n.T("更改空间图标…")).Chosen() {
 		a.editSpaceProperty(sp, "icon")
@@ -960,6 +961,22 @@ func (a *App) spaceEditMenu(m *ui.Menu, sp *space.Space) {
 	if m.Item(i18n.T("编辑主题颜色…")).Chosen() {
 		a.editSpace(sp)
 	}
+	folder := attachmentFolder(sp)
+	label := folder
+	if label == "" {
+		label = i18n.T("文档旁的 assets")
+	}
+	attachments := m.Submenu(i18n.T("附件目录"), func(sub *ui.Menu) {
+		if sub.Item(i18n.T("文档旁的 assets（默认）")).Radio(folder == "").Chosen() {
+			a.setAttachmentsFolder(sp, "")
+		}
+		sub.Separator()
+		if sub.Item(i18n.T("选择文件夹…")).Chosen() {
+			a.chooseAttachmentsFolder(sp)
+		}
+	})
+	attachments.Subtitle(label)
+	attachments.Disabled(sp.IsExternal())
 }
 
 // spaceBar is the foot of the sidebar, as Arc's: the library at the left,
