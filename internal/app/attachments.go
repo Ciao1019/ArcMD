@@ -198,11 +198,14 @@ func (a *App) writeAssetFor(d *document, dir, name string, data []byte) (string,
 	}
 	// Attachments go beside the document unless the space names a folder of
 	// its own; an external space always keeps them beside the open file.
+	// The URL is relative to the document, so the Markdown also shows the
+	// picture in GitHub, VS Code and the HTML export.
 	writeDir, urlDir := path.Join(dir, assetsDir), assetsDir
+	folderMode := false
 	if d.space.IsExternal() {
 		writeDir = path.Join(path.Dir(nameOnDisk), assetsDir)
 	} else if folder := attachmentFolder(d.space); folder != "" {
-		writeDir, urlDir = folder, folder
+		writeDir, urlDir, folderMode = folder, folder, true
 	}
 	base := assetName(name)
 	ext := vault.FileExt(base)
@@ -228,6 +231,10 @@ func (a *App) writeAssetFor(d *document, dir, name string, data []byte) (string,
 				continue // taken meanwhile
 			}
 			return "", err
+		}
+		a.markSelfWrite(full)
+		if folderMode {
+			rel = docRelativeURL(dir, path.Join(urlDir, name))
 		}
 		return rel, nil
 	}

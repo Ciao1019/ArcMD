@@ -115,6 +115,13 @@ type App struct {
 	overClose, overClosed place
 	spaceScroll           ui.ScrollState
 	spaceBarFor           string
+	// imgResolved caches where image URLs resolved, keyed by document and
+	// URL, so a missing picture does not walk the attachment folder every
+	// frame; dropped whenever files change.
+	imgResolved map[imageKey]resolvedImage
+	// selfWrites remembers the files ArcMD just wrote, so its own asset
+	// writes do not trigger attachment relinking.
+	selfWrites map[string]time.Time
 	// history is the documents shown, as a browser's; at is the one
 	// shown now.
 	history []place
@@ -543,12 +550,37 @@ func (a *App) asyncPost() func(func()) {
 	return nil
 }
 
+// imageResourceFor resolves the picture's file through a cache before the
+// document decodes it. A missing picture keeps its (negative) answer, so a
+// broken reference does not walk the attachments folder again on every
+// frame; the cache is dropped whenever files change.
 func (a *App) imageResourceFor(d *document, url string) editor.ImageResource {
 	if d == nil {
 		return editor.ImageResource{}
 	}
-	return d.imageResourceWith(url, a.asyncPost())
+	key := imageKey{doc: d, url: url}
+	res, ok := a.imgResolved[key]
+	if !ok {
+		full, err := d.localImage(url)
+		res = resolvedImage{full: full, err: err}
+		if a.imgResolved == nil {
+			a.imgResolved = map[imageKey]resolvedImage{}
+		}
+		a.imgResolved[key] = res
+	}
+	if res.err != nil {
+		problem := editor.ImageInvalid
+		if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+			problem = editor.ImageRemote
+		}
+		return editor.ImageResource{Problem: problem}
+	}
+	return d.imageResourceFrom(res.full, url, a.asyncPost())
 }
+
+// invalidateResolvedImages drops the cached picture resolutions, as after a
+// file or folder of the space changed.
+func (a *App) invalidateResolvedImages() { a.imgResolved = nil }
 
 func (a *App) session(id string) *spaceSession {
 	s := a.sessions[id]
@@ -1074,6 +1106,7 @@ func (a *App) moved(sp *space.Space, from, to string) {
 	}
 	_ = history.Move(sp.Root, from, to)
 	a.state.Renamed(sp.ID, from, to)
+	a.invalidateResolvedImages()
 	if a.dragGrab.active && a.dragGrab.space == sp.ID && a.dragGrab.rel == from {
 		a.dragGrab.rel = to
 	}

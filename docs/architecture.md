@@ -176,7 +176,12 @@ Switching documents, switching Spaces and closing the window flush first.
 A space is a folder plus a name, glyph, color and attachments folder, kept in
 `<config>/ArcMD/spaces.json` with the order, the active space, pins and the
 last open document of each. New attachments go to the folder chosen from the
-space's menu; empty keeps the older `assets/` beside each document. The same file keeps bookmarks: places marked in
+space's menu or the command bar; empty keeps the older `assets/` beside each
+document. Image URLs are relative to the document (`../attachments/x.png`
+from a subfolder), so the Markdown also shows them in GitHub, VS Code and the
+HTML export, and moving a document inside the space only recomputes the
+relative path instead of copying the file. The folder is hidden from the
+sidebar tree, follows renames, and is cleared when it is deleted. The same file keeps bookmarks: places marked in
 documents by top-level block ID, with an excerpt that finds the block again
 in a Markdown file read afresh. They live outside the document so marking a
 place never edits or converts it. Switching a space swaps the document list, the
@@ -195,11 +200,18 @@ Local images resolve relative to the document's directory, including URL-encoded
 names and `../images` resources outside its Space. This is a read-only exception:
 resource writes remain inside the destination Space, using `assets/` or the
 space's attachments folder and rebasing native document URLs when a parent
-reference would escape. When a space names an attachments folder, references
-that no longer resolve where the document points are also looked up there; file
-watch events moving old folders into it rewrite the documents' references
-(`relinkAttachments`), while reading alone already resolves them, so opening a
-document never writes it. GIFs show their first frame.
+reference would escape. Cross-space moves copy pictures into the destination
+space's attachment folder (numbering conflicts inside it). When a space names
+an attachments folder, references that no longer resolve where the document
+points are also looked up there; real move and create watch events rewrite the
+documents' references (`relinkAttachments`) — ArcMD's own saves and asset
+writes never trigger a scan, rewrites follow the events' old→new paths and
+only fall back to name matching when exactly one file matches, closed
+documents are rescanned and rewritten in the background with a kept history
+snapshot of the previous content — while reading alone already resolves them,
+so opening a document never writes it. Missing pictures keep their negative
+resolution in a cache cleared on file events, so a broken reference does not
+walk the folder every frame. GIFs show their first frame.
 
 `editor/images.go` owns image layout, recovery cards, focus targets and the
 image preview. Figures follow Textus: natural size, centered in the column,

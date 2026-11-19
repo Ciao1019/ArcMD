@@ -159,6 +159,12 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 	if sp == nil {
 		return
 	}
+	a.invalidateResolvedImages()
+	// Where files moved to, and whether attachments may have moved into the
+	// space's folder — both read before a.moved follows the renames below,
+	// which also updates the space's attachment folder.
+	moves := renameMoves(sp, events)
+	attachmentsMoved := a.attachmentsTouched(sp, events)
 	docs := a.residentDocuments()
 	touched := map[*document]bool{}
 	structural := false
@@ -197,8 +203,8 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 			a.withDocument(d, a.checkDisk)
 		}
 	}
-	if attachmentsTouched(sp, events) {
-		a.relinkAttachments(sp)
+	if attachmentsMoved {
+		a.relinkAttachments(sp, moves)
 	}
 
 }

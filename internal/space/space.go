@@ -86,7 +86,8 @@ func (s *Space) SortOf(dir string) string { return s.Sort[dir] }
 // CleanAttachmentsDir normalizes a folder to keep a space's attachments in
 // and reports whether it stays inside the space. "" keeps the old
 // arrangement (an assets folder beside each document), and "." keeps them at
-// the space's root.
+// the space's root. Hidden folders (.git, .arcmd …) and node_modules are
+// refused: they hold no attachments and the sidebar never shows them.
 func CleanAttachmentsDir(dir string) (string, bool) {
 	dir = strings.TrimSpace(strings.ReplaceAll(dir, `\`, "/"))
 	if dir == "" {
@@ -101,6 +102,11 @@ func CleanAttachmentsDir(dir string) (string, bool) {
 	}
 	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", false
+	}
+	for seg := range strings.SplitSeq(clean, "/") {
+		if strings.HasPrefix(seg, ".") || seg == "node_modules" {
+			return "", false
+		}
 	}
 	return clean, true
 }
@@ -235,7 +241,7 @@ func renamer(from, to string) func(string) string {
 func under(p, rel string) bool { return p == rel || strings.HasPrefix(p, rel+"/") }
 
 // Renamed follows a file or folder moved from one path to another in the
-// open folders and LastOpen.
+// open folders, LastOpen and the attachment folder.
 func (s *Space) Renamed(from, to string) {
 	s.reorderRenamed(from, to)
 	re := renamer(from, to)
@@ -243,6 +249,9 @@ func (s *Space) Renamed(from, to string) {
 	s.Sort = nil
 	for k, v := range sorts {
 		s.SetSort(re(k), v)
+	}
+	if s.AttachmentsDir != "" {
+		s.AttachmentsDir = re(s.AttachmentsDir)
 	}
 	for i, p := range s.Pins {
 		s.Pins[i] = re(p)
@@ -268,10 +277,13 @@ func (s *Space) Unpin(rel string) {
 	s.Pins = slices.DeleteFunc(s.Pins, func(p string) bool { return p == rel })
 }
 
-// Forget drops rel, and what is under it, from the open folders and
-// LastOpen, as after it is gone.
+// Forget drops rel, and what is under it, from the open folders, LastOpen
+// and the attachment folder, as after it is gone.
 func (s *Space) Forget(rel string) {
 	s.Pins = slices.DeleteFunc(s.Pins, func(p string) bool { return under(p, rel) })
+	if s.AttachmentsDir != "" && under(s.AttachmentsDir, rel) {
+		s.AttachmentsDir = ""
+	}
 	if dir, name := parentOf(rel); s.Order[dir] != nil {
 		s.Order[dir] = slices.DeleteFunc(s.Order[dir], func(n string) bool { return n == name })
 	}
