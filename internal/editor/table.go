@@ -755,10 +755,13 @@ func (e *Editor) tableToolbar(c *ui.Context, surface ui.Element) {
 		return
 	}
 	sel := e.tableSel
-	x, y := d.cols[sel.index], d.rect.Y-tableBarGap-tableBar-46
+	x, y := d.rect.X, d.rect.Y-tableBarGap-tableBar-46
 	before, after, remove := i18n.T("在左侧插入列"), i18n.T("在右侧插入列"), i18n.T("删除列")
 	beforeIcon, afterIcon := iconInsertLeft, iconInsertRight
 	lines := document.CellRange{Row0: 0, Col0: sel.index, Row1: len(d.rows) - 2, Col1: sel.index}
+	if !sel.rows {
+		x, y = d.cols[sel.index], d.rect.Y-tableBarGap-tableBar-46
+	}
 	if sel.rows {
 		x, y = d.rect.X, d.rows[sel.index]-46
 		before, after, remove = i18n.T("在上方插入行"), i18n.T("在下方插入行"), i18n.T("删除行")
