@@ -331,7 +331,7 @@ func (a *App) inDraggedGroup(spID, rel string) bool {
 func (a *App) modalBlocksSidebarKeys() bool {
 	return a.palette.open || a.settingsOpen || a.replace.open || a.tagRename.open ||
 		a.versions.open || a.updates.window || a.updates.communityOpen || a.pdfExport != nil || a.pluginModalOpen() ||
-		a.library.open || a.spaceForm.open || a.renaming != "" || a.tour.open ||
+		a.unsaved.open || a.library.open || a.spaceForm.open || a.renaming != "" || a.tour.open ||
 		a.carrying != nil || a.carried != nil
 }
 

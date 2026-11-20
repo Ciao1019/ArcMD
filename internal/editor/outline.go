@@ -21,8 +21,11 @@ const (
 	// outlineWidth is the room the open outline takes.
 	outlineWidth = 248
 	// outlineMinPage is the narrowest page the outline makes room beside;
-	// narrower panes float it over the page.
-	outlineMinPage = 600
+	// narrower panes float it over the page. Once floated, widening waits
+	// until outlineUnfoldPage so the outline coming back never makes the
+	// page narrower than before it folded.
+	outlineMinPage    = 600
+	outlineUnfoldPage = outlineMinPage + outlineWidth + 2
 	// outlineRow is the height of an entry.
 	outlineRow = 28
 	// outlineAll is how many headings the outline builds every row for;
@@ -132,7 +135,12 @@ func (e *Editor) outlineReserve(c *ui.Context, o Options) float32 {
 	s.mode = outlineOff
 	if s.set != nil && (e.hasHeadings() || e.hasBookmarks()) {
 		s.mode = outlineFloating
-		if o.Width-outlineWidth >= outlineMinPage {
+		minPage := float32(outlineMinPage)
+		unfolding := was == outlineFloating && s.open
+		if unfolding {
+			minPage = outlineUnfoldPage
+		}
+		if (!unfolding || !o.Resizing) && o.Width-outlineWidth >= minPage {
 			s.mode = outlineBeside
 		}
 	}

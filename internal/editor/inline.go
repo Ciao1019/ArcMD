@@ -236,10 +236,16 @@ func (e *Editor) buildEditingInlineMath(b *document.Block, text string, font ui.
 		obj.placeholder = true
 		return obj, true
 	}
-	box, err := tex.LayoutInline(src, font.Size*1.1, e.measureMath)
+	availW := float32(0)
+	if shape.Width > 0 {
+		availW = max(1, shape.Width-30)
+	}
+	box, err := tex.LayoutInlineWidth(src, font.Size*1.1, availW, e.measureMath)
 	if err == nil {
 		obj.box = &box
-		obj.scale = min(float32(1), max(1, shape.Width-30)/max(1, box.W))
+		if availW > 0 {
+			obj.scale = min(float32(1), availW/max(1, box.W))
+		}
 		e.inlineValidID = validKey
 		e.inlineValidBox = box
 		return obj, true
@@ -248,7 +254,9 @@ func (e *Editor) buildEditingInlineMath(b *document.Block, text string, font ui.
 	if e.inlineValidID == validKey && e.inlineValidBox.W > 0 {
 		prev := e.inlineValidBox
 		obj.box = &prev
-		obj.scale = min(float32(1), max(1, shape.Width-30)/max(1, prev.W))
+		if availW > 0 {
+			obj.scale = min(float32(1), availW/max(1, prev.W))
+		}
 		return obj, true
 	}
 	fallback := tex.Box{W: max(22, font.Size*1.3), Ascent: font.Size * 0.78, Descent: font.Size * 0.22}
@@ -280,12 +288,18 @@ func (e *Editor) shapeInline(b *document.Block, spans []ui.Span, font ui.Font, s
 			}
 			obj.label = ui.ShapeText(fmt.Sprint(note.number), ui.Font{Family: font.Family, Size: font.Size * .72}, 0)
 		} else {
-			box, err := tex.LayoutInline(token.source, font.Size*1.1, e.measureMath)
+			availW := float32(0)
+			if shape.Width > 0 {
+				availW = max(1, shape.Width-4)
+			}
+			box, err := tex.LayoutInlineWidth(token.source, font.Size*1.1, availW, e.measureMath)
 			if err != nil {
 				continue
 			}
 			obj.box = &box
-			obj.scale = min(float32(1), max(1, shape.Width-4)/max(1, box.W))
+			if availW > 0 {
+				obj.scale = min(float32(1), availW/max(1, box.W))
+			}
 		}
 		l.objects = append(l.objects, obj)
 	}
@@ -617,11 +631,11 @@ func (e *Editor) paintInline(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 					p.TextLayout(fx, ox+4+max(0, o.box.W*o.scale-fw)/2, oy+(o.rect.H-fh)/2, t.Accent.Alpha(0.7))
 				} else {
 					fx := ox + 4
-					p.Transform(ui.Scaling(o.scale, o.scale), fx, y, func() { e.paintFormula(p, *o.box, fx, y+o.box.Ascent, t) })
+					e.paintFormulaScaled(p, *o.box, fx, y+o.box.Ascent*o.scale, o.scale, t)
 				}
 				e.paintTabOutBadge(p, frame, t)
 			} else {
-				p.Transform(ui.Scaling(o.scale, o.scale), x, y, func() { e.paintFormula(p, *o.box, x, y+o.box.Ascent, t) })
+				e.paintFormulaScaled(p, *o.box, x, y+o.box.Ascent*o.scale, o.scale, t)
 			}
 		} else {
 			if o.script {

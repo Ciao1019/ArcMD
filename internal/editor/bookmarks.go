@@ -213,7 +213,12 @@ func (e *Editor) blockSpan(id string) (ui.Rect, bool) {
 		if j+1 < len(e.handles) {
 			bottom = e.indexedHandle(j + 1).top
 		}
-		return ui.Rect{X: e.padding - 8, Y: h.top - 4, W: e.width - 2*e.padding + 16, H: bottom - h.top}, true
+		bx, bw := e.padding, e.width-2*e.padding
+		if d, ok := e.tableDecoration(id); ok {
+			bx = min(bx, d.rect.X)
+			bw = max(bw, d.rect.W)
+		}
+		return ui.Rect{X: bx - 8, Y: h.top - 4, W: bw + 16, H: bottom - h.top}, true
 	}
 	return ui.Rect{}, false
 }
@@ -290,10 +295,14 @@ func (e *Editor) bookmarkMarks(c *ui.Context) {
 		}
 		id := h.id
 		top := h.rect.Y + 2
+		markX := x
 		if blk := e.blockByID(id); blk != nil && blk.Kind == "table" {
 			// A table's handle sits by its column bar; the mark goes by its
 			// first row.
 			top = h.top + 32
+			if d, ok := e.tableDecoration(id); ok {
+				markX = max(markX, d.rect.X+d.rect.W+12)
+			}
 		}
 		label, tip, icon := i18n.T("移除书签"), e.bookmarkTip(i18n.T("书签 · 点击移除")), iconBookmarkFilled
 		color := t.Accent.Alpha(.75)
@@ -301,7 +310,7 @@ func (e *Editor) bookmarkMarks(c *ui.Context) {
 			label, tip, icon = i18n.T("添加书签"), e.bookmarkTip(i18n.T("添加书签")), iconBookmark
 			color = t.Text.Alpha(.3)
 		}
-		mark := ui.ButtonBase(c.Key("bookmark-mark:"+id)).Absolute().Left(x).Top(top).Size(bookmarkMark, bookmarkMark).
+		mark := ui.ButtonBase(c.Key("bookmark-mark:"+id)).Absolute().Left(markX).Top(top).Size(bookmarkMark, bookmarkMark).
 			Radius(4).Center().Label(label).Tooltip(tip).KeepFocus().Cursor(ui.CursorPointer)
 		if mark.Hovered() {
 			mark.Background(t.Text.Alpha(.06))

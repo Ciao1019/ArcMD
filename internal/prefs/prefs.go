@@ -21,7 +21,10 @@ type Prefs struct {
 	Version    int     `json:"version"`
 	FontSize   float32 `json:"fontSize,omitempty"`
 	LineHeight float32 `json:"lineHeight,omitempty"`
-	NoAutoPair bool    `json:"noAutoPair,omitempty"`
+	// NoAutosave disables background automatic saving so edits stay in memory
+	// until explicitly saved or confirmed when closing.
+	NoAutosave bool `json:"noAutosave,omitempty"`
+	NoAutoPair bool `json:"noAutoPair,omitempty"`
 	// AutoSpace puts a space between Chinese and Latin text as it is typed.
 	AutoSpace bool `json:"autoSpace,omitempty"`
 	// CodeNoWrap disables soft wrapping in code blocks by default so long

@@ -74,7 +74,16 @@ func (a *App) View(c *ui.Context) {
 	a.syncWatches()
 	post := a.asyncPost()
 	for _, d := range a.residentDocuments() {
-		a.withDocument(d, func() { d.autosaveWith(c, post); a.syncSavedSearch(d); a.followTitle(); a.syncExcerpts(a.doc) })
+		a.withDocument(d, func() {
+			if a.autosaveEnabled() {
+				d.autosaveWith(c, post)
+			} else {
+				d.pollAsyncSave()
+			}
+			a.syncSavedSearch(d)
+			a.followTitle()
+			a.syncExcerpts(a.doc)
+		})
 		if a.win != nil {
 			d.releaseShownImagePixels(c.Now())
 		}
@@ -107,6 +116,7 @@ func (a *App) View(c *ui.Context) {
 	var docked float32
 	frame.Children(func() {
 		if a.focus {
+			a.dockSliding = false
 			a.focusView(c)
 			return
 		}
@@ -125,6 +135,7 @@ func (a *App) View(c *ui.Context) {
 			target = inner
 		}
 		docked = dock.Animate("width", target, slide)
+		a.dockSliding = docked != target
 		dock.Width(docked).Hidden(docked < 0.5).Children(func() {
 			if docked < 0.5 {
 				return
@@ -169,6 +180,7 @@ func (a *App) View(c *ui.Context) {
 	a.pluginMarkdownView(c)
 	a.gitChangesView(c)
 	a.mergeView(c)
+	a.unsavedPromptView(c)
 	a.tourView(c)
 	if a.captureSplits() {
 		a.saveState()
@@ -222,7 +234,7 @@ func (a *App) shortcuts(c *ui.Context) {
 	case a.pressed(c, "reload"):
 		a.reload()
 	case a.pressed(c, "save"):
-		a.flush()
+		a.saveNow()
 	case a.pressed(c, "settings"):
 		a.openSettings(tabGeneral)
 	case a.pressed(c, "overview"):

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
@@ -68,5 +69,107 @@ func TestMultilinePasteCaretAndContinuedTyping(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestTableCellAndLiteralPlainTextCopy(t *testing.T) {
+	md := strings.Join([]string{
+		"| 服务 | 账号 | 密码 |",
+		"| --- | :---: | ---: |",
+		`| 微信 | admin_01 | Abc_123*456[7]\8<9>\$0 |`,
+		"| 数据库 | `db_user` | `P@ss_w0rd*99` |",
+		"| 后台 | **ops_user** | <span style=\"color:#D83931\" data-color=\"red\">Red_Pass*1</span> |",
+	}, "\n")
+	e, tt := newTester(md)
+	focus(e, tt)
+
+	wantPasswords := map[int]string{
+		1: "Abc_123*456[7]\\8<9>$0",
+		2: "P@ss_w0rd*99",
+		3: "Red_Pass*1",
+	}
+	table := e.Doc.Blocks[0]
+	if table.Kind != "table" || len(table.Children) != 4 {
+		t.Fatalf("unexpected table blocks: %+v", e.Doc.Blocks)
+	}
+	for rowIdx, want := range wantPasswords {
+		cell := table.Children[rowIdx].Children[2]
+		leaf, ok := e.Engine.LeafByID(cell.ID)
+		if !ok {
+			t.Fatalf("missing leaf for row %d", rowIdx)
+		}
+		e.SetSelection(leaf.Start, leaf.End)
+		tt.Frame()
+		tt.Key(ui.Cmd, ui.KeyC)
+		if got := tt.Clipboard(); got != want {
+			t.Fatalf("row %d plain clipboard = %q; want exact %q", rowIdx, got, want)
+		}
+		// Centered/right-aligned cell fragments must not leak <p align="..."> wrappers into Markdown.
+		rawMD, err := tt.ClipboardData().Read(transfer.Markdown)
+		if err != nil {
+			t.Fatalf("row %d missing Markdown clipboard: %v", rowIdx, err)
+		}
+		if strings.Contains(string(rawMD), "<p ") || strings.Contains(string(rawMD), "</p>") {
+			t.Fatalf("row %d Markdown clipboard leaked paragraph alignment HTML: %q", rowIdx, string(rawMD))
+		}
+	}
+
+	// Partial multi-cell copy across a row uses tab-separated literal text without backslash escapes.
+	c1, _ := e.Engine.LeafByID(table.Children[1].Children[1].ID)
+	c2, _ := e.Engine.LeafByID(table.Children[1].Children[2].ID)
+	e.SetSelection(c1.Start, c2.End)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyC)
+	if got, want := tt.Clipboard(), "admin_01\tAbc_123*456[7]\\8<9>$0"; got != want {
+		t.Fatalf("multi-cell plain clipboard = %q; want %q", got, want)
+	}
+
+	// Plain prose and inline code selections also copy literal text without Markdown escapes or backticks.
+	e2, tt2 := newTester("- 密码：Pass_123*456[0]\n\n命令：`sk_live_123*abc`")
+	focus(e2, tt2)
+	listLeaf := e2.Doc.Leaves()[0]
+	prefixLen := document.Len("密码：")
+	e2.SetSelection(listLeaf.Start+prefixLen, listLeaf.End)
+	tt2.Frame()
+	tt2.Key(ui.Cmd, ui.KeyC)
+	if got, want := tt2.Clipboard(), "Pass_123*456[0]"; got != want {
+		t.Fatalf("list slice plain clipboard = %q; want %q", got, want)
+	}
+
+	codeLeaf := e2.Doc.Leaves()[1]
+	codePrefix := document.Len("命令：")
+	e2.SetSelection(codeLeaf.Start+codePrefix, codeLeaf.End)
+	tt2.Frame()
+	tt2.Key(ui.Cmd, ui.KeyC)
+	if got, want := tt2.Clipboard(), "sk_live_123*abc"; got != want {
+		t.Fatalf("inline code plain clipboard = %q; want %q", got, want)
+	}
+
+	// Pasting a password containing Markdown punctuation into a table cell preserves every character literally.
+	emptyCellTable, tt3 := newTester("| 账号 | 密码 |\n| --- | --- |\n| root |  |")
+	focus(emptyCellTable, tt3)
+	targetCell, _ := emptyCellTable.Engine.LeafByID(emptyCellTable.Doc.Blocks[0].Children[1].Children[1].ID)
+	emptyCellTable.SetSelection(targetCell.Start, targetCell.End)
+	tt3.Frame()
+	rawPass := "#Abc*123*xyz_456~789~"
+	tt3.SetClipboardData(transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.Text, []byte(rawPass)),
+		transfer.Bytes(transfer.Markdown, []byte(`\#Abc\*123\*xyz_456\~789\~`)),
+	)))
+	tt3.Key(ui.Cmd, ui.KeyV)
+	if got := emptyCellTable.Doc.Blocks[0].Children[1].Children[1].Text(); got != rawPass {
+		t.Fatalf("paste into table cell = %q; want %q", got, rawPass)
+	}
+
+	// Intraword underscores stay unescaped in exported Markdown while boundary emphasis underscores still escape.
+	roundDoc := document.New()
+	roundDoc.Blocks = []*document.Block{document.NewBlock("paragraph", "Abc_123 and _literal_")}
+	exported := ExportMarkdown(roundDoc)
+	if got, want := exported, "Abc_123 and \\_literal\\_\n"; got != want {
+		t.Fatalf("ExportMarkdown underscore escaping = %q; want %q", got, want)
+	}
+	reimported := ImportMarkdown(exported)
+	if got := reimported.Blocks[0].Text(); got != "Abc_123 and _literal_" || len(reimported.Blocks[0].Runs) != 1 || reimported.Blocks[0].Runs[0].Style != (document.Style{}) {
+		t.Fatalf("roundtrip altered plain text: %+v", reimported.Blocks[0].Runs)
 	}
 }

@@ -227,3 +227,30 @@ func TestEquationTags(t *testing.T) {
 		}
 	}
 }
+
+func TestLongEquationWrapsBeforeShrinking(t *testing.T) {
+	const eq = `y_3^{(3)} = -0.2y_3 - 0.6\dot{y}_3 - 0.9\ddot{y}_3 + a_3 u_3`
+	single, err := LayoutInline(eq, 16, fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	narrowW := single.W * 0.62
+	wrapped, err := LayoutInlineWidth(eq, 16, narrowW, fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrapped.W > narrowW+0.5 {
+		t.Fatalf("wrapped width %v exceeds target %v (single=%v)", wrapped.W, narrowW, single.W)
+	}
+	if wrapped.Descent <= single.Descent+10 {
+		t.Fatalf("expected multi-line descent > %v, got %v", single.Descent, wrapped.Descent)
+	}
+	// Plenty of width leaves the equation on one line unchanged.
+	wide, err := LayoutInlineWidth(eq, 16, single.W+20, fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wide.W != single.W || wide.Descent != single.Descent {
+		t.Fatalf("wide LayoutInlineWidth changed single-line geometry: got %+v, want %+v", wide, single)
+	}
+}

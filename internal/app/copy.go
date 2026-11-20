@@ -96,7 +96,7 @@ func (a *App) pasteInto(dst *space.Space, dir, afterRel string) {
 	if !a.canPasteInto(dst, dir) {
 		return
 	}
-	if !a.flush() {
+	if a.autosaveEnabled() && !a.flush() {
 		return
 	}
 	items := slices.Clone(a.copied)
@@ -175,7 +175,7 @@ func (a *App) duplicateEntry(sp *space.Space, rel string) {
 		return
 	}
 	live := a.residentDocument(sp.ID, rel)
-	if !a.flush() {
+	if a.autosaveEnabled() && !a.flush() {
 		return
 	}
 	if live != nil {
@@ -279,7 +279,7 @@ func (a *App) trackUndoCopies(spID string, rels []string) []*place {
 // trashCopied moves the items created by an undone paste or duplicate to the
 // system trash (with trashbin backups), never permanently deleting user files.
 func (a *App) trashCopied(targets []*place) {
-	if len(targets) == 0 || !a.flush() {
+	if len(targets) == 0 || (a.autosaveEnabled() && !a.flush()) {
 		return
 	}
 	changed := false
@@ -380,7 +380,7 @@ func (a *App) copyWithResources(src *space.Space, rel string, dst *space.Space, 
 	if dst == nil || dst.IsExternal() {
 		return "", errors.New(i18n.T("外部空间只记录文件，不能作为粘贴目标。"))
 	}
-	if !a.flush() {
+	if a.autosaveEnabled() && !a.flush() {
 		return "", errors.New(i18n.T("请先保存文档并解决文件冲突"))
 	}
 	docs, err := a.copyDocuments(src, rel)

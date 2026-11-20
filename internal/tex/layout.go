@@ -99,8 +99,8 @@ func spacing(a, b string) float32 {
 	return 0
 }
 
-// list lays a list of atoms out on a line.
-func (l *layouter) list(nodes []*node, size float32, display bool) Box {
+// atomClasses classifies top-level atoms and turns unary signs into ordinals.
+func atomClasses(nodes []*node) []string {
 	classes := make([]string, len(nodes))
 	for i, n := range nodes {
 		classes[i] = class(n)
@@ -122,21 +122,122 @@ func (l *layouter) list(nodes []*node, size float32, display bool) Box {
 			classes[i] = "ord"
 		}
 	}
+	return classes
+}
+
+func (l *layouter) placeAtoms(atoms []Box, classes []string, size float32) Box {
 	var out Box
 	x, prev := float32(0), ""
-	for i, n := range nodes {
-		b := l.atom(n, size, display)
+	for i, b := range atoms {
 		x += spacing(prev, classes[i]) * size
 		out.place(b, x, 0)
 		x += b.W
 		out.W = max(out.W, x)
 		prev = classes[i]
 	}
-	if len(nodes) == 0 {
+	if len(atoms) == 0 {
 		// An empty list keeps the height of a line, as "{}" does.
 		_, a, d := l.m("x", size, false, l.bold)
 		out.Ascent, out.Descent = a*0.6, d*0.2
 	}
+	return out
+}
+
+// list lays a list of atoms out on a line.
+func (l *layouter) list(nodes []*node, size float32, display bool) Box {
+	classes := atomClasses(nodes)
+	atoms := make([]Box, len(nodes))
+	for i, n := range nodes {
+		atoms[i] = l.atom(n, size, display)
+	}
+	return l.placeAtoms(atoms, classes, size)
+}
+
+// listWrapped lays a list of atoms out, breaking before top-level relations or
+// binary operators when the single-line width exceeds maxWidth.
+func (l *layouter) listWrapped(nodes []*node, size, maxWidth float32, display bool) Box {
+	classes := atomClasses(nodes)
+	atoms := make([]Box, len(nodes))
+	for i, n := range nodes {
+		atoms[i] = l.atom(n, size, display)
+	}
+	single := l.placeAtoms(atoms, classes, size)
+	if maxWidth <= 0 || maxWidth < size*3.5 || single.W <= maxWidth*1.05 || len(nodes) < 2 {
+		return single
+	}
+	indent := size * 0.9
+	type span struct{ a, b int }
+	var spans []span
+	start, lastRel, lastBin := 0, -1, -1
+	curX := float32(0)
+	for i := 0; i < len(nodes); i++ {
+		if i == start {
+			curX = 0
+			if len(spans) > 0 {
+				curX = min(indent, maxWidth*0.2)
+			}
+		} else {
+			if classes[i] == "rel" {
+				lastRel = i
+			} else if classes[i] == "bin" {
+				lastBin = i
+			}
+			curX += spacing(classes[i-1], classes[i]) * size
+		}
+		curX += atoms[i].W
+		if curX > maxWidth {
+			brk := lastBin
+			if brk <= start {
+				brk = lastRel
+			} else if lastRel > start && len(spans) == 0 {
+				// Prefer keeping the left-hand side with the first relation if
+				// a binary break exists; otherwise break before the relation.
+				_ = lastRel
+			}
+			if brk > start {
+				spans = append(spans, span{start, brk})
+				start = brk
+				lastRel, lastBin = -1, -1
+				i = start - 1
+				continue
+			}
+		}
+	}
+	spans = append(spans, span{start, len(nodes)})
+	if len(spans) <= 1 {
+		return single
+	}
+	lines := make([]Box, len(spans))
+	maxW := float32(0)
+	for idx, sp := range spans {
+		b := l.placeAtoms(atoms[sp.a:sp.b], classes[sp.a:sp.b], size)
+		if idx > 0 {
+			pad := min(indent, max(0, maxWidth-b.W))
+			if pad > 0 {
+				shifted := Box{}
+				shifted.place(b, pad, 0)
+				b = shifted
+			}
+		}
+		lines[idx] = b
+		maxW = max(maxW, b.W)
+	}
+	if maxW >= single.W {
+		return single
+	}
+	gap := size * 0.26
+	if display {
+		gap = size * 0.3
+	}
+	out := Box{}
+	y := float32(0)
+	for i, b := range lines {
+		if i > 0 {
+			y += lines[i-1].Descent + gap + b.Ascent
+		}
+		out.place(b, 0, y)
+	}
+	out.W = maxW
 	return out
 }
 
@@ -513,12 +614,16 @@ func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bo
 	anyTag := false
 	for i, line := range rawLines {
 		clean, tagNodes := extractTags(line)
-		mathBoxes[i] = l.list(clean, size, display)
+		avail := lineWidth
 		if len(tagNodes) > 0 {
 			tagBoxes[i] = l.list(tagNodes, size, false)
 			hasTags[i] = true
 			anyTag = true
+			if avail > 0 {
+				avail = max(size*3.5, avail-tagBoxes[i].W-size*1.5)
+			}
 		}
+		mathBoxes[i] = l.listWrapped(clean, size, avail, display)
 	}
 	if !anyTag {
 		return l.stack(mathBoxes, size, alignCenter)

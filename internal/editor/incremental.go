@@ -120,7 +120,17 @@ func (e *Editor) relayoutTable(o Options, change document.TextChange, rowIndex i
 	e.rows, e.decorations, e.resizers = nil, nil, nil
 	layout := e.blockLayouter(o, func(id string) document.Leaf { return leaves[id] }, nil, true)
 	start := oldTable.rect.Y - 22
-	height := layout(table, oldTable.rect.X, start, oldTable.rect.W)
+	tx, tw := oldTable.rect.X, oldTable.rect.W
+	for _, top := range e.Doc.Blocks {
+		if top.ID == owner {
+			tx, tw = e.tableSpan(table, o.Width, max(80, o.Width-2*e.padding))
+			if j, ok := e.handleIDs[owner]; ok {
+				e.indexedHandle(j).rect.X = tx - 48
+			}
+			break
+		}
+	}
+	height := layout(table, tx, start, tw)
 	updated, decorated, handles := e.rows, e.decorations, e.resizers
 	e.rows, e.decorations, e.resizers = rows, decorations, resizers
 	if len(updated) != to-from || len(decorated) == 0 {

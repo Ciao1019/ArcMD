@@ -36,7 +36,7 @@ internal/mermaid/     原生 Mermaid 排版：flowchart/graph 与 sequenceDiagra
 internal/history/     版本历史：空间内 .arcmd/history 的快照、命名里程碑、合并、上限与字素级行内差异（不依赖 UI）
 internal/merge/       Git 统一差异分块（含折叠上下文与行内字素高亮）与 IDEA 式三路合并引擎（不依赖 UI）
 internal/trashbin/    「最近删除」：删除前的副本、恢复（不覆盖、重名编号）、30 天过期（不依赖 UI）
-internal/prefs/       prefs.json：打字机滚动、专注淡化、代码块换行、自定义快捷键（不依赖 UI）
+internal/prefs/       prefs.json：自动保存、打字机滚动、专注淡化、代码块换行、自定义快捷键（不依赖 UI）
 internal/pdf/         纯 Go 矢量 PDF 写出（Type 3 字形子集 + `/Outlines` 书签 + `/Link` 注释 + JPEG 图像嵌入）（不依赖 UI）
 internal/update/      软件更新：横幅/Toast 该说什么、检查间隔、发布说明转纯文本（不依赖 UI；下载与替换由 mygo.Updater 完成）
 internal/templates/   空间模板（.arcmd/templates）与今日笔记：列出、套用、占位符 {{date}} {{time}} {{weekday}} {{title}}（不依赖 UI）
@@ -191,7 +191,7 @@ gofmt -l .                                           # 必须无输出
   | ⌃⌘S | 所有空间（资料库的空间页） |
   | ⌃⇧= / ⌃⇧− | 添加 / 关闭当前分屏 |
   | ⌃⇧1…4 / ⌃⇧Tab | 选择第 N 个 / 下一个分屏 |
-  | ⌘S | 立即保存（平时自动保存） |
+  | ⌘S | 立即保存（默认自动保存，可在设置「通用 › 写作」或命令栏关闭，关闭后离开未保存文档会提示保存 / 不保存 / 取消） |
   | ⌘B / ⌘I / ⌘U / ⇧⌘X / ⌘E | 粗体 / 斜体 / 下划线 / 删除线 / 行内代码 |
   | ⌥⌘0…⌥⌘6 | 正文 / 标题 1–6 |
   | ⌘Z / ⇧⌘Z | 撤销 / 重做 |

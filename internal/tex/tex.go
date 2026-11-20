@@ -69,6 +69,12 @@ func LayoutInline(src string, size float32, m Measure) (Box, error) {
 	return layoutMode(src, size, m, false)
 }
 
+// LayoutInlineWidth typesets inline math within lineWidth DIPs, wrapping long
+// equations at top-level relation or binary operators before scaling down.
+func LayoutInlineWidth(src string, size, lineWidth float32, m Measure) (Box, error) {
+	return layoutModeWidth(src, size, lineWidth, m, false)
+}
+
 func layoutMode(src string, size float32, m Measure, display bool) (Box, error) {
 	return layoutModeWidth(src, size, 0, m, display)
 }

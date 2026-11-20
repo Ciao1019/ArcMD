@@ -340,7 +340,11 @@ func (e *Editor) writeFragment(fragment *document.Document, text string, write f
 		return
 	}
 	if text == "" {
-		text = trimNewline(ExportMarkdown(fragment))
+		if !rich(fragment) {
+			text = plainFragmentText(fragment)
+		} else {
+			text = trimNewline(ExportMarkdown(fragment))
+		}
 	}
 	if e.services == (ui.Services{}) {
 		write(text)

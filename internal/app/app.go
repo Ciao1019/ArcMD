@@ -34,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.4"
+const Version = "0.2.5"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -110,6 +110,7 @@ type App struct {
 	paneNavigation  bool
 	documentContext int
 	splitResizing   bool
+	dockSliding     bool
 	sessions        map[string]*spaceSession
 	// openDocs are the pinned documents kept open behind the one shown,
 	// and bounce the row springing from a close (opendocs.go).
@@ -251,7 +252,8 @@ type App struct {
 	// focus is focus mode; narrow whether the window is narrow enough to
 	// fold the sidebar away, narrowShown whether it is shown anyway
 	// (focus.go).
-	focus, narrow, narrowShown bool
+	focus, narrow, narrowReady, narrowShown bool
+	unsaved                                 unsavedPrompt
 	// versions is the history window (versions.go); bin keeps what was
 	// deleted recently, which the library lists (trash.go).
 	versions   versionsState
@@ -546,11 +548,20 @@ func (a *App) showMain(w mainWindow) {
 // macOS, closing the window with ⌘W or the red close button hides it so the
 // app stays running in the Dock until an explicit Quit (⌘Q).
 func (a *App) closeMain(w mainWindow, goos string) bool {
-	if !a.flush() {
-		if w != nil {
-			a.showMain(w)
+	if a.autosaveEnabled() {
+		if !a.flush() {
+			if w != nil {
+				a.showMain(w)
+			}
+			return false
 		}
-		return false
+	} else if a.quitting || goos != "darwin" {
+		if !a.confirmLeaveDocs(a.residentDocuments(), func() { a.retryCloseMain(w, goos) }) {
+			if w != nil {
+				a.showMain(w)
+			}
+			return false
+		}
 	}
 	a.finishSpaceEdit()
 	if a.captureSplits() {
@@ -916,8 +927,25 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 		}
 		return false
 	}
-	if !a.flush() {
-		return false
+	if a.autosaveEnabled() {
+		if !a.flush() {
+			return false
+		}
+	} else {
+		paneIdx := -1
+		if a.paneNavigation && a.split != nil {
+			paneIdx = a.split.active
+		}
+		if !a.confirmLeaveDocs(a.leavingCurrentDoc(), func() {
+			if paneIdx >= 0 && a.split != nil && paneIdx < len(a.split.panes) {
+				a.focusPane(paneIdx, false)
+				a.navigateInPane(a.doc, func() { a.openIn(sp, rel) })
+				return
+			}
+			a.openIn(sp, rel)
+		}) {
+			return false
+		}
 	}
 	if a.split != nil && a.doc != nil && !a.paneNavigation {
 		a.suspendSplit()
@@ -1007,7 +1035,7 @@ func (a *App) goHistory(step int) {
 		a.paneNavigation = true
 		defer func() { a.paneNavigation = false; a.syncSplit() }()
 	}
-	if !a.flush() {
+	if !a.confirmLeaveDocs(a.leavingCurrentDoc(), func() { a.goHistory(step) }) {
 		return
 	}
 	for a.canGo(step) {
@@ -1050,7 +1078,7 @@ func (a *App) reload() {
 		a.useDisk()
 		return
 	}
-	if !a.flush() {
+	if !a.confirmLeaveDocs([]*document{a.doc}, a.reload) {
 		return
 	}
 	rel, source := a.doc.rel, a.doc.source
@@ -1285,7 +1313,7 @@ func (a *App) finishRename(openDuplicated bool) {
 		return
 	}
 	renaming := a.residentDocument(sp.ID, rel)
-	if !a.flush() {
+	if a.autosaveEnabled() && !a.flush() {
 		if dupPending {
 			a.flushPendingDupUndo("", "")
 		}
@@ -1336,7 +1364,7 @@ func (a *App) moveInto(rel, dir string) {
 		return
 	}
 	sp := a.state.ActiveSpace()
-	if !a.flush() {
+	if a.autosaveEnabled() && !a.flush() {
 		return
 	}
 	to, _, err := a.moveWithResources(sp, rel, sp, dir)
@@ -1377,7 +1405,7 @@ func (a *App) switchSpaceOnly(id string) bool {
 		return false
 	}
 	next := a.state.Get(id)
-	if next == nil || !a.canEnter(next.Root) || !a.flush() {
+	if next == nil || !a.canEnter(next.Root) || (a.autosaveEnabled() && !a.flush()) {
 		return false
 	}
 	if a.carrying == nil && a.carried == nil {
@@ -1463,6 +1491,9 @@ func (a *App) togglePin(sp *space.Space, rel string) {
 		return
 	}
 	if sp.IsPinned(rel) {
+		if d := a.openDocs[place{sp.ID, rel}]; d != nil && d != a.doc && !a.confirmLeaveDocs([]*document{d}, func() { a.togglePin(sp, rel) }) {
+			return
+		}
 		sp.Unpin(rel)
 		a.saveState()
 		return
@@ -1513,7 +1544,7 @@ func (a *App) trash(rel string) {
 	if err != nil {
 		return
 	}
-	if !a.flush() {
+	if a.autosaveEnabled() && !a.flush() {
 		return
 	}
 	kept, ok := a.keepDeleted(sp.ID, sp.Name, sp.Root, rel)

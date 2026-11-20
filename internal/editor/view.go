@@ -213,6 +213,7 @@ type Editor struct {
 	openWiki, openTag           func(string)
 	maths                       map[string]mathShape
 	mathGlyphs                  map[string]*ui.TextLayout
+	tableWidths                 map[string]cachedTableWidths
 	mermaids                    map[string]mermaidShape
 	mermaidLayouts              map[string]*ui.TextLayout
 	mermaidViewer               mermaidViewer
@@ -963,6 +964,7 @@ func (e *Editor) layout(o Options) {
 		clear(e.heightHints)
 		clear(e.mathGlyphs)
 		clear(e.maths)
+		clear(e.tableWidths)
 		clear(e.mermaidLayouts)
 		clear(e.mermaids)
 		clear(e.boardScenes)
@@ -1020,7 +1022,11 @@ func (e *Editor) layout(o Options) {
 			e.Scroll.Y = max(0, y+anchor.offset)
 			anchorPlaced = true
 		}
-		h := blockLayout(b, e.padding, y, width)
+		bx, bw := e.padding, width
+		if b.Kind == "table" {
+			bx, bw = e.tableSpan(b, o.Width, width)
+		}
+		h := blockLayout(b, bx, y, bw)
 		if b.ID == anchor.id && anchorPlaced {
 			e.Scroll.Y = max(0, y+min(anchor.offset, max(0, h-1)))
 		}
@@ -1035,7 +1041,7 @@ func (e *Editor) layout(o Options) {
 		if b.Kind == "table" {
 			// A table's handle sits left of its column bar, clear of the
 			// row bar.
-			hx, hy = e.padding-48, y+22-21
+			hx, hy = bx-48, y+22-21
 		}
 		if foldable[b.ID] {
 			// The fold triangle sits just left of the block, 20

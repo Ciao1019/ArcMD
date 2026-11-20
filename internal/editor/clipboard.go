@@ -5,6 +5,7 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
@@ -15,7 +16,7 @@ func (e *Editor) copySelection(write func(string)) {
 	if r.Start == r.End {
 		return
 	}
-	text := e.slice(r.Start, r.End)
+	text := strings.ReplaceAll(e.slice(r.Start, r.End), "\u2028", "\n")
 	fragment := e.Engine.Fragment()
 	fragment.ImportSource = ""
 	data, err := fragment.Encode()
@@ -23,10 +24,74 @@ func (e *Editor) copySelection(write func(string)) {
 		write(text)
 		return
 	}
-	if !literalBlock(e.LeafAt(r.Start).Block.Kind) {
-		text = trimNewline(ExportMarkdown(fragment))
-	}
+	text = e.clipboardPlainText(r, fragment, text)
 	e.writeClipboard(fragment, data, text)
+}
+
+func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Document, slice string) string {
+	a, z := e.LeafAt(r.Start), e.LeafAt(r.End)
+	if literalBlock(a.Block.Kind) {
+		return slice
+	}
+	// Copying inside a single table cell or inline code/keycap span puts the
+	// literal characters on the plain-text pasteboard so passwords, identifiers,
+	// and commands paste into chat apps, terminals, and login inputs without
+	// Markdown backslash escapes or wrapper markup.
+	if a.Block == z.Block && (a.Block.Kind == "cell" || inlineLiteralRuns(a.Block, r.Start-a.Start, r.End-a.Start)) {
+		return slice
+	}
+	if tableID, cr, ok := e.cellRange(); ok && !(len(fragment.Blocks) == 1 && fragment.Blocks[0].Kind == "table") {
+		if table := e.blockByID(tableID); table != nil {
+			return exportCellRangePlainText(table, cr)
+		}
+	}
+	if !rich(fragment) {
+		if a.Block == z.Block {
+			return slice
+		}
+		return plainFragmentText(fragment)
+	}
+	return trimNewline(ExportMarkdown(fragment))
+}
+
+func inlineLiteralRuns(b *document.Block, from, to int) bool {
+	runs := document.SliceRuns(b.Runs, max(0, from), max(0, to))
+	if len(runs) == 0 {
+		return false
+	}
+	for _, r := range runs {
+		if !r.Style.Code && !r.Style.Kbd {
+			return false
+		}
+	}
+	return true
+}
+
+func plainFragmentText(doc *document.Document) string {
+	parts := make([]string, 0, len(doc.Blocks))
+	for _, b := range doc.Blocks {
+		parts = append(parts, strings.ReplaceAll(b.Text(), "\u2028", "\n"))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func exportCellRangePlainText(table *document.Block, cr document.CellRange) string {
+	covered := document.CoveredCells(table)
+	var rows []string
+	for ri := max(0, cr.Row0); ri <= min(cr.Row1, len(table.Children)-1); ri++ {
+		row := table.Children[ri]
+		var cols []string
+		for ci := max(0, cr.Col0); ci <= min(cr.Col1, len(row.Children)-1); ci++ {
+			cell := row.Children[ci]
+			if covered[cell] {
+				cols = append(cols, "")
+				continue
+			}
+			cols = append(cols, strings.ReplaceAll(cell.Text(), "\u2028", "\n"))
+		}
+		rows = append(rows, strings.Join(cols, "\t"))
+	}
+	return strings.Join(rows, "\n")
 }
 
 func trimNewline(s string) string { return strings.TrimSuffix(s, "\n") }
@@ -79,7 +144,7 @@ func (e *Editor) pasteSelection(read func() string) {
 		}
 	}
 	text := read()
-	if kind != "code" && kind != "raw" && !e.Engine.CurrentStyle().Code && !e.Engine.CurrentStyle().Kbd {
+	if kind != "code" && kind != "raw" && kind != "cell" && !e.Engine.CurrentStyle().Code && !e.Engine.CurrentStyle().Kbd {
 		if md, err := clipboard.Read(transfer.Markdown); err == nil && len(md) < 8<<20 && len(md) > 0 {
 			text = string(md)
 		}
@@ -123,9 +188,9 @@ func (e *Editor) pasteSelection(read func() string) {
 			}
 		}
 	}
-	if !literalBlock(kind) && !e.CurrentStyle().Code && !e.CurrentStyle().Kbd && len(text) < 8<<20 {
+	if !literalBlock(kind) && kind != "cell" && !e.CurrentStyle().Code && !e.CurrentStyle().Kbd && len(text) < 8<<20 {
 		// Rows copied from a spreadsheet, as tab-separated lines.
-		if doc := tabTable(text); doc != nil && kind != "cell" {
+		if doc := tabTable(text); doc != nil {
 			e.UnmarkText()
 			e.Engine.Paste(doc)
 			e.sync()
@@ -169,11 +234,13 @@ func pastedMath(source string) *document.Document {
 // plain text, worth pasting as structure.
 func rich(doc *document.Document) bool {
 	for _, b := range doc.Blocks {
-		if b.Kind != "paragraph" || b.Align != "" || len(b.Comments) > 0 {
+		if b.Kind != "paragraph" || b.Align != "" || b.Indent != 0 || len(b.Comments) > 0 {
 			return true
 		}
 		for _, r := range b.Runs {
-			if r.Style != (document.Style{}) {
+			s := r.Style
+			s.NoMath = false
+			if s != (document.Style{}) {
 				return true
 			}
 		}

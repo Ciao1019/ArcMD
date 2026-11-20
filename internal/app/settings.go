@@ -204,6 +204,12 @@ func (a *App) settingsGeneral(c *ui.Context) {
 		FontSize(12).TextColor(t.TextMuted)
 	settingsHeading(c, i18n.T("写作"), "")
 	settingsGroup(c, "writing", func() {
+		autosave := !a.prefs.NoAutosave
+		toggleRow(c, "autosave", i18n.T("自动保存"), fmt.Sprintf(i18n.T("编辑后自动写入文件；关闭后需按 %s 手动保存。"), a.keyLabel("save")), &autosave, nil)
+		if autosave == a.prefs.NoAutosave {
+			a.toggleAutosave()
+		}
+		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
 		toggleRow(c, "typewriter", i18n.T("打字机滚动"), i18n.T("正在写的一行始终停在页面中间。"), &a.prefs.Typewriter, a.savePrefs)
 		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
 		toggleRow(c, "draw-annotations", i18n.T("打开文档时画出手绘标注"), i18n.T("页面上的标注依次画出来；减弱动态效果时直接显示。"), &a.prefs.DrawAnnotations, a.savePrefs)
@@ -328,17 +334,21 @@ func (a *App) settingsAppearance(c *ui.Context) {
 // toggleRow is a labeled switch; changed runs when it is flipped.
 func toggleRow(c *ui.Context, key, label, note string, on *bool, changed func()) {
 	t := c.Theme()
+	before := *on
 	ui.Row(c.Key(key)).Padding(10, 12).Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+		col := ui.Column(c.Key("label")).Grow(1).MinWidth(0).Gap(2).Cursor(ui.CursorPointer)
+		col.Children(func() {
 			ui.Text(c, label)
 			ui.Text(c, note).FontSize(12).TextColor(t.TextMuted)
 		})
-		before := *on
-		ui.Switch(c.Key("switch"), on).Label(label)
-		if *on != before && changed != nil {
-			changed()
+		if col.Clicked() {
+			*on = !*on
 		}
+		ui.Switch(c.Key("switch"), on).Label(label)
 	})
+	if *on != before && changed != nil {
+		changed()
+	}
 }
 
 func (a *App) settingsSpaces(c *ui.Context) {

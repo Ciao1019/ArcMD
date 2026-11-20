@@ -299,3 +299,55 @@ func TestDisplayMathTagRendersFlushRight(t *testing.T) {
 		t.Fatalf("expected right-aligned tag '3.1' near right edge of box (%v), ops=%+v", box.W, box.Ops)
 	}
 }
+
+func TestTableInlineFormulasAutoSizeAndExpandWithWindow(t *testing.T) {
+	if err := loadMathFonts(); err != nil {
+		t.Fatal(err)
+	}
+	md := strings.Join([]string{
+		"| 个体 | 相对阶 | 名义输出方程 | 指令上限候选值 |",
+		"| --- | --- | --- | --- |",
+		`| 1 | 1 | $\dot{y}_1 = -0.6y_1 + a_1 u_1$ | 2.0 |`,
+		`| 2 | 2 | $\ddot{y}_2 = -0.4y_2 - 0.8\dot{y}_2 + a_2 u_2$ | 2.5 |`,
+		`| 3 | 3 | $y_3^{(3)} = -0.2y_3 - 0.6\dot{y}_3 - 0.9\ddot{y}_3 + a_3 u_3$ | 3.0 |`,
+	}, "\n")
+	e, _ := newTester(md)
+	tblID := e.Doc.Blocks[0].ID
+	d, ok := e.tableDecoration(tblID)
+	if !ok || len(d.cols) != 5 {
+		t.Fatalf("unexpected table decoration: %+v", d)
+	}
+	col0W := d.cols[1] - d.cols[0]
+	col2W := d.cols[3] - d.cols[2]
+	if col2W <= col0W*2 {
+		t.Fatalf("formula column did not receive content-aware width: col0=%v col2=%v", col0W, col2W)
+	}
+	for _, r := range e.rows {
+		if r.layout == nil {
+			continue
+		}
+		for _, o := range r.layout.objects {
+			if o.box != nil && o.scale < 0.999 {
+				t.Fatalf("table formula scaled down (%v) despite ample table width: %+v", o.scale, d.cols)
+			}
+		}
+	}
+
+	// A multi-formula wide table expands past the 820 prose column when the window widens.
+	wideMD := strings.Join([]string{
+		"| 编号 | 状态动态方程 | 观测输出方程 | 鲁棒控制律 | 稳定性判据 |",
+		"| --- | --- | --- | --- | --- |",
+		`| 1 | $x_{k+1} = A_1 x_k + B_1 u_k + E_1 w_k + d_k$ | $y_k = C_1 x_k + D_1 u_k + F_1 v_k$ | $u_k = -K_1 \hat{x}_k + G_1 r_k - H_1 \hat{d}_k$ | $V(x_{k+1}) - V(x_k) \le -\alpha \|x_k\|^2$ |`,
+	}, "\n")
+	ew, ttw := newTester(wideMD)
+	ttw.SetSize(960, 650)
+	ttw.Frame()
+	dNarrow, _ := ew.tableDecoration(ew.Doc.Blocks[0].ID)
+
+	ttw.SetSize(1400, 650)
+	ttw.Frame()
+	dWide, _ := ew.tableDecoration(ew.Doc.Blocks[0].ID)
+	if dWide.rect.W <= dNarrow.rect.W+100 {
+		t.Fatalf("widening window did not expand wide formula table: narrow=%v wide=%v", dNarrow.rect.W, dWide.rect.W)
+	}
+}

@@ -648,6 +648,7 @@ func (e *Engine) Fragment() *Document {
 			b.Kind = "paragraph"
 			b.Level, b.NoteLabel, b.ImageWidth, b.URL = 0, "", 0, ""
 			b.Background, b.ColSpan, b.RowSpan = "", 0, 0
+			b.Align, b.Indent, b.Checked, b.Language, b.MapList = "", 0, false, "", nil
 		}
 		out.Blocks = append(out.Blocks, b)
 	}

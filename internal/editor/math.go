@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -80,6 +81,9 @@ func (e *Editor) exitDisplayMath() bool {
 func (e *Editor) glyphs(text string, size float32, italic, bold bool) *ui.TextLayout {
 	// A registration failure still leaves the system serif fallbacks usable.
 	_ = loadMathFonts()
+	if size > 0 {
+		size = float32(math.Round(float64(size)*20)) / 20
+	}
 	key := fmt.Sprintf("%s|%g|%v|%v", text, size, italic, bold)
 	if l, ok := e.mathGlyphs[key]; ok {
 		return l
@@ -234,17 +238,26 @@ func (e *Editor) paintMath(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) bo
 	w := box.W * scale
 	fx := x + (r.rect.W-w)/2
 	fy := y + r.mathTop
-	p.Transform(ui.Scaling(scale, scale), fx, fy, func() {
-		e.paintFormula(p, *box, fx, fy+box.Ascent, t)
-	})
+	e.paintFormulaScaled(p, *box, fx, fy+box.Ascent*scale, scale, t)
 	return r.mathHidden
 }
 
 func (e *Editor) paintFormula(p *ui.Painter, box tex.Box, x, y float32, t *ui.Theme) {
+	e.paintFormulaScaled(p, box, x, y, 1, t)
+}
+
+// paintFormulaScaled draws a formula directly at its target font size instead
+// of scaling pre-shaped glyphs through a painter transform, keeping multiple
+// formulas on the same surface crisp on whole screen pixels and preventing
+// fraction rules or radical strokes from thinning below a readable hairline.
+func (e *Editor) paintFormulaScaled(p *ui.Painter, box tex.Box, x, y, scale float32, t *ui.Theme) {
+	if scale <= 0 {
+		return
+	}
 	for _, op := range box.Ops {
 		switch op.Kind {
 		case "text":
-			l := e.glyphs(op.Text, op.Size, op.Italic, op.Bold)
+			l := e.glyphs(op.Text, max(4, op.Size*scale), op.Italic, op.Bold)
 			baseline := float32(0)
 			if lines := l.Lines(); len(lines) > 0 {
 				baseline = lines[0].Baseline
@@ -253,15 +266,23 @@ func (e *Editor) paintFormula(p *ui.Painter, box tex.Box, x, y float32, t *ui.Th
 			if op.Error {
 				color = t.Danger
 			}
-			p.TextLayout(l, x+op.X, y+op.Y-baseline, color)
+			p.TextLayout(l, x+op.X*scale, y+op.Y*scale-baseline, color)
 		case "rule":
-			p.Fill(ui.Rect{X: x + op.X, Y: y + op.Y, W: op.W, H: op.H}, t.Text, 0)
+			h := op.H * scale
+			if op.H > 0 && scale < 1 {
+				h = max(min(op.H, 0.85), h)
+			}
+			p.Fill(ui.Rect{X: x + op.X*scale, Y: y + op.Y*scale, W: op.W * scale, H: h}, t.Text, 0)
 		case "path":
 			pts := make([][2]float32, len(op.Points))
 			for i, pt := range op.Points {
-				pts[i] = [2]float32{x + pt[0], y + pt[1]}
+				pts[i] = [2]float32{x + pt[0]*scale, y + pt[1]*scale}
 			}
-			p.StrokePolyline(pts, op.Width, t.Text)
+			sw := op.Width * scale
+			if op.Width > 0 && scale < 1 {
+				sw = max(min(op.Width, 0.85), sw)
+			}
+			p.StrokePolyline(pts, sw, t.Text)
 		}
 	}
 }

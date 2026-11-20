@@ -2125,10 +2125,6 @@ func renderMarkdownRuns(runs []document.Run, before, after rune, inKbd bool) str
 	return out.String()
 }
 
-// markdownEscape leaves ']' unescaped because ExtMath treats '\[...\]' as TeX
-// display math, whereas an unmatched ']' after '\[...' stays literal text.
-var markdownEscape = strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "`", "\\`", "<", "&lt;")
-
 func formatMarkdownLeafRun(run document.Run, skipWiki bool) string {
 	if run.Style.Code {
 		fence := "`"
@@ -2186,7 +2182,43 @@ func escapePlainSegment(s string, skipWiki bool) string {
 }
 
 func escapeMarkdownPlain(s string) string {
-	out := markdownEscape.Replace(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRuneInString(s[i:])
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '*':
+			b.WriteString(`\*`)
+		case '[':
+			b.WriteString(`\[`)
+		case '`':
+			b.WriteString("\\`")
+		case '<':
+			b.WriteString("&lt;")
+		case '_':
+			prevAlnum := false
+			if i > 0 {
+				pr, _ := utf8.DecodeLastRuneInString(s[:i])
+				prevAlnum = unicode.IsLetter(pr) || unicode.IsDigit(pr)
+			}
+			nextAlnum := false
+			if i+n < len(s) {
+				nr, _ := utf8.DecodeRuneInString(s[i+n:])
+				nextAlnum = unicode.IsLetter(nr) || unicode.IsDigit(nr)
+			}
+			if prevAlnum && nextAlnum {
+				b.WriteByte('_')
+			} else {
+				b.WriteString(`\_`)
+			}
+		default:
+			b.WriteString(s[i : i+n])
+		}
+		i += n
+	}
+	out := b.String()
 	// Only escape "==" when it would be misread as ==highlight== syntax.
 	if strings.Contains(out, "==") && len(splitHighlightSyntax(out, document.Style{})) > 1 {
 		out = strings.ReplaceAll(out, "==", `\==`)

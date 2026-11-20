@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -193,6 +194,277 @@ func (e *Editor) estimateTableInnerHeight(b *document.Block, w float32, widths [
 	return total
 }
 
+type cachedTableWidths struct {
+	cols     int
+	padX     float32
+	fontSize float32
+	stamp    runsStamp
+	allEmpty bool
+	nat      []float32
+	mathNeed []float32
+}
+
+func (e *Editor) cachedTableNaturalWidths(b *document.Block, padX float32) cachedTableWidths {
+	cols := 0
+	if len(b.Children) > 0 {
+		cols = len(b.Children[0].Children)
+	}
+	if cols == 0 {
+		return cachedTableWidths{allEmpty: true}
+	}
+	fontSize := float32(14)
+	if e.mapTablePreview {
+		fontSize = mapCellFont
+	}
+	stamp := tableStamp(b)
+	if cached, ok := e.tableWidths[b.ID]; ok && cached.cols == cols && cached.padX == padX && cached.fontSize == fontSize && cached.stamp == stamp {
+		return cached
+	}
+	nat := make([]float32, cols)
+	mathNeed := make([]float32, cols)
+	baseEmpty := 2*padX + 28
+	for i := range nat {
+		nat[i] = baseEmpty
+	}
+	covered := document.CoveredCells(b)
+	nrows := len(b.Children)
+	nonEmpty := false
+
+	measureCell := func(cell *document.Block) (cellNat, cellMath float32) {
+		txt := cell.Text()
+		if txt == "" {
+			return baseEmpty, 0
+		}
+		nonEmpty = true
+		hasDollar := strings.IndexByte(txt, '$') >= 0
+		var tokens []inlineToken
+		if hasDollar {
+			tokens = inlineTokens(txt)
+		}
+		tokIdx := 0
+		lineStart := 0
+		for pos := 0; pos <= len(txt); pos++ {
+			if pos < len(txt) && txt[pos] != '\n' {
+				continue
+			}
+			lineW := float32(0)
+			lineMathW := float32(0)
+			cur := lineStart
+			for tokIdx < len(tokens) && tokens[tokIdx].end <= pos {
+				tk := tokens[tokIdx]
+				tokIdx++
+				if tk.start < cur {
+					continue
+				}
+				lineW += estimateSegmentAdvance(txt[cur:tk.start], fontSize)
+				a, z := document.Len(txt[:tk.start]), document.Len(txt[:tk.end])
+				if tk.note == "" && tokenAllowed(cell, a, z) {
+					if box, err := tex.LayoutInline(tk.source, fontSize*1.1, e.measureMath); err == nil {
+						mw := box.W + 8
+						lineW += mw
+						lineMathW += mw
+						cur = tk.end
+						continue
+					}
+				}
+				lineW += estimateSegmentAdvance(txt[tk.start:tk.end], fontSize)
+				cur = tk.end
+			}
+			if cur < pos {
+				lineW += estimateSegmentAdvance(txt[cur:pos], fontSize)
+			}
+			// Cap pure prose so a long sentence wraps instead of starving neighbor
+			// columns, while never capping inline formulas below their natural width.
+			proseW := lineW - lineMathW
+			cappedLineW := lineMathW + min(proseW, 380)
+			extraPad := float32(8)
+			if lineMathW > 0 {
+				extraPad = 20
+			}
+			cellNat = max(cellNat, 2*padX+extraPad+cappedLineW)
+			if lineMathW > 0 {
+				cellMath = max(cellMath, 2*padX+12+lineMathW)
+			}
+			lineStart = pos + 1
+		}
+		return cellNat, cellMath
+	}
+
+	type spanCell struct {
+		ci, span              int
+		cellNat, cellMathNeed float32
+	}
+	var spans []spanCell
+	for ri, tr := range b.Children {
+		for ci, cell := range tr.Children {
+			if covered[cell] {
+				continue
+			}
+			spanCols, _ := document.Span(cell)
+			spanCols = min(spanCols, cols-ci)
+			_ = ri
+			_ = nrows
+			cNat, cMath := measureCell(cell)
+			if spanCols <= 1 {
+				nat[ci] = max(nat[ci], cNat)
+				mathNeed[ci] = max(mathNeed[ci], cMath)
+			} else {
+				spans = append(spans, spanCell{ci: ci, span: spanCols, cellNat: cNat, cellMathNeed: cMath})
+			}
+		}
+	}
+	for _, sc := range spans {
+		sumNat, sumMath := float32(0), float32(0)
+		for k := sc.ci; k < sc.ci+sc.span; k++ {
+			sumNat += nat[k]
+			sumMath += mathNeed[k]
+		}
+		if sc.cellNat > sumNat {
+			each := (sc.cellNat - sumNat) / float32(sc.span)
+			for k := sc.ci; k < sc.ci+sc.span; k++ {
+				nat[k] += each
+			}
+		}
+		if sc.cellMathNeed > sumMath {
+			each := (sc.cellMathNeed - sumMath) / float32(sc.span)
+			for k := sc.ci; k < sc.ci+sc.span; k++ {
+				mathNeed[k] += each
+			}
+		}
+	}
+	out := cachedTableWidths{
+		cols:     cols,
+		padX:     padX,
+		fontSize: fontSize,
+		stamp:    stamp,
+		allEmpty: !nonEmpty,
+		nat:      nat,
+		mathNeed: mathNeed,
+	}
+	if e.tableWidths == nil {
+		e.tableWidths = make(map[string]cachedTableWidths, 32)
+	} else if len(e.tableWidths) > maxCachedShapes {
+		clear(e.tableWidths)
+	}
+	e.tableWidths[b.ID] = out
+	return out
+}
+
+func estimateSegmentAdvance(s string, fontSize float32) float32 {
+	w := float32(0)
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			w += fontSize * 2.0
+		case r >= 0x1100:
+			w += fontSize * 1.02
+		default:
+			w += fontSize * 0.56
+		}
+	}
+	return w
+}
+
+func distributeTableWidths(cw cachedTableWidths, w float32) []float32 {
+	cols := cw.cols
+	widths := make([]float32, cols)
+	if cols == 0 {
+		return widths
+	}
+	if cw.allEmpty {
+		each := w / float32(cols)
+		for i := range widths {
+			widths[i] = each
+		}
+		return widths
+	}
+	baseMin := min(float32(52), w/float32(cols))
+	colMin := make([]float32, cols)
+	colNat := make([]float32, cols)
+	sumMin, sumNat := float32(0), float32(0)
+	for i := range cols {
+		colMin[i] = max(baseMin, cw.mathNeed[i])
+		colNat[i] = max(colMin[i], cw.nat[i])
+		sumMin += colMin[i]
+		sumNat += colNat[i]
+	}
+	switch {
+	case sumNat <= w && sumNat > 0:
+		extra := w - sumNat
+		equalEach := extra * 0.5 / float32(cols)
+		propPool := extra - equalEach*float32(cols)
+		for i := range cols {
+			widths[i] = colNat[i] + equalEach + propPool*(colNat[i]/sumNat)
+		}
+	case sumMin <= w:
+		rem := w - sumMin
+		flex := float32(0)
+		for i := range cols {
+			flex += colNat[i] - colMin[i]
+		}
+		for i := range cols {
+			if flex > 0 {
+				widths[i] = colMin[i] + rem*((colNat[i]-colMin[i])/flex)
+			} else {
+				widths[i] = colMin[i] + rem/float32(cols)
+			}
+		}
+	default:
+		rem := max(0, w-baseMin*float32(cols))
+		flex := float32(0)
+		for i := range cols {
+			flex += max(0, colNat[i]-baseMin)
+		}
+		for i := range cols {
+			if flex > 0 {
+				widths[i] = baseMin + rem*(max(0, colNat[i]-baseMin)/flex)
+			} else {
+				widths[i] = w / float32(cols)
+			}
+		}
+	}
+	return widths
+}
+
+// tableSpan gives a top-level table wider horizontal room on wide pages when
+// its columns or formulas naturally exceed the standard prose column, while
+// keeping margins for its left block handle and right bookmark mark.
+func (e *Editor) tableSpan(b *document.Block, pageW, bodyW float32) (x, w float32) {
+	if b == nil || b.Kind != "table" || b.Indent > 0 || e.printing || e.mapTablePreview || len(b.Children) == 0 || len(b.Children[0].Children) == 0 {
+		return e.padding, bodyW
+	}
+	availW := max(bodyW, pageW-156)
+	if availW <= bodyW {
+		return e.padding, bodyW
+	}
+	cw := e.cachedTableNaturalWidths(b, 14)
+	wantW := bodyW
+	if len(b.Widths) == cw.cols {
+		sum := float32(0)
+		for _, v := range b.Widths {
+			sum += v
+		}
+		if sum > 0 {
+			for i, v := range b.Widths {
+				if v > 0 && cw.mathNeed[i] > 0 {
+					wantW = max(wantW, cw.mathNeed[i]*sum/v)
+				}
+			}
+		}
+	} else if !cw.allEmpty {
+		sumNat := float32(0)
+		for _, v := range cw.nat {
+			sumNat += v
+		}
+		wantW = max(wantW, sumNat)
+	}
+	tw := min(availW, wantW)
+	if tw <= bodyW+0.5 {
+		return e.padding, bodyW
+	}
+	return (pageW - tw) / 2, tw
+}
+
 func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, winTop, winBottom float32, leafOf func(string) document.Leaf, cellTop *float32, header *bool, blockLayout func(*document.Block, float32, float32, float32) float32) float32 {
 	padX, padY, minRow, extra := float32(14), float32(7), float32(42), float32(4)
 	if e.mapTablePreview {
@@ -202,20 +474,24 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 	y += 22
 	top := y
 	cols := len(b.Children[0].Children)
-	widths := make([]float32, cols)
-	sum := float32(cols)
+	var widths []float32
 	if len(b.Widths) == cols {
-		sum = 0
+		widths = make([]float32, cols)
+		sum := float32(0)
 		for _, v := range b.Widths {
 			sum += v
 		}
-	}
-	for i := range widths {
-		value := float32(1)
-		if len(b.Widths) == cols {
-			value = b.Widths[i]
+		if sum <= 0 {
+			sum = float32(cols)
 		}
-		widths[i] = w * value / sum
+		for i, v := range b.Widths {
+			if v <= 0 {
+				v = 1
+			}
+			widths[i] = w * v / sum
+		}
+	} else {
+		widths = distributeTableWidths(e.cachedTableNaturalWidths(b, padX), w)
 	}
 	colEdges := []float32{x}
 	for _, cw := range widths {

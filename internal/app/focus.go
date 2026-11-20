@@ -11,13 +11,27 @@ import (
 )
 
 // narrowWidth is the window width below which the sidebar folds away by
-// itself, as Arc's does, and comes back when the window widens.
-const narrowWidth = 900
+// itself, as Arc's does. Widening again waits until narrowUnfoldWidth so
+// re-opening the sidebar never makes the document narrower than before.
+const (
+	narrowWidth       = 900
+	narrowUnfoldWidth = narrowWidth + sidebarWidth + 10
+)
 
-// narrowTick notes whether the window is narrow; crossing the width
+// narrowTick notes whether the window is narrow; crossing the threshold
 // forgets the sidebar shown while narrow.
 func (a *App) narrowTick(w float32) {
-	if narrow := w < narrowWidth; narrow != a.narrow {
+	narrow := a.narrow
+	switch {
+	case !a.narrowReady:
+		narrow = w < narrowWidth
+		a.narrowReady = true
+	case !a.narrow && w < narrowWidth:
+		narrow = true
+	case a.narrow && w >= narrowUnfoldWidth:
+		narrow = false
+	}
+	if narrow != a.narrow {
 		a.narrow, a.narrowShown = narrow, false
 	}
 }
@@ -173,7 +187,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		AutoSpace:             a.prefs.AutoSpace,
 		CodeNoWrap:            a.prefs.CodeNoWrap,
 		EmojiSuggest:          suggestEmoji,
-		Resizing:              a.splitResizing || a.qa.resizing,
+		Resizing:              a.splitResizing || a.qa.resizing || a.dockSliding,
 		Width:                 width,
 		Theme:                 c.Theme(),
 		Page:                  pageStyle(a.paperDark),
