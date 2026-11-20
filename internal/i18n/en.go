@@ -1364,4 +1364,19 @@ var en = map[string]string{
 	"待合并冲突 %d": "%d conflicts to merge",
 	"「%s」存在同步冲突（本地与云端均已修改）。":          "“%s” has a sync conflict (modified both locally and in the cloud).",
 	"这是「%s」的云端冲突副本，可通过三栏合并将改动归并回原文档。": "This is a cloud conflict copy of “%s”. Use 3-Way Merge to fold changes back into the original.",
+
+	// Sidebar copy, paste and duplicate
+	"粘贴 %d 项":    "Paste %d Items",
+	"复制已选 %d 项":  "Copy %d Selected Items",
+	"复制当前文档":     "Copy Current Document",
+	"创建当前文档副本":   "Duplicate Current Document",
+	"粘贴到当前文件夹":   "Paste into Current Folder",
+	"已复制「%s」":    "Copied “%s”",
+	"已复制 %d 个项目": "Copied %d Items",
+	"已粘贴到「%s」":   "Pasted into “%s”",
+	"已创建副本":      "Duplicated",
+	"外部空间只记录文件，不能作为粘贴目标。": "The External space tracks files only and cannot be pasted into.",
+	"粘贴 %s 失败。%v":       "Couldn't paste %s. %v",
+	"创建 %s 的副本失败。%v":    "Couldn't duplicate %s. %v",
+	"无法粘贴「%s」：源文件已不存在。": "Couldn't paste “%s”: the source file no longer exists.",
 }

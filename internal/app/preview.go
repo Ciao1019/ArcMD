@@ -110,6 +110,11 @@ type preview struct {
 	// refocus gives the editor the keys back once the search field had
 	// them.
 	refocus bool
+	// suppress prevents the hover preview from popping up on a row the user
+	// just clicked until the pointer leaves that row; pointer tracks whichever
+	// sidebar row is currently under the pointer (expanded folders included).
+	pointer  place
+	suppress place
 	// col are the card's colors this frame, in the space's look.
 	col previewLook
 }
@@ -131,8 +136,17 @@ func (a *App) previewView(c *ui.Context) {
 	now := c.Now()
 	hover := p.hover
 	p.hover = nil
+	pointer := p.pointer
+	p.pointer = place{}
 	if a.listDragging || a.carrying != nil || a.dragSettle.active || a.insertSeam.index >= 0 || a.listDrop != nil || a.favDrop != nil || a.renaming != "" || a.spaceForm.open || len(a.picks) > 0 || c.Modifiers()&(ui.Cmd|ui.Shift) != 0 {
 		hover = nil
+	}
+	if p.suppress != (place{}) {
+		if pointer != p.suppress {
+			p.suppress = place{}
+		} else if hover != nil && hover.space != nil && hover.space.ID == p.suppress.space && hover.rel == p.suppress.rel {
+			hover = nil
+		}
 	}
 	// The pointer resting: a new row starts the wait, the same row ends it.
 	switch {
@@ -206,6 +220,13 @@ func (a *App) openPreview(t previewTarget) {
 	tt := t
 	p.shown, p.closing, p.leftAt = &tt, false, time.Time{}
 	p.query, p.selected, p.extended = "", 0, false
+}
+
+// dismissPreview closes any open preview without restoring focus to the
+// document editor, for sidebar interactions that keep focus in the sidebar.
+func (a *App) dismissPreview() {
+	a.preview.refocus = false
+	a.closePreview(a.now)
 }
 
 // closePreview fades the preview out.

@@ -83,6 +83,7 @@ func (a *App) forgetExternal(sp *space.Space, rel string) {
 			a.replaceReferences(d, nil)
 		}
 	}
+	a.forgetCopied(sp.ID, rel)
 	a.state.Forget(sp.ID, rel)
 	delete(sp.ExternalFiles, rel)
 	_ = history.Forget(sp.Root, rel)

@@ -154,6 +154,7 @@ func (a *App) removeSpace(id string) {
 		}
 	}
 	if a.state.Remove(id) == nil {
+		a.forgetCopiedSpace(id)
 		delete(a.sessions, id)
 		a.saveState()
 		a.refreshTree()
