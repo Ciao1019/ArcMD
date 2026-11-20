@@ -129,9 +129,21 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				a.slot, restingPins = a.computeSlot(sp, pins, over)
 				highlight = a.dropSection(a.listDrop)
 				tree.ContextMenu(func(m *ui.Menu) { a.listMenu(m, sp) })
-				if tree.FocusWithin() && a.renaming == "" && !c.FocusTakesText() && tree.Shortcut(ui.Cmd, ui.KeyBackspace) {
-					if group := a.activePickedGroup(); len(group) > 0 {
-						a.trashGroup(group)
+				if tree.FocusWithin() && a.renaming == "" && !c.FocusTakesText() && !a.modalBlocksSidebarKeys() {
+					if tree.Shortcut(ui.Cmd, ui.KeyBackspace) {
+						if group := a.activePickedGroup(); len(group) > 0 {
+							a.trashGroup(group)
+						}
+					}
+					if tree.Shortcut(ui.Cmd, ui.KeyC) {
+						if group := a.activePickedGroup(); len(group) > 0 {
+							a.copyEntries(sp, group)
+						}
+					}
+					if tree.Shortcut(ui.Cmd, ui.KeyV) {
+						if a.canPasteInto(sp, "") {
+							a.pasteInto(sp, "", "")
+						}
 					}
 				}
 			}
@@ -718,6 +730,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 	}
 	a.rowBounce(c, row, place{sp.ID, n.Path})
 	if hovered && !renaming {
+		a.preview.pointer = place{sp.ID, n.Path}
 		// Resting here previews a closed folder's documents, or the
 		// document.
 		switch {
@@ -829,9 +842,27 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		}
 		a.nodeMenu(m, sp, n)
 	})
+	if !renaming && a.renaming == "" && !c.FocusTakesText() && !a.modalBlocksSidebarKeys() {
+		if row.Shortcut(ui.Cmd, ui.KeyC) {
+			a.copyEntries(sp, a.dragGroup(sp.ID, n.Path))
+		}
+		if row.Shortcut(ui.Cmd, ui.KeyV) {
+			if n.Dir {
+				if a.canPasteInto(sp, n.Path) {
+					a.pasteInto(sp, n.Path, "")
+				} else if a.canPasteInto(sp, parentDir(n.Path)) {
+					a.pasteInto(sp, parentDir(n.Path), n.Path)
+				}
+			} else if a.canPasteInto(sp, parentDir(n.Path)) {
+				a.pasteInto(sp, parentDir(n.Path), n.Path)
+			}
+		}
+	}
 	switch {
 	case renaming, closed:
 	case row.Clicked():
+		a.dismissPreview()
+		a.preview.suppress = place{sp.ID, n.Path}
 		mods := row.ClickModifiers()
 		if mods&(ui.Cmd|ui.Shift) != 0 {
 			a.pickRow(sp, n.Path, mods&ui.Shift != 0)
@@ -852,12 +883,14 @@ func (a *App) renameField(c *ui.Context) {
 	in := ui.TextInput(c.Key("rename"), &a.newName).Grow(1).MinWidth(0).Height(26).Padding(2, 6).
 		TextColor(c.Theme().Text).AutoFocus().Label(i18n.T("名称"))
 	switch {
-	case c.Shortcut(0, ui.KeyEscape):
+	case in.Shortcut(0, ui.KeyEscape), c.Shortcut(0, ui.KeyEscape):
 		a.renaming = ""
+		a.openAfterRename = ""
+		a.flushPendingDupUndo("", "")
 	case in.Submitted():
 		a.commitRename()
 	case a.renameFocused && !in.Focused():
-		a.commitRename()
+		a.finishRename(false)
 	}
 	a.renameFocused = in.Focused()
 }
@@ -873,6 +906,18 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		if m.Item(i18n.T("重命名…")).Chosen() {
 			a.renameIn(sp, n.Path)
 		}
+		if m.Item(i18n.T("复制")).Shortcut(ui.Cmd, ui.KeyC).Chosen() {
+			a.copyEntries(sp, []string{n.Path})
+		}
+		if !sp.IsExternal() {
+			if m.Item(i18n.T("创建副本")).Chosen() {
+				a.duplicateEntry(sp, n.Path)
+			}
+			if m.Item(a.pasteMenuLabel()).Shortcut(ui.Cmd, ui.KeyV).Disabled(!a.canPasteInto(sp, n.Path)).Chosen() {
+				a.pasteInto(sp, n.Path, "")
+			}
+		}
+		m.Separator()
 		if m.Item(i18n.T("新建文档")).Chosen() {
 			a.newDoc(n.Path)
 		}
@@ -942,6 +987,17 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		m.Separator()
 		if m.Item(i18n.T("重命名…")).Chosen() {
 			a.renameIn(sp, n.Path)
+		}
+		if m.Item(i18n.T("复制")).Shortcut(ui.Cmd, ui.KeyC).Chosen() {
+			a.copyEntries(sp, []string{n.Path})
+		}
+		if !sp.IsExternal() {
+			if m.Item(i18n.T("创建副本")).Chosen() {
+				a.duplicateEntry(sp, n.Path)
+			}
+			if m.Item(a.pasteMenuLabel()).Shortcut(ui.Cmd, ui.KeyV).Disabled(!a.canPasteInto(sp, parentDir(n.Path))).Chosen() {
+				a.pasteInto(sp, parentDir(n.Path), n.Path)
+			}
 		}
 		m.Separator()
 		if sp.IsExternal() {
@@ -1018,6 +1074,9 @@ func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 	}
 	if m.Item(i18n.T("新建文件夹")).Shortcut(ui.Cmd|ui.Shift, ui.KeyN).Chosen() {
 		a.newFolder("")
+	}
+	if m.Item(a.pasteMenuLabel()).Shortcut(ui.Cmd, ui.KeyV).Disabled(!a.canPasteInto(sp, "")).Chosen() {
+		a.pasteInto(sp, "", "")
 	}
 	m.Separator()
 	if m.Item(i18n.T("在访达中显示")).Chosen() {

@@ -325,13 +325,20 @@ func (a *App) inDraggedGroup(spID, rel string) bool {
 	return false
 }
 
+// modalBlocksSidebarKeys reports whether a modal dialog, rename input or drag
+// is active that should block sidebar file shortcuts (Cmd+C / Cmd+V / Cmd+⌫).
+// Passive hover previews do not block focused sidebar shortcuts.
+func (a *App) modalBlocksSidebarKeys() bool {
+	return a.palette.open || a.settingsOpen || a.replace.open || a.tagRename.open ||
+		a.versions.open || a.updates.window || a.updates.communityOpen || a.pdfExport != nil || a.pluginModalOpen() ||
+		a.library.open || a.spaceForm.open || a.renaming != "" || a.tour.open ||
+		a.carrying != nil || a.carried != nil
+}
+
 // modalOrOverlayBlocksEsc reports whether an overlay, rename field or dialog
 // is open that should handle Escape before sidebar multi-selection clears.
 func (a *App) modalOrOverlayBlocksEsc() bool {
-	return a.palette.open || a.settingsOpen || a.replace.open || a.tagRename.open ||
-		a.versions.open || a.updates.window || a.updates.communityOpen || a.pdfExport != nil || a.pluginModalOpen() ||
-		a.library.open || a.spaceForm.open || a.renaming != "" ||
-		(a.preview.shown != nil && !a.preview.closing) || a.carrying != nil || a.carried != nil
+	return a.modalBlocksSidebarKeys() || (a.preview.shown != nil && !a.preview.closing)
 }
 
 // countLabel formats a concise item count description for batch undo toasts.
@@ -573,6 +580,7 @@ func (a *App) moveGroupAcross(fromID string, group []string, toID, dir string) [
 			delete(src.ExternalFiles, rel)
 		}
 		a.followOpen(fromID, rel, toID, to)
+		a.followCopied(fromID, rel, toID, to)
 		a.followSplitPaths(fromID, rel, toID, to)
 		movedList = append(movedList, crossMoved{oldDir: oldDir, to: to})
 		out = append(out, to)
@@ -753,6 +761,7 @@ func (a *App) trashGroup(group []string) {
 				a.replaceReferences(d, nil)
 			}
 		}
+		a.forgetCopied(sp.ID, rel)
 		a.state.Forget(sp.ID, rel)
 		trashed = append(trashed, rel)
 	}
@@ -949,6 +958,9 @@ func (a *App) pickedMenu(m *ui.Menu, sp *space.Space, rawGroup []string) {
 	}
 
 	m.Separator()
+	if m.Item(i18n.T("复制")).Shortcut(ui.Cmd, ui.KeyC).Chosen() {
+		a.copyEntries(sp, group)
+	}
 	if sp.IsExternal() {
 		a.spacesGroupMenu(m, sp, group)
 		m.Separator()

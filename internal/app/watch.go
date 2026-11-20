@@ -298,6 +298,7 @@ func (a *App) replaceDoc(text string) {
 func (a *App) closeMissing() {
 	d := a.doc
 	a.replaceReferences(d, nil)
+	a.forgetCopied(d.space.ID, d.rel)
 	a.state.Forget(d.space.ID, d.rel)
 	a.saveState()
 	a.notify("「%s」已被移动或删除。", d.title())

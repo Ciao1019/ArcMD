@@ -144,6 +144,7 @@ func (a *App) moveAcross(fromID, rel, toID, dir string) string {
 	}
 	follow := a.split == nil && a.doc != nil && a.doc.space == src && within(a.doc.rel, rel)
 	a.followOpen(fromID, rel, toID, to)
+	a.followCopied(fromID, rel, toID, to)
 	a.followSplitPaths(fromID, rel, toID, to)
 	a.saveState()
 	if a.doc != nil && a.state.IsFavorite(a.doc.space.ID, a.doc.rel) {

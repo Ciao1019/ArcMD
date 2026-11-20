@@ -146,11 +146,21 @@ type App struct {
 	renameFocused bool
 	// renameSpace is the ID of the space holding the item being renamed.
 	renameSpace string
+	// openAfterRename opens a freshly duplicated document once its inline
+	// rename is confirmed with Enter (copy.go).
+	openAfterRename string
+	// pendingDupUndo defers a duplicated item's Undo toast until its inline
+	// rename finishes so the toast shows the final name with a fresh timeout.
+	pendingDupUndo *place
 	// picks are the sidebar rows picked with Cmd/Shift-click in picksSpace,
 	// and pickAnchor where the next Shift-click range starts (multiselect.go).
 	picks      map[string]bool
 	picksSpace string
 	pickAnchor string
+	// copied holds the sidebar items copied for pasting, and recentCopies
+	// keeps live paths for paste/duplicate undo toasts (copy.go).
+	copied       []place
+	recentCopies []*place
 
 	palette palette
 	// qa is the panel of questions about the space (qa.go).
@@ -897,6 +907,7 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 				a.notify("文件已被移动或删除：%s", sp.ExternalFiles[rel])
 				return false
 			}
+			a.forgetCopied(sp.ID, rel)
 			a.state.Forget(sp.ID, rel)
 			a.saveState()
 			a.refreshTree()
@@ -1238,7 +1249,9 @@ func (a *App) startRename(rel string) {
 // renameIn edits the name of the file or folder at rel of the space sp: in
 // its row, or under its tile for a favorite, which may be another space's.
 func (a *App) renameIn(sp *space.Space, rel string) {
-	a.renaming, a.renameSpace, a.renameFocused = rel, sp.ID, false
+	a.flushPendingDupUndo("", "")
+	a.dismissPreview()
+	a.renaming, a.renameSpace, a.renameFocused, a.openAfterRename = rel, sp.ID, false, ""
 	if sp.IsExternal() {
 		rel = filepath.Base(sp.ExternalFiles[rel])
 	}
@@ -1248,19 +1261,34 @@ func (a *App) renameIn(sp *space.Space, rel string) {
 	}
 }
 
-// commitRename gives the file or folder being renamed the name typed.
-func (a *App) commitRename() {
+// commitRename gives the file or folder being renamed the name typed, opening
+// a freshly duplicated document when its inline rename is confirmed.
+func (a *App) commitRename() { a.finishRename(true) }
+
+func (a *App) finishRename(openDuplicated bool) {
 	rel, name := a.renaming, strings.TrimSpace(a.newName)
+	openPending := openDuplicated && a.openAfterRename != "" && a.openAfterRename == rel
+	dupPending := a.pendingDupUndo != nil && a.pendingDupUndo.space == a.renameSpace && a.pendingDupUndo.rel == rel
 	a.renaming = ""
+	a.openAfterRename = ""
 	if rel == "" || name == "" {
+		if dupPending {
+			a.flushPendingDupUndo("", "")
+		}
 		return
 	}
 	sp := a.state.Get(a.renameSpace)
 	if sp == nil {
+		if dupPending {
+			a.flushPendingDupUndo("", "")
+		}
 		return
 	}
 	renaming := a.residentDocument(sp.ID, rel)
 	if !a.flush() {
+		if dupPending {
+			a.flushPendingDupUndo("", "")
+		}
 		return
 	}
 	if renaming != nil {
@@ -1270,6 +1298,9 @@ func (a *App) commitRename() {
 	to, err := renameFile(sp, rel, name)
 	if err != nil {
 		a.notify("重命名 %s 失败。%v", path.Base(rel), err)
+		if dupPending {
+			a.flushPendingDupUndo(sp.ID, rel)
+		}
 		return
 	}
 	if to != rel {
@@ -1279,6 +1310,22 @@ func (a *App) commitRename() {
 		}
 		if vault.IsDocument(rel) {
 			a.relink(vault.Title(rel), vault.Title(to), sources)
+		}
+	}
+	if dupPending {
+		a.flushPendingDupUndo(sp.ID, to)
+	}
+	if openPending && sp == a.state.ActiveSpace() && vault.IsDocument(to) {
+		a.open(to)
+		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() {
+			d.ensureBodyParagraph()
+			leaves := d.ed.Doc.Leaves()
+			pos := 0
+			if len(d.ed.Doc.Blocks) > 0 && d.ed.Doc.Blocks[0].Kind == "heading" && len(leaves) > 1 {
+				pos = leaves[1].End
+			}
+			d.ed.SetSelection(pos, pos)
+			d.ed.RequestFocus = true
 		}
 	}
 }
@@ -1316,6 +1363,7 @@ func (a *App) moved(sp *space.Space, from, to string) {
 		a.dragGrab.rel = to
 	}
 	a.followPicks(sp.ID, from, to)
+	a.followCopied(sp.ID, from, sp.ID, to)
 	a.followOpen(sp.ID, from, sp.ID, to)
 	a.followSplitPaths(sp.ID, from, sp.ID, to)
 	a.saveState()
@@ -1346,7 +1394,9 @@ func (a *App) switchSpaceOnly(id string) bool {
 	a.saveState()
 	a.syncOpen()
 	a.doc = nil
+	a.flushPendingDupUndo("", "")
 	a.renaming = ""
+	a.openAfterRename = ""
 	a.syncTree()
 	a.pager.swipe = 0
 	a.pagerSettle(a.spaceIndex(id), from)
@@ -1480,6 +1530,7 @@ func (a *App) trash(rel string) {
 		}
 	}
 	a.forgetPicks(sp.ID, rel)
+	a.forgetCopied(sp.ID, rel)
 	a.state.Forget(sp.ID, rel)
 	a.saveState()
 	a.refreshTree()
