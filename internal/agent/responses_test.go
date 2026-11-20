@@ -20,7 +20,7 @@ func TestProtocolSelection(t *testing.T) {
 		{"gpt-6.2-sol", ProtocolChat, ProtocolChat},
 		{"other", ProtocolResponses, ProtocolResponses},
 	} {
-		s := Settings{Model: tc.model, Protocol: tc.setting}
+		s := Settings{BaseURL: "https://api.openai.com/v1", Model: tc.model, Protocol: tc.setting}
 		_, responses := s.Provider().(*Responses)
 		if s.EffectiveProtocol() != tc.want || responses != (tc.want == ProtocolResponses) {
 			t.Errorf("%+v: selected %q", tc, s.EffectiveProtocol())
@@ -79,7 +79,7 @@ func TestResponsesStatelessToolLoop(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	provider := (Settings{BaseURL: srv.URL + "/v1", Model: "gpt-6.2-astra", APIKey: "test"}).Provider()
+	provider := (Settings{Protocol: ProtocolResponses, BaseURL: srv.URL + "/v1", Model: "gpt-6.2-astra", APIKey: "test"}).Provider()
 	calls := 0
 	tool := Tool{Spec: ToolSpec{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)}, Run: func(_ context.Context, args json.RawMessage) (string, error) {
 		calls++
@@ -141,10 +141,137 @@ func TestResponsesCompletedItemEvents(t *testing.T) {
 	for _, i := range []int{2, 0, 1} {
 		fmt.Fprintf(&buf, "data: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":%s}\n\n", i, items[i])
 	}
-	buf.WriteString("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
-	var summary string
-	resp, err := c.readStream(context.Background(), strings.NewReader(buf.String()), func(d Delta) { summary += d.Reasoning })
-	if err != nil || len(resp.Message.Calls) != 2 || resp.Message.Calls[0].ID != "a" || resp.Message.Calls[1].ID != "b" || summary != "checking" {
-		t.Fatalf("%+v %q %v", resp, summary, err)
+	for _, output := range []string{"", `, "output":[]`} {
+		completed := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"" + output + "}}\n\n"
+		var summary string
+		resp, err := c.readStream(context.Background(), strings.NewReader(buf.String()+completed), func(d Delta) { summary += d.Reasoning })
+		if err != nil || len(resp.Message.Calls) != 2 || resp.Message.Calls[0].ID != "a" || resp.Message.Calls[1].ID != "b" || summary != "checking" {
+			t.Fatalf("%+v %q %v", resp, summary, err)
+		}
+	}
+}
+
+func TestAutomaticProtocolHosts(t *testing.T) {
+	for _, test := range []struct{ base, want string }{
+		{"https://OPENROUTER.AI/api/v1/", ProtocolResponses}, {"https://API.OPENAI.COM/v1", ProtocolResponses},
+		{"https://gateway.example/v1", ProtocolChat}, {"https://api.openai.com.example/v1", ProtocolChat},
+		{"http://localhost:11434/v1", ProtocolChat},
+	} {
+		s := Settings{BaseURL: test.base, Model: " OpenAI/GPT-6.2-SOL "}
+		if got := s.EffectiveProtocol(); got != test.want {
+			t.Errorf("%s: got %q, want %q", test.base, got, test.want)
+		}
+	}
+}
+
+func TestResponsesManualNonReasoner(t *testing.T) {
+	c := Responses{ChatCompletions{BaseURL: "https://custom.example/v1", Model: "ordinary"}}
+	resp, err := c.completed(responseObject{Output: []json.RawMessage{
+		json.RawMessage(`{"type":"reasoning","id":"rs_private","summary":[{"text":"shown"}]}`),
+		json.RawMessage(`{"type":"function_call","name":"read","call_id":"call_1","arguments":"{}"}`),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL += "/"
+	if !resp.Message.responses.matches(&c) {
+		t.Fatal("trailing slash discarded replay")
+	}
+	wire, err := json.Marshal(c.request(Request{Messages: []Message{resp.Message}}))
+	if err != nil || strings.Contains(string(wire), `"include"`) || strings.Contains(string(wire), "rs_private") || !strings.Contains(string(wire), "call_1") || resp.Message.Reasoning != "shown" {
+		t.Fatalf("%s, %v", wire, err)
+	}
+}
+
+func TestFitProtectsPendingToolBatch(t *testing.T) {
+	c := &Responses{ChatCompletions{BaseURL: "https://a/v1", Model: "r"}}
+	replay := &responseReplay{base: c.BaseURL, model: c.Model, items: []json.RawMessage{json.RawMessage(`{"type":"reasoning","encrypted_content":"` + strings.Repeat("x", 150000) + `"}`)}}
+	history := []Message{
+		{Role: Assistant, Calls: []ToolCall{{ID: "old"}}, responses: replay}, {Role: ToolRole, Text: strings.Repeat("a", 1000)},
+		{Role: Assistant, Calls: []ToolCall{{ID: "a"}, {ID: "b"}}, responses: replay}, {Role: ToolRole, Text: "fresh A"}, {Role: ToolRole, Text: "fresh B"},
+	}
+	a := Agent{Provider: c}
+	got := a.fit(append([]Message(nil), history...))
+	if got[0].responses != nil || got[1].Text != omitted || got[2].responses != replay || got[3].Text != "fresh A" || got[4].Text != "fresh B" {
+		t.Fatal("incorrect replay or tool retention")
+	}
+	for _, provider := range []Provider{&ChatCompletions{}, &Responses{ChatCompletions{BaseURL: "https://b/v1", Model: c.Model}}, &Responses{ChatCompletions{BaseURL: c.BaseURL, Model: "other"}}} {
+		a.Provider = provider
+		got = a.fit(append([]Message(nil), history...))
+		if got[1].Text != history[1].Text {
+			t.Fatal("budget charged for replay on another endpoint or model")
+		}
+	}
+}
+
+func TestResponseStreamErrors(t *testing.T) {
+	c := Responses{}
+	for _, tc := range []struct {
+		event  string
+		status int
+		retry  bool
+	}{
+		{`{"type":"error","code":"rate_limit_exceeded","message":"slow"}`, 429, true},
+		{`{"type":"response.failed","response":{"error":{"code":"server_error","message":"busy"}}}`, 500, true},
+		{`{"type":"error","error":{"code":"invalid_api_key","message":"invalid"}}`, 401, false},
+		{`{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}`, 400, false},
+	} {
+		_, err := c.readStream(context.Background(), strings.NewReader("data: "+tc.event+"\n"), func(Delta) {})
+		var api *APIError
+		if !errors.As(err, &api) || api.Status != tc.status || Retryable(err) != tc.retry {
+			t.Errorf("%s: %v", tc.event, err)
+		}
+	}
+	data := "data: " + `{"type":"response.reasoning_text.delta","delta":"checking"}` + "\n" + "data: " + `{"type":"response.completed","response":{"output":[]}}` + "\n"
+	var shown string
+	r, err := c.readStream(context.Background(), strings.NewReader(data), func(d Delta) { shown += d.Reasoning })
+	if err != nil || shown != "checking" || r.Message.Reasoning != shown {
+		t.Fatalf("%+v, %q, %v", r, shown, err)
+	}
+}
+
+func TestResponsesRetryBeforeFirstDelta(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		var attempts int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			if attempts == 1 {
+				if partial {
+					sse(w, `{"type":"response.output_text.delta","delta":"partial"}`, `{"type":"error","code":"rate_limit_exceeded"}`)
+				} else {
+					sse(w, `{"type":"error","code":"rate_limit_exceeded"}`)
+				}
+				return
+			}
+			sse(w, `{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed"}}`)
+		}))
+		a := Agent{Provider: &Responses{ChatCompletions{BaseURL: srv.URL, Model: "test"}}, Retries: 1, Wait: func(context.Context, int) error { return nil }}
+		var text string
+		_, err := a.Run(context.Background(), []Message{{Role: User, Text: "q"}}, func(e Event) {
+			if e.Kind == TextDelta {
+				text += e.Text
+			}
+		})
+		srv.Close()
+		if partial {
+			if err == nil || attempts != 1 || text != "partial" {
+				t.Fatalf("partial: attempts %d, text %q, error %v", attempts, text, err)
+			}
+		} else if err != nil || attempts != 2 || text != "ok" {
+			t.Fatalf("retry: attempts %d, text %q, error %v", attempts, text, err)
+		}
+	}
+}
+
+func TestFitCountsPlainTextAfterSwitch(t *testing.T) {
+	a := Agent{Provider: &ChatCompletions{}, ContextChars: 500}
+	result := strings.Repeat("r", 200)
+	history := []Message{
+		{Role: Assistant, Text: strings.Repeat("t", 400), responses: &responseReplay{items: []json.RawMessage{json.RawMessage("{}")}}},
+		{Role: Assistant, Calls: []ToolCall{{ID: "old"}}}, {Role: ToolRole, CallID: "old", Text: result},
+		{Role: User, Text: "another question"},
+	}
+	if got := a.fit(history); got[2].Text != omitted {
+		t.Fatal("budget ignored assistant text sent by the new provider")
 	}
 }

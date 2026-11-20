@@ -115,7 +115,8 @@ func (s Settings) EffectiveProtocol() string {
 	case ProtocolChat, ProtocolResponses:
 		return s.Protocol
 	}
-	if responsesReasoner(s.Model) {
+	u, err := url.Parse(strings.TrimSpace(s.BaseURL))
+	if err == nil && u.Scheme == "https" && responsesReasoner(s.Model) && (strings.EqualFold(u.Hostname(), "api.openai.com") || strings.EqualFold(u.Hostname(), "openrouter.ai")) {
 		return ProtocolResponses
 	}
 	return ProtocolChat

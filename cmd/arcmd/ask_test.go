@@ -65,3 +65,40 @@ func TestAsk(t *testing.T) {
 		t.Fatalf("without settings: %d %s", code, errOut.String())
 	}
 }
+
+func TestAskProtocolOverrides(t *testing.T) {
+	for _, tc := range []struct{ name, env, flag, path string }{
+		{"saved", "", "", "/responses"},
+		{"environment", "chat-completions", "", "/chat/completions"},
+		{"flag", "chat-completions", "responses", "/responses"},
+		{"automatic", "responses", "auto", "/chat/completions"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "prefs.json"), []byte(`{"version":1,"ai":{"protocol":"responses"}}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("ARCMD_AI_PROTOCOL", tc.env)
+			t.Setenv("ARCMD_AI_KEY", "")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.path {
+					t.Errorf("got %s, want %s", r.URL.Path, tc.path)
+				}
+				if r.URL.Path == "/responses" {
+					fmt.Fprintln(w, `data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}`)
+				} else {
+					fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`)
+				}
+			}))
+			defer server.Close()
+			args := []string{"-space", dir, "-base-url", server.URL, "-model", "gpt-6.2-sol"}
+			if tc.flag != "" {
+				args = append(args, "-protocol", tc.flag)
+			}
+			var stdout, stderr bytes.Buffer
+			if exit := ask(append(args, "q"), app.Config{ConfigDir: dir}, &stdout, &stderr); exit != 0 || strings.TrimSpace(stdout.String()) != "ok" {
+				t.Fatalf("exit %d: %s / %s", exit, &stdout, &stderr)
+			}
+		})
+	}
+}

@@ -8,17 +8,16 @@ import (
 	"testing"
 )
 
-func TestChatToolReasoningEffort(t *testing.T) {
+func TestExplicitChatPreservesGatewayReasoningDefault(t *testing.T) {
 	tools := []ToolSpec{{Name: "read", Parameters: json.RawMessage(`{"type":"object"}`)}}
 	for _, tt := range []struct {
 		name, model string
 		tools       []ToolSpec
-		wantNone    bool
 	}{
-		{"sol with tools", "gpt-6.2-sol", tools, true},
-		{"astra with tools", "gpt-6.2-astra", tools, false},
-		{"sol without tools", "gpt-6.2-sol", nil, false},
-		{"another model with tools", "other", tools, false},
+		{"sol with tools", "gpt-6.2-sol", tools},
+		{"astra with tools", "gpt-6.2-astra", tools},
+		{"sol without tools", "gpt-6.2-sol", nil},
+		{"another model with tools", "other", tools},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,12 +27,7 @@ func TestChatToolReasoningEffort(t *testing.T) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
-				effort, present := body["reasoning_effort"]
-				if tt.wantNone && string(effort) != `"none"` {
-					http.Error(w, "Function tools require reasoning_effort=none for gpt-6.2-sol in chat completions", http.StatusBadRequest)
-					return
-				}
-				if !tt.wantNone && present {
+				if effort, ok := body["reasoning_effort"]; ok {
 					t.Errorf("unexpected reasoning_effort: %s", effort)
 				}
 				if len(tt.tools) > 0 {

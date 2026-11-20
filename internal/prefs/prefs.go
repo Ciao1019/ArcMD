@@ -95,13 +95,13 @@ func (s Store) Load() (*Prefs, error) {
 	if p.Version > CurrentVersion || p.Version < 1 {
 		return nil, fmt.Errorf("prefs: unsupported version %d", p.Version)
 	}
-	p.normalizeReading()
+	p.normalize()
 	return &p, nil
 }
 
 // Save writes the preferences.
 func (s Store) Save(p *Prefs) error {
-	p.normalizeReading()
+	p.normalize()
 	p.Version = CurrentVersion
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -156,7 +156,10 @@ func (p *Prefs) Column() float32 {
 	return 0
 }
 
-func (p *Prefs) normalizeReading() {
+func (p *Prefs) normalize() {
+	if p.AI.Protocol != "responses" && p.AI.Protocol != "chat-completions" {
+		p.AI.Protocol = ""
+	}
 	if p.Language != "zh-Hans" && p.Language != "en" {
 		p.Language = ""
 	}

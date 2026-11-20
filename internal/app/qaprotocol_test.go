@@ -9,7 +9,7 @@ import (
 
 func TestQAProtocolPreference(t *testing.T) {
 	a, tt := qaApp(t, nil)
-	a.prefs.AI = prefs.AI{Model: "gpt-6.2-sol"}
+	a.prefs.AI = prefs.AI{Provider: "openai", Model: "gpt-6.2-sol"}
 	a.openSettings(tabAI)
 	tt.Frame()
 	if !tt.HasText("当前使用 Responses，流式输出") {

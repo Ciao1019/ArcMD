@@ -57,11 +57,10 @@ type chatTool struct {
 }
 
 type chatRequest struct {
-	Model           string        `json:"model"`
-	Messages        []chatMessage `json:"messages"`
-	Tools           []chatTool    `json:"tools,omitempty"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
-	Stream          bool          `json:"stream"`
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
+	Tools    []chatTool    `json:"tools,omitempty"`
+	Stream   bool          `json:"stream"`
 }
 
 type chatChunk struct {
@@ -87,11 +86,6 @@ func text(s string) *string { return &s }
 // body is the request in the service's format.
 func (c *ChatCompletions) body(req Request) chatRequest {
 	out := chatRequest{Model: c.Model, Stream: true}
-	// With function tools, this model's Chat Completions endpoint requires
-	// an explicit opt-out. Omitting the field leaves the service default active.
-	if strings.TrimPrefix(c.Model, "openai/") == "gpt-6.2-sol" && len(req.Tools) > 0 {
-		out.ReasoningEffort = "none"
-	}
 	if req.System != "" {
 		out.Messages = append(out.Messages, chatMessage{Role: "system", Content: text(req.System)})
 	}

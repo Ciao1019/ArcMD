@@ -34,13 +34,18 @@ type responseRequest struct {
 	Tools        []responseTool    `json:"tools,omitempty"`
 	Stream       bool              `json:"stream"`
 	Store        bool              `json:"store"`
-	Include      []string          `json:"include"`
+	Include      []string          `json:"include,omitempty"`
 	Reasoning    map[string]string `json:"reasoning,omitempty"`
 }
 
+func (r *responseReplay) matches(c *Responses) bool {
+	return c != nil && r != nil && r.model == c.Model && strings.TrimRight(r.base, "/") == strings.TrimRight(c.BaseURL, "/")
+}
+
 func (c *Responses) request(req Request) responseRequest {
-	out := responseRequest{Model: c.Model, Instructions: req.System, Input: make([]any, 0, len(req.Messages)), Stream: true, Store: false, Include: []string{"reasoning.encrypted_content"}}
+	out := responseRequest{Model: c.Model, Instructions: req.System, Input: make([]any, 0, len(req.Messages)), Stream: true, Store: false}
 	if responsesReasoner(c.Model) {
+		out.Include = []string{"reasoning.encrypted_content"}
 		out.Reasoning = map[string]string{"effort": "medium", "summary": "auto"}
 	}
 	for _, m := range req.Messages {
@@ -48,7 +53,7 @@ func (c *Responses) request(req Request) responseRequest {
 		case ToolRole:
 			out.Input = append(out.Input, map[string]string{"type": "function_call_output", "call_id": m.CallID, "output": m.Text})
 		case Assistant:
-			if prev := m.responses; prev != nil && prev.base == c.BaseURL && prev.model == c.Model {
+			if prev := m.responses; prev.matches(c) {
 				for _, item := range prev.items {
 					out.Input = append(out.Input, item)
 				}
@@ -81,15 +86,52 @@ type responseObject struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	}
-	Error             *struct{ Message string }
+	Error             *responseError
 	IncompleteDetails *struct{ Reason string } `json:"incomplete_details"`
+}
+
+type responseError struct{ Code, Message string }
+
+func (e responseError) asError() error {
+	status := 400
+	switch e.Code {
+	case "rate_limit_exceeded", "insufficient_quota", "rate_limit_error":
+		status = 429
+	case "server_error", "internal_server_error", "internal_error":
+		status = 500
+	case "service_unavailable", "server_overloaded", "overloaded_error":
+		status = 503
+	case "timeout", "request_timeout", "stream_interrupted":
+		return ErrStreamCut
+	case "invalid_api_key", "authentication_error":
+		status = 401
+	case "permission_denied":
+		status = 403
+	case "model_not_found":
+		status = 404
+	}
+	message := e.Message
+	if message == "" {
+		message = e.Code
+	}
+	return &APIError{Status: status, Message: message}
+}
+
+func (r responseObject) failure() error {
+	if r.Error != nil {
+		return r.Error.asError()
+	}
+	if r.IncompleteDetails != nil {
+		return (responseError{Code: r.IncompleteDetails.Reason}).asError()
+	}
+	return ErrStreamCut
 }
 
 // completed is authoritative for complete tool arguments, multiple parallel calls,
 // and the ordered reasoning items that must accompany their outputs on the next step.
 func (c *Responses) completed(r responseObject) (Response, error) {
 	if r.Status != "" && r.Status != "completed" {
-		return Response{}, fmt.Errorf("model response: %s", r.Status)
+		return Response{}, r.failure()
 	}
 	replay := &responseReplay{base: c.BaseURL, model: c.Model}
 	msg := Message{Role: Assistant}
@@ -97,6 +139,7 @@ func (c *Responses) completed(r responseObject) (Response, error) {
 	for _, raw := range r.Output {
 		var item struct {
 			Type, Name, Arguments string
+			EncryptedContent      string `json:"encrypted_content"`
 			CallID                string `json:"call_id"`
 			Content               []struct{ Type, Text, Refusal string }
 			Summary               []struct{ Text string }
@@ -117,6 +160,9 @@ func (c *Responses) completed(r responseObject) (Response, error) {
 		case "reasoning":
 			for _, part := range item.Summary {
 				reasoning.WriteString(part.Text)
+			}
+			if item.EncryptedContent == "" {
+				continue
 			}
 		case "function_call":
 			if item.CallID == "" || item.Name == "" {
@@ -156,10 +202,12 @@ func (c *Responses) readStream(ctx context.Context, r io.Reader, onDelta func(De
 			break
 		}
 		var e struct {
-			OutputIndex          int `json:"output_index"`
-			Item                 json.RawMessage
-			Type, Delta, Message string
-			Response             responseObject
+			OutputIndex int `json:"output_index"`
+			Item        json.RawMessage
+			Type, Delta string
+			responseError
+			Error    *responseError
+			Response responseObject
 		}
 		if err := json.Unmarshal([]byte(data), &e); err != nil {
 			return Response{}, fmt.Errorf("invalid Responses event: %w", err)
@@ -168,7 +216,7 @@ func (c *Responses) readStream(ctx context.Context, r io.Reader, onDelta func(De
 		case "response.output_text.delta", "response.refusal.delta":
 			text.WriteString(e.Delta)
 			onDelta(Delta{Text: e.Delta})
-		case "response.reasoning_summary_text.delta":
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			reasoning.WriteString(e.Delta)
 			onDelta(Delta{Reasoning: e.Delta})
 		case "response.function_call_arguments.delta", "response.function_call_arguments.done":
@@ -176,7 +224,7 @@ func (c *Responses) readStream(ctx context.Context, r io.Reader, onDelta func(De
 		case "response.output_item.done":
 			done[e.OutputIndex] = e.Item
 		case "response.completed":
-			if e.Response.Output == nil && len(done) > 0 {
+			if len(e.Response.Output) == 0 && len(done) > 0 {
 				indices := make([]int, 0, len(done))
 				for index := range done {
 					indices = append(indices, index)
@@ -206,15 +254,13 @@ func (c *Responses) readStream(ctx context.Context, r io.Reader, onDelta func(De
 				onDelta(Delta{Reasoning: resp.Message.Reasoning})
 			}
 			return resp, nil
-		case "error", "response.failed", "response.incomplete":
-			reason := e.Message
-			if e.Response.Error != nil {
-				reason = e.Response.Error.Message
+		case "error":
+			if e.Error != nil {
+				return Response{}, e.Error.asError()
 			}
-			if e.Response.IncompleteDetails != nil {
-				reason = e.Response.IncompleteDetails.Reason
-			}
-			return Response{}, fmt.Errorf("model service: %s: %s", e.Type, reason)
+			return Response{}, e.responseError.asError()
+		case "response.failed", "response.incomplete":
+			return Response{}, e.Response.failure()
 		}
 	}
 	if err := ctx.Err(); err != nil {

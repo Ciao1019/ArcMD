@@ -115,7 +115,7 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 | **表格、双栏与媒体** | CSV/TSV 粘贴建表、行列拖拽换位、跨格合并拆分、16 色底色、按列自然排序；可调比例双栏布局；图片无损裁剪（保留原图）与页面内 GIF 播放；框选多块批量操作与目录拖拽移动整章。 |
 | **分屏、命令栏与模板** | 最多四分屏并排或拆分为独立原生窗口；零阻塞 <kbd>⌘K</kbd> 命令栏（拼音/首字母与多关键词全文检索、持久化磁盘缓存、<kbd>⇧⌘R</kbd> 跨文档替换与一键撤销）；空间模板（`{{date}}` / `{{time}}` / `{{weekday}}` / `{{title}}`）与 <kbd>⌥⌘T</kbd> 今日笔记。 |
 | **双链、专注与守护** | `[[双链]]` 跨空间补全、反向链接聚合与改名自动同步，`#标签` 全局整理；<kbd>⇧⌘F</kbd> 专注模式、段落余晖淡化、打字机滚动、字数目标与分屏只读锁；<kbd>⇧⌘M</kbd> 同步位置 Markdown 预览、纯 Go 矢量 PDF（Type 3 字形、目录书签与可点击链接） / 独立 HTML 导出；`.arcmd/history` 命名里程碑、字素级行内差异恢复与外部修改冲突保护。 |
-| **空间问答 Agent** | <kbd>⌘J</kbd> 打开只读空间问答面板：不建向量索引，Agent 通过搜索、大纲、双链与按行阅读工具探索当前空间（含未保存草稿与外部空间文件），流式回答附内联来源胶囊、悬停论断高亮与滑移原文预览卡，点击直达对应内容块；支持 OpenAI / DeepSeek / OpenRouter / 本地 Ollama 等 Chat Completions 服务与终端 `arcmd ask`。在「设置 → AI 问答 → 接口协议」选择 Chat Completions 或 Responses，两者均流式输出。自动选择时，`gpt-6.2-sol` 和 `gpt-6.2-astra` 使用 Responses，其他模型使用 Chat Completions。终端 `arcmd ask` 沿用同一设置。 |
+| **空间问答 Agent** | <kbd>⌘J</kbd> 打开只读空间问答面板：不建向量索引，Agent 通过搜索、大纲、双链与按行阅读工具探索当前空间（含未保存草稿与外部空间文件），流式回答附内联来源胶囊、悬停论断高亮与滑移原文预览卡，点击直达对应内容块；支持 OpenAI / DeepSeek / OpenRouter / 本地 Ollama 等 Chat Completions 服务与终端 `arcmd ask`。在「设置 → AI 问答 → 接口协议」选择 Chat Completions 或 Responses，两者均流式输出。自定义服务默认使用 Chat Completions。终端可用 `arcmd ask -protocol` 或 `ARCMD_AI_PROTOCOL` 覆盖已保存的选择。 |
 
 **轻量核心，按需扩展**：核心内置只读的空间问答 Agent，而 AI 写作改写、翻译与同步能力规划通过可选插件提供（插件也可为问答 Agent 扩展工具），让编辑器核心始终纯粹轻快。插件清单、校验安装器与宿主接口已就位，沙箱运行时与市场正在建设中，详见[插件规范与路线图（英文）](docs/plugins.md)。
 
