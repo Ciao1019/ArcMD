@@ -67,3 +67,14 @@ func TestFontAndPageWidth(t *testing.T) {
 		t.Fatal("unknown choices fall back to the defaults")
 	}
 }
+
+func TestLoadUnknownAIProtocol(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	if err := os.WriteFile(s.Path, []byte(`{"version":1,"ai":{"model":"custom","protocol":"unknown"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Load()
+	if err != nil || p.AI.Protocol != "" || p.AI.Model != "custom" {
+		t.Fatalf("loaded %+v, %v", p, err)
+	}
+}

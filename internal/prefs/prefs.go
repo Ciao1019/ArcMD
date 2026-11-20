@@ -68,10 +68,11 @@ type Prefs struct {
 	AI AI `json:"ai,omitzero"`
 }
 
-// AI is a model service speaking the Chat Completions format.
+// AI selects a model service and its streaming protocol.
 type AI struct {
 	// Provider is a preset's ID (agent.Presets), "custom" for another.
 	Provider string `json:"provider,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
 	BaseURL  string `json:"baseURL,omitempty"`
 	Model    string `json:"model,omitempty"`
 }
@@ -96,13 +97,13 @@ func (s Store) Load() (*Prefs, error) {
 	if p.Version > CurrentVersion || p.Version < 1 {
 		return nil, fmt.Errorf("prefs: unsupported version %d", p.Version)
 	}
-	p.normalizeReading()
+	p.normalize()
 	return &p, nil
 }
 
 // Save writes the preferences.
 func (s Store) Save(p *Prefs) error {
-	p.normalizeReading()
+	p.normalize()
 	p.Version = CurrentVersion
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -157,7 +158,10 @@ func (p *Prefs) Column() float32 {
 	return 0
 }
 
-func (p *Prefs) normalizeReading() {
+func (p *Prefs) normalize() {
+	if p.AI.Protocol != "responses" && p.AI.Protocol != "chat-completions" {
+		p.AI.Protocol = ""
+	}
 	if p.Language != "zh-Hans" && p.Language != "en" {
 		p.Language = ""
 	}

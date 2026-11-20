@@ -35,8 +35,9 @@ func ask(args []string, cfg app.Config, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, askUsage); fs.PrintDefaults() }
 	spaceArg := fs.String("space", "", "space name, ID or folder (default: the active space)")
-	base := fs.String("base-url", os.Getenv("ARCMD_AI_BASE_URL"), "Chat Completions API root (default: settings)")
+	base := fs.String("base-url", os.Getenv("ARCMD_AI_BASE_URL"), "model service API root (default: settings)")
 	model := fs.String("model", os.Getenv("ARCMD_AI_MODEL"), "model name (default: settings)")
+	protocol := fs.String("protocol", os.Getenv("ARCMD_AI_PROTOCOL"), "API protocol: auto, chat-completions or responses (default: settings)")
 	steps := fs.Int("max-steps", agent.DefaultMaxSteps, "most model steps for the question")
 	verbose := fs.Bool("v", false, "print each tool's whole result")
 	if err := fs.Parse(args); err != nil {
@@ -52,7 +53,17 @@ func ask(args []string, cfg app.Config, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "arcmd:", err)
 		return 1
 	}
-	settings := agent.Settings{BaseURL: *base, Model: *model, APIKey: os.Getenv("ARCMD_AI_KEY")}
+	settings := agent.Settings{BaseURL: *base, Model: *model, APIKey: os.Getenv("ARCMD_AI_KEY"), Protocol: p.AI.Protocol}
+	switch choice := strings.ToLower(strings.TrimSpace(*protocol)); choice {
+	case "":
+	case "auto":
+		settings.Protocol = ""
+	case agent.ProtocolChat, agent.ProtocolResponses:
+		settings.Protocol = choice
+	default:
+		fmt.Fprintf(stderr, "arcmd: unknown protocol %q (use auto, chat-completions or responses)\n", *protocol)
+		return 2
+	}
 	if settings.BaseURL == "" {
 		settings.BaseURL = p.AI.BaseURL
 		if settings.BaseURL == "" {

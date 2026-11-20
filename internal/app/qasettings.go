@@ -35,7 +35,7 @@ func (a *App) settingsAI(c *ui.Context) {
 		})
 	}
 	settingsGroup(c, "ai", func() {
-		row("address", "Base URL", i18n.T("Chat Completions 地址"), func() {
+		row("address", "Base URL", i18n.T("模型服务的 API 根地址"), func() {
 			before := ai.BaseURL
 			ui.TextInput(c.Key("field"), &ai.BaseURL).Grow(1).MinWidth(0).Placeholder("https://api.example.com/v1").Label(i18n.T("服务地址"))
 			if ai.BaseURL != before {
@@ -120,6 +120,19 @@ func (a *App) settingsAI(c *ui.Context) {
 			if ui.Button(c.Key("fetch"), label).Disabled(a.qa.modelsBusy || a.modelListSettings().CheckService() != nil).
 				Tooltip(i18n.T("从服务拉取可用的模型列表")).Clicked() {
 				a.fetchModels()
+			}
+		})
+		sep()
+		protocols := []string{"", agent.ProtocolChat, agent.ProtocolResponses}
+		names := []string{i18n.T("自动选择"), "Chat Completions", "Responses"}
+		effective := names[slices.Index(protocols, settings.EffectiveProtocol())]
+		row("protocol", i18n.T("接口协议"), fmt.Sprintf(i18n.T("当前使用 %s，流式输出"), effective), func() {
+			at := max(0, slices.Index(protocols, ai.Protocol))
+			before := at
+			ui.Segmented(c.Key("choice"), &at, names...).Label(i18n.T("接口协议"))
+			if at != before {
+				ai.Protocol = protocols[at]
+				a.savePrefs()
 			}
 		})
 	})

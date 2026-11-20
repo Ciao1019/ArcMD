@@ -46,6 +46,8 @@ type Message struct {
 	// Reasoning is what a thinking model sent as its reasoning, kept for
 	// providers that want it back with the calls it led to.
 	Reasoning string
+	// responses retains ordered wire items for stateless Responses tool loops.
+	responses *responseReplay
 	// Calls are an assistant message's tool calls.
 	Calls []ToolCall
 	// CallID is the call a tool message answers.
@@ -285,30 +287,58 @@ func backoff(ctx context.Context, attempt int) error {
 	}
 }
 
-// fit drops the text of the oldest tool results while the conversation is
-// longer than the budget, keeping the latest turn's results whole as long
-// as it can: the model can read again what it needs.
+// fit budgets the history as the active provider will see it. Retain the
+// pending tool batch even when that batch alone exceeds the soft budget.
 func (a *Agent) fit(msgs []Message) []Message {
 	budget := a.ContextChars
 	if budget <= 0 {
 		budget = DefaultContextChars
 	}
+	responses, _ := a.Provider.(*Responses)
+	chat, _ := a.Provider.(*ChatCompletions)
+	plainSize := func(m Message) int {
+		size := len(m.Text)
+		if chat != nil && chat.ReplayReasoning {
+			size += len(m.Reasoning)
+		}
+		for _, call := range m.Calls {
+			size += len(call.Args) + len(call.Name) + len(call.ID)
+		}
+		return size
+	}
 	size := len(a.System)
-	for _, m := range msgs {
-		size += len(m.Text) + len(m.Reasoning)
-		for _, c := range m.Calls {
-			size += len(c.Args)
+	protected := len(msgs)
+	for i, m := range msgs {
+		switch m.Role {
+		case User, Assistant:
+			protected = len(msgs)
+			if m.Role == Assistant && len(m.Calls) > 0 {
+				protected = i
+			}
+		}
+		if m.responses.matches(responses) {
+			for _, item := range m.responses.items {
+				size += len(item)
+			}
+		} else {
+			size += plainSize(m)
 		}
 	}
-	for i := range msgs {
-		if size <= budget {
-			break
+	for i := 0; i < protected && size > budget; i++ {
+		m := &msgs[i]
+		if m.responses.matches(responses) {
+			for _, item := range m.responses.items {
+				size -= len(item)
+			}
+			m.responses = nil
+			size += plainSize(*m)
 		}
-		if msgs[i].Role != ToolRole || strings.HasPrefix(msgs[i].Text, omitted) {
-			continue
+	}
+	for i := 0; i < protected && size > budget; i++ {
+		if msgs[i].Role == ToolRole && len(msgs[i].Text) > len(omitted) {
+			size -= len(msgs[i].Text) - len(omitted)
+			msgs[i].Text = omitted
 		}
-		size -= len(msgs[i].Text) - len(omitted)
-		msgs[i].Text = omitted
 	}
 	return msgs
 }
