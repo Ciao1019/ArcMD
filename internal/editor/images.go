@@ -50,13 +50,22 @@ func (e *Editor) InvalidateImage(src string) {
 	e.ready = false
 }
 
-// ClearImages releases all cached decoded image resources owned by this editor.
+// ClearImages releases all cached decoded image and embedded PDF bitmaps owned by this editor.
 func (e *Editor) ClearImages() {
-	if e == nil || e.images == nil {
+	if e == nil {
 		return
 	}
-	clear(e.images)
-	e.images = nil
+	if e.images != nil {
+		clear(e.images)
+		e.images = nil
+	}
+	for _, v := range e.pdfs {
+		if v != nil {
+			v.ClearBitmaps()
+		}
+	}
+	clear(e.pdfs)
+	e.pdfs = nil
 }
 
 type imageEnterState struct {

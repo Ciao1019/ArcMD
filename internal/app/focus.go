@@ -6,6 +6,7 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
 )
@@ -65,6 +66,8 @@ func (a *App) toggleFocus() {
 	if a.doc != nil {
 		if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
+		} else if a.doc.isPDF() {
+			a.doc.pdf.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -87,14 +90,27 @@ func (a *App) setOutline(open bool) {
 
 // toggleOutline opens or collapses the outline of the document in front.
 func (a *App) toggleOutline() {
-	if a.doc != nil && a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() {
+	if a.doc == nil || a.doc.loadErr != nil {
+		return
+	}
+	if a.doc.isPDF() {
+		a.doc.pdf.ToggleOutline()
+		return
+	}
+	if !a.doc.source && !a.doc.isWhiteboard() {
 		a.doc.ed.ToggleOutline()
 	}
 }
 
 // outlineOpen reports whether the document in front shows its outline.
 func (a *App) outlineOpen() bool {
-	return a.doc != nil && !a.doc.isWhiteboard() && a.doc.ed.OutlineOpen()
+	if a.doc == nil || a.doc.isWhiteboard() {
+		return false
+	}
+	if a.doc.isPDF() {
+		return a.doc.pdf.SidebarOpen
+	}
+	return a.doc.ed.OutlineOpen()
 }
 
 // toggleDim fades the paragraphs but the caret's in focus mode, or not.
@@ -142,6 +158,8 @@ func (a *App) focusView(c *ui.Context) {
 				a.conflictBar(c)
 				if a.doc.isWhiteboard() {
 					editor.BoardView(c.Key(a.doc.viewKey()), a.doc.board, a.boardOptionsFor(c, a.doc))
+				} else if a.doc.isPDF() {
+					editor.PDFView(c.Key(a.doc.viewKey()), a.doc.pdf, a.pdfOptionsFor(c, a.doc))
 				} else {
 					editor.View(c.Key(a.doc.viewKey()), a.doc.ed, a.editorOptions(c, w-18, true))
 				}
@@ -192,7 +210,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		Theme:                 c.Theme(),
 		Page:                  pageStyle(a.paperDark),
 		Attach:                func() { run(a.pickImages) },
-		DropFiles:             func(paths []string, at int) { run(func() { a.insertImages(paths, at) }) },
+		DropFiles:             func(paths []string, at int) { run(func() { a.handleEditorFileDrop(paths, at) }) },
 		PasteImage:            func(data []byte) { run(func() { a.pasteImage(data) }) },
 		LoadImage:             func(url string) editor.ImageResource { return a.imageResourceFor(d, url) },
 		ReplaceImage:          func(id, url string) { a.pickReplacementImage(d, id, url) },
@@ -222,6 +240,10 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		UserWhiteboardLib:     a.userWhiteboardLibrary,
 		SaveWhiteboardLib:     a.saveWhiteboardLibrary,
 		ImportWhiteboardLib:   a.importWhiteboardLibrary,
+		LoadPDF:               func(url string) (*pdfdoc.Document, uint64, error) { return a.loadPDFFor(d, url) },
+		OpenPDF:               func(url string, split bool) { a.openPDFFrom(d, url, split) },
+		AttachPDF:             func() { run(a.pickPDFs) },
+		AsyncPDF:              a.win != nil,
 		ToggleBookmark: func(id string) {
 			a.toggleBookmark(d, id)
 		},

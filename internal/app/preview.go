@@ -390,6 +390,9 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	p := &a.preview
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
 		key := "open/" + sp.ID + "/" + rel
+		if a.doc.isPDF() {
+			return a.doc
+		}
 		if a.doc.isWhiteboard() {
 			rev := time.Unix(0, int64(a.doc.board.Revision()))
 			if th, ok := p.thumbs[key]; ok && th.changed.Equal(rev) {
@@ -425,6 +428,11 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	if th, ok := p.thumbs[key]; ok && th.changed.Equal(info.ModTime()) {
 		a.touchThumb(key)
 		return th.doc
+	}
+	if vault.IsPDF(rel) {
+		d := openPDFDocument(sp, rel, "")
+		a.putThumb(key, thumb{d, info.ModTime()})
+		return d
 	}
 	text, err := readFile(sp, rel)
 	if err != nil {
@@ -623,7 +631,9 @@ func (a *App) pickPreview(c *ui.Context, rel string) {
 		a.openIn(sp, rel)
 	}
 	if a.doc != nil {
-		if a.doc.isWhiteboard() {
+		if a.doc.isPDF() {
+			a.doc.pdf.RequestFocus = true
+		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
@@ -655,6 +665,30 @@ func (a *App) docPreview(c *ui.Context) {
 			if d.board != nil && d.board.Scene != nil {
 				editor.PaintSceneFit(pt, r, d.board.Scene, pg.Whiteboard, dt, 10)
 			}
+		})
+	} else if d.isPDF() {
+		paper.Background(dt.Background.Mix(dt.Text, 0.04))
+		paper.Draw(func(pt *ui.Painter, r ui.Rect) {
+			if d.pdf == nil || d.pdf.Doc == nil || d.pdf.PageCount() == 0 {
+				return
+			}
+			info := d.pdf.Doc.PageInfo(0)
+			aspect := float32(info.Aspect())
+			pad := float32(6)
+			availW, availH := max(20, r.W-2*pad), max(20, r.H-2*pad)
+			pw, ph := availW, availW/aspect
+			if ph > availH {
+				ph = availH
+				pw = ph * aspect
+			}
+			dst := ui.Rect{X: r.X + (r.W-pw)/2, Y: r.Y + (r.H-ph)/2, W: pw, H: ph}
+			pt.Fill(dst, ui.RGB(255, 255, 255), 3)
+			if bmp := d.pdf.PreviewBitmap(0); bmp != nil {
+				pt.Clip(dst, 3, func() {
+					pt.Image(bmp, dst, ui.Contain)
+				})
+			}
+			pt.Stroke(dst, ui.RGBA(0, 0, 0, 0.10), 3, 1)
 		})
 	} else {
 		paper.Children(func() {

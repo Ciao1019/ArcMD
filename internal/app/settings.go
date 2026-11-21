@@ -33,6 +33,7 @@ func (a *App) moreMenu(c *ui.Context) {
 		d := a.doc
 		noDoc := d == nil || d.loadErr != nil
 		wb := a.doc != nil && a.doc.isWhiteboard()
+		isPDF := a.doc != nil && a.doc.isPDF()
 		if a.menuKey(m.Item(i18n.T("专注模式")), "focus").Checked(a.focus).Chosen() {
 			a.toggleFocus()
 		}
@@ -44,14 +45,14 @@ func (a *App) moreMenu(c *ui.Context) {
 		if a.doc != nil && a.doc.source {
 			mode = i18n.T("返回富文本编辑")
 		}
-		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb).Chosen() {
+		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb || isPDF).Chosen() {
 			a.toggleSource()
 		}
 		if a.menuKey(m.Item(i18n.T("添加分屏")), "split-add").Disabled(a.doc == nil).Chosen() {
 			a.addSplitPane()
 		}
 		m.Separator()
-		if a.menuKey(m.Item(i18n.T("版本历史…")), "history").Disabled(noDoc).Chosen() {
+		if a.menuKey(m.Item(i18n.T("版本历史…")), "history").Disabled(noDoc || isPDF).Chosen() {
 			a.openVersions()
 		}
 		m.Submenu(i18n.T("导出"), func(sub *ui.Menu) {
@@ -60,17 +61,17 @@ func (a *App) moreMenu(c *ui.Context) {
 					a.exportWhiteboardSVG(a.doc)
 				}
 			}
-			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb).Chosen() {
+			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb || isPDF).Chosen() {
 				a.exportMarkdown()
 			}
-			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc).Chosen() {
+			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc || isPDF).Chosen() {
 				a.exportPDF()
 			}
-			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb).Chosen() {
+			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb || isPDF).Chosen() {
 				a.exportHTML()
 			}
-		}).Disabled(noDoc)
-		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || d.source).Chosen() {
+		}).Disabled(noDoc || isPDF)
+		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || isPDF || d.source).Chosen() {
 			a.toggleDocumentMap(d)
 		}
 		if m.Item(i18n.T("打印…")).Disabled(noDoc).Chosen() {

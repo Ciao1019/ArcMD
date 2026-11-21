@@ -247,3 +247,31 @@ func TestWritePreservesHardLinks(t *testing.T) {
 		t.Fatalf("peer content = %q (%v), want %q", string(got), err, "# Short\n")
 	}
 }
+
+func TestPDFDocuments(t *testing.T) {
+	root := t.TempDir()
+	if err := Write(root, "Papers/Attention.pdf", "%PDF-1.4"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(root, "assets/Embedded.pdf", "%PDF-1.4"); err != nil {
+		t.Fatal(err)
+	}
+	if !IsPDF("Papers/Attention.pdf") || !IsDocument("Papers/Attention.pdf") || IsMarkdown("Papers/Attention.pdf") || IsPDF(".pdf") {
+		t.Fatal("IsPDF classification mismatch")
+	}
+	nodes, err := Tree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Find(nodes, "Papers/Attention.pdf") == nil || Find(nodes, "assets/Embedded.pdf") != nil {
+		t.Fatalf("unexpected Tree visibility for PDFs: %+v", nodes)
+	}
+	renamed, err := Rename(root, "Papers/Attention.pdf", "Transformers")
+	if err != nil || renamed != "Papers/Transformers.pdf" {
+		t.Fatalf("Rename PDF = %q, %v", renamed, err)
+	}
+	dup, err := Copy(root, renamed, "Papers")
+	if err != nil || dup != "Papers/Transformers 2.pdf" {
+		t.Fatalf("Copy PDF = %q, %v", dup, err)
+	}
+}

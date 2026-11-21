@@ -117,3 +117,64 @@ func TestCopyAndCopyTo(t *testing.T) {
 		t.Error("copied into a file instead of a directory")
 	}
 }
+
+func TestImportFile(t *testing.T) {
+	srcDir, root := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mdPath := filepath.Join(srcDir, "Notes.md")
+	if err := os.WriteFile(mdPath, []byte("# Notes\n\nhello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pdfPath := filepath.Join(srcDir, "Paper.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(srcDir, "Folder")
+	if err := os.Mkdir(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Importing .md and .pdf copies them into the vault root and preserves contents.
+	gotMD, err := ImportFile(mdPath, root, "")
+	if err != nil || gotMD != "Notes.md" {
+		t.Fatalf("ImportFile md = %q, %v", gotMD, err)
+	}
+	if text, err := Read(root, "Notes.md"); err != nil || text != "# Notes\n\nhello" {
+		t.Fatalf("imported md = %q, %v", text, err)
+	}
+	gotPDF, err := ImportFile(pdfPath, root, "")
+	if err != nil || gotPDF != "Paper.pdf" {
+		t.Fatalf("ImportFile pdf = %q, %v", gotPDF, err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(root, "Paper.pdf")); err != nil || string(raw) != "%PDF-1.4\n" {
+		t.Fatalf("imported pdf = %q, %v", raw, err)
+	}
+
+	// Collision numbering never overwrites existing files.
+	gotMD2, err := ImportFile(mdPath, root, "")
+	if err != nil || gotMD2 != "Notes 2.md" {
+		t.Fatalf("ImportFile collision = %q, %v", gotMD2, err)
+	}
+
+	// Subfolder import places the file inside the folder.
+	gotSub, err := ImportFile(pdfPath, root, "Sub")
+	if err != nil || gotSub != "Sub/Paper.pdf" {
+		t.Fatalf("ImportFile sub = %q, %v", gotSub, err)
+	}
+
+	// Directories, missing sources, and invalid destination folders must fail.
+	if _, err := ImportFile(folder, root, ""); err == nil {
+		t.Error("expected directory import to fail")
+	}
+	if _, err := ImportFile(filepath.Join(srcDir, "missing.md"), root, ""); err == nil {
+		t.Error("expected missing source import to fail")
+	}
+	if _, err := ImportFile(mdPath, root, "../escape"); err == nil {
+		t.Error("expected escape dir import to fail")
+	}
+	if _, err := ImportFile(mdPath, root, "NoSuchDir"); err == nil {
+		t.Error("expected non-existent dir import to fail")
+	}
+}

@@ -120,28 +120,28 @@ func TestDropImagesWhereTheyFall(t *testing.T) {
 	}
 }
 
-// Files that are no pictures are left out, with a notice naming them.
+// Files that are neither pictures nor PDFs are left out, with a notice naming them.
 func TestDropSkipsOtherFiles(t *testing.T) {
 	a, tt := dropApp(t)
 	pic, _ := pngFile(t, "pic.png")
-	notes := filepath.Join(t.TempDir(), "notes.pdf")
-	if err := os.WriteFile(notes, []byte("%PDF"), 0o600); err != nil {
+	archive := filepath.Join(t.TempDir(), "archive.zip")
+	if err := os.WriteFile(archive, []byte("PK"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	folder := filepath.Join(t.TempDir(), "photos.png") // a folder named as a picture
 	if err := os.Mkdir(folder, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dropAt(t, a, tt, "gamma", notes, pic, folder)
+	dropAt(t, a, tt, "gamma", archive, pic, folder)
 	if got := blockList(a); !slices.Equal(got, []string{"Drop", "alpha", "beta", "image:assets/pic.png", "gamma"}) {
 		t.Fatalf("blocks = %q", got)
 	}
-	if !tt.HasText("notes.pdf、photos.png 未插入") {
+	if !tt.HasText("archive.zip、photos.png 未插入") {
 		t.Errorf("no notice: %q", tt.Texts())
 	}
-	// No pictures among them: nothing changes.
+	// Unsupported files alone: nothing changes.
 	before := a.doc.ed.Revision()
-	dropAt(t, a, tt, "gamma", notes)
+	dropAt(t, a, tt, "gamma", archive)
 	if a.doc.ed.Revision() != before {
 		t.Errorf("revision %d→%d", before, a.doc.ed.Revision())
 	}

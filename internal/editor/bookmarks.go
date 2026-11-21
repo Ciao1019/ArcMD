@@ -81,8 +81,15 @@ func BlockExcerpt(b *document.Block) string {
 	}
 	switch b.Kind {
 	case "image":
-		if name := b.URL[strings.LastIndex(b.URL, "/")+1:]; name != "" {
+		clean, _ := ParsePDFURLPage(b.URL)
+		if name := clean[strings.LastIndex(clean, "/")+1:]; name != "" {
+			if IsPDFURL(clean) {
+				return "PDF · " + name
+			}
 			return i18n.T("图片 · ") + name
+		}
+		if IsPDFURL(clean) {
+			return "PDF"
 		}
 		return i18n.T("图片")
 	case "table":

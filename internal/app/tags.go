@@ -58,6 +58,9 @@ func (a *App) renameTag(from, to string) {
 		if d.loadErr != nil {
 			continue
 		}
+		if d.isPDF() {
+			continue
+		}
 		if d.isWhiteboard() {
 			if d.boardReadOnly {
 				if strings.Contains(strings.ToLower(d.board.Scene.PlainText()), "#"+strings.ToLower(from)) {
@@ -104,7 +107,7 @@ func (a *App) renameTag(from, to string) {
 		}
 	}
 	for _, p := range places {
-		if resident[p] != nil {
+		if resident[p] != nil || vault.IsPDF(p.rel) {
 			continue
 		}
 		sp := a.state.Get(p.space)
@@ -117,6 +120,9 @@ func (a *App) renameTag(from, to string) {
 			continue
 		}
 		var ok bool
+		if d.isPDF() {
+			continue
+		}
 		if d.isWhiteboard() {
 			ok = d.board.RewriteTags(from, to)
 		} else {

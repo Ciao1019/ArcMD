@@ -126,6 +126,11 @@ func ExportHTML(doc *document.Document) string {
 				continue
 			case "image":
 				if safeHTMLURL(b.URL) {
+					if IsPDFURL(b.URL) {
+						h := float32(480)
+						out.WriteString(`<figure class="arcmd-pdf"><object data="` + html.EscapeString(b.URL) + `" type="application/pdf" width="100%" height="` + fmt.Sprintf("%.0f", h) + `"><a href="` + html.EscapeString(b.URL) + `">` + html.EscapeString(imageName(b.URL)) + `</a></object></figure>`)
+						continue
+					}
 					out.WriteString("<img src=\"" + html.EscapeString(b.URL) + "\" alt=\"" + html.EscapeString(b.Text()) + "\"")
 					if b.ImageWidth > 0 {
 						fmt.Fprintf(&out, " width=\"%.0f\"", b.ImageWidth)

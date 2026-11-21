@@ -17,13 +17,19 @@ import (
 // so a document keeps it as it moves, and documents side by side seldom
 // share one.
 
-// fileIcon draws the icon of rel/title: whiteboards without a leading emoji
-// show the whiteboard glyph on their title color tile; Markdown files show docIcon.
+// fileIcon draws the icon of rel/title: whiteboards and PDFs without a leading
+// emoji show their type glyph on their title color tile; Markdown files show docIcon.
 func fileIcon(c *ui.Context, rel, title string, size float32) ui.Element {
 	if vault.IsWhiteboard(rel) && leadingEmoji(title) == "" {
 		ink, fill := docIconColors(c.Theme(), title)
 		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
 			ui.Icon(c, iconWhiteboard).FontSize(size * 0.64).TextColor(ink)
+		})
+	}
+	if vault.IsPDF(rel) && leadingEmoji(title) == "" {
+		ink, fill := docIconColors(c.Theme(), title)
+		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
+			ui.Icon(c, iconFile).FontSize(size * 0.64).TextColor(ink)
 		})
 	}
 	return docIcon(c, title, size)

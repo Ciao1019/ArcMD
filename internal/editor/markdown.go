@@ -550,7 +550,7 @@ func overlapsProtectedInline(in []parser.Inline, start, end int) bool {
 }
 
 func isObsidianImageExt(target string) bool {
-	if isWhiteboardURL(target) {
+	if isWhiteboardURL(target) || IsPDFURL(target) {
 		return true
 	}
 	ext := strings.ToLower(path.Ext(target))
@@ -599,7 +599,7 @@ func parseObsidianImageEmbed(line string) (url, alt string, width float32, ok bo
 		return "", "", 0, false
 	}
 	parts := strings.Split(inner, "|")
-	target, _, _ := strings.Cut(parts[0], "#")
+	target, frag, hasFrag := strings.Cut(parts[0], "#")
 	target = strings.TrimSpace(target)
 	if target == "" || strings.ContainsAny(target, ":\x00") {
 		return "", "", 0, false
@@ -608,6 +608,12 @@ func parseObsidianImageEmbed(line string) (url, alt string, width float32, ok bo
 	target = strings.TrimLeft(target, "/")
 	if target == "" || !isObsidianImageExt(target) {
 		return "", "", 0, false
+	}
+	if hasFrag && IsPDFURL(target) {
+		frag = strings.TrimSpace(frag)
+		if frag != "" {
+			target = target + "#" + frag
+		}
 	}
 	rest := parts[1:]
 	if len(rest) > 0 {

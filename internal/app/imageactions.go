@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -21,6 +23,7 @@ import (
 // pickReplacementImage retains the document and block identities across the
 // native dialog. Switching panes or deleting the block cannot redirect it.
 func (a *App) pickReplacementImage(d *document, id, expected string) {
+	isPDF := editor.IsPDFURL(expected)
 	current := func() bool {
 		if d == nil || d.ed.ReadOnly || d.loadErr != nil || d.source || a.residentDocument(d.space.ID, d.rel) != d {
 			return false
@@ -41,10 +44,22 @@ func (a *App) pickReplacementImage(d *document, id, expected string) {
 		}
 		data, err := os.ReadFile(files[0])
 		if err == nil {
-			_, err = ui.DecodeBitmap(data)
+			if isPDF {
+				if pdoc, pErr := pdfdoc.OpenBytes(data); pErr != nil {
+					err = pErr
+				} else {
+					pdoc.Close()
+				}
+			} else {
+				_, err = ui.DecodeBitmap(data)
+			}
 		}
 		if err != nil {
-			a.notify("无法使用所选的图片。%v", err)
+			if isPDF {
+				a.notify("无法使用所选的 PDF。%v", err)
+			} else {
+				a.notify("无法使用所选的图片。%v", err)
+			}
 			return
 		}
 		active := a.doc == d
@@ -67,8 +82,13 @@ func (a *App) pickReplacementImage(d *document, id, expected string) {
 	if win == nil {
 		return
 	}
-	opts := mygo.OpenDialogOptions{Parent: win, Title: i18n.T("重新选择图片"),
-		Filters: []mygo.FileFilter{{Name: i18n.T("图片"), Extensions: imageExtensions}}}
+	title := i18n.T("重新选择图片")
+	filters := []mygo.FileFilter{{Name: i18n.T("图片"), Extensions: imageExtensions}}
+	if isPDF {
+		title = i18n.T("重新选择 PDF")
+		filters = []mygo.FileFilter{{Name: "PDF", Extensions: []string{"pdf"}}}
+	}
+	opts := mygo.OpenDialogOptions{Parent: win, Title: title, Filters: filters}
 	go func() {
 		files, err := mygo.Dialog.Open(opts)
 		win.Update(func() {

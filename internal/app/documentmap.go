@@ -1,12 +1,18 @@
 package app
 
 import (
+	"bytes"
+	"image/png"
 	"math"
+	"path"
 	"slices"
+	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/vault"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -26,7 +32,7 @@ func (a *App) toggleDocumentMap(d *document) {
 }
 
 func (a *App) toggleActiveDocumentMap() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.source {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.source {
 		return
 	}
 	if a.focus {
@@ -93,6 +99,7 @@ func (a *App) documentMapWorkspace(c *ui.Context, d *document, width float32) {
 	if width < 580 {
 		opts := a.editorOptionsFor(c, width, false, d)
 		colors := mapBranchPalette(d, opts.Theme.Dark)
+		d.mindMap.SetActions(a.mindMapActions(d, opts, colors, a.prefs.MindMapBothSides))
 		ws := ui.Column(c.Key("document-workspace")).Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
 		wsH := ws.LayoutBounds().H
 		ws.Children(func() {
@@ -143,6 +150,7 @@ func (a *App) documentMapWorkspace(c *ui.Context, d *document, width float32) {
 	side := min(maxSide, max(minSide, width*d.mapFraction))
 	opts := a.editorOptionsFor(c, width-side, false, d)
 	colors := mapBranchPalette(d, opts.Theme.Dark)
+	d.mindMap.SetActions(a.mindMapActions(d, opts, colors, a.prefs.MindMapBothSides))
 	ui.Row(c.Key("document-workspace")).Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		ui.Column(c.Key("document-body")).Grow(1).MinWidth(0).MinHeight(0).Clip().Children(func() {
 			editor.View(c.Key(d.viewKey()), d.ed, opts)
@@ -180,4 +188,143 @@ func (a *App) documentMapWorkspace(c *ui.Context, d *document, width float32) {
 		}
 		d.mindMap.View(c.Key("document-map-panel"), d.ed, opts, max(1, side-7), colors, a.prefs.MindMapBothSides, setBoth, closeTip, onClose)
 	})
+}
+
+func (a *App) mindMapActions(d *document, opts editor.Options, colors []ui.Color, bothSides bool) editor.MapActions {
+	return editor.MapActions{
+		ExtractBranch: func(title, markdown string) (string, bool) {
+			return a.extractMindMapBranch(d, title, markdown)
+		},
+		CopyPNG: func(branchID string) {
+			a.copyMindMapPNG(d, opts, colors, bothSides, branchID)
+		},
+		ExportPNG: func(branchID string) {
+			a.exportMindMapPNG(d, opts, colors, bothSides, branchID)
+		},
+		ExportSVG: func(branchID string) {
+			a.exportMindMapSVG(d, opts, colors, bothSides, branchID)
+		},
+		Notify: func(msg string) {
+			a.notify("%s", msg)
+		},
+	}
+}
+
+func (a *App) extractMindMapBranch(d *document, title, markdown string) (string, bool) {
+	if d == nil || d.space == nil || d.loadErr != nil {
+		return "", false
+	}
+	root, nameOnDisk, err := fileLocation(d.space, d.rel)
+	if err != nil {
+		a.notify("提取失败。%v", err)
+		return "", false
+	}
+	dir := path.Dir(nameOnDisk)
+	if dir == "." {
+		dir = ""
+	}
+	stem := strings.TrimSpace(title)
+	if stem == "" {
+		stem = d.title()
+	}
+	body := strings.TrimRight(markdown, "\n") + "\n"
+	rel, err := createNumbered(root, dir, stem, ".md", []byte(body))
+	if err != nil {
+		a.notify("提取失败。%v", err)
+		return "", false
+	}
+	a.refreshTree()
+	a.refreshSearch()
+	a.notify("已提取为新文档 %s", rel)
+	linkTarget := strings.TrimSuffix(path.Base(rel), ".md")
+	return linkTarget, true
+}
+
+func (a *App) renderMindMapPNG(d *document, opts editor.Options, colors []ui.Color, bothSides bool, branchID string) ([]byte, string, error) {
+	var w, h float32
+	var title string
+	ui.Render(func(c *ui.Context) {
+		w, h, title = d.mindMap.RenderExportView(c, d.ed, opts, colors, bothSides, branchID)
+	}, 1, 1, 1)
+	rw := max(1, min(4096, int(math.Ceil(float64(w)))))
+	rh := max(1, min(4096, int(math.Ceil(float64(h)))))
+	scale := float32(2)
+	if rw > 2048 || rh > 2048 {
+		scale = 1
+	}
+	img := ui.Render(func(c *ui.Context) {
+		d.mindMap.RenderExportView(c, d.ed, opts, colors, bothSides, branchID)
+	}, rw, rh, scale)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, title, err
+	}
+	return buf.Bytes(), title, nil
+}
+
+func (a *App) copyMindMapPNG(d *document, opts editor.Options, colors []ui.Color, bothSides bool, branchID string) {
+	if d == nil || d.mindMap == nil {
+		return
+	}
+	data, _, err := a.renderMindMapPNG(d, opts, colors, bothSides, branchID)
+	if err != nil {
+		a.notify("复制图片失败。%v", err)
+		return
+	}
+	if err := mygo.Clipboard.WriteImage(data); err != nil {
+		a.notify("复制图片失败。%v", err)
+		return
+	}
+	a.notify("已复制导图图片")
+}
+
+func (a *App) exportMindMapPNG(d *document, opts editor.Options, colors []ui.Color, bothSides bool, branchID string) {
+	if d == nil || d.mindMap == nil {
+		return
+	}
+	data, title, err := a.renderMindMapPNG(d, opts, colors, bothSides, branchID)
+	if err != nil {
+		a.notify("导出失败。%v", err)
+		return
+	}
+	a.writeMindMapExport(d, title, ".png", data)
+}
+
+func (a *App) exportMindMapSVG(d *document, opts editor.Options, colors []ui.Color, bothSides bool, branchID string) {
+	if d == nil || d.mindMap == nil {
+		return
+	}
+	var svg, title string
+	ui.Render(func(c *ui.Context) {
+		svg, title = d.mindMap.ExportSVG(c, d.ed, opts, colors, bothSides, branchID)
+	}, 1, 1, 1)
+	a.writeMindMapExport(d, title, ".svg", []byte(svg))
+}
+
+func (a *App) writeMindMapExport(d *document, title, ext string, data []byte) {
+	root, nameOnDisk, err := fileLocation(d.space, d.rel)
+	if err != nil {
+		a.notify("导出失败。%v", err)
+		return
+	}
+	dir := path.Dir(nameOnDisk)
+	if dir == "." {
+		dir = ""
+	}
+	stem := strings.TrimSpace(title)
+	if stem == "" {
+		stem = d.title()
+	}
+	rel, err := createNumbered(root, dir, stem, ext, data)
+	if err != nil {
+		a.notify("导出失败。%v", err)
+		return
+	}
+	a.notify("已导出 %s", rel)
+	a.refreshTree()
+	if a.win != nil {
+		if full, err := vault.Resolve(root, rel); err == nil {
+			mygo.Shell.ShowItemInFolder(full)
+		}
+	}
 }

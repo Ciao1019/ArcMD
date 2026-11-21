@@ -99,7 +99,7 @@ func isImage(name string) bool {
 // pictures, folders included, are left out with a notice, as Markdown
 // has no attachments.
 func (a *App) insertImages(paths []string, at int) {
-	if a.doc == nil || a.doc.ed.ReadOnly {
+	if a.doc == nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.ed.ReadOnly {
 		return
 	}
 	d := a.doc
@@ -109,7 +109,8 @@ func (a *App) insertImages(paths []string, at int) {
 	var blocks []*model.Block
 	var skipped []string
 	for _, src := range paths {
-		if info, err := os.Stat(src); err == nil && info.IsDir() || !isImage(src) {
+		info, statErr := os.Stat(src)
+		if statErr == nil && info.IsDir() || (!isImage(src) && !vault.IsPDF(src)) {
 			skipped = append(skipped, filepath.Base(src))
 			continue
 		}
@@ -121,7 +122,8 @@ func (a *App) insertImages(paths []string, at int) {
 		blocks = append(blocks, imageBlock(filepath.Base(src), rel))
 	}
 	if len(skipped) > 0 {
-		a.notify("只能插入图片（%s）：%s 未插入。", strings.Join(imageExtensions, "、"), strings.Join(skipped, "、"))
+		supported := append(slices.Clone(imageExtensions), "pdf")
+		a.notify("只能插入图片或 PDF（%s）：%s 未插入。", strings.Join(supported, "、"), strings.Join(skipped, "、"))
 	}
 	a.placeImages(blocks, at)
 }
@@ -169,7 +171,13 @@ func (a *App) placeImages(blocks []*model.Block, at int) {
 			}
 		})
 	}
-	ed.FocusInsertedImage(blocks[len(blocks)-1].ID)
+	last := blocks[len(blocks)-1]
+	if vault.IsPDF(last.URL) {
+		ed.FocusBlock(last.ID)
+		ed.RequestFocus = true
+		return
+	}
+	ed.FocusInsertedImage(last.ID)
 }
 
 // copyAsset copies the file at src into the folder assets beside the

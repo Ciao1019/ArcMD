@@ -42,6 +42,10 @@ func (a *App) View(c *ui.Context) {
 	}
 	a.syncOpen()
 	a.overClosed, a.overClose = a.overClose, place{}
+	a.fileDrop.over = false
+	a.fileDrop.targetKind = fileDropNone
+	a.fileDrop.targetDir = ""
+	a.fileDrop.targetName = ""
 	clear(a.tour.marks)
 	a.shortcuts(c)
 	// Finish swipe and spring state before deriving the chrome and paper,
@@ -113,6 +117,14 @@ func (a *App) View(c *ui.Context) {
 	}
 	look := a.look
 	frame.Draw(func(p *ui.Painter, r ui.Rect) { look.paint(p, r, 0, vibrant) })
+	if sp != nil && !a.modalBlocksSidebarKeys() {
+		if frame.FileDragOver() {
+			a.setFileDropOver(fileDropWindow, "", sp.Name)
+		}
+		if files := frame.DroppedFiles(); len(files) > 0 {
+			a.importDroppedFiles(sp, "", files)
+		}
+	}
 	var docked float32
 	frame.Children(func() {
 		if a.focus {
@@ -165,6 +177,7 @@ func (a *App) View(c *ui.Context) {
 		a.peekLeave = time.Time{}
 	}
 	a.dragOverlayView(c)
+	a.fileDropOverlayView(c)
 	a.previewView(c)
 	a.paletteView(c)
 	a.updateToast(c)
@@ -449,12 +462,30 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 			a.navDir = 0
 			a.navAt = time.Time{}
 		}
+	} else if d == a.doc && !a.fileDrop.landAt.IsZero() {
+		if a.reduceMotion {
+			a.fileDrop.landAt = time.Time{}
+		} else {
+			elapsed := c.Now().Sub(a.fileDrop.landAt)
+			if elapsed >= 0 && elapsed < fileDropLandDur {
+				u := float32(elapsed) / float32(fileDropLandDur)
+				inv := 1 - u
+				k := 1 - inv*inv*inv
+				s := 0.975 + 0.025*k
+				page.Opacity(0.72+0.28*k).Translate(0, 10*(1-k)).Scale(s, s)
+				c.After(0)
+			} else {
+				a.fileDrop.landAt = time.Time{}
+			}
+		}
 	}
 	page.Children(func() {
 		a.conflictBarFor(c, d)
 		a.syncConflictBarFor(c, d)
 		if d.isWhiteboard() {
 			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
+		} else if d.isPDF() {
+			editor.PDFView(c.Key(d.viewKey()), d.pdf, a.pdfOptionsFor(c, d))
 		} else {
 			a.documentMapWorkspace(c, d, cardWidth)
 		}
@@ -590,6 +621,10 @@ func errText(err error) string {
 // or a web address in the browser.
 func (a *App) followLink(url string) {
 	if a.doc != nil {
+		if editor.IsPDFURL(url) && !strings.Contains(url, "://") {
+			a.openPDFFrom(a.doc, url, false)
+			return
+		}
 		if a.doc.space.IsExternal() {
 			file, _, _ := strings.Cut(url, "#")
 			if vault.IsDocument(file) {

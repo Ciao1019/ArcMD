@@ -33,8 +33,8 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			e.Engine.Insert(document.Columns())
 		case "rule":
 			e.Engine.Insert(document.NewBlock("rule", ""))
-		case "image":
-			// The host picks the images and inserts it at the caret.
+		case "image", "pdf":
+			// The host picks the file(s) and inserts them at the caret.
 		case "wiki":
 			e.Engine.Replace(e.Caret, e.Caret, "[[")
 		case "mermaid-flow":
@@ -55,6 +55,9 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 	e.sync()
 	if item.kind == "image" && e.attach != nil {
 		e.attach()
+	}
+	if item.kind == "pdf" && e.attachPDF != nil {
+		e.attachPDF()
 	}
 }
 

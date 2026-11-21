@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -39,6 +40,24 @@ func readFile(sp *space.Space, rel string) (string, error) {
 		return "", err
 	}
 	return vault.Read(root, name)
+}
+
+// readDocSource reads text for text-based documents, or returns a lightweight
+// stat stamp for read-only binary PDFs so opening, pinning, and watching PDFs
+// never copy multi-megabyte files into Go strings.
+func readDocSource(sp *space.Space, rel string) (string, error) {
+	if vault.IsPDF(rel) {
+		full, err := resolveFile(sp, rel)
+		if err != nil {
+			return "", err
+		}
+		info, err := os.Stat(full)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("pdf:%d:%d", info.ModTime().UnixNano(), info.Size()), nil
+	}
+	return readFile(sp, rel)
 }
 
 func writeFile(sp *space.Space, rel, text string) error {
@@ -100,7 +119,11 @@ func (a *App) chooseExternalFiles() {
 	win := a.win
 	go func() {
 		files, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: i18n.T("打开文件…"), Multiple: true,
-			Filters: []mygo.FileFilter{{Name: "Markdown", Extensions: []string{"md", "markdown", "mdx", "arcmd"}}}})
+			Filters: []mygo.FileFilter{
+				{Name: i18n.T("支持的文档"), Extensions: []string{"md", "markdown", "mdx", "arcmd", "pdf", "svg", "excalidraw"}},
+				{Name: "Markdown", Extensions: []string{"md", "markdown", "mdx", "arcmd"}},
+				{Name: "PDF", Extensions: []string{"pdf"}},
+			}})
 		if err != nil {
 			return
 		}

@@ -87,13 +87,14 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		target := to + d.rel[len(rel):]
 		targetDir := path.Dir(target)
 		for old := range d.urls {
-			if vault.IsWhiteboard(old) {
-				clean := strings.TrimPrefix(path.Clean(unescapeImagePath(old)), "/")
+			oldBase, oldFrag, hasFrag := strings.Cut(old, "#")
+			if vault.IsWhiteboard(oldBase) || vault.IsPDF(oldBase) {
+				clean := strings.TrimPrefix(path.Clean(unescapeImagePath(oldBase)), "/")
 				if !underAttachmentFolder(clean, assetsDir) && !underAttachmentFolder(clean, attachmentFolder(src)) {
 					continue
 				}
 			}
-			file, resolveErr := resolveSpaceImage(src, d.rel, old)
+			file, resolveErr := resolveSpaceImage(src, d.rel, oldBase)
 			if resolveErr != nil {
 				continue
 			}
@@ -137,10 +138,10 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 				// and is left out.
 				folderMode := attachmentFolder(dst) != ""
 				destDir, useFolder := targetDir, false
-				orig := old
+				orig := oldBase
 				if folderMode {
 					destDir, useFolder = attachmentFolder(dst), true
-					clean := path.Clean(strings.ReplaceAll(unescapeImagePath(old), `\`, "/"))
+					clean := path.Clean(strings.ReplaceAll(unescapeImagePath(oldBase), `\`, "/"))
 					for strings.HasPrefix(clean, "../") {
 						clean = strings.TrimPrefix(clean, "../")
 					}
@@ -163,10 +164,13 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 				case useFolder:
 					newURL = docRelativeURL(targetDir, fileRel)
 				case firstUsed:
-					newURL = old // the picture sits where the URL points
+					newURL = oldBase // the picture sits where the URL points
 				default:
 					newURL = path.Join(assetsDir, path.Base(fileRel))
 				}
+			}
+			if hasFrag {
+				newURL += "#" + oldFrag
 			}
 			d.urls[old] = newURL
 		}
@@ -196,8 +200,10 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		if d.live == nil {
 			continue
 		}
-		if d.live.isWhiteboard() {
-			d.live.diskText = d.original
+		if d.live.isWhiteboard() || d.live.isPDF() {
+			if d.live.isWhiteboard() {
+				d.live.diskText = d.original
+			}
 			continue
 		}
 		d.live.ed.RelocateImages(d.urls)
@@ -244,6 +250,10 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 		if live != nil {
 			live.waitAsyncSave()
 		}
+		if vault.IsPDF(p.Path) {
+			docs = append(docs, &movingDocument{rel: p.Path, urls: map[string]string{}, live: live})
+			continue
+		}
 		text, err := readFile(sp, p.Path)
 		if err != nil {
 			return nil, err
@@ -288,7 +298,7 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 }
 
 func imageDocument(rel, text string) (*model.Document, error) {
-	if vault.IsWhiteboard(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
 		return model.New(), nil
 	}
 	if vault.IsMarkdown(rel) {
@@ -303,7 +313,7 @@ func imageDocument(rel, text string) (*model.Document, error) {
 }
 
 func relocateText(rel, text string, urls map[string]string) (string, error) {
-	if vault.IsWhiteboard(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
 		return text, nil
 	}
 	changed := false

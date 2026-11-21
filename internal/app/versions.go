@@ -75,7 +75,7 @@ func (d *document) fullPath() string {
 // openVersions shows the history of the open document.
 func (a *App) openVersions() {
 	d := a.doc
-	if d == nil || d.loadErr != nil {
+	if d == nil || d.loadErr != nil || d.isPDF() {
 		a.notify("这篇文档还没有版本历史。")
 		return
 	}

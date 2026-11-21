@@ -23,6 +23,16 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 	}
 	switch ev.Kind {
 	case ui.InputPointerDown:
+		if ev.Button == 1 {
+			if e.Anchor == e.Caret && len(e.blocks.ids) == 0 {
+				if at, ok := e.IndexForPoint(ui.Point{X: ev.X, Y: ev.Y}); ok {
+					e.UnmarkText()
+					e.SetSelection(at, at)
+					e.vertical = false
+				}
+			}
+			return false
+		}
 		if ev.Button != 0 {
 			return false
 		}
@@ -74,6 +84,10 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			e.SetSelection(at, at)
 		}
 		if ev.Clicks == 2 {
+			if r := e.rowAt(at); r != nil && isPDFEmbed(r.leaf.Block) && !r.pdfBrowsing && r.pdfError == nil {
+				e.openPDFModal(r.leaf.Block.ID)
+				return true
+			}
 			if !e.ReadOnly {
 				if r := e.rowAt(at); r != nil && !r.boardEditing &&
 					(isWhiteboardBlock(r.leaf.Block) || (isWhiteboardEmbed(r.leaf.Block) && e.saveWhiteboard != nil)) {
@@ -171,6 +185,11 @@ func (e *Editor) command(command string, read func() string, write func(string))
 	case "paste":
 		e.pasteSelection(read)
 	case "pasteAndMatchStyle":
+		if e.ReadOnly {
+			return true
+		}
+		e.UnmarkText()
+		e.clearBlocks()
 		e.Buffer.ReplaceText(nil, read())
 	case "undo":
 		e.Undo()
@@ -295,6 +314,9 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		commands := map[ui.Key]string{ui.KeyA: "selectAll", ui.KeyC: "copy", ui.KeyX: "cut", ui.KeyV: "paste", ui.KeyZ: "undo"}
 		if mods == ui.Cmd|ui.Shift && key == ui.KeyZ {
 			return e.command("redo", read, write)
+		}
+		if mods == ui.Cmd|ui.Shift && key == ui.KeyV {
+			return e.command("pasteAndMatchStyle", read, write)
 		}
 		if mods == ui.Cmd {
 			if name, ok := commands[key]; ok {
@@ -580,7 +602,7 @@ func (e *Editor) selectAll() {
 	last := e.Engine.LeafAt(sel.End)
 	if first.Block.ID == last.Block.ID && first.Start < first.End {
 		b := first.Block
-		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
+		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !isPDFEmbed(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
 		if editable {
 			candidates = append(candidates, ui.TextInputRange{Start: first.Start, End: first.End})
 		}

@@ -251,6 +251,7 @@ func (a *App) actions() []action {
 	}
 	dir := a.currentDir()
 	cmd(i18n.T("打开文件…"), "", a.chooseExternalFiles)
+	cmd(i18n.T("打开 PDF 文件…"), "", a.choosePDFFile)
 	cmd(i18n.T("在所有文档中查找和替换…"), a.keyLabel("replace-all"), a.openReplaceAll)
 	if !active.IsExternal() {
 		cmd(i18n.T("新建文档"), a.keyLabel("new-doc"), func() { a.newDoc(dir) })
@@ -283,7 +284,14 @@ func (a *App) actions() []action {
 		focus = i18n.T("退出专注模式")
 	}
 	cmd(focus, a.keyLabel("focus"), a.toggleFocus)
-	if a.doc != nil && !a.doc.isWhiteboard() && a.doc.loadErr == nil && !a.doc.source {
+	if a.doc != nil && a.doc.isPDF() && a.doc.loadErr == nil {
+		outline := i18n.T("展开缩略图与目录")
+		if a.outlineOpen() {
+			outline = i18n.T("收起缩略图与目录")
+		}
+		cmd(outline, a.keyLabel("outline"), a.toggleOutline)
+	}
+	if a.doc != nil && !a.doc.isWhiteboard() && !a.doc.isPDF() && a.doc.loadErr == nil && !a.doc.source {
 		outline := i18n.T("展开目录")
 		if a.outlineOpen() {
 			outline = i18n.T("收起目录")
@@ -431,7 +439,23 @@ func (a *App) actions() []action {
 				cmd(i18n.T("三栏合并当前冲突…"), "", func() { a.openMergeForConflict(cf) })
 			}
 		}
-		if a.doc.isWhiteboard() {
+		if a.doc.isPDF() {
+			cmd(i18n.T("在 PDF 中查找…"), a.keyLabel("find"), func() { a.doc.pdf.OpenFind() })
+			cmd(i18n.T("PDF：适应宽度"), "⌘0", func() {
+				a.doc.pdf.FitMode = editor.PDFFitWidth
+				a.doc.pdf.Zoom = 1.0
+			})
+			cmd(i18n.T("PDF：适应整页"), "", func() { a.doc.pdf.FitMode = editor.PDFFitPage })
+			spread := i18n.T("PDF：双页并排视图")
+			if a.doc.pdf.TwoPage {
+				spread = i18n.T("PDF：单页连续视图")
+			}
+			cmd(spread, "", func() {
+				a.doc.pdf.TwoPage = !a.doc.pdf.TwoPage
+				a.doc.pdf.GoToPage(a.doc.pdf.CurrentPage, true)
+			})
+			cmd(i18n.T("PDF：顺时针旋转 90°"), "", func() { a.doc.pdf.RotateCW() })
+		} else if a.doc.isWhiteboard() {
 			cmd(i18n.T("导出 SVG 文件"), "", func() { a.exportWhiteboardSVG(a.doc) })
 			cmd(i18n.T("适应画布"), "", func() { a.doc.board.FitToContent(ui.Rect{}) })
 			if !a.doc.boardReadOnly {
@@ -445,18 +469,20 @@ func (a *App) actions() []action {
 			}
 			cmd(mode, a.keyLabel("source"), a.toggleSource)
 		}
-		cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
-		cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
-		cmd(i18n.T("打印…"), "", a.printDoc)
+		if !a.doc.isPDF() {
+			cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
+			cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
+			cmd(i18n.T("打印…"), "", a.printDoc)
+		}
 		cmd(i18n.T("重命名文档"), "", func() { a.renameIn(sp, rel) })
 		cmd(i18n.T("复制当前文档"), "", func() { a.copyEntries(sp, []string{rel}) })
 		if !sp.IsExternal() {
 			cmd(i18n.T("创建当前文档副本"), "", func() { a.duplicateEntry(sp, rel) })
 		}
-		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() {
+		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() {
 			a.editorActions(cmd)
 		}
-		if !a.doc.isWhiteboard() {
+		if !a.doc.isWhiteboard() && !a.doc.isPDF() {
 			cmd(i18n.T("导出 Markdown 文件"), "", a.exportMarkdown)
 			cmd(i18n.T("将当前文档存为模板"), "", a.saveAsTemplate)
 			cmd(i18n.T("导出 HTML 网页"), "", a.exportHTML)
@@ -477,7 +503,7 @@ func (a *App) actions() []action {
 					continue
 				}
 			case "selection":
-				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.ed == nil {
+				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.ed == nil {
 					continue
 				}
 				s, e := a.doc.ed.Positions()
@@ -872,10 +898,11 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("增加缩进"), "", after(func() { ed.Engine.Indent(1) }))
 	cmd(i18n.T("减少缩进"), "", after(func() { ed.Engine.Indent(-1) }))
 	cmd(i18n.T("插入图片…"), "", a.pickImages)
+	cmd(i18n.T("插入 PDF…"), "", a.pickPDFs)
 	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "code" && !strings.EqualFold(strings.TrimSpace(b.Language), "mermaid") {
 		cmd(i18n.T("代码块：切换自动换行"), "", after(func() { ed.ToggleCodeWrap(b.ID) }))
 	}
-	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" && !vault.IsWhiteboard(b.URL) {
+	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" && !vault.IsWhiteboard(b.URL) && !editor.IsPDFURL(b.URL) {
 		cmd(i18n.T("裁剪图片…"), "", func() { ed.OpenCropper(b.ID) })
 	}
 }

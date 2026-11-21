@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -171,5 +172,123 @@ func TestTableCellAndLiteralPlainTextCopy(t *testing.T) {
 	reimported := ImportMarkdown(exported)
 	if got := reimported.Blocks[0].Text(); got != "Abc_123 and _literal_" || len(reimported.Blocks[0].Runs) != 1 || reimported.Blocks[0].Runs[0].Style != (document.Style{}) {
 		t.Fatalf("roundtrip altered plain text: %+v", reimported.Blocks[0].Runs)
+	}
+}
+
+func TestBodyContextMenuClipboardAndSelection(t *testing.T) {
+	e, tt := newTester("Hello world\n\nSecond line")
+	focus(e, tt)
+
+	// Select "world" and copy via right-click context menu.
+	start := ui.UTF16Len("Hello ")
+	end := ui.UTF16Len("Hello world")
+	e.SetSelection(start, end)
+	tt.Frame()
+	rect, _, ok := e.BoundsForRange(ui.TextInputRange{Start: start, End: start})
+	if !ok {
+		t.Fatal("missing bounds for selection start")
+	}
+	tt.RightClickAt(rect.X+4, rect.Y+rect.H/2)
+	menu := tt.Menu()
+	for _, want := range []string{"剪切", "复制", "粘贴", "粘贴为纯文本", "全选", "加粗", "斜体", "插入表格"} {
+		if !slices.Contains(menu, want) {
+			t.Fatalf("context menu %v missing %q", menu, want)
+		}
+	}
+	if err := tt.ChooseMenuItem("复制"); err != nil {
+		t.Fatalf("choose 复制: %v", err)
+	}
+	if got := tt.Clipboard(); got != "world" {
+		t.Fatalf("clipboard after context copy = %q; want %q", got, "world")
+	}
+	// Selection stays intact on right-click copy.
+	if e.Anchor != start || e.Caret != end {
+		t.Fatalf("selection after copy = %d,%d; want %d,%d", e.Anchor, e.Caret, start, end)
+	}
+
+	// Cut via right-click context menu removes the selected text.
+	tt.RightClickAt(rect.X+4, rect.Y+rect.H/2)
+	if err := tt.ChooseMenuItem("剪切"); err != nil {
+		t.Fatalf("choose 剪切: %v", err)
+	}
+	if got := e.Doc.Blocks[0].Text(); got != "Hello " {
+		t.Fatalf("first block after cut = %q; want %q", got, "Hello ")
+	}
+	if got := tt.Clipboard(); got != "world" {
+		t.Fatalf("clipboard after cut = %q; want %q", got, "world")
+	}
+
+	// With no selection, Cut and Copy are disabled, while Paste works at the right-clicked location.
+	tt.RightClickAt(rect.X+4, rect.Y+rect.H/2)
+	if err := tt.ChooseMenuItem("复制"); err == nil {
+		t.Fatal("expected 复制 to be disabled with empty selection")
+	}
+	tt.CloseMenu()
+
+	tt.SetClipboardData(transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.Text, []byte("**bold**")),
+		transfer.Bytes(transfer.HTML, []byte("<p><strong>bold</strong></p>")),
+	)))
+	endFirst := ui.UTF16Len("Hello ")
+	caretRect, _, ok := e.BoundsForRange(ui.TextInputRange{Start: endFirst, End: endFirst})
+	if !ok {
+		t.Fatal("missing bounds for end of first line")
+	}
+	tt.RightClickAt(caretRect.X+2, caretRect.Y+caretRect.H/2)
+	if err := tt.ChooseMenuItem("粘贴"); err != nil {
+		t.Fatalf("choose 粘贴: %v", err)
+	}
+	if got := e.Doc.Blocks[0].Text(); got != "Hello bold" {
+		t.Fatalf("first block after rich paste = %q; want %q", got, "Hello bold")
+	}
+	if len(e.Doc.Blocks[0].Runs) < 2 || !e.Doc.Blocks[0].Runs[1].Style.Bold {
+		t.Fatalf("expected bold run after rich paste, got %+v", e.Doc.Blocks[0].Runs)
+	}
+
+	// Paste as plain text inserts literal text without rich formatting.
+	e.SetSelection(0, 0)
+	tt.Frame()
+	topRect, _, ok := e.BoundsForRange(ui.TextInputRange{Start: 0, End: 0})
+	if !ok {
+		t.Fatal("missing bounds for start of document")
+	}
+	tt.RightClickAt(topRect.X+2, topRect.Y+topRect.H/2)
+	if err := tt.ChooseMenuItem("粘贴为纯文本"); err != nil {
+		t.Fatalf("choose 粘贴为纯文本: %v", err)
+	}
+	if got := e.Doc.Blocks[0].Text(); got != "**bold**Hello bold" {
+		t.Fatalf("first block after plain paste = %q; want %q", got, "**bold**Hello bold")
+	}
+	if e.Doc.Blocks[0].Runs[0].Style.Bold {
+		t.Fatalf("plain paste should not apply bold style: %+v", e.Doc.Blocks[0].Runs)
+	}
+
+	// Select All via context menu selects the entire document in one step.
+	tt.RightClickAt(topRect.X+2, topRect.Y+topRect.H/2)
+	if err := tt.ChooseMenuItem("全选"); err != nil {
+		t.Fatalf("choose 全选: %v", err)
+	}
+	if got := e.Selection().Range; got != (ui.TextInputRange{Start: 0, End: e.Len()}) {
+		t.Fatalf("selection after context 全选 = %+v; want 0..%d", got, e.Len())
+	}
+
+	// Read-only mode exposes Copy and Select All, and hides mutating actions.
+	e.ReadOnly = true
+	tt.Frame()
+	tt.RightClickAt(topRect.X+2, topRect.Y+topRect.H/2)
+	roMenu := tt.Menu()
+	if !slices.Contains(roMenu, "复制") || !slices.Contains(roMenu, "全选") {
+		t.Fatalf("read-only menu %v missing 复制 or 全选", roMenu)
+	}
+	for _, hidden := range []string{"剪切", "粘贴", "粘贴为纯文本", "加粗", "斜体", "插入表格"} {
+		if slices.Contains(roMenu, hidden) {
+			t.Fatalf("read-only menu %v should not include %q", roMenu, hidden)
+		}
+	}
+	if err := tt.ChooseMenuItem("复制"); err != nil {
+		t.Fatalf("choose read-only 复制: %v", err)
+	}
+	if got := tt.Clipboard(); !strings.Contains(got, "Second line") {
+		t.Fatalf("read-only copy clipboard = %q; want document content", got)
 	}
 }

@@ -250,7 +250,7 @@ func (a *App) checkDisk() {
 	if d.pollAsyncSave(); d.saving {
 		return
 	}
-	text, err := readFile(d.space, d.rel)
+	text, err := readDocSource(d.space, d.rel)
 	if d.pollAsyncSave(); d.saving {
 		return
 	}
@@ -285,6 +285,9 @@ func (a *App) replaceDoc(text string) {
 	if old.isWhiteboard() && d.isWhiteboard() {
 		d.board.PreserveViewport(old.board)
 		d.boardReadOnly = old.boardReadOnly
+	} else if old.isPDF() && d.isPDF() {
+		d.pdf.GoToPage(old.pdf.CurrentPage, true)
+		d.pdf.SidebarOpen = old.pdf.SidebarOpen
 	} else {
 		d.ed.Scroll = old.ed.Scroll
 	}
