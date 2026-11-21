@@ -25,7 +25,7 @@ internal/document/    独立的结构化文档模型、JSON 编解码、编辑�
 internal/editor/      自研富文本视图、UTF-16 输入协议、Markdown 导入导出、排版与交互
 internal/space/       Space 模型与 spaces.json 存储（不依赖 UI）
 internal/vault/       Space 文件夹内的文件树、读写、新建、重命名、移动（不依赖 UI）
-internal/plugin/      插件清单、注册表与本地 zip 安装、启用/卸载、配置与凭据隔离、wazero WASM 沙箱宿主与空间文件宿主接口（不依赖 UI）
+internal/plugin/      插件清单、注册表与本地/远程 zip 安装（SHA-256 校验）、启用/卸载、配置与凭据隔离、wazero WASM 沙箱宿主与空间文件宿主接口；官方插件（dev.arcmd.cloud-sync、dev.arcmd.image-host）独立托管于 Ciao1019/arcmd-plugins，从其 catalog GitHub Release 按需下载安装（不依赖 UI）
 internal/fuzzy/       命令栏的模糊匹配（支持多关键词与拼音/首字母匹配）
 internal/pinyin/      中文汉字转拼音与声母索引表（供模糊匹配调用，不依赖 UI）
 internal/search/      命令栏的全文搜索：各 Space 文档纯文本的不可变索引，按修改时间增量刷新与磁盘缓存（不依赖 UI）
@@ -46,7 +46,6 @@ internal/agent/       问答 Agent：与服务无关的消息模型、工具调�
 internal/i18n/        界面语言：i18n.T 把中文界面文字查成当前语言（en.go 是英文对照表），Pick 按系统语言选择（不依赖 UI）
 internal/whiteboard/  Excalidraw 风格手绘白板：场景模型、两栖 .excalidraw.svg 编解码、Rough 矢量曲线、几何绑定与撤销栈（不依赖 UI）
 internal/mindmap/     原生文档思维导图排版与交互视图：单/双侧树布局、分支折线、视口裁剪与键盘导航（依赖 ui）
-plugins/cloud-sync/   官方「云端同步」WASM 插件（dev.arcmd.cloud-sync）：S3 SigV4 与 WebDAV 客户端、三路增量双向同步及内嵌 bundle
 docs/                 architecture.md（架构）、plugins.md（插件与市场规范）
 ```
 

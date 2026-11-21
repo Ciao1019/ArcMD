@@ -170,6 +170,36 @@ func (e *Editor) ReplaceImage(id, expected, next string) bool {
 	return true
 }
 
+// ReplaceImageURLs replaces every image block URL present in replacements in a
+// single undoable edit, returning the number of blocks updated.
+func (e *Editor) ReplaceImageURLs(replacements map[string]string) int {
+	if e.ReadOnly || len(replacements) == 0 {
+		return 0
+	}
+	e.UnmarkText()
+	changed := 0
+	e.Engine.Edit(func() {
+		for _, leaf := range e.Doc.Leaves() {
+			if leaf.Block.Kind != "image" {
+				continue
+			}
+			next, ok := replacements[leaf.Block.URL]
+			if !ok || next == "" || next == leaf.Block.URL {
+				continue
+			}
+			delete(e.images, leaf.Block.URL)
+			delete(e.images, next)
+			leaf.Block.URL = next
+			changed++
+		}
+	})
+	if changed > 0 {
+		e.ready = false
+		e.sync()
+	}
+	return changed
+}
+
 func imageName(src string) string {
 	if u, err := url.Parse(src); err == nil && u.Host != "" {
 		src = u.EscapedPath()

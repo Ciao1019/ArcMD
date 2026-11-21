@@ -276,6 +276,7 @@ type App struct {
 	tour tour
 
 	runAsync             func(func())
+	remoteImages         remoteImageState
 	navDir               int
 	navAt                time.Time
 	keyGen               uint64
@@ -766,6 +767,9 @@ func (a *App) retireClosedDocuments(candidates ...*document) {
 func (a *App) imageResourceFor(d *document, url string) editor.ImageResource {
 	if d == nil || d.closed.Load() {
 		return editor.ImageResource{}
+	}
+	if isRemoteImageURL(url) {
+		return a.remoteImageResource(d, url)
 	}
 	key := imageKey{doc: d, url: url}
 	res, ok := a.imgResolved[key]
