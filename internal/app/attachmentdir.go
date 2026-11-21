@@ -470,7 +470,7 @@ func (a *App) relinkAttachments(sp *space.Space, moves map[string]string) {
 			continue
 		}
 		resident[d.rel] = true
-		if d.loadErr != nil || d.isWhiteboard() || d.source || d.ed.ReadOnly {
+		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.source || d.ed.ReadOnly {
 			continue
 		}
 		if moved := attachmentRelocations(sp, d.rel, d.ed.ImageURLs(), moves); len(moved) > 0 {
@@ -526,7 +526,7 @@ func (a *App) relinkAttachments(sp *space.Space, moves map[string]string) {
 	scan := func() {
 		docs, _ := vault.List(snapshot.Root)
 		for _, info := range docs {
-			if resident[info.Path] || vault.IsWhiteboard(info.Path) {
+			if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) {
 				continue
 			}
 			text, err := readFile(&snapshot, info.Path)

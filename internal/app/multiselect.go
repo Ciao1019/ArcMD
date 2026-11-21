@@ -792,7 +792,7 @@ func (a *App) openPickedInSplit(sp *space.Space, docRels []string) {
 		}
 		d := a.residentDocument(sp.ID, rel)
 		if d == nil {
-			text, err := readFile(sp, rel)
+			text, err := readDocSource(sp, rel)
 			if err != nil {
 				a.notify("打开 %s 失败。%v", vault.Title(rel), err)
 				return

@@ -16,6 +16,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/Ciao1019/ArcMD/internal/spacefs"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/Ciao1019/ArcMD/internal/whiteboard"
@@ -221,6 +222,27 @@ func (a *App) qaSession(spaceID string) *qaSession {
 // QAPage is a document file as the agent reads it: its Markdown, each
 // line knowing its top-level block.
 func QAPage(name, content string) (*spacefs.Page, error) {
+	if vault.IsPDF(name) {
+		doc, err := pdfdoc.OpenBytes([]byte(content))
+		if err != nil {
+			return nil, err
+		}
+		defer doc.Close()
+		cnt := min(doc.PageCount(), 200)
+		var parts []spacefs.Part
+		for i := range cnt {
+			txt := strings.TrimSpace(doc.PageText(i))
+			head := fmt.Sprintf("## Page %d", i+1)
+			if txt != "" {
+				head += "\n" + txt
+			}
+			parts = append(parts, spacefs.Part{
+				Block: fmt.Sprintf("page:%d", i+1),
+				Text:  head,
+			})
+		}
+		return spacefs.PageOf(name, parts), nil
+	}
 	if vault.IsWhiteboard(name) {
 		scene, err := whiteboard.Decode(content)
 		if err != nil {
@@ -482,6 +504,19 @@ func (a *App) openCitation(spaceID string, c agent.Citation) {
 	fs := a.qa.spaces[spaceID]
 	if fs == nil || !a.openAnywhere(spaceID, c.Path) || a.doc == nil || a.doc.loadErr != nil {
 		a.notify("找不到引用的文档：%s", c.Path)
+		return
+	}
+	if a.doc.isPDF() {
+		if page, err := fs.Page(c.Path); err == nil {
+			if at, ok := page.Locate(c.From); ok {
+				if pStr, has := strings.CutPrefix(at.Block, "page:"); has {
+					if pNum, convErr := strconv.Atoi(pStr); convErr == nil && pNum >= 1 {
+						a.doc.pdf.GoToPage(pNum-1, false)
+					}
+				}
+			}
+		}
+		a.doc.pdf.RequestFocus = true
 		return
 	}
 	if a.doc.isWhiteboard() {

@@ -470,7 +470,7 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 		}
 	}
 	for _, file := range files {
-		if resident[file] || !vault.IsDocument(file.rel) {
+		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) {
 			continue
 		}
 		sp := a.state.Get(file.space)
@@ -516,10 +516,11 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 	oldBase := path.Base(oldRel)
 	newBase := path.Base(newRel)
 	matchURL := func(docRel, raw string) (string, bool) {
-		if !vault.IsWhiteboard(raw) {
+		rawBase, frag, hasFrag := strings.Cut(raw, "#")
+		if !vault.IsWhiteboard(rawBase) && !vault.IsPDF(rawBase) {
 			return "", false
 		}
-		clean := unescapeImagePath(strings.TrimSpace(raw))
+		clean := unescapeImagePath(strings.TrimSpace(rawBase))
 		cleanNoSlash := strings.TrimPrefix(path.Clean(clean), "/")
 		docDir := path.Dir(docRel)
 		joined := cleanNoSlash
@@ -529,13 +530,19 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 		if clean != oldBase && cleanNoSlash != oldRel && joined != oldRel {
 			return "", false
 		}
-		if clean == oldBase && path.Dir(oldRel) == path.Dir(newRel) {
-			return newBase, true
+		var out string
+		switch {
+		case clean == oldBase && path.Dir(oldRel) == path.Dir(newRel):
+			out = newBase
+		case strings.HasPrefix(clean, "/"):
+			out = "/" + newRel
+		default:
+			out = newRel
 		}
-		if strings.HasPrefix(clean, "/") {
-			return "/" + newRel, true
+		if hasFrag {
+			out += "#" + frag
 		}
-		return newRel, true
+		return out, true
 	}
 	resident := map[string]bool{}
 	for _, d := range a.residentDocuments() {
@@ -543,7 +550,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 			continue
 		}
 		resident[d.rel] = true
-		if d.loadErr != nil || d.isWhiteboard() || d.ed.ReadOnly {
+		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.ed.ReadOnly {
 			continue
 		}
 		urls := map[string]string{}
@@ -564,7 +571,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 		return
 	}
 	for _, info := range docs {
-		if resident[info.Path] || vault.IsWhiteboard(info.Path) {
+		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) {
 			continue
 		}
 		text, rErr := readFile(sp, info.Path)

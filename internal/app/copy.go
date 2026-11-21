@@ -422,13 +422,14 @@ func (a *App) copyWithResources(src *space.Space, rel string, dst *space.Space, 
 		sameDir := src.ID == dst.ID && targetDir == srcDir
 		if !sameDir {
 			for old := range d.urls {
-				if vault.IsWhiteboard(old) {
-					clean := strings.TrimPrefix(path.Clean(unescapeImagePath(old)), "/")
+				oldBase, oldFrag, hasFrag := strings.Cut(old, "#")
+				if vault.IsWhiteboard(oldBase) || vault.IsPDF(oldBase) {
+					clean := strings.TrimPrefix(path.Clean(unescapeImagePath(oldBase)), "/")
 					if !underAttachmentFolder(clean, assetsDir) && !underAttachmentFolder(clean, attachmentFolder(src)) {
 						continue
 					}
 				}
-				file, resolveErr := resolveSpaceImage(src, d.rel, old)
+				file, resolveErr := resolveSpaceImage(src, d.rel, oldBase)
 				if resolveErr != nil {
 					continue
 				}
@@ -455,10 +456,10 @@ func (a *App) copyWithResources(src *space.Space, rel string, dst *space.Space, 
 				default:
 					folderMode := attachmentFolder(dst) != ""
 					destDir, useFolder := targetDir, false
-					orig := old
+					orig := oldBase
 					if folderMode {
 						destDir, useFolder = attachmentFolder(dst), true
-						clean := path.Clean(strings.ReplaceAll(unescapeImagePath(old), `\`, "/"))
+						clean := path.Clean(strings.ReplaceAll(unescapeImagePath(oldBase), `\`, "/"))
 						for strings.HasPrefix(clean, "../") {
 							clean = strings.TrimPrefix(clean, "../")
 						}
@@ -483,12 +484,15 @@ func (a *App) copyWithResources(src *space.Space, rel string, dst *space.Space, 
 						newURL = docRelativeURL(targetDir, fileRel)
 						coverURL = escapeImagePath(fileRel)
 					case firstUsed:
-						newURL = old
-						coverURL = old
+						newURL = oldBase
+						coverURL = oldBase
 					default:
 						newURL = path.Join(assetsDir, path.Base(fileRel))
 						coverURL = newURL
 					}
+				}
+				if hasFrag {
+					newURL += "#" + oldFrag
 				}
 				d.urls[old] = newURL
 				if model.ValidCover(newURL) {
@@ -542,6 +546,10 @@ func (a *App) copyDocuments(sp *space.Space, rel string) ([]*movingDocument, err
 		if live := a.residentDocument(sp.ID, p.Path); live != nil {
 			live.waitAsyncSave()
 		}
+		if vault.IsPDF(p.Path) {
+			docs = append(docs, &movingDocument{rel: p.Path, urls: map[string]string{}})
+			continue
+		}
 		text, err := readFile(sp, p.Path)
 		if err != nil {
 			return nil, err
@@ -565,7 +573,7 @@ func (a *App) copyDocuments(sp *space.Space, rel string) ([]*movingDocument, err
 // always receive fresh block IDs (and any rebased image URLs); Markdown files
 // stay byte-identical unless an image or cover URL changed.
 func copyDocumentText(rel, text string, urls, coverURLs map[string]string) (string, error) {
-	if vault.IsWhiteboard(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
 		return text, nil
 	}
 	mapCopyURLs := func(doc *model.Document) {

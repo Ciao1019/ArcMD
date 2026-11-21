@@ -192,7 +192,7 @@ func (a *App) linkedMentionsFor(d *document) []string {
 		if n.Path == d.rel && sp.ID == d.space.ID {
 			return true
 		}
-		if vault.IsWhiteboard(n.Path) {
+		if vault.IsWhiteboard(n.Path) || vault.IsPDF(n.Path) {
 			return true
 		}
 		text, ok := ix.TextOf(sp.ID, n.Path)
@@ -217,6 +217,10 @@ func (a *App) linkedMentionsFor(d *document) []string {
 
 func (a *App) documentCorner(c *ui.Context, d *document) {
 	if d == nil || d.loadErr != nil {
+		return
+	}
+	if d.isPDF() {
+		a.pdfCorner(c, d)
 		return
 	}
 	if d.isWhiteboard() {

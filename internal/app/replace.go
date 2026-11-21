@@ -133,7 +133,15 @@ func (a *App) replaceEverywhere() {
 			n += k
 			return out
 		}
+		if vault.IsPDF(h.Path) {
+			skipped++
+			continue
+		}
 		if d := resident[place{h.Space, h.Path}]; d != nil {
+			if d.isPDF() {
+				skipped++
+				continue
+			}
 			if d.isWhiteboard() {
 				if d.boardReadOnly {
 					skipped++

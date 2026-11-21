@@ -56,6 +56,7 @@ var insertions = []insertion{
 	{name: "高亮块", kind: "callout", search: "callout gaoliangkuai glk highlight", icon: iconBulb, group: 1, grid: true, tint: "orange"},
 	{name: "分隔线", kind: "rule", search: "divider rule fengexian fgx line", icon: iconRule, grid: true, tint: "orange", md: "---"},
 	{name: "图片", kind: "image", search: "image picture tupian tp", icon: iconImage, group: 1, tint: "yellow"},
+	{name: "PDF 文档", kind: "pdf", search: "pdf document paper slide wendang wd", icon: iconFileDoc, group: 1, tint: "orange"},
 	{name: "表格", kind: "table", search: "table biaoge bg", icon: iconTable, group: 1, tint: "teal"},
 	{name: "折叠块", kind: "toggle", search: "toggle details fold collapse zhediekuai zdk zhedie", icon: iconToggle, group: 1, tint: "indigo"},
 	{name: "分栏", kind: "columns", search: "columns grid fenlan fl shuanglan", icon: iconColumns, group: 1, tint: "indigo"},
@@ -88,7 +89,7 @@ func (e *Editor) slashEntries() []slashEntry {
 			}
 		}
 		for _, it := range insertions {
-			if it.group == 1 && (e.attach != nil || it.kind != "image") {
+			if it.group == 1 && (e.attach != nil || it.kind != "image") && (e.attachPDF != nil || it.kind != "pdf") {
 				out = append(out, slashEntry{it, false})
 			}
 		}
@@ -96,7 +97,7 @@ func (e *Editor) slashEntries() []slashEntry {
 	}
 	ranked := [4][]slashEntry{}
 	for _, it := range insertions {
-		if e.attach == nil && it.kind == "image" {
+		if (e.attach == nil && it.kind == "image") || (e.attachPDF == nil && it.kind == "pdf") {
 			continue
 		}
 		words := strings.Fields(strings.ToLower(it.label() + " " + it.search))
@@ -420,7 +421,7 @@ func turnItems(b *document.Block) []insertion {
 	}
 	for _, it := range insertions {
 		switch {
-		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq" || it.kind == "whiteboard":
+		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "pdf" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq" || it.kind == "whiteboard":
 		case b.Kind == "code" && it.kind == "callout":
 		case b.Kind == "callout" && (it.kind == "code" || it.kind == "quote"):
 		default:

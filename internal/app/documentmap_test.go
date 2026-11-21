@@ -25,6 +25,7 @@ func TestDocumentMapToggleAndJump(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
+	tt.Frame()
 	if a.doc.mindMap == nil {
 		t.Fatal("missing map")
 	}
@@ -119,6 +120,7 @@ func TestDocumentMapLayoutPreference(t *testing.T) {
 	if err := tt.Click("思维导图"); err != nil {
 		t.Fatal(err)
 	}
+	tt.Frame()
 	tt.Frame()
 	if a.prefs.MindMapBothSides {
 		t.Fatal("new installations must open on one side")
@@ -304,5 +306,205 @@ func TestDocumentMapShortcutPaletteCloseAndResponsive(t *testing.T) {
 		if second := a.split.panes[1].doc; second != nil && second.mindMap != nil {
 			t.Fatal("secondary split pane auto-opened mind map")
 		}
+	}
+}
+
+func TestDocumentMapNodeAndCanvasContextMenus(t *testing.T) {
+	a, tt := newTestApp(t)
+	sample := strings.Join([]string{
+		"# 项目总览",
+		"",
+		"## 架构设计",
+		"",
+		"### 网关层",
+		"",
+		"负责流量转发。",
+		"",
+		"## 开发计划",
+		"",
+		"- 搭建脚手架",
+		"- 编写测试",
+	}, "\n")
+	openSample(t, a, "Plan.arcmd", sample)
+	if !a.folded() {
+		a.toggleSidebar()
+	}
+	tt.Frame()
+	if err := tt.Click("思维导图"); err != nil {
+		t.Fatal(err)
+	}
+	settle(tt)
+
+	// 1. Focus branch (drill down) & breadcrumb exit.
+	if err := tt.RightClick("架构设计"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("聚焦此分支"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.doc.mindMap.FocusRoot() == "" {
+		t.Fatal("focus branch did not set focusRoot")
+	}
+	if _, ok := tt.Find("退出聚焦"); !ok {
+		t.Fatal("missing focus breadcrumb exit button")
+	}
+	if _, ok := tt.Find("开发计划"); ok {
+		t.Fatal("sibling branch should be hidden while focused")
+	}
+	if err := tt.Click("退出聚焦"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.doc.mindMap.FocusRoot() != "" {
+		t.Fatal("exit focus did not clear focusRoot")
+	}
+
+	// 2. Move branch down & undo.
+	if err := tt.RightClick("架构设计"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("下移分支"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if got := a.doc.ed.Doc.Blocks[1].Text(); got != "开发计划" {
+		t.Fatalf("after move down, first section is %q; want 开发计划", got)
+	}
+	a.doc.ed.Undo()
+	tt.Frame()
+	if got := a.doc.ed.Doc.Blocks[1].Text(); got != "架构设计" {
+		t.Fatalf("after undo move down, first section is %q; want 架构设计", got)
+	}
+
+	// 3. Add child node & undo.
+	beforeBlocks := len(a.doc.ed.Doc.Blocks)
+	if err := tt.RightClick("架构设计"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("添加", "添加子节点"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.doc.ed.Doc.Blocks) != beforeBlocks+1 {
+		t.Fatalf("add child node produced %d blocks; want %d", len(a.doc.ed.Doc.Blocks), beforeBlocks+1)
+	}
+	a.doc.ed.Undo()
+	tt.Frame()
+
+	// 4. Delete node only (promotes child heading H3 -> H2) & undo.
+	if err := tt.RightClick("架构设计"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("仅删除当前节点"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if got := a.doc.ed.Doc.Blocks[1]; got.Text() != "网关层" || got.Kind != "heading" || got.Level != 2 {
+		t.Fatalf("delete only node left %+v; want H2 网关层", got)
+	}
+	a.doc.ed.Undo()
+	tt.Frame()
+
+	// 5. Delete whole branch & undo.
+	if err := tt.RightClick("开发计划"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("删除整个分支"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if strings.Contains(editor.ExportMarkdown(a.doc.ed.Doc), "搭建脚手架") {
+		t.Fatal("delete branch did not remove child list items")
+	}
+	a.doc.ed.Undo()
+	tt.Frame()
+
+	// 6. Extract branch to new document (creates .md + replaces with [[wikilink]]).
+	if err := tt.RightClick("架构设计"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("提取为新文档"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !strings.Contains(editor.ExportMarkdown(a.doc.ed.Doc), "[[架构设计]]") {
+		t.Fatalf("extract branch did not insert wikilink: %s", editor.ExportMarkdown(a.doc.ed.Doc))
+	}
+	root, _, err := fileLocation(a.doc.space, a.doc.rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extracted, err := os.ReadFile(filepath.Join(root, "架构设计.md"))
+	if err != nil {
+		t.Fatalf("extracted document missing: %v", err)
+	}
+	if !strings.HasPrefix(string(extracted), "# 架构设计") || !strings.Contains(string(extracted), "## 网关层") {
+		t.Fatalf("extracted document did not normalize headings:\n%s", string(extracted))
+	}
+	a.doc.ed.Undo()
+	tt.Frame()
+
+	// 7. Export branch as PNG & SVG.
+	if err := tt.RightClick("开发计划"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("导出分支为", "PNG 图片…"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	pngFile, err := os.Open(filepath.Join(root, "开发计划.png"))
+	if err != nil {
+		t.Fatalf("exported PNG missing: %v", err)
+	}
+	img, err := png.Decode(pngFile)
+	pngFile.Close()
+	if err != nil || img.Bounds().Dx() < 20 || img.Bounds().Dy() < 20 {
+		t.Fatalf("invalid exported PNG: %v", err)
+	}
+
+	if err := tt.RightClick("开发计划"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("导出分支为", "SVG 矢量图…"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	svgBytes, err := os.ReadFile(filepath.Join(root, "开发计划.svg"))
+	if err != nil || !strings.Contains(string(svgBytes), "<svg ") || !strings.Contains(string(svgBytes), "开发计划") {
+		t.Fatalf("invalid exported SVG: %v", err)
+	}
+
+	// 8. Canvas context menu: headings only & show depth.
+	vp, ok := tt.Find("思维导图画布")
+	if !ok {
+		t.Fatal("missing mind map canvas")
+	}
+	tt.RightClickAt(vp.X+8, vp.Y+8)
+	if err := tt.ChooseMenuItem("仅看标题大纲"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.doc.mindMap.HeadingsOnly() {
+		t.Fatal("headings only toggle did not activate")
+	}
+	if _, ok := tt.Find("搭建脚手架"); ok {
+		t.Fatal("list item should be hidden in headings-only mode")
+	}
+	tt.RightClickAt(vp.X+8, vp.Y+8)
+	if err := tt.ChooseMenuItem("仅看标题大纲"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.doc.mindMap.HeadingsOnly() {
+		t.Fatal("headings only toggle did not deactivate")
+	}
+	tt.RightClickAt(vp.X+8, vp.Y+8)
+	if err := tt.ChooseMenuItem("显示层级", "仅显示第 1 层"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.doc.mindMap.HasFolded() {
+		t.Fatal("show depth level 1 did not fold branches")
 	}
 }

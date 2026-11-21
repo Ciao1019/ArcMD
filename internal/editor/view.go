@@ -13,6 +13,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/mermaid"
+	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
@@ -208,6 +209,21 @@ type Editor struct {
 	saveBlockAsWhiteboard       func(string, *whiteboard.Scene)
 	boardWikiSuggest            func(string) []string
 	openWikiSplit               func(string, bool)
+	pdfBrowsing, laidPDF        string
+	pdfFocusPending             bool
+	asyncPDF                    bool
+	pdfModalID, laidModalPDF    string
+	pdfModalFocusPending        bool
+	pdfHeights                  map[string]float32
+	pdfRestPages                map[string]int
+	pdfDragID                   string
+	pdfDragStartH               float32
+	pdfs                        map[string]*PDFViewer
+	pdfEmbedRev                 map[string]uint64
+	embedPDFs                   map[string]embedPDFCache
+	loadPDF                     func(string) (*pdfdoc.Document, uint64, error)
+	openPDF                     func(string, bool)
+	attachPDF                   func()
 	laidFindKey                 string
 	bindings                    map[string]Combo
 	openWiki, openTag           func(string)
@@ -309,6 +325,13 @@ type row struct {
 	boardErr     string
 	boardError   *ui.TextLayout
 
+	pdfDoc      *pdfdoc.Document
+	pdfRect     ui.Rect
+	pdfBrowsing bool
+	pdfEmbed    bool
+	pdfErr      string
+	pdfError    *ui.TextLayout
+
 	yApplied float64
 }
 
@@ -343,6 +366,9 @@ type decoration struct {
 	boardEditing   bool
 	boardEmbed     bool
 	boardURL       string
+	pdfBrowsing    bool
+	pdfEmbed       bool
+	pdfURL         string
 	yApplied       float64
 }
 
@@ -612,6 +638,11 @@ type Options struct {
 	UserWhiteboardLib     func() []whiteboard.LibraryItem
 	SaveWhiteboardLib     func([]whiteboard.LibraryItem)
 	ImportWhiteboardLib   func(onLoad func([]whiteboard.LibraryItem))
+	// PDF embed integration callbacks.
+	LoadPDF   func(url string) (*pdfdoc.Document, uint64, error)
+	OpenPDF   func(url string, split bool)
+	AttachPDF func()
+	AsyncPDF  bool
 }
 
 func New(markdown string) *Editor { return FromOwnedDocument(ImportMarkdown(markdown)) }
@@ -672,6 +703,7 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 
 func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.services = c.Services()
+	e.asyncPDF = o.AsyncPDF && !c.Instant()
 	// Native window drags do not go through a split divider or the host's
 	// panel animation. Detect them here, including in detached windows.
 	if e.windowResize.active(c) {
@@ -703,6 +735,9 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.saveBlockAsWhiteboard = o.SaveBlockAsWhiteboard
 	e.boardWikiSuggest = o.BoardWikiSuggest
 	e.openWikiSplit = o.OpenWikiSplit
+	e.loadPDF = o.LoadPDF
+	e.openPDF = o.OpenPDF
+	e.attachPDF = o.AttachPDF
 	e.header.pickCover = o.PickCover
 	e.bookmarks.marks, e.bookmarks.toggle, e.bookmarks.label, e.bookmarks.key = o.Bookmarks, o.ToggleBookmark, o.LabelBookmark, o.BookmarkKey
 	e.reserved = o.Reserved
@@ -807,6 +842,10 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 						e.boardModalFocusPending = true
 					} else if e.boardEditing != "" {
 						e.boardFocusPending = true
+					} else if e.pdfModalID != "" {
+						e.pdfModalFocusPending = true
+					} else if e.pdfBrowsing != "" {
+						e.pdfFocusPending = true
 					} else {
 						surface.Focus()
 						e.lastInput = c.Now()
@@ -845,9 +884,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					return e.input(ev, services.ReadClipboard, services.WriteClipboard, o.OpenLink)
 				})
 				surface.ContextMenu(func(menu *ui.Menu) {
-					menuAction(menu, i18n.T("加粗"), func() { e.Wrap("**") })
-					menuAction(menu, i18n.T("斜体"), func() { e.Wrap("*") })
-					menuAction(menu, i18n.T("插入表格"), func() { e.Engine.Insert(document.Table(3, 3)); e.RequestFocus = true })
+					e.buildContextMenu(menu, services.ReadClipboard, services.WriteClipboard)
 				})
 				caret := !e.ReadOnly && e.focused && (c.Now().Sub(e.lastInput) < time.Second || c.Now().UnixMilli()/530%2 == 0)
 				if e.focused {
@@ -863,6 +900,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				}
 				e.imageControls(c, o)
 				e.boardControls(c, o)
+				e.pdfControls(c, o)
 				e.bookmarkMarks(c)
 				if o.Footer != nil {
 					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(max(80, e.width-2*e.padding))
@@ -888,7 +926,54 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.cropView(c)
 	e.wikiPreview(c, surface, o.PreviewWiki)
 	e.boardModalView(c, o)
+	e.pdfModalView(c, o)
 	return pane
+}
+
+func (e *Editor) buildContextMenu(menu *ui.Menu, read func() string, write func(string)) {
+	hasSelection := e.Anchor != e.Caret || len(e.blocks.ids) > 0
+	if !e.ReadOnly {
+		if menu.Item(i18n.T("剪切")).Shortcut(ui.Cmd, ui.KeyX).Disabled(!hasSelection).Chosen() {
+			e.command("cut", read, write)
+			e.RequestFocus = true
+		}
+	}
+	if menu.Item(i18n.T("复制")).Shortcut(ui.Cmd, ui.KeyC).Disabled(!hasSelection).Chosen() {
+		e.command("copy", read, write)
+		e.RequestFocus = true
+	}
+	if !e.ReadOnly {
+		if menu.Item(i18n.T("粘贴")).Shortcut(ui.Cmd, ui.KeyV).Chosen() {
+			e.command("paste", read, write)
+			e.RequestFocus = true
+		}
+		if menu.Item(i18n.T("粘贴为纯文本")).Shortcut(ui.Cmd|ui.Shift, ui.KeyV).Chosen() {
+			e.command("pasteAndMatchStyle", read, write)
+			e.RequestFocus = true
+		}
+	}
+	menu.Separator()
+	if menu.Item(i18n.T("全选")).Shortcut(ui.Cmd, ui.KeyA).Disabled(e.Len() == 0 && len(e.blocks.ids) == 0).Chosen() {
+		if len(e.blocks.ids) > 0 {
+			e.SelectAllBlocks()
+		} else {
+			e.SetSelection(0, e.Len())
+			e.vertical = false
+		}
+		e.RequestFocus = true
+	}
+	if !e.ReadOnly {
+		menu.Separator()
+		if menu.Item(i18n.T("加粗")).Shortcut(ui.Cmd, ui.KeyB).Chosen() {
+			e.Wrap("**")
+			e.RequestFocus = true
+		}
+		if menu.Item(i18n.T("斜体")).Shortcut(ui.Cmd, ui.KeyI).Chosen() {
+			e.Wrap("*")
+			e.RequestFocus = true
+		}
+		menuAction(menu, i18n.T("插入表格"), func() { e.Engine.Insert(document.Table(3, 3)); e.RequestFocus = true })
+	}
 }
 
 // footerTop is where the host's footer goes: below the last block, and
@@ -951,7 +1036,15 @@ func (e *Editor) layout(o Options) {
 			}
 		}
 	}
-	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
+	if !embedStale && e.loadPDF != nil && len(e.embedPDFs) > 0 {
+		for url, cached := range e.embedPDFs {
+			if _, rev, err := e.loadPDF(url); err == nil && rev != cached.rev {
+				embedStale = true
+				break
+			}
+		}
+	}
+	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidPDF == e.pdfBrowsing && e.laidModalPDF == e.pdfModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
 	if same && e.cacheRevision == e.Revision() {
 		return
 	}
@@ -986,6 +1079,8 @@ func (e *Editor) layout(o Options) {
 	e.laidMermaid = e.mermaidEditing
 	e.laidBoard = e.boardEditing
 	e.laidModalBoard = e.boardModalID
+	e.laidPDF = e.pdfBrowsing
+	e.laidModalPDF = e.pdfModalID
 	e.laidFindKey = findKey
 	// The text column is 820 wide unless the reader picked another.
 	e.column = columnWidth(o.Column)
@@ -1257,10 +1352,12 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 					row.mermaidHidden = true
 				}
 				e.rows = append(e.rows, row)
-				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || isWhiteboardEmbed(b) {
+				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || isWhiteboardEmbed(b) || isPDFEmbed(b) {
 					d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
 					if isWhiteboardEmbed(b) {
 						d.kind, d.id, d.boardEmbed, d.boardURL, d.boardEditing = "whiteboard-embed", b.ID, true, b.URL, row.boardEditing
+					} else if isPDFEmbed(b) {
+						d.kind, d.id, d.pdfEmbed, d.pdfURL, d.pdfBrowsing = "pdf-embed", b.ID, true, b.URL, row.pdfBrowsing
 					} else if isWhiteboardBlock(b) {
 						d.kind, d.label, d.id = "whiteboard", b.Language, b.ID
 					} else if isMermaidBlock(b) {
@@ -1289,6 +1386,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		row := row{leafRevision: e.Revision(), leaf: leaf, layout: laid, rect: ui.Rect{X: x, Y: y, W: w, H: total}, x: x + left, y: y + top, number: number, size: font.Size, tableHeader: header}
 		if isWhiteboardEmbed(b) {
 			total = e.layoutWhiteboardEmbed(&row, o, gap)
+		} else if isPDFEmbed(b) {
+			total = e.layoutPDFEmbed(&row, o, gap)
 		} else if b.Kind == "image" {
 			total = e.layoutImage(&row, o)
 		}
@@ -1316,11 +1415,14 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			e.recordExactHeight(b.ID, e.hintWidthFor(b, shapeWidth), hintH, font, b.Runs)
 		}
 		e.rows = append(e.rows, row)
-		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" || isWhiteboardEmbed(b) {
+		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" || isWhiteboardEmbed(b) || isPDFEmbed(b) {
 			d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
 			if isWhiteboardEmbed(b) {
 				d.kind, d.id, d.boardEmbed, d.boardURL, d.boardEditing = "whiteboard-embed", b.ID, true, b.URL, row.boardEditing
 				d.rect = row.boardRect
+			} else if isPDFEmbed(b) {
+				d.kind, d.id, d.pdfEmbed, d.pdfURL, d.pdfBrowsing = "pdf-embed", b.ID, true, b.URL, row.pdfBrowsing
+				d.rect = row.pdfRect
 			} else if isWhiteboardBlock(b) {
 				d.kind, d.label, d.id = "whiteboard", b.Language, b.ID
 				d.boardEditing = row.boardEditing
@@ -1360,6 +1462,9 @@ func (e *Editor) indexedRow(i int) *row {
 			}
 			if r.boardRect.W > 0 {
 				r.boardRect.Y += dy
+			}
+			if r.pdfRect.W > 0 {
+				r.pdfRect.Y += dy
 			}
 			r.yApplied = off
 		}
@@ -1649,6 +1754,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				if e.paintWhiteboardRow(p, bounds, r, t) {
 					return
 				}
+				if e.paintPDFRow(p, bounds, r, t) {
+					return
+				}
 				e.paintAnnotations(p, shiftedBounds, r, true)
 				textColor := t.Text
 				if r.leaf.Block.Kind == "image" && e.imageCaptionID != r.leaf.Block.ID {
@@ -1815,6 +1923,8 @@ func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) 
 			e.paintMermaidHover(p, bounds, d, t)
 		case (d.kind == "whiteboard" || d.kind == "whiteboard-embed") && d.id != "":
 			e.paintWhiteboardHover(p, bounds, d, t)
+		case d.kind == "pdf-embed" && d.id != "":
+			e.paintPDFHover(p, bounds, d, t)
 		case d.kind == "code" && d.id != "":
 			if idx, ok := e.rowIDs[d.id]; ok {
 				barBox, _, availW, contentW, scrollX, noWrap := e.codeScrollFor(*e.indexedRow(idx))
@@ -1907,6 +2017,8 @@ func (e *Editor) hoverControl(x, y float32) bool {
 			e.copyBlock(d.id)
 			return true
 		case (d.kind == "whiteboard" || d.kind == "whiteboard-embed") && d.id != "" && e.whiteboardControl(d, x, y):
+			return true
+		case d.kind == "pdf-embed" && d.id != "" && e.pdfControl(d, x, y):
 			return true
 		case d.kind == "table" && e.tableControl(d, x, y):
 			return true

@@ -8,6 +8,7 @@ import (
 
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/Ciao1019/ArcMD/internal/search"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/Ciao1019/ArcMD/internal/whiteboard"
@@ -52,6 +53,14 @@ type hitsKey struct {
 // blocks' text, a line each, as the editor's find box sees it, and its
 // page icon.
 func extractText(name, content string) (search.Extracted, error) {
+	if vault.IsPDF(name) {
+		doc, err := pdfdoc.OpenBytes([]byte(content))
+		if err != nil {
+			return search.Extracted{}, nil
+		}
+		defer doc.Close()
+		return search.Extracted{Text: doc.PlainText(200)}, nil
+	}
 	if vault.IsWhiteboard(name) {
 		scene, err := whiteboard.Decode(content)
 		if err != nil {
@@ -146,6 +155,15 @@ const searchLimit = 5
 // plainText is the document's text as search sees it, kept for the
 // revision.
 func (d *document) plainText() string {
+	if d.isPDF() {
+		if !d.plainKnown {
+			if d.pdf != nil && d.pdf.Doc != nil {
+				d.plain = d.pdf.Doc.PlainText(200)
+			}
+			d.plainKnown = true
+		}
+		return d.plain
+	}
 	if d.isWhiteboard() {
 		if rev := d.board.Revision(); !d.plainKnown || rev != d.plainRev {
 			d.plain, d.plainRev, d.plainKnown = d.board.Scene.PlainText(), rev, true
@@ -190,6 +208,16 @@ func (a *App) openAtText(id, rel, query string) {
 
 func (a *App) openAtTextTerm(id, rel, query, term string) {
 	if !a.openAnywhere(id, rel) || a.doc.loadErr != nil {
+		return
+	}
+	if a.doc.isPDF() {
+		needle := strings.TrimSpace(term)
+		if needle == "" {
+			needle = strings.TrimSpace(query)
+		}
+		if needle != "" {
+			a.doc.pdf.FindText(needle)
+		}
 		return
 	}
 	if a.doc.isWhiteboard() {

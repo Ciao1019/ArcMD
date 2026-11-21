@@ -198,7 +198,7 @@ func (a *App) openSplit(sp *space.Space, rel string, leading bool, vertical bool
 		a.fillPane(a.split.panes[a.split.active], sp.ID, rel)
 		return
 	}
-	text, err := readFile(sp, rel)
+	text, err := readDocSource(sp, rel)
 	if err != nil {
 		a.notify("打开 %s 失败。%v", vault.Title(rel), err)
 		return

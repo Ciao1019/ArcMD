@@ -123,6 +123,17 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 			restingPins := len(pins)
 			highlight := 0
 			if live {
+				if !a.modalBlocksSidebarKeys() {
+					if tree.FileDragOver() {
+						a.setFileDropOver(fileDropSidebar, "", sp.Name)
+						tree.DrawOver(func(p *ui.Painter, r ui.Rect) {
+							p.StrokeDashed(ui.Rect{X: r.X + 1, Y: r.Y + 1, W: max(0, r.W-2), H: max(0, r.H-2)}, t.Accent.Alpha(0.65), 10, 1.5)
+						})
+					}
+					if files := tree.DroppedFiles(); len(files) > 0 {
+						a.importDroppedFiles(sp, "", files)
+					}
+				}
 				prev = append([]rowFrame(nil), a.rows...)
 				a.rows = a.rows[:0]
 				over := a.listDrag(c, tree, prev)
@@ -721,9 +732,19 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		}
 	}
 
+	fileOver := false
+	if live && n.Dir && !sp.IsExternal() && !a.modalBlocksSidebarKeys() {
+		fileOver = row.FileDragOver()
+		if fileOver {
+			a.setFileDropOver(fileDropFolder, n.Path, n.Name)
+		}
+		if files := row.DroppedFiles(); len(files) > 0 {
+			a.importDroppedFiles(sp, n.Path, files)
+		}
+	}
 	d := a.listDrop
-	into := live && d != nil && d.kind == dropInto && d.parent == n.Path
-	hovered := live && !settling && row.Hovered() && a.listDrop == nil && !a.listDragging
+	into := live && (d != nil && d.kind == dropInto && d.parent == n.Path || fileOver)
+	hovered := live && !settling && row.Hovered() && a.listDrop == nil && !a.listDragging && !a.fileDrop.over
 	minus := opened && hovered && !renaming
 	if minus {
 		row.PaddingEnd(6)
@@ -758,6 +779,10 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 	// text override, which a chosen tree item would take, are cleared so
 	// child controls such as the inline rename input inherit readable ink.
 	row.Background(ui.Transparent).TextColor(t.Text)
+	pulse := float32(0)
+	if live && !settling && !dragging {
+		pulse = a.applyImportPulse(c, row, place{sp.ID, n.Path})
+	}
 	slotFade := 1 - settleK
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
 		if settling {
@@ -775,6 +800,9 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		}
 		if fill.A > 0 {
 			p.Fill(fr, fill, 10)
+		}
+		if pulse > 0 {
+			p.Fill(fr, t.Accent.Alpha(0.18*pulse), 10)
 		}
 		if into {
 			p.Stroke(fr, t.Text.Alpha(0.3), 10, 1.5)

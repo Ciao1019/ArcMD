@@ -36,17 +36,9 @@ func CopyTo(from, rel, to, dir string) (string, error) {
 	if !fi.IsDir() && !fi.Mode().IsRegular() {
 		return "", fmt.Errorf("vault: %s is not a file or folder", rel)
 	}
-	dstParent := to
-	if dir != "" {
-		full, err := Resolve(to, dir)
-		if err != nil {
-			return "", err
-		}
-		dstParent = full
-	}
-	st, err := os.Stat(dstParent)
-	if err != nil || !st.IsDir() {
-		return "", fmt.Errorf("vault: %s is not a folder", dir)
+	dstParent, err := resolveTargetDir(to, dir)
+	if err != nil {
+		return "", err
 	}
 	base := path.Base(rel)
 	if fi.IsDir() {
@@ -83,6 +75,43 @@ func CopyTo(from, rel, to, dir string) (string, error) {
 		return "", errors.New("vault: too many folders with that name")
 	}
 
+	return copyFileUnique(src, to, dir, base)
+}
+
+// ImportFile copies an external regular file at src into the folder dir
+// ("" for the root) of the vault at root, choosing an unused numbered name
+// when the name is taken, and returns its vault-relative path.
+func ImportFile(src, root, dir string) (string, error) {
+	fi, err := os.Stat(src)
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("vault: %s is not a regular file", filepath.Base(src))
+	}
+	if _, err := resolveTargetDir(root, dir); err != nil {
+		return "", err
+	}
+	return copyFileUnique(src, root, dir, filepath.Base(src))
+}
+
+func resolveTargetDir(root, dir string) (string, error) {
+	dstParent := root
+	if dir != "" {
+		full, err := Resolve(root, dir)
+		if err != nil {
+			return "", err
+		}
+		dstParent = full
+	}
+	st, err := os.Stat(dstParent)
+	if err != nil || !st.IsDir() {
+		return "", fmt.Errorf("vault: %s is not a folder", dir)
+	}
+	return dstParent, nil
+}
+
+func copyFileUnique(src, root, dir, base string) (string, error) {
 	ext := FileExt(base)
 	stem := strings.TrimSuffix(base, ext)
 	for i := 1; i < 1000; i++ {
@@ -91,7 +120,7 @@ func CopyTo(from, rel, to, dir string) (string, error) {
 			name = fmt.Sprintf("%s %d%s", stem, i, ext)
 		}
 		dest := path.Join(dir, name)
-		dst, err := Resolve(to, dest)
+		dst, err := Resolve(root, dest)
 		if err != nil {
 			return "", err
 		}

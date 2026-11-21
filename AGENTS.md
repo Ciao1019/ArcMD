@@ -38,6 +38,7 @@ internal/merge/       Git 统一差异分块（含折叠上下文与行内字素
 internal/trashbin/    「最近删除」：删除前的副本、恢复（不覆盖、重名编号）、30 天过期（不依赖 UI）
 internal/prefs/       prefs.json：自动保存、打字机滚动、专注淡化、代码块换行、自定义快捷键（不依赖 UI）
 internal/pdf/         纯 Go 矢量 PDF 写出（Type 3 字形子集 + `/Outlines` 书签 + `/Link` 注释 + JPEG 图像嵌入）（不依赖 UI）
+internal/pdfdoc/      只读 PDF 解析与渲染：纯 Go 结构/大纲/文本解析 + 零 CGO 系统原生栅格化（macOS PDFKit、Linux Poppler/pdftoppm、Windows WinRT PdfDocument）（不依赖 UI）
 internal/update/      软件更新：横幅/Toast 该说什么、检查间隔、发布说明转纯文本（不依赖 UI；下载与替换由 mygo.Updater 完成）
 internal/templates/   空间模板（.arcmd/templates）与今日笔记：列出、套用、占位符 {{date}} {{time}} {{weekday}} {{title}}（不依赖 UI）
 internal/spacefs/     问答 Agent 读文档的只读视图：每篇文档投影成带行号的 Markdown（行 → 顶层块与纯文本行），search / glob / grep / read / outline / links 与空间概览，未保存内容作为 live 页面叠加（不依赖 UI）
@@ -49,7 +50,7 @@ plugins/cloud-sync/   官方「云端同步」WASM 插件（dev.arcmd.cloud-sync
 docs/                 architecture.md（架构）、plugins.md（插件与市场规范）
 ```
 
-**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, merge, trashbin, prefs, pdf, update, templates, i18n, agent, spacefs, whiteboard}`，`editor → {document, wiki, tex, mermaid, pdf, i18n, whiteboard, mindmap}`，`mindmap → ui`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`merge → history`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/merge/trashbin/prefs/pdf/update/templates/i18n/agent/spacefs/whiteboard）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 与 `mindmap` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
+**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, merge, trashbin, prefs, pdf, pdfdoc, update, templates, i18n, agent, spacefs, whiteboard}`，`editor → {document, wiki, tex, mermaid, pdf, pdfdoc, i18n, whiteboard, mindmap}`，`mindmap → ui`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`merge → history`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/merge/trashbin/prefs/pdf/pdfdoc/update/templates/i18n/agent/spacefs/whiteboard）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 与 `mindmap` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
 
 ## 常用命令
 
@@ -225,6 +226,7 @@ gofmt -l .                                           # 必须无输出
 - 应用内移动文档或文件夹统一走 `relocate.go`：图片与封面、内存撤销/重做和版本快照一起处理；共享原图保留，重名图片编号且改写引用（`.md` 与旧 `.arcmd` 均支持改写）；资源处理失败回滚移动。跨空间历史合并时不覆盖同名快照，完成后再清理原位置历史。
 - 系统文件关联通过 `mygo.App.OnOpenFile` 接入，后续进程转交现有窗口；开发运行也接受文档路径。优先匹配最深的已有 Space，外部文档集中在不可移除的内置「外部空间」（首次使用时出现，此后保留），仅记录逐个打开的文件，不扫描父文件夹；同名文件用独立列表名称区分。移除文档只移除引用，不删除原文件。外部 `.md` 编辑后直接原地保存到原文件，图片仍相对原目录读取；元数据与历史留在配置目录 `external/`。仅打开不修改或复制文档。
 - 本地图片相对实际文档目录解析（`localImageFile`），允许 Markdown 的 `../images/...` 指向 Space 外的同级资源目录，支持 URL 编码的文件名。普通 Space（非「外部空间」）另支持 Obsidian `![[图.png]]`、`![[图.png|360]]`、`![[图.png|360x240]]`、`![[图.png|说明|420]]` 嵌入语法（连续无空行混排的段落自动拆块，未编辑时经 `ImportSource` 原样保留 `![[...]]`，不被 `wiki.Links` 当作笔记双链）并在同目录未命中时按 Space 根目录、文档旁 / 根目录的 `assets/` 和 Space 的附件目录查找（`resolveSpaceImage` 的 `attachmentMatches`）；「外部空间」严格只按当前文件目录相对解析，不扫描旁路目录。移动资源仍经 `vault.Resolve` 限定在目标 Space 内：Space 设了附件目录时，空间内移动只重算文档相对路径（附件不复制）；跨空间移动复制到目标 Space 的附件目录（无则 `assets/`），旧附件目录、`assets/` 前缀与父级段（`../`）去掉，副本不会落到附件目录之外，重名在目录内编号。
+- 只读 PDF 浏览与 Markdown 内联嵌入共用 `editor.PDFView` / `pdf_block.go`：`.pdf` 可直接作为独立只读文档出现在侧边栏、分屏、收藏、置顶与「外部空间」（只读状态戳零拷贝跟踪变更，不写 `.arcmd/history`，支持缩略图/目录侧栏 `⇧⌘O`、双页并排、缩放旋转、全文检索 `⌘K`、页内查找 `⌘F` 与 AI 问答页码引用跳转）；在 Markdown 中支持拖入 `.pdf`、`/` 斜杠菜单「PDF 文档」或命令栏「插入 PDF…」，以标准 `![标题](assets/doc.pdf#page=N)` 或 Obsidian `![[doc.pdf#page=N|宽度]]` 语法嵌入——静止态不捕获滚轮（底部快速翻页器 `‹ 第 N / M 页 ›` 直接翻看幻灯片），悬停或双击可切换「内联浏览」（可拖拽调节高度并一键固定 `#page=N`）、「全屏阅读」与「在分屏中阅读」（自动同步当前页码），移动/复制/重命名文档时同步迁移 PDF 附件并保留 `#page=N` 锚点。
 - 自动重链只由真实的 FileRename 移动事件触发，以文档相对路径精确匹配 OldPath→Path（`renameMoves`）；目录选择、FileCreate、FileWrite、原子发布的点临时名 rename 和 ArcMD 自身附件写入都不触发扫描。根目录兼容路径和按文件名查找仅供读取，不作为自动改盘的依据。打开的文档在内存里重写，由自动保存落盘；关闭文档的枚举、读取和解析在后台 goroutine 完成，字符串预筛包含正文图片和封面，每个空间至多一个扫描任务，连续移动合并后补扫。逐篇提交回到主线程，重新检查空间与目录设置、文档是否已打开和磁盘内容；保存保留历史快照失败则取消写入，写入前再次比对原文。打开/浏览不写盘。失效图片的解析结果按（文档, URL）缓存（`App.imgResolved`），文件事件、重链、换目录时清空，缺失图片不再每帧 WalkDir。侧边栏文件树隐藏附件目录（`readTree` 的 `dropTreeFolder`），选择/重置目录立即刷新树；`Space.Renamed` / `Space.Forget` 跟随重命名，监听确认目录被删时清空附件设置。GIF 当前显示首帧。
 - 写文件走 `vault.Write` / `fsutil.WriteFileAtomic`（检测到已有常规文件存在多个硬链接时自动回退就地覆写并截断，避免临时文件重命名断开硬链接）。新文件走 `vault.CreateFile` / `fsutil.CreateFileAtomic`，通过同目录临时文件与排他发布避免覆盖已有文件。
 - 输入法组合期间保存已提交的模型。保存失败保留脏状态，切文档、切 Space 和关闭窗口前保存成功才继续。

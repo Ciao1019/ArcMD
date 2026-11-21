@@ -59,6 +59,7 @@ type Options struct {
 	Visible                ui.Rect
 	Prepare                func(index int) bool // measure a newly visible rich node
 	FoldLabel, UnfoldLabel string
+	NodeMenu               func(*ui.Menu, string)
 }
 
 type node struct {
@@ -117,6 +118,127 @@ func (s *State) UnfoldAll() {
 	}
 	clear(s.closed)
 	s.layoutRevision = 0
+}
+
+// HasChildren reports whether the node with id currently has child nodes.
+func (s *State) HasChildren(id string) bool {
+	idx, ok := s.nodeIndex[id]
+	return ok && idx >= 0 && idx < len(s.nodes) && len(s.nodes[idx].kids) > 0
+}
+
+// IsFolded reports whether the node with id is currently folded.
+func (s *State) IsFolded(id string) bool {
+	return id != "" && s.closed[id]
+}
+
+// SetFolded folds or unfolds a single node by id.
+func (s *State) SetFolded(id string, folded bool) {
+	if id == "" {
+		return
+	}
+	if folded {
+		if s.closed == nil {
+			s.closed = map[string]bool{}
+		}
+		if s.closed[id] {
+			return
+		}
+		s.closed[id] = true
+	} else {
+		if !s.closed[id] {
+			return
+		}
+		delete(s.closed, id)
+	}
+	s.layoutRevision = 0
+}
+
+// HasFoldableDescendant reports whether any descendant of id has children.
+func (s *State) HasFoldableDescendant(id string) bool {
+	idx, ok := s.nodeIndex[id]
+	if !ok || idx < 0 || idx >= len(s.nodes) {
+		return false
+	}
+	var walk func(i int) bool
+	walk = func(i int) bool {
+		for _, k := range s.nodes[i].kids {
+			if len(s.nodes[k].kids) > 0 || walk(k) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(idx)
+}
+
+// HasFoldedDescendant reports whether any descendant of id is currently folded.
+func (s *State) HasFoldedDescendant(items []Item, id string) bool {
+	if len(s.closed) == 0 {
+		return false
+	}
+	idx, ok := s.nodeIndex[id]
+	if !ok || idx < 0 || idx >= len(s.nodes) {
+		return false
+	}
+	n := len(items)
+	var walk func(i int) bool
+	walk = func(i int) bool {
+		for _, k := range s.nodes[i].kids {
+			if k < n && len(s.nodes[k].kids) > 0 && s.closed[items[k].ID] {
+				return true
+			}
+			if walk(k) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(idx)
+}
+
+// FoldSubtree folds or unfolds all collapsible descendants of id. When
+// unfolding, id itself is also unfolded so its subtree becomes visible.
+func (s *State) FoldSubtree(items []Item, id string, folded bool) {
+	idx, ok := s.nodeIndex[id]
+	if !ok || idx < 0 || idx >= len(s.nodes) {
+		return
+	}
+	if folded && s.closed == nil {
+		s.closed = map[string]bool{}
+	}
+	n := len(items)
+	if !folded && idx < n {
+		delete(s.closed, items[idx].ID)
+	}
+	var walk func(i int)
+	walk = func(i int) {
+		for _, k := range s.nodes[i].kids {
+			if k < n && len(s.nodes[k].kids) > 0 {
+				if folded {
+					s.closed[items[k].ID] = true
+				} else {
+					delete(s.closed, items[k].ID)
+				}
+			}
+			walk(k)
+		}
+	}
+	walk(idx)
+	s.layoutRevision = 0
+}
+
+// ShowDepth expands the map up to maxDepth levels (1 shows top-level branches
+// folded, 2 shows two levels, etc.; maxDepth <= 0 unfolds everything).
+func (s *State) ShowDepth(items []Item, maxDepth int) {
+	if maxDepth <= 0 {
+		s.UnfoldAll()
+		return
+	}
+	if s.closed == nil {
+		s.closed = map[string]bool{}
+	}
+	clear(s.closed)
+	s.CollapseBranches(items, maxDepth-1, "")
 }
 
 // CollapseBranches folds nodes at Depth >= minDepth that have children, while
@@ -649,6 +771,12 @@ func View(c *ui.Context, s *State, rootItem Item, items []Item, o Options) ui.El
 				}
 				if el.Clicked() && s.dragID != item.ID && o.Chosen != nil {
 					o.Chosen(item.ID)
+				}
+				if o.NodeMenu != nil {
+					nodeID := item.ID
+					el.ContextMenu(func(m *ui.Menu) {
+						o.NodeMenu(m, nodeID)
+					})
 				}
 				if s.dragID == item.ID && !el.Pressed() {
 					s.dragID = ""

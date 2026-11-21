@@ -19,6 +19,8 @@ func TestIsSyncPath(t *testing.T) {
 		"Old/legacy.arcmd",
 		"Board.excalidraw.svg",
 		"Sketch.excalidraw",
+		"Report.pdf",
+		"Papers/Spec.pdf",
 		"assets/image.png",
 		"Notes/assets/diagram.webp",
 		"Notes/assets/custom.bin",
@@ -56,7 +58,6 @@ func TestIsSyncPath(t *testing.T) {
 		".arcmd/history/Welcome.md/20261119.md",
 		".arcmd/history/labels.json",
 		"Export.html",
-		"Report.pdf",
 		"Notes/archive.zip",
 	}
 	for _, p := range blocked {

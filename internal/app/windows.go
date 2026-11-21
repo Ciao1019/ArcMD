@@ -74,7 +74,7 @@ func (a *App) openInWindow(sp *space.Space, rel string) {
 		a.replaceReferences(d, nil)
 		delete(a.openDocs, place{sp.ID, rel})
 	} else {
-		text, err := readFile(sp, rel)
+		text, err := readDocSource(sp, rel)
 		if err != nil {
 			a.notify("无法打开 %s。%v", vault.Title(rel), err)
 			return
@@ -192,6 +192,10 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 		}
 		if d.isWhiteboard() {
 			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
+			return
+		}
+		if d.isPDF() {
+			editor.PDFView(c.Key(d.viewKey()), d.pdf, a.pdfOptionsFor(c, d))
 			return
 		}
 		width, _ := c.Size()

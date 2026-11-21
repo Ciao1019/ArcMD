@@ -55,7 +55,7 @@ func (a *App) restoreSplits() {
 			p := &splitPane{factor: max(0, ref.Share)}
 			key := place{ref.Space, ref.Path}
 			if source := a.state.Get(ref.Space); source != nil && vault.IsDocument(ref.Path) && !seen[key] {
-				if text, err := readFile(source, ref.Path); err == nil {
+				if text, err := readDocSource(source, ref.Path); err == nil {
 					p.doc = a.residentDocument(ref.Space, ref.Path)
 					if p.doc == nil {
 						p.doc = openDocument(source, ref.Path, text, false)
