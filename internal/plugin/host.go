@@ -64,6 +64,8 @@ type Response struct {
 	Toast string `json:"toast,omitempty"`
 	// Status is an optional short status line surfaced on the plugin card.
 	Status string `json:"status,omitempty"`
+	// Data carries optional structured payload returned to command callers.
+	Data map[string]any `json:"data,omitempty"`
 }
 
 // Edit replaces Range of the open document with Text.

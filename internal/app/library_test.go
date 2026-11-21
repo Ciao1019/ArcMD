@@ -94,6 +94,7 @@ func TestLibrarySpaces(t *testing.T) {
 // folded sidebar.
 func TestLibraryPages(t *testing.T) {
 	a, tt := libraryApp(t)
+	wireCloudSyncMock(t, a)
 	a.toggleSidebar()
 	settle(tt)
 	a.toggleLibrary()
@@ -187,6 +188,9 @@ func TestLibrarySnapshot(t *testing.T) {
 				a, tt := libraryApp(t)
 				tt.SetSize(1240, 760)
 				tt.SetDark(dark)
+				if page == libPlugins {
+					wireCloudSyncMock(t, a)
+				}
 				if page == libTrash {
 					a.trashFile = os.RemoveAll
 					a.trash("Journal/Ideas.md")

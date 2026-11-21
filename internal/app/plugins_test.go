@@ -3,8 +3,12 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
+	"encoding/xml"
+	"errors"
 	"fmt"
 	"image/png"
 	"io"
@@ -25,6 +29,500 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/egoist/mygo/ui"
 )
+
+const testCloudSyncManifestJSON = `{
+  "id": "dev.arcmd.cloud-sync",
+  "name": "云端同步",
+  "version": "0.1.0",
+  "description": "通过 S3（兼容 R2 / OSS / COS / MinIO）或 WebDAV（坚果云 / Nextcloud / Alist）双向增量同步空间文档与附件。",
+  "author": "ArcMD",
+  "homepage": "https://github.com/Ciao1019/arcmd-plugins",
+  "license": "MIT",
+  "icon": "cloud",
+  "engine": "0.2.3",
+  "runtime": "wasm",
+  "main": "plugin.wasm",
+  "permissions": ["space:read", "space:write", "network", "secrets", "ui:panel"],
+  "contributes": {
+    "commands": [
+      {"id": "sync-now", "title": "云端同步：立即同步", "primary": true, "inSettings": true},
+      {"id": "test-connection", "title": "云端同步：测试连接", "inSettings": true},
+      {"id": "sync-status", "title": "云端同步：查看同步记录"}
+    ],
+    "panels": [
+      {"id": "status", "title": "云端同步", "icon": "☁"}
+    ],
+    "settings": [
+      {"id": "provider", "title": "同步方式", "group": "连接设置", "type": "segmented", "default": "s3", "options": [{"value": "s3", "label": "S3 对象存储"}, {"value": "webdav", "label": "WebDAV"}]},
+      {"id": "s3Endpoint", "title": "Endpoint", "description": "S3 兼容服务地址", "group": "连接设置", "type": "string", "placeholder": "https://...r2.cloudflarestorage.com", "when": {"field": "provider", "equals": "s3"}, "presets": [{"name": "Cloudflare R2", "values": {"s3Endpoint": "https://<accountid>.r2.cloudflarestorage.com", "s3Region": "auto", "s3PathStyle": false}}, {"name": "AWS S3", "values": {"s3Endpoint": "https://s3.us-east-1.amazonaws.com", "s3Region": "us-east-1", "s3PathStyle": false}}]},
+      {"id": "s3Region", "title": "Region", "group": "连接设置", "type": "string", "default": "auto", "when": {"field": "provider", "equals": "s3"}},
+      {"id": "s3Bucket", "title": "Bucket", "group": "连接设置", "type": "string", "when": {"field": "provider", "equals": "s3"}},
+      {"id": "s3AccessKey", "title": "Access Key ID", "group": "连接设置", "type": "string", "when": {"field": "provider", "equals": "s3"}},
+      {"id": "s3SecretKey", "title": "Secret Access Key", "description": "保存在本机凭据目录，不进空间文件夹", "group": "连接设置", "type": "secret", "when": {"field": "provider", "equals": "s3"}},
+      {"id": "s3Prefix", "title": "远端目录前缀", "group": "连接设置", "type": "string", "default": "ArcMD", "when": {"field": "provider", "equals": "s3"}},
+      {"id": "s3PathStyle", "title": "使用 Path-Style 路径模式", "group": "连接设置", "type": "bool", "default": false, "when": {"field": "provider", "equals": "s3"}},
+      {"id": "webdavURL", "title": "服务器地址", "description": "WebDAV 服务根地址", "group": "连接设置", "type": "string", "when": {"field": "provider", "equals": "webdav"}, "presets": [{"name": "坚果云", "values": {"webdavURL": "https://dav.jianguoyun.com/dav/"}}]},
+      {"id": "webdavUsername", "title": "用户名", "group": "连接设置", "type": "string", "when": {"field": "provider", "equals": "webdav"}},
+      {"id": "webdavPassword", "title": "密码 / 应用密码", "description": "坚果云请在网页端生成应用专用密码；保存在本机凭据目录", "group": "连接设置", "type": "secret", "when": {"field": "provider", "equals": "webdav"}},
+      {"id": "webdavRoot", "title": "远端目录", "group": "连接设置", "type": "string", "default": "ArcMD", "when": {"field": "provider", "equals": "webdav"}},
+      {"id": "spaces", "title": "选择要同步的空间", "description": "每个勾选的空间会同步到远端前缀下各自名称的目录，跳过本地版本历史快照。", "group": "同步空间", "type": "spaces"},
+      {"id": "autoSync", "title": "定时自动同步", "description": "每隔一段时间在后台自动双向增量同步。", "group": "自动同步", "type": "bool", "default": false},
+      {"id": "intervalMinutes", "title": "同步间隔", "group": "自动同步", "type": "segmented", "default": "15", "options": [{"value": "5", "label": "5 分钟"}, {"value": "15", "label": "15 分钟"}, {"value": "30", "label": "30 分钟"}, {"value": "60", "label": "60 分钟"}], "when": {"field": "autoSync", "equals": true}},
+      {"id": "syncOnSave", "title": "保存文档后自动同步", "description": "保存已勾选空间的文档 15 秒后自动增量同步。", "group": "自动同步", "type": "bool", "default": true},
+      {"id": "allowInsecureHTTP", "title": "允许非加密 HTTP", "group": "自动同步", "type": "bool", "default": false}
+    ]
+  }
+}`
+
+func buildMockPluginZip(t *testing.T, manifestJSON string) (*plugin.Manifest, []byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	files := map[string][]byte{
+		plugin.ManifestFile: []byte(manifestJSON),
+		"plugin.wasm":       {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00},
+	}
+	for name, data := range files {
+		hdr := &zip.FileHeader{Name: name, Method: zip.Deflate, Modified: time.Unix(0, 0).UTC()}
+		hdr.SetMode(0o644)
+		w, err := zw.CreateHeader(hdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	man, shaHex, err := plugin.InspectArchive(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return man, raw, shaHex
+}
+
+func newMockPluginRegistry(t *testing.T, overrideSHA string, manifestJSONs ...string) *httptest.Server {
+	t.Helper()
+	zips := map[string][]byte{}
+	var listings []plugin.Listing
+	var srv *httptest.Server
+
+	type pkgEntry struct {
+		man  *plugin.Manifest
+		name string
+		sha  string
+	}
+	var entries []pkgEntry
+	for _, mj := range manifestJSONs {
+		man, zipBytes, shaHex := buildMockPluginZip(t, mj)
+		if overrideSHA != "" {
+			shaHex = overrideSHA
+		}
+		name := fmt.Sprintf("/%s-%s.zip", man.ID, man.Version)
+		zips[name] = zipBytes
+		entries = append(entries, pkgEntry{man: man, name: name, sha: shaHex})
+	}
+
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.json" {
+			listings = listings[:0]
+			for _, e := range entries {
+				listings = append(listings, plugin.Listing{
+					ID:          e.man.ID,
+					Name:        e.man.Name,
+					Version:     e.man.Version,
+					Description: e.man.Description,
+					Author:      e.man.Author,
+					Homepage:    e.man.Homepage,
+					Icon:        e.man.Icon,
+					Permissions: e.man.Permissions,
+					Download:    srv.URL + e.name,
+					SHA256:      e.sha,
+				})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(plugin.Index{Version: 1, Plugins: listings})
+			return
+		}
+		if data, ok := zips[r.URL.Path]; ok {
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+type mockCloudSyncInstance struct {
+	app *App
+	p   *plugin.Installed
+}
+
+func (m *mockCloudSyncInstance) Close() error { return nil }
+
+func (m *mockCloudSyncInstance) Invoke(ctx context.Context, req plugin.Request) (*plugin.Response, error) {
+	switch req.Command {
+	case "test-connection":
+		return &plugin.Response{Status: "WebDAV 连接成功。", Toast: "WebDAV 连接成功。"}, nil
+	case "sync-status":
+		return &plugin.Response{Markdown: "# 云端同步记录\n\n最近同步成功。\n"}, nil
+	case "sync-now":
+		return m.syncNow(ctx)
+	default:
+		return nil, fmt.Errorf("unknown command %q", req.Command)
+	}
+}
+
+func (m *mockCloudSyncInstance) davReq(method, rawURL, user, pass string, depth string, body []byte) (int, http.Header, []byte, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, rawURL, bodyReader)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	req.SetBasicAuth(user, pass)
+	if depth != "" {
+		req.Header.Set("Depth", depth)
+	}
+	client := m.app.pluginsUI.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, data, err
+}
+
+func (m *mockCloudSyncInstance) ensureDAVDir(rootURL, relDir, user, pass string) error {
+	cur := strings.TrimRight(rootURL, "/")
+	for _, seg := range strings.Split(strings.Trim(relDir, "/"), "/") {
+		if seg == "" {
+			continue
+		}
+		cur += "/" + url.PathEscape(seg)
+		code, _, _, err := m.davReq("MKCOL", cur+"/", user, pass, "", nil)
+		if err != nil {
+			return err
+		}
+		if code >= 400 && code != http.StatusConflict && code != http.StatusMethodNotAllowed {
+			return fmt.Errorf("MKCOL %s returned %d", cur, code)
+		}
+	}
+	return nil
+}
+
+type mockDAVMeta struct {
+	ETag    string
+	Size    int64
+	ModUnix int64
+}
+
+func (m *mockCloudSyncInstance) listDAVFiles(spaceURL, user, pass string) (map[string]mockDAVMeta, error) {
+	baseParsed, err := url.Parse(spaceURL)
+	if err != nil {
+		return nil, err
+	}
+	basePath := strings.TrimRight(baseParsed.Path, "/")
+	files := map[string]mockDAVMeta{}
+	queue := []string{""}
+
+	type davRespXML struct {
+		Responses []struct {
+			Href     string `xml:"href"`
+			PropStat []struct {
+				Prop struct {
+					Collection *struct{} `xml:"resourcetype>collection"`
+					Length     int64     `xml:"getcontentlength"`
+					LastMod    string    `xml:"getlastmodified"`
+					ETag       string    `xml:"getetag"`
+				} `xml:"prop"`
+			} `xml:"propstat"`
+		} `xml:"response"`
+	}
+
+	for len(queue) > 0 {
+		sub := queue[0]
+		queue = queue[1:]
+		dirURL := strings.TrimRight(spaceURL, "/") + "/"
+		if sub != "" {
+			dirURL += escapeAppDAVPath(sub)[1:] + "/"
+		}
+		code, _, body, err := m.davReq("PROPFIND", dirURL, user, pass, "1", nil)
+		if err != nil {
+			return nil, err
+		}
+		if code == http.StatusNotFound {
+			continue
+		}
+		if code >= 400 {
+			return nil, fmt.Errorf("PROPFIND %s returned %d", dirURL, code)
+		}
+		var ms davRespXML
+		if err := xml.Unmarshal(body, &ms); err != nil {
+			return nil, err
+		}
+		for _, r := range ms.Responses {
+			u, perr := url.Parse(r.Href)
+			if perr != nil {
+				continue
+			}
+			pClean := path.Clean(u.Path)
+			if pClean == basePath || !strings.HasPrefix(pClean, basePath+"/") {
+				continue
+			}
+			rel := strings.TrimPrefix(pClean, basePath+"/")
+			if rel == sub || rel == "" {
+				continue
+			}
+			var isCol bool
+			var meta mockDAVMeta
+			for _, ps := range r.PropStat {
+				if ps.Prop.Collection != nil {
+					isCol = true
+				}
+				if ps.Prop.ETag != "" {
+					meta.ETag = strings.Trim(ps.Prop.ETag, "\"")
+				}
+				if ps.Prop.Length > 0 {
+					meta.Size = ps.Prop.Length
+				}
+				if t, terr := http.ParseTime(ps.Prop.LastMod); terr == nil {
+					meta.ModUnix = t.Unix()
+				}
+			}
+			if isCol || strings.HasSuffix(r.Href, "/") {
+				queue = append(queue, rel)
+				continue
+			}
+			files[rel] = meta
+		}
+	}
+	return files, nil
+}
+
+func (m *mockCloudSyncInstance) syncNow(ctx context.Context) (*plugin.Response, error) {
+	spaceSvc := plugin.SpaceServiceFromContext(ctx)
+	if spaceSvc == nil {
+		return nil, errors.New("missing space service")
+	}
+	cfg, err := m.app.pluginsUI.cfg.Load(m.p.Manifest)
+	if err != nil {
+		return nil, err
+	}
+	davURL := strings.TrimRight(fmt.Sprint(cfg["webdavURL"]), "/")
+	davRoot := strings.Trim(fmt.Sprint(cfg["webdavRoot"]), "/")
+	if davRoot == "" {
+		davRoot = "ArcMD"
+	}
+	user := fmt.Sprint(cfg["webdavUsername"])
+	sk, _ := plugin.SecretKey(m.p.Manifest.ID, "webdavPassword")
+	passBytes, _ := m.app.qa.secrets.Get(sk)
+	pass := string(passBytes)
+
+	selectedSpaces := map[string]bool{}
+	for _, id := range stringSliceValue(cfg["spaces"]) {
+		selectedSpaces[id] = true
+	}
+
+	uploaded := 0
+	var conflicts []persistedConflict
+
+	for _, sp := range spaceSvc.ListSpaces() {
+		if !selectedSpaces[sp.ID] {
+			continue
+		}
+		prefixRel := davRoot + "/" + sp.Name
+		if err := m.ensureDAVDir(davURL, prefixRel, user, pass); err != nil {
+			return nil, err
+		}
+		spaceURL := davURL + escapeAppDAVPath(prefixRel)
+
+		basePath, err := m.app.pluginsUI.cfg.StatePath(m.p.Manifest.ID, "baseline_"+sp.ID+".json")
+		if err != nil {
+			return nil, err
+		}
+		baseline := persistedBaseline{Version: 1, Files: map[string]persistedBaselineRow{}}
+		if raw, err := os.ReadFile(basePath); err == nil {
+			_ = json.Unmarshal(raw, &baseline)
+			if baseline.Files == nil {
+				baseline.Files = map[string]persistedBaselineRow{}
+			}
+		}
+
+		localList, err := spaceSvc.ListFiles(sp.ID)
+		if err != nil {
+			return nil, err
+		}
+		localMap := map[string]plugin.SpaceFileEntry{}
+		for _, f := range localList {
+			localMap[f.Path] = f
+		}
+		remoteMap, err := m.listDAVFiles(spaceURL, user, pass)
+		if err != nil {
+			return nil, err
+		}
+
+		allPaths := map[string]bool{}
+		for p := range localMap {
+			allPaths[p] = true
+		}
+		for p := range remoteMap {
+			allPaths[p] = true
+		}
+		for p := range baseline.Files {
+			allPaths[p] = true
+		}
+
+		for rel := range allPaths {
+			_, hasLocal := localMap[rel]
+			rMeta, hasRemote := remoteMap[rel]
+			bRow, hasBase := baseline.Files[rel]
+			fileURL := spaceURL + escapeAppDAVPath(rel)
+
+			switch {
+			case hasLocal && !hasRemote && !hasBase:
+				data, meta, err := spaceSvc.ReadFile(sp.ID, rel)
+				if err != nil {
+					return nil, err
+				}
+				if dir := path.Dir(rel); dir != "." {
+					if err := m.ensureDAVDir(spaceURL, dir, user, pass); err != nil {
+						return nil, err
+					}
+				}
+				code, hdr, _, err := m.davReq(http.MethodPut, fileURL, user, pass, "", data)
+				if err != nil || code >= 400 {
+					return nil, fmt.Errorf("PUT %s failed: %d %v", rel, code, err)
+				}
+				etag := strings.Trim(hdr.Get("ETag"), "\"")
+				baseline.Files[rel] = persistedBaselineRow{
+					LocalSize:    meta.Size,
+					LocalModNano: meta.ModTimeUnixNano,
+					LocalSHA256:  meta.SHA256,
+					RemoteSize:   int64(len(data)),
+					RemoteETag:   etag,
+				}
+				writeCloudBaseSnapshot(filepath.Dir(basePath), sp.ID, rel, string(data))
+				uploaded++
+
+			case hasLocal && !hasRemote && hasBase:
+				_, meta, err := spaceSvc.ReadFile(sp.ID, rel)
+				if err != nil {
+					return nil, err
+				}
+				if !meta.Dirty && meta.SHA256 == bRow.LocalSHA256 {
+					if err := spaceSvc.DeleteFile(sp.ID, rel, meta.SHA256); err != nil {
+						return nil, err
+					}
+					delete(baseline.Files, rel)
+				}
+
+			case hasLocal && hasRemote:
+				data, meta, err := spaceSvc.ReadFile(sp.ID, rel)
+				if err != nil {
+					return nil, err
+				}
+				localChanged := meta.Dirty || !hasBase || meta.SHA256 != bRow.LocalSHA256
+				remoteChanged := !hasBase || rMeta.ETag != bRow.RemoteETag
+				if !localChanged && remoteChanged {
+					code, _, rBody, err := m.davReq(http.MethodGet, fileURL, user, pass, "", nil)
+					if err != nil || code >= 400 {
+						return nil, fmt.Errorf("GET %s failed: %d %v", rel, code, err)
+					}
+					written, err := spaceSvc.WriteFile(sp.ID, rel, rBody, meta.SHA256, rMeta.ModUnix*1e9)
+					if err != nil {
+						return nil, err
+					}
+					baseline.Files[rel] = persistedBaselineRow{
+						LocalSize:     written.Size,
+						LocalModNano:  written.ModTimeUnixNano,
+						LocalSHA256:   written.SHA256,
+						RemoteSize:    rMeta.Size,
+						RemoteETag:    rMeta.ETag,
+						RemoteModUnix: rMeta.ModUnix,
+					}
+					writeCloudBaseSnapshot(filepath.Dir(basePath), sp.ID, rel, string(rBody))
+				} else if localChanged && !remoteChanged && !meta.Dirty {
+					if dir := path.Dir(rel); dir != "." {
+						_ = m.ensureDAVDir(spaceURL, dir, user, pass)
+					}
+					code, hdr, _, err := m.davReq(http.MethodPut, fileURL, user, pass, "", data)
+					if err != nil || code >= 400 {
+						return nil, fmt.Errorf("PUT %s failed: %d %v", rel, code, err)
+					}
+					baseline.Files[rel] = persistedBaselineRow{
+						LocalSize:    meta.Size,
+						LocalModNano: meta.ModTimeUnixNano,
+						LocalSHA256:  meta.SHA256,
+						RemoteSize:   int64(len(data)),
+						RemoteETag:   strings.Trim(hdr.Get("ETag"), "\""),
+					}
+					writeCloudBaseSnapshot(filepath.Dir(basePath), sp.ID, rel, string(data))
+					uploaded++
+				} else if localChanged && remoteChanged {
+					code, _, rBody, err := m.davReq(http.MethodGet, fileURL, user, pass, "", nil)
+					if err != nil || code >= 400 {
+						return nil, fmt.Errorf("GET conflict %s failed: %d %v", rel, code, err)
+					}
+					baseSnap, _ := readCloudBaseSnapshot(filepath.Dir(basePath), sp.ID, rel)
+					conflicts = append(conflicts, persistedConflict{
+						SpaceID:       sp.ID,
+						SpaceName:     sp.Name,
+						Path:          rel,
+						BaseText:      baseSnap,
+						LocalText:     string(data),
+						RemoteText:    string(rBody),
+						RemoteSize:    rMeta.Size,
+						RemoteETag:    rMeta.ETag,
+						RemoteModUnix: rMeta.ModUnix,
+						CreatedUnix:   time.Now().Unix(),
+					})
+				}
+			}
+		}
+
+		bJSON, _ := json.Marshal(baseline)
+		_ = os.MkdirAll(filepath.Dir(basePath), 0o755)
+		_ = os.WriteFile(basePath, bJSON, 0o600)
+	}
+
+	cfPath, err := m.app.pluginsUI.cfg.StatePath(m.p.Manifest.ID, "conflicts.json")
+	if err == nil {
+		if len(conflicts) > 0 {
+			cJSON, _ := json.Marshal(conflicts)
+			_ = os.WriteFile(cfPath, cJSON, 0o600)
+		} else {
+			_ = os.Remove(cfPath)
+		}
+	}
+	msg := fmt.Sprintf("云端同步完成：上传 %d", uploaded)
+	return &plugin.Response{Status: msg, Toast: msg}, nil
+}
+
+func wireCloudSyncMock(t *testing.T, a *App) {
+	t.Helper()
+	regSrv := newMockPluginRegistry(t, "", testCloudSyncManifestJSON)
+	a.pluginsUI.registryURL = regSrv.URL + "/index.json"
+	a.pluginsUI.httpClient = regSrv.Client()
+	a.pluginsUI.sync = true
+	a.pluginsUI.startInstance = func(p *plugin.Installed) (plugin.Instance, error) {
+		if p.Manifest.ID == cloudSyncPluginID {
+			return &mockCloudSyncInstance{app: a, p: p}, nil
+		}
+		return nil, fmt.Errorf("unexpected mock plugin %q", p.Manifest.ID)
+	}
+}
 
 type appDAVObj struct {
 	data    []byte
@@ -162,6 +660,7 @@ func escapeAppDAVPath(p string) string {
 
 func installCloudSyncViaUI(t *testing.T, a *App, tt *ui.Tester) {
 	t.Helper()
+	wireCloudSyncMock(t, a)
 	a.openPlugins()
 	settle(tt)
 	if err := tt.Click("安装 云端同步"); err != nil {
@@ -174,7 +673,7 @@ func installCloudSyncViaUI(t *testing.T, a *App, tt *ui.Tester) {
 	if len(a.installed) != 0 {
 		t.Fatal("plugin was installed before permission confirmation")
 	}
-	if err := tt.Click("安装并启用"); err != nil {
+	if err := tt.Click("下载并安装"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -256,10 +755,10 @@ func TestPluginInstallPermissionAndSettings(t *testing.T) {
 func TestPluginCloudSyncWebDAVLiveReloadConflictAndTrash(t *testing.T) {
 	dav, srv := newAppDAVServer(t, "alice", "app-pass")
 	a, tt := newTestApp(t)
-	a.pluginsUI.httpClient = srv.Client()
 	a.trashFile = os.RemoveAll
 
 	installCloudSyncViaUI(t, a, tt)
+	_ = srv
 
 	if err := tt.Click("WebDAV"); err != nil {
 		t.Fatal(err)
@@ -385,7 +884,6 @@ func TestPluginCloudSyncWebDAVLiveReloadConflictAndTrash(t *testing.T) {
 func TestPluginAutoSyncFrameClock(t *testing.T) {
 	dav, srv := newAppDAVServer(t, "u", "p")
 	a, tt := newTestApp(t)
-	a.pluginsUI.httpClient = srv.Client()
 
 	installCloudSyncViaUI(t, a, tt)
 	if err := tt.Click("WebDAV"); err != nil {
@@ -492,6 +990,7 @@ func TestPluginLocalZipInstallEnableDisableUninstall(t *testing.T) {
 
 func TestPluginEnglishLocalization(t *testing.T) {
 	a, tt := newTestApp(t)
+	wireCloudSyncMock(t, a)
 	i18n.SetLanguage("en")
 	t.Cleanup(func() { i18n.SetLanguage("zh-Hans") })
 
@@ -504,10 +1003,10 @@ func TestPluginEnglishLocalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("This plugin requests the following permissions:") || !tt.HasText("Install & Enable") {
+	if !tt.HasText("This plugin requests the following permissions:") || !tt.HasText("Download and Install") {
 		t.Fatalf("English permission prompt missing labels: %q", tt.Texts())
 	}
-	if err := tt.Click("Install & Enable"); err != nil {
+	if err := tt.Click("Download and Install"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -546,39 +1045,44 @@ func TestPluginSnapshot(t *testing.T) {
 			suffix = "-dark"
 		}
 		render("plugin-install-confirm"+suffix, dark, func(a *App, tt *ui.Tester) {
+			wireCloudSyncMock(t, a)
 			a.openPlugins()
 			settle(tt)
 			_ = tt.Click("安装 云端同步")
 		})
 		render("plugin-settings-s3"+suffix, dark, func(a *App, tt *ui.Tester) {
+			wireCloudSyncMock(t, a)
 			a.openPlugins()
 			settle(tt)
 			_ = tt.Click("安装 云端同步")
 			tt.Frame()
-			_ = tt.Click("安装并启用")
+			_ = tt.Click("下载并安装")
 		})
 	}
 	render("plugin-settings-webdav", false, func(a *App, tt *ui.Tester) {
+		wireCloudSyncMock(t, a)
 		a.openPlugins()
 		settle(tt)
 		_ = tt.Click("安装 云端同步")
 		tt.Frame()
-		_ = tt.Click("安装并启用")
+		_ = tt.Click("下载并安装")
 		tt.Frame()
 		_ = tt.Click("WebDAV")
 	})
 	render("plugin-history-sheet", false, func(a *App, tt *ui.Tester) {
+		wireCloudSyncMock(t, a)
 		a.openPlugins()
 		settle(tt)
 		_ = tt.Click("安装 云端同步")
 		tt.Frame()
-		_ = tt.Click("安装并启用")
+		_ = tt.Click("下载并安装")
 		tt.Frame()
 		a.pluginsUI.settings.open = false
 		p := a.findInstalledPlugin(cloudSyncPluginID)
 		a.runPluginCommand(p, "sync-status", nil, false)
 	})
 	render("plugin-card-pink", false, func(a *App, tt *ui.Tester) {
+		wireCloudSyncMock(t, a)
 		a.state.ActiveSpace().SetTheme(space.Theme{
 			Colors:     []string{"#EAB8C2", "#F1D4C2"},
 			Intensity:  0.75,
@@ -589,6 +1093,7 @@ func TestPluginSnapshot(t *testing.T) {
 		settle(tt)
 	})
 	render("plugin-card-installed-pink", false, func(a *App, tt *ui.Tester) {
+		wireCloudSyncMock(t, a)
 		a.state.ActiveSpace().SetTheme(space.Theme{
 			Colors:     []string{"#EAB8C2", "#F1D4C2"},
 			Intensity:  0.75,
@@ -599,7 +1104,7 @@ func TestPluginSnapshot(t *testing.T) {
 		settle(tt)
 		_ = tt.Click("安装 云端同步")
 		tt.Frame()
-		_ = tt.Click("安装并启用")
+		_ = tt.Click("下载并安装")
 		tt.Frame()
 		a.pluginsUI.settings.open = false
 		a.undos = nil

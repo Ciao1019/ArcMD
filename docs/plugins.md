@@ -1,11 +1,12 @@
 # Plugins and the marketplace
 
-> Status: **active (`wasm` runtime + native Plugins UI)**. The manifest (`arcmd-plugin.json`),
-> registry index, installing/enabling, local `.zip` archive installation (`InspectArchive` /
-> `InstallArchive`), permission confirmation prompt, declarative `contributes.settings` UI,
-> sandboxed `wazero` WASM host (`internal/plugin/wasm.go`), and the bundled official **Cloud Sync**
-> plugin (`dev.arcmd.cloud-sync` in `plugins/cloud-sync/`) are implemented. The `process` runtime
-> and hosted remote marketplace registry remain planned.
+> Status: **active (`wasm` runtime + native Plugins UI + remote GitHub Releases marketplace)**. The manifest
+> (`arcmd-plugin.json`), remote registry index fetching, on-demand `.zip` archive download with SHA-256
+> verification, local `.zip` installation (`InspectArchive` / `InstallArchive`), permission confirmation
+> prompt, declarative `contributes.settings` UI, and sandboxed `wazero` WASM host (`internal/plugin/wasm.go`)
+> are implemented. Official plugins (`dev.arcmd.cloud-sync` and `dev.arcmd.image-host`) are hosted in the
+> standalone repository [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) and installed
+> on demand rather than bundled in the application binary. The `process` runtime remains planned.
 
 ArcMD's core edits Markdown, organizes it into spaces, and answers
 questions about a space with a read-only agent (`internal/agent`,
@@ -109,16 +110,20 @@ token) can be added as sequential updates rendered by `ui/markdown`.
 Both implement `plugin.Host`; `Instance.Invoke(Request) → Response` is the
 protocol surface for v1.
 
-## Bundled Official Plugin: Cloud Sync (`dev.arcmd.cloud-sync`)
+## Official Marketplace & Plugins (`Ciao1019/arcmd-plugins`)
 
-Located in `plugins/cloud-sync/` (built into `plugins/cloud-sync/bundle/cloud-sync.zip` via `go generate ./plugins/cloud-sync` with `GOOS=wasip1 GOARCH=wasm`):
+All official WASM plugins are maintained and released separately in [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) so desktop releases stay small and plugin versions ship independently:
 
-- **Backends**: Pure-Go **S3** (AWS Signature V4 `AWS4-HMAC-SHA256`, Virtual-Hosted & Path-Style, presets for Cloudflare R2, AWS S3, Aliyun OSS, Tencent COS, Backblaze B2, local MinIO) and **WebDAV** (`PROPFIND` `Depth: 1` / `0`, `MKCOL`, `GET`/`PUT`/`DELETE`, Basic Auth, presets for 坚果云 / Nextcloud / Alist).
-- **3-Way Incremental Sync**: Compares `Local × Remote × Baseline` (`baseline_<spaceID>.json`), supports selective per-Space opt-in, dual-edit / dirty-buffer conflict copies (`<stem> (冲突副本 YYYY-MM-DD HHmm)<ext>`), sync history (`history.json`), post-save debounced sync (15s), and frame-clock periodic auto-sync (`autoSync`).
+- **`dev.arcmd.cloud-sync` (云端同步)**: Pure-Go **S3** (AWS Signature V4 `AWS4-HMAC-SHA256`, Virtual-Hosted & Path-Style, presets for Cloudflare R2, AWS S3, Aliyun OSS, Tencent COS, Backblaze B2, local MinIO) and **WebDAV** (`PROPFIND` `Depth: 1` / `0`, `MKCOL`, `GET`/`PUT`/`DELETE`, Basic Auth, presets for 坚果云 / Nextcloud / Alist) with 3-way incremental sync, conflict staging for ArcMD's 3-pane merge UI, sync history, and frame-clock auto-sync.
+- **`dev.arcmd.image-host` (图床上传)**: Auto-uploads pasted/dropped/inserted images to S3-compatible object storage or custom multipart HTTP endpoints, inserts remote URLs into the document (preserving pre-cached bitmaps under `ConfigDir/cache/remote-images`), avoids storing duplicates inside the Space folder, and supports one-click migration of existing local document images.
+
+Release & distribution model:
+- Each plugin version is built reproducibly (`GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0`) by GitHub Actions into an immutable release tagged `<id>-v<version>` (`<id>-<version>.zip`).
+- A rolling `catalog` release serves `index.json` at `https://github.com/Ciao1019/arcmd-plugins/releases/download/catalog/index.json` (overridable via `ARCMD_PLUGIN_REGISTRY` for local testing or custom mirrors).
 
 ## The marketplace & Plugins UI
 
-Library › Plugins (`插件`) lets users install the bundled Cloud Sync plugin with one click or install any local `.zip` package (`Manager.InstallArchive`), inspect requested permissions before enabling, toggle enable/disable, configure declarative settings, trigger commands (also available via `⌘K`), or uninstall cleanly.
+Library › Plugins (`插件`) fetches the marketplace catalog on open, lists available official plugins alongside installed plugins, or lets users install any local `.zip` package (`Manager.InstallArchive`), inspect requested permissions before downloading/enabling, verify the archive SHA-256 digest automatically, toggle enable/disable, configure declarative settings, trigger commands (also available via `⌘K`), or uninstall cleanly.
 
 The marketplace registry format is a static `index.json`:
 

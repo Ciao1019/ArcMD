@@ -17,19 +17,23 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/pinyin"
 	"github.com/Ciao1019/ArcMD/internal/plugin"
 	"github.com/Ciao1019/ArcMD/internal/space"
-	"github.com/Ciao1019/ArcMD/plugins/cloud-sync/bundle"
 	"github.com/egoist/mygo"
 	uiglass "github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-const cloudSyncPluginID = "dev.arcmd.cloud-sync"
+const (
+	cloudSyncPluginID        = "dev.arcmd.cloud-sync"
+	imageHostPluginID        = "dev.arcmd.image-host"
+	defaultPluginRegistryURL = "https://github.com/Ciao1019/arcmd-plugins/releases/download/catalog/index.json"
+)
 
 type pluginState struct {
 	host          *plugin.WASMHost
 	cfg           *plugin.ConfigStore
 	instances     map[string]plugin.Instance
+	startInstance func(p *plugin.Installed) (plugin.Instance, error)
 	cachedConfigs map[string]map[string]any
 	httpClient    *http.Client
 	sync          bool
@@ -40,6 +44,12 @@ type pluginState struct {
 	install     pluginInstallState
 	settings    pluginSettingsState
 	sheet       pluginSheetState
+
+	registryURL     string
+	remoteCatalog   []plugin.Listing
+	registryLoading bool
+	registryLoaded  bool
+	registryErr     string
 
 	lastAutoSync time.Time
 	saveSyncDue  time.Time
@@ -55,11 +65,12 @@ type pluginRunState struct {
 }
 
 type pluginInstallState struct {
-	open     bool
-	manifest *plugin.Manifest
-	listing  plugin.Listing
-	archive  []byte
-	err      string
+	open        bool
+	downloading bool
+	manifest    *plugin.Manifest
+	listing     plugin.Listing
+	archive     []byte
+	err         string
 }
 
 type pluginSettingsState struct {
@@ -178,13 +189,21 @@ func (a *App) ensurePluginInstance(p *plugin.Installed) (plugin.Instance, error)
 	if p.Manifest.Runtime != plugin.RuntimeWASM {
 		return nil, fmt.Errorf(i18n.T("%s 需要进程插件运行时支持。"), i18n.T(p.Manifest.Name))
 	}
-	if a.pluginsUI.host == nil {
-		return nil, errors.New("WASM plugin runtime is unavailable")
-	}
 	if inst, ok := a.pluginsUI.instances[p.Manifest.ID]; ok {
 		return inst, nil
 	}
-	inst, err := a.pluginsUI.host.Start(context.Background(), p)
+	var (
+		inst plugin.Instance
+		err  error
+	)
+	if a.pluginsUI.startInstance != nil {
+		inst, err = a.pluginsUI.startInstance(p)
+	} else {
+		if a.pluginsUI.host == nil {
+			return nil, errors.New("WASM plugin runtime is unavailable")
+		}
+		inst, err = a.pluginsUI.host.Start(context.Background(), p)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -224,10 +243,68 @@ func pluginIconSVG(name string) *ui.SVG {
 	if name == "cloud" {
 		return iconCloud
 	}
+	if name == "image" {
+		return iconImage
+	}
 	if ic := lucideIcons[name]; ic != nil {
 		return ic
 	}
 	return iconPlugins
+}
+
+func (a *App) pluginRegistryURL() string {
+	if u := strings.TrimSpace(a.pluginsUI.registryURL); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(os.Getenv("ARCMD_PLUGIN_REGISTRY")); u != "" {
+		return u
+	}
+	if a.win != nil {
+		return defaultPluginRegistryURL
+	}
+	return ""
+}
+
+func (a *App) fetchPluginRegistry(force bool) {
+	regURL := a.pluginRegistryURL()
+	if regURL == "" || a.pluginsUI.registryLoading {
+		return
+	}
+	if a.pluginsUI.registryLoaded && !force {
+		return
+	}
+	a.pluginsUI.registryLoading = true
+	a.pluginsUI.registryErr = ""
+
+	client := a.pluginsUI.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	finish := func(idx *plugin.Index, err error) {
+		a.pluginsUI.registryLoading = false
+		if err != nil {
+			a.pluginsUI.registryErr = err.Error()
+			return
+		}
+		a.pluginsUI.registryLoaded = true
+		a.pluginsUI.registryErr = ""
+		if idx != nil {
+			a.pluginsUI.remoteCatalog = idx.Plugins
+		} else {
+			a.pluginsUI.remoteCatalog = nil
+		}
+	}
+
+	post := a.asyncPost()
+	if a.pluginsUI.sync || post == nil {
+		idx, err := plugin.FetchIndex(context.Background(), client, regURL)
+		finish(idx, err)
+		return
+	}
+	go func() {
+		idx, err := plugin.FetchIndex(context.Background(), client, regURL)
+		post(func() { finish(idx, err) })
+	}()
 }
 
 func pluginPermissionLabel(perm plugin.Permission) string {
@@ -290,6 +367,25 @@ func (a *App) libraryPlugins(c *ui.Context) {
 		if addBtn.Clicked() {
 			a.pickLocalPluginArchive()
 		}
+		if a.pluginRegistryURL() != "" {
+			refBtn := ui.Box(c.Key("plugins-refresh")).Size(36, 36).Shrink(0).Radius(10).Center().
+				Background(librarySearch(t)).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).
+				Disabled(a.pluginsUI.registryLoading).
+				Label(i18n.T("刷新插件列表")).Tooltip(i18n.T("刷新插件列表"))
+			if refBtn.Hovered() && !a.pluginsUI.registryLoading {
+				refBtn.Background(hoverFill(t))
+			}
+			refCol := ink.Alpha(0.75)
+			if a.pluginsUI.registryLoading {
+				refCol = ink.Alpha(0.35)
+			}
+			refBtn.Children(func() {
+				ui.Icon(c, iconRefresh).FontSize(15).TextColor(refCol)
+			})
+			if refBtn.Clicked() {
+				a.fetchPluginRegistry(true)
+			}
+		}
 	})
 
 	words := strings.Fields(strings.ToLower(a.pluginsUI.query))
@@ -315,17 +411,18 @@ func (a *App) libraryPlugins(c *ui.Context) {
 		}
 	}
 
-	var shownCatalog []bundle.CatalogPlugin
-	for _, cat := range bundle.OfficialCatalog() {
-		if installedIDs[cat.Manifest.ID] {
+	var shownRemote []plugin.Listing
+	for _, listing := range a.pluginsUI.remoteCatalog {
+		if installedIDs[listing.ID] {
 			continue
 		}
-		if matches(cat.Manifest.Name, cat.Manifest.Description, cat.Manifest.ID) {
-			shownCatalog = append(shownCatalog, cat)
+		if matches(listing.Name, listing.Description, listing.ID) {
+			shownRemote = append(shownRemote, listing)
 		}
 	}
 
-	if len(shownInstalled) == 0 && len(a.brokenPlugins) == 0 && len(shownCatalog) == 0 {
+	hasCatalogSection := len(shownRemote) > 0 || a.pluginsUI.registryLoading || a.pluginsUI.registryErr != ""
+	if len(shownInstalled) == 0 && len(a.brokenPlugins) == 0 && !hasCatalogSection {
 		if len(words) > 0 {
 			ui.Text(c, i18n.T("没有符合搜索的插件")).FontSize(13).TextColor(ink.Alpha(0.55)).
 				AlignSelf(ui.Center).Margin(24, 0, 0, 0)
@@ -356,10 +453,16 @@ func (a *App) libraryPlugins(c *ui.Context) {
 				})
 			}
 		}
-		if len(shownCatalog) > 0 {
+		if hasCatalogSection {
 			ui.Text(c, i18n.T("官方插件")).FontSize(12).FontWeight(600).TextColor(ink.Alpha(0.6)).Padding(6, 4, 0, 4)
-			for _, cat := range shownCatalog {
-				a.catalogPluginCard(c, cat)
+			for _, listing := range shownRemote {
+				a.remoteCatalogPluginCard(c, listing)
+			}
+			if a.pluginsUI.registryLoading {
+				ui.Text(c, i18n.T("正在获取远程插件列表…")).FontSize(12).TextColor(ink.Alpha(0.55)).Padding(2, 4)
+			} else if a.pluginsUI.registryErr != "" {
+				ui.Text(c, fmt.Sprintf(i18n.T("获取插件市场失败：%v"), a.pluginsUI.registryErr)).
+					FontSize(12).TextColor(t.Danger.Alpha(0.85)).Padding(2, 4)
 			}
 		}
 	})
@@ -511,28 +614,33 @@ func (a *App) installedPluginCard(c *ui.Context, p *plugin.Installed) {
 	})
 }
 
-func (a *App) catalogPluginCard(c *ui.Context, cat bundle.CatalogPlugin) {
-	ink := libraryInk(c.Theme())
-	m := cat.Manifest
-	name := i18n.T(m.Name)
+func (a *App) remoteCatalogPluginCard(c *ui.Context, listing plugin.Listing) {
+	a.catalogPluginCardView(c, listing.ID, listing.Name, listing.Version, listing.Author, listing.Description, listing.Icon, func() {
+		a.promptInstallRemotePlugin(listing)
+	})
+}
 
-	pluginGlassCard(c, "catalog-"+m.ID).Children(func() {
+func (a *App) catalogPluginCardView(c *ui.Context, id, rawName, version, author, desc, icon string, onInstall func()) {
+	ink := libraryInk(c.Theme())
+	name := i18n.T(rawName)
+
+	pluginGlassCard(c, "catalog-"+id).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			pluginGlassIconTile(c, pluginIconSVG(m.Icon), c.Theme().Accent)
+			pluginGlassIconTile(c, pluginIconSVG(icon), c.Theme().Accent)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(1.5).Children(func() {
 				ui.Text(c, name).FontSize(14).FontWeight(600).TextColor(ink.Alpha(0.92)).SingleLine()
-				meta := "v" + m.Version
-				if m.Author != "" {
-					meta += " · " + m.Author
+				meta := "v" + version
+				if author != "" {
+					meta += " · " + author
 				}
 				ui.Text(c, meta).FontSize(11).TextColor(ink.Alpha(0.54)).SingleLine()
 			})
-			if pluginGlassButton(c, "install-"+m.ID, i18n.T("安装"), i18n.T("安装 ")+name, false).Clicked() {
-				a.promptInstallPlugin(cat.Manifest, cat.Listing, cat.Archive)
+			if pluginGlassButton(c, "install-"+id, i18n.T("安装"), i18n.T("安装 ")+name, false).Clicked() {
+				onInstall()
 			}
 		})
-		if m.Description != "" {
-			ui.Text(c, i18n.T(m.Description)).FontSize(12).LineHeight(1.48).TextColor(ink.Alpha(0.72))
+		if desc != "" {
+			ui.Text(c, i18n.T(desc)).FontSize(12).LineHeight(1.48).TextColor(ink.Alpha(0.72))
 		}
 	})
 }
@@ -543,6 +651,24 @@ func (a *App) promptInstallPlugin(man *plugin.Manifest, listing plugin.Listing, 
 		manifest: man,
 		listing:  listing,
 		archive:  archive,
+	}
+}
+
+func (a *App) promptInstallRemotePlugin(listing plugin.Listing) {
+	a.pluginsUI.install = pluginInstallState{
+		open: true,
+		manifest: &plugin.Manifest{
+			ID:          listing.ID,
+			Name:        listing.Name,
+			Version:     listing.Version,
+			Description: listing.Description,
+			Author:      listing.Author,
+			Homepage:    listing.Homepage,
+			Icon:        listing.Icon,
+			Runtime:     plugin.RuntimeWASM,
+			Permissions: listing.Permissions,
+		},
+		listing: listing,
 	}
 }
 
@@ -595,28 +721,61 @@ func (a *App) pickLocalPluginArchive() {
 
 func (a *App) confirmInstallPlugin() {
 	st := &a.pluginsUI.install
-	if st.manifest == nil || len(st.archive) == 0 {
+	if st.manifest == nil || st.downloading {
 		return
 	}
-	inst, err := a.plugins.InstallArchive(st.archive, st.listing)
-	if err != nil {
-		st.err = err.Error()
+	finish := func(inst *plugin.Installed, err error) {
+		st.downloading = false
+		if err != nil {
+			st.err = err.Error()
+			return
+		}
+		if err := a.plugins.SetEnabled(inst.Manifest.ID, true); err != nil {
+			st.err = err.Error()
+			return
+		}
+		id := inst.Manifest.ID
+		hasSettings := len(inst.Manifest.Contributes.Settings) > 0
+		name := i18n.T(inst.Manifest.Name)
+		*st = pluginInstallState{}
+		a.closePluginInstance(id)
+		a.reloadPlugins()
+		a.notify("已安装插件「%s」。", name)
+		if hasSettings {
+			a.openPluginSettings(id)
+		}
+	}
+
+	if len(st.archive) > 0 {
+		inst, err := a.plugins.InstallArchive(st.archive, st.listing)
+		finish(inst, err)
 		return
 	}
-	if err := a.plugins.SetEnabled(inst.Manifest.ID, true); err != nil {
-		st.err = err.Error()
+	if st.listing.Download == "" {
 		return
 	}
-	id := inst.Manifest.ID
-	hasSettings := len(inst.Manifest.Contributes.Settings) > 0
-	name := i18n.T(inst.Manifest.Name)
-	*st = pluginInstallState{}
-	a.closePluginInstance(id)
-	a.reloadPlugins()
-	a.notify("已安装插件「%s」。", name)
-	if hasSettings {
-		a.openPluginSettings(id)
+	st.downloading = true
+	st.err = ""
+	listing := st.listing
+	client := a.pluginsUI.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 60 * time.Second}
 	}
+	post := a.asyncPost()
+	if a.pluginsUI.sync || post == nil {
+		inst, err := a.plugins.Install(context.Background(), client, listing)
+		finish(inst, err)
+		return
+	}
+	go func() {
+		inst, err := a.plugins.Install(context.Background(), client, listing)
+		post(func() {
+			if !st.open || st.manifest == nil || st.manifest.ID != listing.ID {
+				return
+			}
+			finish(inst, err)
+		})
+	}()
 }
 
 func (a *App) setPluginEnabled(id string, on bool) {
@@ -870,7 +1029,14 @@ func (a *App) pluginInstallConfirmView(c *ui.Context) {
 				if ui.Button(c.Key("cancel"), i18n.T("取消")).Clicked() {
 					*st = pluginInstallState{}
 				}
-				if ui.PrimaryButton(c.Key("confirm"), i18n.T("安装并启用")).Clicked() {
+				label := i18n.T("安装并启用")
+				if len(st.archive) == 0 && st.listing.Download != "" {
+					label = i18n.T("下载并安装")
+					if st.downloading {
+						label = i18n.T("正在下载…")
+					}
+				}
+				if ui.PrimaryButton(c.Key("confirm"), label).Disabled(st.downloading).Clicked() {
 					a.confirmInstallPlugin()
 				}
 			})
@@ -1223,6 +1389,10 @@ func (a *App) pluginMarkdownView(c *ui.Context) {
 
 func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[string]any, quiet bool) {
 	if p == nil || p.Manifest == nil {
+		return
+	}
+	if p.Manifest.ID == imageHostPluginID && cmdID == "upload-doc-images" {
+		a.uploadCurrentDocumentImages(p)
 		return
 	}
 	st := a.pluginRunState(p.Manifest.ID)

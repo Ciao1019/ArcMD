@@ -117,6 +117,7 @@ func (a *App) loadLibrary() {
 		l.items, l.err = a.bin.List(time.Now())
 	case libPlugins:
 		a.reloadPlugins()
+		a.fetchPluginRegistry(false)
 	}
 }
 
