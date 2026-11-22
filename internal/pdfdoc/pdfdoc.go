@@ -23,12 +23,15 @@ import (
 	"io"
 	"math"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf16"
 )
+
+const maxPDFPages = 20000
 
 var (
 	// ErrInvalid reports that the input is not a readable PDF document.
@@ -90,6 +93,7 @@ type platformDoc interface {
 // concurrent use from background rendering and indexing goroutines.
 type Document struct {
 	path     string
+	data     []byte
 	parsedMu sync.Mutex
 	parsed   *rawPDF
 	parseErr error
@@ -105,6 +109,14 @@ type Document struct {
 
 	closedMu sync.RWMutex
 	closed   bool
+}
+
+func nonNilPlatformDoc(plat platformDoc) bool {
+	if plat == nil {
+		return false
+	}
+	rv := reflect.ValueOf(plat)
+	return rv.Kind() != reflect.Ptr || !rv.IsNil()
 }
 
 // Open opens a PDF file from disk without reading the whole file into memory
@@ -129,54 +141,9 @@ func openFileDoc(path string, openPlat func(string) (platformDoc, error)) (*Docu
 		path:      path,
 		pageTexts: map[int]string{},
 	}
-
-	plat, platErr := openPlat(path)
-	if errors.Is(platErr, ErrEncrypted) {
-		return nil, ErrEncrypted
-	}
-	if plat != nil && plat.PageCount() > 0 {
-		doc.plat = plat
-		cnt := plat.PageCount()
-		doc.pages = make([]PageInfo, cnt)
-		var raw *rawPDF
-		rawLoaded := false
-		loadRaw := func() *rawPDF {
-			if !rawLoaded {
-				rawLoaded = true
-				raw, _ = doc.ensureParsed()
-			}
-			return raw
-		}
-		for i := range cnt {
-			if info, ok := plat.PageInfo(i); ok && info.Width > 0 && info.Height > 0 {
-				doc.pages[i] = info
-			} else if r := loadRaw(); r != nil && i < len(r.pageInfos) {
-				doc.pages[i] = r.pageInfos[i]
-			} else {
-				doc.pages[i] = PageInfo{Width: 595.28, Height: 841.89}
-			}
-		}
-		if items, ok := plat.Outlines(); ok && len(items) > 0 {
-			doc.outlines = items
-		} else if r := loadRaw(); r != nil {
-			doc.outlines = r.outlines
-		}
-		return doc, nil
-	}
-	if plat != nil {
-		plat.Close()
-	}
-
-	// Fall back to pure-Go structural parser.
-	raw, err := doc.ensureParsed()
-	if err != nil {
+	if err := doc.init(func() (platformDoc, error) { return openPlat(path) }); err != nil {
 		return nil, err
 	}
-	if len(raw.pages) == 0 {
-		return nil, ErrInvalid
-	}
-	doc.pages = slices.Clone(raw.pageInfos)
-	doc.outlines = raw.outlines
 	return doc, nil
 }
 
@@ -186,54 +153,68 @@ func OpenBytes(data []byte) (*Document, error) {
 		return nil, ErrInvalid
 	}
 	doc := &Document{
+		data:      data,
 		pageTexts: map[int]string{},
 	}
-	plat, platErr := openPlatformBytes(data)
-	if errors.Is(platErr, ErrEncrypted) {
-		return nil, ErrEncrypted
+	if err := doc.init(func() (platformDoc, error) { return openPlatformBytes(data) }); err != nil {
+		return nil, err
 	}
-	raw, rawErr := parseRawPDF(data)
-	if errors.Is(rawErr, ErrEncrypted) && plat == nil {
-		return nil, ErrEncrypted
-	}
-	if rawErr == nil {
-		doc.parsed = raw
-	} else {
-		doc.parseErr = rawErr
-	}
+	return doc, nil
+}
 
-	if plat != nil && plat.PageCount() > 0 {
-		doc.plat = plat
-		cnt := plat.PageCount()
-		doc.pages = make([]PageInfo, cnt)
-		for i := range cnt {
-			if info, ok := plat.PageInfo(i); ok && info.Width > 0 && info.Height > 0 {
-				doc.pages[i] = info
-			} else if raw != nil && i < len(raw.pageInfos) {
-				doc.pages[i] = raw.pageInfos[i]
-			} else {
-				doc.pages[i] = PageInfo{Width: 595.28, Height: 841.89}
-			}
+func (d *Document) init(openPlat func() (platformDoc, error)) error {
+	plat, platErr := openPlat()
+	if errors.Is(platErr, ErrEncrypted) {
+		if nonNilPlatformDoc(plat) {
+			plat.Close()
 		}
-		if items, ok := plat.Outlines(); ok && len(items) > 0 {
-			doc.outlines = items
-		} else if raw != nil {
-			doc.outlines = raw.outlines
-		}
-		return doc, nil
+		return ErrEncrypted
 	}
-	if plat != nil {
+	if platErr == nil && nonNilPlatformDoc(plat) {
+		if cnt := min(plat.PageCount(), maxPDFPages); cnt > 0 {
+			d.plat = plat
+			d.pages = make([]PageInfo, cnt)
+			var raw *rawPDF
+			rawLoaded := false
+			loadRaw := func() *rawPDF {
+				if !rawLoaded {
+					rawLoaded = true
+					raw, _ = d.ensureParsed()
+				}
+				return raw
+			}
+			for i := range cnt {
+				if info, ok := plat.PageInfo(i); ok && info.Width > 0 && info.Height > 0 {
+					d.pages[i] = info
+				} else if r := loadRaw(); r != nil && i < len(r.pageInfos) {
+					d.pages[i] = r.pageInfos[i]
+				} else {
+					d.pages[i] = PageInfo{Width: 595.28, Height: 841.89}
+				}
+			}
+			if items, ok := plat.Outlines(); ok && len(items) > 0 {
+				d.outlines = items
+			} else if r := loadRaw(); r != nil {
+				d.outlines = r.outlines
+			}
+			return nil
+		}
+	}
+	if nonNilPlatformDoc(plat) {
 		plat.Close()
 	}
-	if rawErr != nil {
-		return nil, rawErr
+
+	// Fall back to pure-Go structural parser.
+	raw, err := d.ensureParsed()
+	if err != nil {
+		return err
 	}
 	if len(raw.pages) == 0 {
-		return nil, ErrInvalid
+		return ErrInvalid
 	}
-	doc.pages = slices.Clone(raw.pageInfos)
-	doc.outlines = raw.outlines
-	return doc, nil
+	d.pages = slices.Clone(raw.pageInfos)
+	d.outlines = raw.outlines
+	return nil
 }
 
 func (d *Document) ensureParsed() (*rawPDF, error) {
@@ -242,14 +223,20 @@ func (d *Document) ensureParsed() (*rawPDF, error) {
 	if d.parsed != nil || d.parseErr != nil {
 		return d.parsed, d.parseErr
 	}
-	if d.path == "" {
+	var data []byte
+	if len(d.data) > 0 {
+		data = d.data
+		d.data = nil
+	} else if d.path != "" {
+		var err error
+		data, err = os.ReadFile(d.path)
+		if err != nil {
+			d.parseErr = err
+			return nil, err
+		}
+	} else {
 		d.parseErr = ErrInvalid
 		return nil, d.parseErr
-	}
-	data, err := os.ReadFile(d.path)
-	if err != nil {
-		d.parseErr = err
-		return nil, err
 	}
 	d.parsed, d.parseErr = parseRawPDF(data)
 	return d.parsed, d.parseErr
@@ -261,16 +248,21 @@ func (d *Document) Close() {
 		return
 	}
 	d.closedMu.Lock()
-	defer d.closedMu.Unlock()
 	if d.closed {
+		d.closedMu.Unlock()
 		return
 	}
 	d.closed = true
 	plat := d.plat
 	d.plat = nil
-	if plat != nil {
+	d.closedMu.Unlock()
+
+	if nonNilPlatformDoc(plat) {
 		plat.Close()
 	}
+	d.parsedMu.Lock()
+	d.data = nil
+	d.parsedMu.Unlock()
 }
 
 // PageCount returns the total number of pages in the PDF.
@@ -358,10 +350,14 @@ func (d *Document) PageText(i int) string {
 	var text string
 	var ok bool
 	d.closedMu.RLock()
-	if !d.closed && d.plat != nil {
+	closed := d.closed
+	if !closed && d.plat != nil {
 		text, ok = d.plat.PageText(i)
 	}
 	d.closedMu.RUnlock()
+	if closed {
+		return ""
+	}
 
 	if !ok {
 		if raw, err := d.ensureParsed(); err == nil && raw != nil {
@@ -644,6 +640,7 @@ type xrefEntry struct {
 }
 
 type rawPDF struct {
+	mu        sync.Mutex
 	data      []byte
 	xref      map[int]xrefEntry
 	trailer   pdfVal
@@ -686,7 +683,7 @@ func parseRawPDF(data []byte) (*rawPDF, error) {
 	if !ok {
 		return nil, ErrInvalid
 	}
-	r.walkPages(pagesRef, [4]float64{0, 0, 595.28, 841.89}, [4]float64{}, false, 0, pdfVal{}, map[int]bool{})
+	r.walkPages(pagesRef, [4]float64{0, 0, 595.28, 841.89}, [4]float64{}, false, 0, pdfVal{}, map[int]bool{}, 0)
 	if len(r.pages) == 0 {
 		return nil, ErrInvalid
 	}
@@ -721,7 +718,7 @@ func (r *rawPDF) loadXRef() error {
 	first := true
 	for cur >= 0 && cur < len(r.data) && !visited[cur] {
 		visited[cur] = true
-		tr, prev, err := r.readXRefAt(cur)
+		tr, prev, err := r.readXRefAt(cur, visited)
 		if err != nil {
 			if first {
 				return r.scanFallbackXRef()
@@ -746,7 +743,7 @@ func (r *rawPDF) loadXRef() error {
 	return nil
 }
 
-func (r *rawPDF) readXRefAt(offset int) (pdfVal, int, error) {
+func (r *rawPDF) readXRefAt(offset int, visited map[int]bool) (pdfVal, int, error) {
 	sc := pdfScanner{b: r.data, pos: offset}
 	sc.skipWS()
 	if sc.hasPrefix("xref") {
@@ -792,8 +789,9 @@ func (r *rawPDF) readXRefAt(offset int) (pdfVal, int, error) {
 		}
 		// Hybrid-reference PDFs may also carry XRefStm.
 		if xs, ok := tr.dictGet("XRefStm"); ok {
-			if xi, ok := xs.intVal(); ok && xi > 0 && xi < len(r.data) {
-				_, _, _ = r.readXRefAt(xi)
+			if xi, ok := xs.intVal(); ok && xi > 0 && xi < len(r.data) && !visited[xi] {
+				visited[xi] = true
+				_, _, _ = r.readXRefAt(xi, visited)
 			}
 		}
 		return tr, prev, nil
@@ -815,6 +813,9 @@ func (r *rawPDF) readXRefAt(offset int) (pdfVal, int, error) {
 	w0, _ := wVal.arr[0].intVal()
 	w1, _ := wVal.arr[1].intVal()
 	w2, _ := wVal.arr[2].intVal()
+	if w0 < 0 || w1 < 0 || w2 < 0 || w0 > 8 || w1 > 8 || w2 > 8 {
+		return pdfVal{}, -1, ErrInvalid
+	}
 	stride := w0 + w1 + w2
 	if stride <= 0 {
 		return pdfVal{}, -1, ErrInvalid
@@ -842,6 +843,9 @@ func (r *rawPDF) readXRefAt(offset int) (pdfVal, int, error) {
 		return v
 	}
 	for _, rg := range ranges {
+		if rg[1] <= 0 {
+			continue
+		}
 		for i := range rg[1] {
 			if pos+stride > len(decoded) {
 				break
@@ -973,8 +977,9 @@ func (r *rawPDF) getObjStm(stmNum int, depth int) map[int]pdfVal {
 	}
 	hdr := pdfScanner{b: decoded[:firstOff]}
 	type pair struct{ num, off int }
-	pairs := make([]pair, 0, nObjs)
-	for range nObjs {
+	limit := min(nObjs, max(firstOff/2, 1))
+	pairs := make([]pair, 0, min(limit, 4096))
+	for range limit {
 		on, okA := hdr.readInt()
 		oo, okB := hdr.readInt()
 		if !okA || !okB {
@@ -1114,14 +1119,23 @@ func applyPredictor(data []byte, parm pdfVal) []byte {
 	}
 	cols := 1
 	if c, ok := parm.dict["Columns"].intVal(); ok && c > 0 {
+		if c > 1<<16 {
+			return data
+		}
 		cols = c
 	}
 	colors := 1
 	if c, ok := parm.dict["Colors"].intVal(); ok && c > 0 {
+		if c > 16 {
+			return data
+		}
 		colors = c
 	}
 	bpc := 8
 	if b, ok := parm.dict["BitsPerComponent"].intVal(); ok && b > 0 {
+		if b > 32 {
+			return data
+		}
 		bpc = b
 	}
 	bpp := max(1, (colors*bpc+7)/8)
@@ -1197,7 +1211,10 @@ func absInt(x int) int {
 	return x
 }
 
-func (r *rawPDF) walkPages(ref pdfVal, mediaBox [4]float64, cropBox [4]float64, hasCrop bool, rotate int, inheritedRes pdfVal, visited map[int]bool) {
+func (r *rawPDF) walkPages(ref pdfVal, mediaBox [4]float64, cropBox [4]float64, hasCrop bool, rotate int, inheritedRes pdfVal, visited map[int]bool, depth int) {
+	if depth > 32 || len(r.pages) >= maxPDFPages {
+		return
+	}
 	objNum := 0
 	if ref.kind == valRef {
 		objNum = ref.refNum
@@ -1231,7 +1248,7 @@ func (r *rawPDF) walkPages(ref pdfVal, mediaBox [4]float64, cropBox [4]float64, 
 		kids := r.resolve(kidsVal, 1)
 		if kids.kind == valArray {
 			for _, k := range kids.arr {
-				r.walkPages(k, mediaBox, cropBox, hasCrop, rotate, inheritedRes, visited)
+				r.walkPages(k, mediaBox, cropBox, hasCrop, rotate, inheritedRes, visited, depth+1)
 			}
 		}
 		return
@@ -1412,22 +1429,28 @@ func (r *rawPDF) searchNameTree(node pdfVal, target string, depth int) pdfVal {
 }
 
 func (r *rawPDF) firstPageImage(page int) image.Image {
+	r.mu.Lock()
 	if page < 0 || page >= len(r.pageDicts) {
+		r.mu.Unlock()
 		return nil
 	}
 	res, ok := r.pageDicts[page].dictGet("Resources")
 	if !ok {
+		r.mu.Unlock()
 		return nil
 	}
 	res = r.resolve(res, 1)
 	xobj, ok := res.dictGet("XObject")
 	if !ok {
+		r.mu.Unlock()
 		return nil
 	}
 	xobj = r.resolve(xobj, 1)
 	if xobj.kind != valDict {
+		r.mu.Unlock()
 		return nil
 	}
+	var jpegStreams [][]byte
 	for _, v := range xobj.dict {
 		im := r.resolve(v, 1)
 		if im.kind != valDict || im.stream == nil {
@@ -1442,9 +1465,14 @@ func (r *rawPDF) firstPageImage(page int) image.Image {
 			fName = r.resolve(fVal.arr[0], 1).str
 		}
 		if fName == "DCTDecode" {
-			if decoded, _, err := image.Decode(bytes.NewReader(im.stream)); err == nil {
-				return decoded
-			}
+			jpegStreams = append(jpegStreams, im.stream)
+		}
+	}
+	r.mu.Unlock()
+
+	for _, stm := range jpegStreams {
+		if decoded, _, err := image.Decode(bytes.NewReader(stm)); err == nil {
+			return decoded
 		}
 	}
 	return nil

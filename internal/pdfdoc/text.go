@@ -13,13 +13,16 @@ type fontCMap struct {
 }
 
 func (r *rawPDF) extractPageText(page int) string {
+	r.mu.Lock()
 	if page < 0 || page >= len(r.pageDicts) {
+		r.mu.Unlock()
 		return ""
 	}
 	dict := r.pageDicts[page]
 	fonts := r.collectFonts(dict, 0)
 	contentsVal, ok := dict.dictGet("Contents")
 	if !ok {
+		r.mu.Unlock()
 		return ""
 	}
 	var streams [][]byte
@@ -39,6 +42,7 @@ func (r *rawPDF) extractPageText(page int) string {
 			}
 		}
 	}
+	r.mu.Unlock()
 	if len(streams) == 0 {
 		return ""
 	}
@@ -82,6 +86,10 @@ func (r *rawPDF) extractPageText(page int) string {
 			start := sc.pos
 			for sc.pos < len(sc.b) && !isPDFDelimOrWS(sc.b[sc.pos]) {
 				sc.pos++
+			}
+			if sc.pos == start {
+				sc.pos++
+				continue
 			}
 			op := string(sc.b[start:sc.pos])
 			switch op {
@@ -253,6 +261,10 @@ func parseToUnicodeCMap(data []byte, cm *fontCMap) {
 		start := sc.pos
 		for sc.pos < len(sc.b) && !isPDFDelimOrWS(sc.b[sc.pos]) {
 			sc.pos++
+		}
+		if sc.pos == start {
+			sc.pos++
+			continue
 		}
 		kw := string(sc.b[start:sc.pos])
 		switch kw {

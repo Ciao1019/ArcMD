@@ -382,3 +382,34 @@ func TestPDFViewerSnapshot(t *testing.T) {
 		savePNG(t, filepath.Join(dir, "pdf-inline-browsing.png"), tt)
 	})
 }
+
+func TestCorruptedPDFInSpaceDoesNotCrashSearchOrOpen(t *testing.T) {
+	a, tt := newTestApp(t)
+	root := a.state.ActiveSpace().Root
+	if err := os.WriteFile(filepath.Join(root, "broken.pdf"), []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "empty.pdf"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "good.md"), []byte("# 正常笔记\n用于回归验证搜索索引。\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a.refreshTree()
+	a.refreshSearch()
+	tt.Frame()
+
+	// Opening the corrupted PDF renders the friendly error card instead of crashing.
+	a.open("broken.pdf")
+	tt.Frame()
+	if a.doc == nil || !a.doc.isPDF() {
+		t.Fatalf("expected broken.pdf to open in PDF viewer error state")
+	}
+
+	// Search index still finds valid documents alongside broken PDFs.
+	hits := a.search.index.Search("回归验证", nil, 10)
+	if len(hits) != 1 || hits[0].Path != "good.md" {
+		t.Fatalf("expected search hit on good.md despite corrupted PDFs, got %+v", hits)
+	}
+}

@@ -248,3 +248,150 @@ func TestOpenFallbackPageInfoAndOutlines(t *testing.T) {
 		t.Fatalf("expected fallback outlines, got %+v", outlines)
 	}
 }
+
+func TestCorruptedAndTruncatedPDFsOpenAndOpenBytes(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		name string
+		data []byte
+		want error
+	}{
+		{
+			name: "empty",
+			data: nil,
+			want: ErrInvalid,
+		},
+		{
+			name: "truncated-header-only",
+			data: []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"),
+			want: ErrInvalid,
+		},
+		{
+			name: "zero-pages",
+			data: []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n112\n%%EOF\n"),
+			want: ErrInvalid,
+		},
+		{
+			name: "xrefstm-self-cycle",
+			data: []byte("%PDF-1.4\nxref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 /XRefStm 9 >>\nstartxref\n9\n%%EOF\n"),
+			want: ErrInvalid,
+		},
+		{
+			name: "encrypted",
+			data: []byte("%PDF-1.4\n" +
+				"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+				"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+				"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n" +
+				"4 0 obj\n<< /Filter /Standard /V 2 /R 3 /O <00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF> /U <FFEEDDCCBBAA9988776655443322110000000000000000000000000000000000> /P -4 >>\nendobj\n" +
+				"xref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000184 00000 n \n" +
+				"trailer\n<< /Size 5 /Root 1 0 R /Encrypt 4 0 R >>\nstartxref\n365\n%%EOF\n"),
+			want: ErrEncrypted,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			docB, errB := OpenBytes(tc.data)
+			if docB != nil {
+				docB.Close()
+			}
+			if !errors.Is(errB, tc.want) {
+				t.Fatalf("OpenBytes(%s): got err %v, want %v", tc.name, errB, tc.want)
+			}
+
+			p := filepath.Join(dir, tc.name+".pdf")
+			if err := os.WriteFile(p, tc.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			docF, errF := Open(p)
+			if docF != nil {
+				docF.Close()
+			}
+			if !errors.Is(errF, tc.want) {
+				t.Fatalf("Open(%s): got err %v, want %v", tc.name, errF, tc.want)
+			}
+		})
+	}
+
+	// Guard against typed-nil platformDoc implementations from any OS backend.
+	validPath := filepath.Join(dir, "valid.pdf")
+	if err := os.WriteFile(validPath, buildSamplePDF(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openFileDoc(validPath, func(string) (platformDoc, error) {
+		var typedNil *stubPartialPlatformDoc
+		return typedNil, ErrInvalid
+	})
+	if err != nil {
+		t.Fatalf("openFileDoc with typed-nil platformDoc should fall back to pure-Go, got err %v", err)
+	}
+	doc.Close()
+
+	doc2, err2 := openFileDoc(validPath, func(string) (platformDoc, error) {
+		var typedNil *stubPartialPlatformDoc
+		return typedNil, nil
+	})
+	if err2 != nil {
+		t.Fatalf("openFileDoc with (typed-nil, nil) should fall back to pure-Go, got err %v", err2)
+	}
+	doc2.Close()
+}
+
+func TestMalformedContentStreamAndCMapDelimitersTerminate(t *testing.T) {
+	cm := &fontCMap{entries: map[uint32]string{}}
+	parseToUnicodeCMap([]byte(") ] > { } beginbfchar <0041> <00480069> endbfchar ) ] >"), cm)
+	if got := cm.entries[0x0041]; got != "Hi" {
+		t.Fatalf("expected CMap entry 'Hi', got %q", got)
+	}
+
+	pdfBytes := []byte("%PDF-1.4\n" +
+		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+		"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n" +
+		"4 0 obj\n<< /Length 44 >>\nstream\nBT ) ] > { } /F1 12 Tf (Hello Safe) Tj } ] ET\nendstream\nendobj\n" +
+		"trailer\n<< /Root 1 0 R >>\n%%EOF\n")
+	raw, err := parseRawPDF(pdfBytes)
+	if err != nil {
+		t.Fatalf("parseRawPDF: %v", err)
+	}
+	txt := raw.extractPageText(0)
+	if !strings.Contains(txt, "Hello Safe") {
+		t.Fatalf("expected 'Hello Safe' despite stray delimiters, got %q", txt)
+	}
+}
+
+type stubFailingRenderPlatformDoc struct{ stubPartialPlatformDoc }
+
+func (s *stubFailingRenderPlatformDoc) RenderPage(int, int, int, int) (*image.RGBA, error) {
+	return nil, ErrInvalid
+}
+
+func TestConcurrentPureGoFallbackExtractAndRender(t *testing.T) {
+	data := buildSamplePDF(t)
+	pdfPath := filepath.Join(t.TempDir(), "purego-concurrent.pdf")
+	if err := os.WriteFile(pdfPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openFileDoc(pdfPath, func(string) (platformDoc, error) {
+		return &stubFailingRenderPlatformDoc{stubPartialPlatformDoc{pages: 2}}, nil
+	})
+	if err != nil {
+		t.Fatalf("openFileDoc: %v", err)
+	}
+	defer doc.Close()
+
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for step := range 6 {
+				p := (worker + step) % doc.PageCount()
+				_, _ = doc.RenderPage(p, 240, 0)
+				_ = doc.PageText(p)
+				_ = doc.Find("Architecture")
+			}
+		}(g)
+	}
+	wg.Wait()
+}
