@@ -110,6 +110,10 @@ type Document struct {
 // Open opens a PDF file from disk without reading the whole file into memory
 // when the platform backend supports direct file-backed access.
 func Open(path string) (*Document, error) {
+	return openFileDoc(path, openPlatformFile)
+}
+
+func openFileDoc(path string, openPlat func(string) (platformDoc, error)) (*Document, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -126,7 +130,7 @@ func Open(path string) (*Document, error) {
 		pageTexts: map[int]string{},
 	}
 
-	plat, platErr := openPlatformFile(path)
+	plat, platErr := openPlat(path)
 	if errors.Is(platErr, ErrEncrypted) {
 		return nil, ErrEncrypted
 	}
@@ -134,15 +138,28 @@ func Open(path string) (*Document, error) {
 		doc.plat = plat
 		cnt := plat.PageCount()
 		doc.pages = make([]PageInfo, cnt)
+		var raw *rawPDF
+		rawLoaded := false
+		loadRaw := func() *rawPDF {
+			if !rawLoaded {
+				rawLoaded = true
+				raw, _ = doc.ensureParsed()
+			}
+			return raw
+		}
 		for i := range cnt {
 			if info, ok := plat.PageInfo(i); ok && info.Width > 0 && info.Height > 0 {
 				doc.pages[i] = info
+			} else if r := loadRaw(); r != nil && i < len(r.pageInfos) {
+				doc.pages[i] = r.pageInfos[i]
 			} else {
 				doc.pages[i] = PageInfo{Width: 595.28, Height: 841.89}
 			}
 		}
-		if items, ok := plat.Outlines(); ok {
+		if items, ok := plat.Outlines(); ok && len(items) > 0 {
 			doc.outlines = items
+		} else if r := loadRaw(); r != nil {
+			doc.outlines = r.outlines
 		}
 		return doc, nil
 	}
