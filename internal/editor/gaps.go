@@ -44,7 +44,7 @@ func (e *Editor) gaps() []gap {
 		}
 		return blocks[h.index]
 	}
-	x, w := e.padding, e.width-2*e.padding
+	x, w := e.padding, e.bodyWidth()
 	var out []gap
 	for j, h := range e.handles {
 		b := at(h)
@@ -68,7 +68,7 @@ func (e *Editor) gapAt(px, py float32) (gap, bool) {
 	if e.ReadOnly || e.printing || len(e.handles) == 0 {
 		return gap{}, false
 	}
-	x, w := e.padding, e.width-2*e.padding
+	x, w := e.padding, e.bodyWidth()
 	if px < x || px > x+w {
 		return gap{}, false
 	}

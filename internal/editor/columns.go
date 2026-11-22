@@ -178,7 +178,7 @@ func (e *Editor) paintColumnsResizers(p *ui.Painter, bounds ui.Rect) {
 			tw, th := p.MeasureText(0, span)
 			pw, ph := tw+14, float32(22)
 			minX := bounds.X + e.padding
-			maxX := bounds.X + max(e.padding, e.width-e.padding-pw)
+			maxX := bounds.X + max(e.padding, e.width-e.rightPadding-pw)
 			pill := ui.Rect{
 				X: max(minX, min(lineX-pw/2, maxX)),
 				Y: topY - ph - 6,

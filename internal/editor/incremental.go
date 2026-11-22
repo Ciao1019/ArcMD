@@ -34,7 +34,7 @@ func (e *Editor) relayoutText(o Options) bool {
 	rows, decorations := e.rows, e.decorations
 	e.rows, e.decorations = nil, nil
 	layout := e.blockLayouter(o, func(string) document.Leaf { return leaf }, nil, true)
-	layout(b, e.padding, old.rect.Y, max(80, o.Width-2*e.padding))
+	layout(b, e.padding, old.rect.Y, e.bodyWidth())
 	updated, decorated := e.rows[0], e.decorations
 	e.rows, e.decorations = rows, decorations
 	updated.number = old.number
@@ -123,7 +123,7 @@ func (e *Editor) relayoutTable(o Options, change document.TextChange, rowIndex i
 	tx, tw := oldTable.rect.X, oldTable.rect.W
 	for _, top := range e.Doc.Blocks {
 		if top.ID == owner {
-			tx, tw = e.tableSpan(table, o.Width, max(80, o.Width-2*e.padding))
+			tx, tw = e.tableSpan(table, o.Width, e.bodyWidth())
 			if j, ok := e.handleIDs[owner]; ok {
 				e.indexedHandle(j).rect.X = tx - 48
 			}

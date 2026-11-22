@@ -200,7 +200,7 @@ func (e *Editor) headerControls(c *ui.Context) {
 		return
 	}
 	if h.coverRect.H > 0 && (e.hovered(h.coverRect, 0) || h.coverOpen) {
-		ui.Row(c.Key("cover-buttons")).Absolute().Right(e.padding).Top(h.coverRect.H - 40).Gap(6).Children(func() {
+		ui.Row(c.Key("cover-buttons")).Absolute().Right(e.rightPadding).Top(h.coverRect.H - 40).Gap(6).Children(func() {
 			if h.coverMovable() && e.headerButton(c, "cover-move", iconMoveVertical, i18n.T("调整位置"), true).Clicked() {
 				h.moving, h.movingY, h.coverOpen, h.iconOpen = true, e.Doc.CoverY, false, false
 			}
@@ -285,7 +285,7 @@ func (e *Editor) headerPopups(c *ui.Context, surface ui.Element) {
 			})
 		}
 		if h.coverOpen {
-			x := bounds.X + bounds.W - e.padding - 300
+			x := bounds.X + bounds.W - e.rightPadding - 300
 			y := bounds.Y + h.coverRect.H - e.Scroll.Y + 2
 			panel := ui.Column(c.Key("page-covers")).Absolute().Left(max(8, x)).Top(y).Width(300).Padding(10).Gap(10)
 			e.popover(c, panel).Children(func() {
@@ -372,7 +372,7 @@ func (e *Editor) coverMover(c *ui.Context) {
 			ui.Text(c, i18n.T("拖动图片以调整位置")).FontSize(13).TextColor(e.page.OnScrim)
 		})
 	})
-	ui.Row(c.Key("cover-buttons")).Absolute().Right(e.padding).Top(r.H - 40).Gap(6).Children(func() {
+	ui.Row(c.Key("cover-buttons")).Absolute().Right(e.rightPadding).Top(r.H - 40).Gap(6).Children(func() {
 		if e.headerButton(c, "cover-save", iconCheck, i18n.T("保存位置"), true).Clicked() {
 			h.moving = false
 			e.Engine.SetCoverY(h.movingY)

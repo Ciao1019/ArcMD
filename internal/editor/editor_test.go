@@ -1288,3 +1288,99 @@ func TestSlashAndCompletionMenusFollowArrowKeys(t *testing.T) {
 	}
 	assertRowVisible(":sm8:", 34, 640, 220)
 }
+
+func TestLeftPlusHandleNeverClipped(t *testing.T) {
+	md := "# Foldable Heading\n\nParagraph text\n\n- Parent item\n  - Nested child item\n\n" +
+		"| Column One Extended Header | Column Two Extended Header | Column Three Extended Header | Column Four Extended Header |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| alpha-wide-cell-value | beta-wide-cell-value | gamma-wide-cell-value | delta-wide-cell-value |\n"
+
+	cases := []struct {
+		name    string
+		width   int
+		opts    Options
+		wantMin float32
+	}{
+		{name: "narrow-420", width: 420, wantMin: 4},
+		{name: "narrow-560", width: 560, wantMin: 4},
+		{name: "narrow-640", width: 640, wantMin: 4},
+		{name: "narrow-760", width: 760, wantMin: 4},
+		{name: "wide-column-960", width: 960, opts: Options{Column: 1040}, wantMin: 4},
+		{name: "outline-open-1100", width: 1100, opts: Options{Outline: true}, wantMin: 4},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := New(md)
+			tt := ui.NewTester(func(c *ui.Context) {
+				w, _ := c.Size()
+				o := tc.opts
+				o.Width = w
+				o.Theme = c.Theme()
+				View(c, e, o)
+			}, tc.width, 700)
+			tt.Frame()
+			if len(e.handles) < 4 {
+				t.Fatalf("expected >=4 handles, got %d", len(e.handles))
+			}
+			for _, h := range e.handles {
+				p := h.plus()
+				kind := e.Doc.Blocks[h.index].Kind
+				if p.X < tc.wantMin {
+					t.Fatalf("%s block %q clipped left edge: plus=%+v padding=%v", tc.name, kind, p, e.padding)
+				}
+				if p.X+p.W > h.rect.X {
+					t.Fatalf("%s block %q plus overlaps grip: plus=%+v grip=%+v", tc.name, kind, p, h.rect)
+				}
+			}
+		})
+	}
+}
+
+func TestLeftPlusClickOnFoldableHeadingAndTable(t *testing.T) {
+	md := "# Foldable Heading\n\nBody paragraph\n\n" +
+		"| Column Alpha Long Header | Column Beta Long Header | Column Gamma Long Header | Column Delta Long Header |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| one-long-cell | two-long-cell | three-long-cell | four-long-cell |\n"
+
+	for _, width := range []int{560, 1200} {
+		for _, kind := range []string{"heading", "table"} {
+			t.Run(fmt.Sprintf("%d-%s", width, kind), func(t *testing.T) {
+				e := New(md)
+				tt := ui.NewTester(func(c *ui.Context) {
+					w, _ := c.Size()
+					View(c, e, Options{Width: w, Theme: c.Theme()})
+				}, width, 700)
+				tt.Frame()
+				before := len(e.Doc.Blocks)
+				var target blockHandle
+				found := false
+				for _, h := range e.handles {
+					if e.Doc.Blocks[h.index].Kind == kind {
+						target = h
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("missing %s handle", kind)
+				}
+				bounds, ok := tt.Find("文档")
+				if !ok {
+					t.Fatal("missing editor bounds")
+				}
+				p := target.plus()
+				cx, cy := bounds.X+p.X+p.W/2, bounds.Y+p.Y+p.H/2
+				tt.Move(cx, cy)
+				tt.ClickAt(cx, cy)
+				tt.Frame()
+				if len(e.BlockSelection()) != 0 {
+					t.Fatalf("plus click at %+v hijacked by block selection: %v", p, e.BlockSelection())
+				}
+				if len(e.Doc.Blocks) != before+1 || !e.slashOpen {
+					t.Fatalf("plus click on %s did not insert block + open slash menu: blocks %d->%d slashOpen=%v", kind, before, len(e.Doc.Blocks), e.slashOpen)
+				}
+			})
+		}
+	}
+}

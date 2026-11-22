@@ -57,54 +57,54 @@ type Editor struct {
 	noAutoPair    bool
 	hoverID       string
 	*Buffer
-	Scroll                           ui.ScrollState
-	RequestFocus                     bool
-	handleIDs, decorationIDs         map[string]int
-	rowIDs                           map[string]int
-	rowSpace, decorationSpace        spatialIndex
-	rowYOff, decYOff                 fenwick64
-	handleYOff, foldYOff             fenwick64
-	resizerYOff, outlineYOff         fenwick64
-	handleEnds                       []blockSliceEnd
-	hasLazyY                         bool
-	rows                             []row
-	decorations                      []decoration
-	handles                          []blockHandle
-	resizers                         []columnHandle
-	cache                            map[string]cachedShape
-	cacheClock                       uint64
-	heightHints                      map[string]heightHint
-	images                           map[string]ImageResource
-	imageCaptionID                   string
-	imageViewer                      imageViewer
-	width, height, viewport, padding float32
-	cacheRevision                    uint64
-	resizePending                    bool
-	resizeScroll                     float32
-	windowResize                     windowResize
-	resizeBatch                      bool
-	resizeRemaining                  int
-	layoutInputs                     layoutInputs
-	cacheTheme                       ui.Theme
-	ready, focused, dragging, reveal bool
-	selectionDrag                    selectionDrag
-	preferredX                       float32
-	vertical                         bool
-	lastInput                        time.Time
-	dragID                           string
-	dropIndex                        int
-	resizing                         *columnHandle
-	resizeX                          float32
-	menuOpen                         bool
-	menuID                           string
-	menuSub                          string
-	menuScroll                       ui.ScrollState
-	tableSel                         tableSelection
-	cellFillOpen, cellFillOpened     bool
-	foldButtons                      []foldButton
-	revealKey                        [2]uint64
-	find                             finder
-	revealAt                         *ui.TextInputRange
+	Scroll                                         ui.ScrollState
+	RequestFocus                                   bool
+	handleIDs, decorationIDs                       map[string]int
+	rowIDs                                         map[string]int
+	rowSpace, decorationSpace                      spatialIndex
+	rowYOff, decYOff                               fenwick64
+	handleYOff, foldYOff                           fenwick64
+	resizerYOff, outlineYOff                       fenwick64
+	handleEnds                                     []blockSliceEnd
+	hasLazyY                                       bool
+	rows                                           []row
+	decorations                                    []decoration
+	handles                                        []blockHandle
+	resizers                                       []columnHandle
+	cache                                          map[string]cachedShape
+	cacheClock                                     uint64
+	heightHints                                    map[string]heightHint
+	images                                         map[string]ImageResource
+	imageCaptionID                                 string
+	imageViewer                                    imageViewer
+	width, height, viewport, padding, rightPadding float32
+	cacheRevision                                  uint64
+	resizePending                                  bool
+	resizeScroll                                   float32
+	windowResize                                   windowResize
+	resizeBatch                                    bool
+	resizeRemaining                                int
+	layoutInputs                                   layoutInputs
+	cacheTheme                                     ui.Theme
+	ready, focused, dragging, reveal               bool
+	selectionDrag                                  selectionDrag
+	preferredX                                     float32
+	vertical                                       bool
+	lastInput                                      time.Time
+	dragID                                         string
+	dropIndex                                      int
+	resizing                                       *columnHandle
+	resizeX                                        float32
+	menuOpen                                       bool
+	menuID                                         string
+	menuSub                                        string
+	menuScroll                                     ui.ScrollState
+	tableSel                                       tableSelection
+	cellFillOpen, cellFillOpened                   bool
+	foldButtons                                    []foldButton
+	revealKey                                      [2]uint64
+	find                                           finder
+	revealAt                                       *ui.TextInputRange
 	// lastAnnotation is the hand-drawn mark the bar's pen applies;
 	// drawIn the new mark drawing itself; annotatePanel the mark picker.
 	lastAnnotation, lastAnnotationColor string
@@ -924,7 +924,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				e.pdfControls(c, o)
 				e.bookmarkMarks(c)
 				if o.Footer != nil {
-					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(max(80, e.width-2*e.padding))
+					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(e.bodyWidth())
 					footer.Children(func() { o.Footer(c) })
 					if h := footer.LayoutBounds().H; h != e.footerH {
 						e.footerH = h
@@ -1107,8 +1107,16 @@ func (e *Editor) layout(o Options) {
 	e.laidFindKey = findKey
 	// The text column is 820 wide unless the reader picked another.
 	e.column = columnWidth(o.Column)
-	e.padding = max(46, (o.Width-e.column)/2)
-	width := max(80, o.Width-2*e.padding)
+	centerPad := (o.Width - e.column) / 2
+	if e.printing {
+		e.padding = max(46, centerPad)
+		e.rightPadding = e.padding
+	} else {
+		e.padding = max(80, centerPad)
+		minRight := min(float32(46), max(24, o.Width*0.12))
+		e.rightPadding = max(minRight, centerPad)
+	}
+	width := e.bodyWidth()
 	clear(e.rows)
 	clear(e.decorations)
 	clear(e.handles)
@@ -1616,7 +1624,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		slot := ui.Rect{
 			X: bounds.X + e.padding,
 			Y: bounds.Y + plan.slotY,
-			W: max(48, e.width-2*e.padding),
+			W: max(48, e.bodyWidth()),
 			H: max(24, plan.slotH-8),
 		}
 		p.Fill(slot, t.Accent.Alpha(0.055), 8)
@@ -1840,7 +1848,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		card := ui.Rect{
 			X: bounds.X + e.padding - 8,
 			Y: bounds.Y + e.indexedHandle(plan.first).top - 4 + plan.floatDY,
-			W: max(64, e.width-2*e.padding+16),
+			W: max(64, e.bodyWidth()+16),
 			H: max(28, plan.slotH-4),
 		}
 		p.Shadow(card, 10, 0, 8, 24, 0, e.page.MathShadow)
@@ -1912,7 +1920,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	}
 	if e.dragID != "" && !plan.active && e.dropIndex >= 0 && e.dropIndex < len(e.handles) {
 		y := bounds.Y + e.indexedHandle(e.dropIndex).top - 4
-		p.Fill(ui.Rect{X: bounds.X + e.padding, Y: y - 1, W: e.width - 2*e.padding, H: 2}, t.Accent, 1)
+		p.Fill(ui.Rect{X: bounds.X + e.padding, Y: y - 1, W: e.bodyWidth(), H: 2}, t.Accent, 1)
 	}
 	if e.fileOver >= 0 {
 		e.paintFileDropPreview(p, bounds, t)
@@ -2609,9 +2617,13 @@ func bodyFamily(family string) string {
 	return family
 }
 
-// Padding is the page's margin either side of its text column, as last
-// laid out.
+// Padding is the left margin of the page's text column, as last laid out.
 func (e *Editor) Padding() float32 { return e.padding }
+
+// bodyWidth returns the prose column width between the left and right page margins.
+func (e *Editor) bodyWidth() float32 {
+	return max(80, e.width-e.padding-e.rightPadding)
+}
 
 // paintKeycaps draws 3-layer rounded 3D keycap surfaces behind Style.Kbd stretches.
 func (e *Editor) paintKeycaps(p *ui.Painter, bounds ui.Rect, r row) {

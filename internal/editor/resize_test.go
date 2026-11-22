@@ -36,7 +36,7 @@ func TestNativeWindowResizeDefersAndSettlesWithoutInput(t *testing.T) {
 	// Scroll during resize: newly visible rows must use the current width.
 	e.Scroll.Y = e.rows[120].rect.Y
 	tt.Frame()
-	if got := e.cache[e.rows[120].leaf.Block.ID].width; got != e.width-2*e.padding {
+	if got := e.cache[e.rows[120].leaf.Block.ID].width; got != e.bodyWidth() {
 		t.Fatalf("newly visible text retained stale width %v", got)
 	}
 	anchor := e.resizeAnchor()
@@ -88,8 +88,8 @@ func TestRapidWindowResizeBoundsWorkAndUsesLatestWidth(t *testing.T) {
 		t.Helper()
 		for i := range e.visibleRows(0) {
 			r := e.rows[i]
-			if got := e.cache[r.leaf.Block.ID].width; got != e.width-2*e.padding {
-				t.Fatalf("visible row %d is at width %v, want %v", i, got, e.width-2*e.padding)
+			if got := e.cache[r.leaf.Block.ID].width; got != e.bodyWidth() {
+				t.Fatalf("visible row %d is at width %v, want %v", i, got, e.bodyWidth())
 			}
 		}
 		if got := e.resizeAnchor(); got.id != anchor.id || math.Abs(float64(got.offset-anchor.offset)) > 1 {
@@ -241,7 +241,7 @@ func TestResizeReflowsVisibleTextAndFinishesExactly(t *testing.T) {
 	// Scrolling while holding the divider must also refresh newly visible rows.
 	e.Scroll.Y = e.rows[80].rect.Y
 	tt.Frame()
-	if cached := e.cache[e.rows[80].leaf.Block.ID]; cached.width != width-2*e.padding {
+	if cached := e.cache[e.rows[80].leaf.Block.ID]; cached.width != e.bodyWidth() {
 		t.Fatal("newly visible text kept stale wrapping")
 	}
 	anchor := e.resizeAnchor()

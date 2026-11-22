@@ -263,6 +263,13 @@ func (e *Editor) blockPointer(ev ui.InputEvent) bool {
 		}
 		// The margin left of the handles, beside the page's blocks.
 		if ev.Mods == 0 && len(e.handles) > 0 && ev.X < e.padding-60 && ev.Y >= e.indexedHandle(0).top-8 && ev.Y <= e.contentEnd {
+			hs, he := e.visibleHandleRange(ev.Y-64, ev.Y+64)
+			for hi := hs; hi < he; hi++ {
+				h := *e.indexedHandle(hi)
+				if h.plus().Contains(ev.X, ev.Y) || h.rect.Contains(ev.X, ev.Y) {
+					return false
+				}
+			}
 			e.blocks.marquee, e.blocks.y0 = true, ev.Y
 			e.marqueeTo(ev.Y)
 			return true
@@ -324,7 +331,7 @@ func (e *Editor) paintBlockSelection(p *ui.Painter, bounds ui.Rect, t *ui.Theme)
 	if last+1 < len(e.handles) {
 		bottom = e.indexedHandle(last + 1).top
 	}
-	p.Fill(ui.Rect{X: bounds.X + e.padding - 8, Y: bounds.Y + top - 4, W: e.width - 2*e.padding + 16, H: bottom - top}, t.Selection, 6)
+	p.Fill(ui.Rect{X: bounds.X + e.padding - 8, Y: bounds.Y + top - 4, W: e.bodyWidth() + 16, H: bottom - top}, t.Selection, 6)
 }
 
 // writeFragment puts a fragment on the clipboard as ArcMD's structure,
