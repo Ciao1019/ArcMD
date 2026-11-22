@@ -187,6 +187,7 @@ func (e *Editor) command(command string, read func() string, write func(string))
 		e.ReplaceText(nil, "")
 	case "paste":
 		e.pasteSelection(read)
+		e.slashOpen, e.slashDismissed = false, true
 	case "pasteAndMatchStyle":
 		if e.ReadOnly {
 			return true
@@ -194,6 +195,7 @@ func (e *Editor) command(command string, read func() string, write func(string))
 		e.UnmarkText()
 		e.clearBlocks()
 		e.Buffer.ReplaceText(nil, read())
+		e.slashOpen, e.slashDismissed = false, true
 	case "undo":
 		e.Undo()
 	case "redo":

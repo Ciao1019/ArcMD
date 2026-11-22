@@ -384,7 +384,8 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 }
 
 // slashKeys moves through the slash menu: the arrows step through the
-// grid and the rows in order, Enter runs, Escape closes.
+// grid and the rows in order (or let the caret move horizontally when
+// filtered to a single column), Enter runs, Escape closes.
 func (e *Editor) slashKeys(ev ui.InputEvent) bool {
 	if !e.slashOpen || e.mark != nil {
 		return false
@@ -394,15 +395,22 @@ func (e *Editor) slashKeys(ev ui.InputEvent) bool {
 	case ui.KeyEscape:
 		e.slashOpen, e.slashDismissed = false, true
 	case ui.KeyDown, ui.KeyRight:
+		if len(entries) == 0 || (ev.Key == ui.KeyRight && !entries[0].grid) {
+			return false
+		}
 		e.slashIndex = min(len(entries)-1, e.slashIndex+1)
 		e.slashReveal = true
 	case ui.KeyUp, ui.KeyLeft:
+		if len(entries) == 0 || (ev.Key == ui.KeyLeft && !entries[0].grid) {
+			return false
+		}
 		e.slashIndex = max(0, e.slashIndex-1)
 		e.slashReveal = true
 	case ui.KeyEnter:
-		if len(entries) > 0 {
-			e.insertItem(entries[max(0, min(e.slashIndex, len(entries)-1))].item)
+		if len(entries) == 0 {
+			return false
 		}
+		e.insertItem(entries[max(0, min(e.slashIndex, len(entries)-1))].item)
 	default:
 		return false
 	}
