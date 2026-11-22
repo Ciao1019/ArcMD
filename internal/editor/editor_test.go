@@ -1306,6 +1306,8 @@ func TestLeftPlusHandleNeverClipped(t *testing.T) {
 		{name: "narrow-640", width: 640, wantMin: 4},
 		{name: "narrow-760", width: 760, wantMin: 4},
 		{name: "wide-column-960", width: 960, opts: Options{Column: 1040}, wantMin: 4},
+		{name: "full-width-1500", width: 1500, opts: Options{FullWidth: true}, wantMin: 4},
+		{name: "full-width-outline-1500", width: 1500, opts: Options{FullWidth: true, Outline: true}, wantMin: 4},
 		{name: "outline-open-1100", width: 1100, opts: Options{Outline: true}, wantMin: 4},
 	}
 
@@ -1381,6 +1383,104 @@ func TestLeftPlusClickOnFoldableHeadingAndTable(t *testing.T) {
 					t.Fatalf("plus click on %s did not insert block + open slash menu: blocks %d->%d slashOpen=%v", kind, before, len(e.Doc.Blocks), e.slashOpen)
 				}
 			})
+		}
+	}
+}
+
+func TestFullWidthLayoutAndOutline(t *testing.T) {
+	md := "# Title\n\n## Section One\n\nParagraph text spanning across the full editor viewport.\n"
+	e := New(md)
+	var column float32
+	full := false
+	outline := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{
+			Width:      w,
+			Theme:      c.Theme(),
+			Column:     column,
+			FullWidth:  full,
+			Outline:    outline,
+			SetOutline: func(v bool) { outline = v },
+		})
+	}, 1500, 700)
+
+	tt.Frame()
+	stdBody, stdPad := e.BodyWidth(), e.Padding()
+
+	column = 1040
+	tt.Frame()
+	wideBody, widePad := e.BodyWidth(), e.Padding()
+	if wideBody <= stdBody || widePad >= stdPad {
+		t.Fatalf("wide should widen body and shrink padding: std=(%v,%v) wide=(%v,%v)", stdBody, stdPad, wideBody, widePad)
+	}
+
+	column, full = 0, true
+	tt.Frame()
+	fullBody, fullPad := e.BodyWidth(), e.Padding()
+	if fullPad != 80 {
+		t.Fatalf("full width left padding = %v; want 80", fullPad)
+	}
+	if fullBody <= wideBody {
+		t.Fatalf("full width should exceed wide column at 1500: wide=%v full=%v", wideBody, fullBody)
+	}
+	if e.outlineState.buttonTop != 12 {
+		t.Fatalf("collapsed outline toggle should sit above title in full width: buttonTop=%v", e.outlineState.buttonTop)
+	}
+
+	outline = true
+	tt.Frame()
+	if e.BodyWidth() >= fullBody {
+		t.Fatalf("opening outline beside full-width page should narrow body: before=%v after=%v", fullBody, e.BodyWidth())
+	}
+	if e.Padding() != 80 {
+		t.Fatalf("full width with outline left padding = %v; want 80", e.Padding())
+	}
+}
+
+func TestPageWidthSwitchResetsTableMotion(t *testing.T) {
+	md := "# Title\n\n" +
+		"A long paragraph that wraps differently between full width and narrow mode so blocks below it shift vertically.\n\n" +
+		"## Wide Table\n\n" +
+		"| Alpha | Beta | Gamma | Delta |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| one-long-cell-value | two-long-cell-value | three-long-cell-value | four-long-cell-value |\n" +
+		"| second-row-alpha | second-row-beta | second-row-gamma | second-row-delta |\n"
+	e := New(md)
+	var column float32
+	full := true
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{
+			Width:     w,
+			Theme:     c.Theme(),
+			Column:    column,
+			FullWidth: full,
+		})
+	}, 2000, 900)
+
+	tt.Frame()
+	// Switch from full width directly to narrow without changing the window width.
+	full = false
+	column = 680
+	tt.Frame()
+
+	if e.motion.moving {
+		t.Fatal("switching page width should snap layout immediately instead of gliding blocks/table cells out of alignment")
+	}
+	for id, b := range e.motion.blocks {
+		if b.dx != 0 || b.dy != 0 {
+			t.Fatalf("block %q retained motion offset (%v,%v) after page width switch", id, b.dx, b.dy)
+		}
+	}
+	for id, r := range e.motion.tableRows {
+		if r.dx != 0 || r.dy != 0 {
+			t.Fatalf("table row %q retained motion offset (%v,%v) after page width switch", id, r.dx, r.dy)
+		}
+	}
+	for id, col := range e.motion.tableCols {
+		if col.dx != 0 || col.dy != 0 {
+			t.Fatalf("table col %q retained motion offset (%v,%v) after page width switch", id, col.dx, col.dy)
 		}
 	}
 }

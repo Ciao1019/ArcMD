@@ -1546,4 +1546,9 @@ var en = map[string]string{
 	"收起代码":           "Collapse Code",
 	"展开完整图片":         "Expand Image",
 	"收起图片":           "Collapse Image",
+	"较宽":             "Wide",
+	"全宽":             "Full Width",
+	"页面宽度：%s":        "Page width: %s",
+	"切换全宽显示":         "Toggle Full Width",
+	"退出全宽显示":         "Exit Full Width",
 }

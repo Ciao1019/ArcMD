@@ -230,6 +230,7 @@ func (a *App) documentCorner(c *ui.Context, d *document) {
 		return
 	}
 	if !d.source {
+		a.pageWidthButton(c, d)
 		b := iconButton(c, "document-map", iconListTree, i18n.T("思维导图"), a.withKey(i18n.T("思维导图"), "mindmap"), false)
 		if d.mindMap != nil {
 			if !a.inWindow(d) && a.split == nil {

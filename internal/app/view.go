@@ -258,6 +258,8 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.toggleOutline()
 	case a.pressed(c, "mindmap"):
 		a.toggleActiveDocumentMap()
+	case a.pressed(c, "full-width"):
+		a.toggleFullWidth()
 	case a.pressed(c, "bookmark"):
 		a.toggleBookmarkAtCaret()
 	case a.pressed(c, "bookmarks"):

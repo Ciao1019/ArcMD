@@ -139,7 +139,7 @@ func (p *Prefs) ReadingLine() float32 {
 // of the text column, by the names prefs.json keeps them under.
 var (
 	Fonts = []string{"", "serif", "kai", "mono"}
-	Pages = []string{"narrow", "", "wide"}
+	Pages = []string{"narrow", "", "wide", "full"}
 )
 
 // fontFamilies are the family lists of Fonts: the first a system has sets
@@ -154,7 +154,7 @@ var fontFamilies = map[string]string{
 func (p *Prefs) BodyFamily() string { return fontFamilies[p.Font] }
 
 // Column is the width of the text column: 680 narrow, 1040 wide, 0 for
-// the standard 820.
+// the standard 820 (FullWidth takes precedence when Page is "full").
 func (p *Prefs) Column() float32 {
 	switch p.Page {
 	case "narrow":
@@ -164,6 +164,9 @@ func (p *Prefs) Column() float32 {
 	}
 	return 0
 }
+
+// FullWidth reports whether the reader chose to span the full editor viewport.
+func (p *Prefs) FullWidth() bool { return p.Page == "full" }
 
 func (p *Prefs) normalize() {
 	if p.AI.Protocol != "responses" && p.AI.Protocol != "chat-completions" {
@@ -175,7 +178,7 @@ func (p *Prefs) normalize() {
 	if _, ok := fontFamilies[p.Font]; !ok {
 		p.Font = ""
 	}
-	if p.Page != "narrow" && p.Page != "wide" {
+	if p.Page != "narrow" && p.Page != "wide" && p.Page != "full" {
 		p.Page = ""
 	}
 	if !(p.FontSize >= 12 && p.FontSize <= 28) {

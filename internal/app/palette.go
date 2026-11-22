@@ -480,6 +480,20 @@ func (a *App) actions() []action {
 			cmd(i18n.T("创建当前文档副本"), "", func() { a.duplicateEntry(sp, rel) })
 		}
 		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() {
+			if a.prefs.FullWidth() {
+				cmd(i18n.T("退出全宽显示"), a.keyLabel("full-width"), a.toggleFullWidth)
+			}
+			for _, opt := range pageWidthChoices {
+				if opt.value == a.prefs.Page {
+					continue
+				}
+				page := opt.value
+				key := ""
+				if page == "full" {
+					key = a.keyLabel("full-width")
+				}
+				cmd(fmt.Sprintf(i18n.T("页面宽度：%s"), i18n.T(opt.label)), key, func() { a.setPageWidth(page) })
+			}
 			a.editorActions(cmd)
 		}
 		if !a.doc.isWhiteboard() && !a.doc.isPDF() {

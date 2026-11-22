@@ -56,14 +56,22 @@ func TestFontAndPageWidth(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := store.Load()
-	if err != nil || got.BodyFamily() == "" || got.Column() != 1040 {
+	if err != nil || got.BodyFamily() == "" || got.Column() != 1040 || got.FullWidth() {
 		t.Fatal(got, err)
+	}
+	got.Page = "full"
+	if err := store.Save(got); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.Load()
+	if err != nil || got.Page != "full" || !got.FullWidth() || got.Column() != 0 {
+		t.Fatal("full width round-trip", got, err)
 	}
 	got.Font, got.Page = "comic", "huge"
 	if err := store.Save(got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Font != "" || got.Page != "" || got.BodyFamily() != "" || got.Column() != 0 {
+	if got.Font != "" || got.Page != "" || got.BodyFamily() != "" || got.Column() != 0 || got.FullWidth() {
 		t.Fatal("unknown choices fall back to the defaults")
 	}
 }

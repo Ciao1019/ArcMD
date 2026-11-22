@@ -155,7 +155,7 @@ func (e *Editor) outlineReserve(c *ui.Context, o Options) float32 {
 	// Beside the title, unless the page's margin without the outline is
 	// too narrow for the button and the title's handle: then above it.
 	s.buttonTop = pageTop + 12
-	if (o.Width-columnWidth(o.Column))/2 < 96 {
+	if o.FullWidth || (o.Width-columnWidth(o.Column))/2 < 96 {
 		s.buttonTop = 12
 	}
 	s.target = 0

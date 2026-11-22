@@ -252,6 +252,9 @@ type App struct {
 	prefStore   prefs.Store
 	prefs       *prefs.Prefs
 	prefsBroken bool
+	// pageWidthBeforeFull remembers the last non-full page width so toggling
+	// full width off returns to what the reader used before (pagewidth.go).
+	pageWidthBeforeFull string
 	// recording is the command whose new key the settings wait for.
 	recording   string
 	recordFocus bool

@@ -23,6 +23,7 @@ type layoutPageKey struct {
 	has                           bool
 	page                          Page
 	fontSize, lineHeight, column  float32
+	fullWidth                     bool
 	fontFamily                    string
 	noteKey                       string
 	codeNoWrap                    bool
@@ -35,6 +36,7 @@ func sameLayoutPageKey(a, b layoutPageKey) bool {
 		a.lineHeight == b.lineHeight &&
 		a.fontFamily == b.fontFamily &&
 		a.column == b.column &&
+		a.fullWidth == b.fullWidth &&
 		a.noteKey == b.noteKey &&
 		a.codeNoWrap == b.codeNoWrap &&
 		a.codeMaxHeight == b.codeMaxHeight &&
@@ -572,10 +574,12 @@ type Options struct {
 	CodeMaxHeight        float32
 	ImageMaxHeight       float32
 	FontSize, LineHeight float32
-	// Column is the text column's width, 0 for 820. Code keeps its monospace.
+	// Column is the text column's width, 0 for 820. FullWidth spans the full
+	// viewport width, keeping only the side gutters. Code keeps its monospace.
 	FontFamily   string
 	DocTitle     string
 	Column       float32
+	FullWidth    bool
 	Width        float32
 	Theme        *ui.Theme
 	LoadImage    func(string) ImageResource
@@ -1036,6 +1040,7 @@ func (e *Editor) layout(o Options) {
 		lineHeight:     o.LineHeight,
 		fontFamily:     o.FontFamily,
 		column:         o.Column,
+		fullWidth:      o.FullWidth,
 		noteKey:        e.noteKey(),
 		codeNoWrap:     e.codeNoWrap,
 		codeMaxHeight:  o.CodeMaxHeight,
@@ -1107,9 +1112,16 @@ func (e *Editor) layout(o Options) {
 	e.laidPDF = e.pdfBrowsing
 	e.laidModalPDF = e.pdfModalID
 	e.laidFindKey = findKey
-	// The text column is 820 wide unless the reader picked another.
+	// The text column is 820 wide unless the reader picked another,
+	// or FullWidth spans the viewport keeping only the side gutters.
 	e.column = columnWidth(o.Column)
-	centerPad := (o.Width - e.column) / 2
+	var centerPad float32
+	if o.FullWidth {
+		e.column = max(80, o.Width)
+		centerPad = 0
+	} else {
+		centerPad = (o.Width - e.column) / 2
+	}
 	if e.printing {
 		e.padding = max(46, centerPad)
 		e.rightPadding = e.padding
@@ -1279,6 +1291,7 @@ func (e *Editor) layoutOptions() Options {
 		LineHeight:     e.readingLine,
 		FontFamily:     e.fontFamily,
 		Column:         e.laidPage.column,
+		FullWidth:      e.laidPage.fullWidth,
 		CodeNoWrap:     e.codeNoWrap,
 		CodeMaxHeight:  e.codeMaxHeight,
 		ImageMaxHeight: e.imageMaxHeight,
@@ -2628,6 +2641,9 @@ func bodyFamily(family string) string {
 
 // Padding is the left margin of the page's text column, as last laid out.
 func (e *Editor) Padding() float32 { return e.padding }
+
+// BodyWidth is the width of the prose column between the page margins, as last laid out.
+func (e *Editor) BodyWidth() float32 { return e.bodyWidth() }
 
 // bodyWidth returns the prose column width between the left and right page margins.
 func (e *Editor) bodyWidth() float32 {
