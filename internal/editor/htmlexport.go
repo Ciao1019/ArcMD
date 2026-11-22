@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/mermaid"
 	"github.com/Ciao1019/ArcMD/internal/whiteboard"
+	"github.com/egoist/mygo/ui"
 )
 
 func isSafeLangClass(lang string) bool {
@@ -38,7 +41,40 @@ func safeHTMLURL(s string) bool {
 
 // ExportHTML supplies semantic clipboard content without depending on a web
 // runtime. Escaping also keeps raw Markdown/TeX and untrusted links inert.
-func ExportHTML(doc *document.Document) string {
+// Code blocks keep their text and Mermaid blocks their source: a clipboard
+// has no page style sheet to color or place them.
+func ExportHTML(doc *document.Document) string { return exportHTML(doc, nil) }
+
+// HTMLStyle is the paper an exported page draws with: the document theme and
+// the page's colors beyond it.
+type HTMLStyle struct {
+	Theme *ui.Theme
+	Page  Page
+}
+
+// HTMLTheme is the pair of papers an exported page follows: the light one, and
+// the dark one a reader whose system prefers dark gets. A missing theme takes
+// the default light or dark theme.
+type HTMLTheme struct {
+	Light, Dark HTMLStyle
+}
+
+// ExportHTMLPage renders the body of an exported page in its paper theme:
+// code blocks keep the editor's highlighting and Mermaid diagrams are drawn
+// as inline SVG, one picture for each system appearance.
+func ExportHTMLPage(doc *document.Document, theme HTMLTheme) string {
+	if theme.Light.Theme == nil {
+		theme.Light.Theme = ui.LightTheme()
+	}
+	if theme.Dark.Theme == nil {
+		theme.Dark.Theme = ui.DarkTheme()
+	}
+	return exportHTML(doc, &theme)
+}
+
+// exportHTML writes a document's blocks; a nil theme is the clipboard's plain
+// HTML, which has no page style sheet.
+func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 	var blocks func([]*document.Block) string
 	runs := func(rs []document.Run) string {
 		return exportHTMLRuns(rs, false)
@@ -92,11 +128,21 @@ func ExportHTML(doc *document.Document) string {
 						continue
 					}
 				}
+				if theme != nil && normalizeLexLang(b.Language) == langMermaid {
+					if svg, ok := mermaidSVG(b.Text(), *theme); ok {
+						out.WriteString(`<figure class="arcmd-mermaid">` + svg + `</figure>`)
+						continue
+					}
+				}
 				classAttr := ""
 				if isSafeLangClass(b.Language) {
 					classAttr = ` class="language-` + html.EscapeString(strings.ToLower(strings.TrimSpace(b.Language))) + `"`
 				}
-				out.WriteString("<pre><code" + classAttr + ">" + html.EscapeString(b.Text()) + "</code></pre>")
+				code := html.EscapeString(b.Text())
+				if theme != nil {
+					code = htmlCode(b.Text(), b.Language)
+				}
+				out.WriteString("<pre><code" + classAttr + ">" + code + "</code></pre>")
 				continue
 			case "toggle":
 				var inner []*document.Block
@@ -193,4 +239,145 @@ func ExportHTML(doc *document.Document) string {
 
 func isHTMLList(b *document.Block) bool {
 	return b.Kind == "bullet" || b.Kind == "numbered" || b.Kind == "task"
+}
+
+// htmlLexerPage gives every token kind a color of its own so htmlCode can
+// recover the kind from the lexer's spans. These colors never reach the
+// page: the exported HTML's CSS colors the classes instead.
+var htmlLexerPage = Page{
+	CodeText: ui.RGB(0, 0, 0),
+	Tokens: CodeTokens{
+		Comment:  ui.RGB(1, 0, 0),
+		Keyword:  ui.RGB(2, 0, 0),
+		String:   ui.RGB(3, 0, 0),
+		Number:   ui.RGB(4, 0, 0),
+		Type:     ui.RGB(5, 0, 0),
+		Function: ui.RGB(6, 0, 0),
+	},
+}
+
+// htmlCode renders a code block with its tokens wrapped in the classes the
+// exported page's style sheet colors, so a shared file keeps its highlighting
+// and follows the reader's light or dark preference.
+func htmlCode(text, language string) string {
+	var out strings.Builder
+	for _, sp := range codeSpansFor("", language, text, htmlLexerPage, nil) {
+		class := htmlTokenClass(sp.Color)
+		if class == "" {
+			out.WriteString(html.EscapeString(sp.Text))
+			continue
+		}
+		out.WriteString(`<span class="` + class + `">` + html.EscapeString(sp.Text) + `</span>`)
+	}
+	return out.String()
+}
+
+func htmlTokenClass(c ui.Color) string {
+	switch c {
+	case htmlLexerPage.Tokens.Comment:
+		return "arcmd-tok-comment"
+	case htmlLexerPage.Tokens.Keyword:
+		return "arcmd-tok-keyword"
+	case htmlLexerPage.Tokens.String:
+		return "arcmd-tok-string"
+	case htmlLexerPage.Tokens.Number:
+		return "arcmd-tok-number"
+	case htmlLexerPage.Tokens.Type:
+		return "arcmd-tok-type"
+	case htmlLexerPage.Tokens.Function:
+		return "arcmd-tok-function"
+	}
+	return ""
+}
+
+// CodeTokenCSS writes the rules that color the token classes htmlCode emits,
+// from the page tokens the editor paints with, so an exported page owns no
+// colors of its own.
+func CodeTokenCSS(tokens CodeTokens) string {
+	classes := []struct {
+		name  string
+		color ui.Color
+	}{
+		{"comment", tokens.Comment},
+		{"keyword", tokens.Keyword},
+		{"string", tokens.String},
+		{"number", tokens.Number},
+		{"type", tokens.Type},
+		{"function", tokens.Function},
+	}
+	var b strings.Builder
+	for _, c := range classes {
+		fmt.Fprintf(&b, "pre code .arcmd-tok-%s { color: %s; }\n", c.name, cssColor(c.color))
+	}
+	return b.String()
+}
+
+// mermaidSVG lays out a mermaid block with the system font's real metrics and
+// draws it as inline SVG, the way the editor and the vector PDF export draw
+// it. Both system appearances are written; the page's CSS shows one. A block
+// that is not a diagram ArcMD understands keeps its source.
+func mermaidSVG(src string, theme HTMLTheme) (string, bool) {
+	diagram, err := mermaid.ParseAndLayout(src, exportMermaidMeasure)
+	if err != nil || diagram.W <= 0 || diagram.H <= 0 {
+		return "", false
+	}
+	alt := i18n.T("流程图")
+	if diagram.Kind == "sequence" {
+		alt = i18n.T("时序图")
+	}
+	light := mermaid.ExportSVG(diagram, exportMermaidPalette(theme.Light), alt)
+	dark := mermaid.ExportSVG(diagram, exportMermaidPalette(theme.Dark), alt)
+	return `<span class="arcmd-diagram-light">` + light + `</span><span class="arcmd-diagram-dark">` + dark + `</span>`, true
+}
+
+// exportMermaidMeasure measures a diagram label with the system font the
+// exported page shows, so the SVG's boxes and its text agree; mermaid's
+// default estimate narrows wide letters such as W.
+func exportMermaidMeasure(text string, size float32, bold bool) (w, h float32) {
+	if text == "" {
+		return 0, size * 1.3
+	}
+	weight := 400
+	if bold {
+		weight = 600
+	}
+	l := ui.ShapeText(text, ui.Font{Family: mermaid.FontFamily, Size: size, Weight: weight}, 0)
+	return l.Size()
+}
+
+// exportMermaidPalette colors an exported diagram from the page's own paper
+// tokens, matching what mermaidShapeColors paints in the editor. ExportSVG
+// paints the paper first, so the translucent tints composite as they do on a
+// page.
+func exportMermaidPalette(style HTMLStyle) mermaid.Palette {
+	t := style.Theme
+	pg := pageOf(style.Page, t)
+	blue := mermaidBlueCallout(pg)
+	yellow := pg.Callouts["yellow"]
+	return mermaid.Palette{
+		Text:             cssColor(t.Text),
+		Caption:          cssColor(pg.Caption),
+		Paper:            cssColor(t.Background),
+		NodeFill:         cssColor(pg.CodeFill),
+		NodeBorder:       cssColor(t.Accent.Alpha(0.45)),
+		ContainerFill:    cssColor(pg.CodeFill.Alpha(0.50)),
+		ContainerBorder:  cssColor(pg.CodeBorder),
+		KeywordFill:      cssColor(pg.CodeHover.Alpha(0.28)),
+		KeywordBorder:    cssColor(pg.CodeBorder),
+		ActorFill:        cssColor(blue.Fill),
+		ActorBorder:      cssColor(blue.Border),
+		NoteFill:         cssColor(yellow.Fill),
+		NoteBorder:       cssColor(yellow.Border),
+		ActivationFill:   cssColor(t.Accent.Alpha(0.18)),
+		ActivationBorder: cssColor(t.Accent.Alpha(0.68)),
+	}
+}
+
+// cssColor writes a color as a CSS value.
+func cssColor(c ui.Color) string {
+	s := c.SRGB()
+	if s.A == 255 {
+		return fmt.Sprintf("#%02x%02x%02x", s.R, s.G, s.B)
+	}
+	return fmt.Sprintf("rgba(%d,%d,%d,%.3f)", s.R, s.G, s.B, float64(s.A)/255)
 }
