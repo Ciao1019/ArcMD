@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.6
+
+本版本新增 **原生零 CGO PDF 阅读器与文档内嵌 PDF 块、思维导图编辑与右键菜单、外部 `.md`/`.pdf` 拖拽导入**（[#36](https://github.com/Ciao1019/ArcMD/issues/36)、[#40](https://github.com/Ciao1019/ArcMD/issues/40)、[#44](https://github.com/Ciao1019/ArcMD/pull/44)），将官方扩展拆分为 **独立远程插件市场与图床自动上传**（[`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins)，[#45](https://github.com/Ciao1019/ArcMD/pull/45)），新增 **长代码块与长图片紧凑高度折叠与块内滚动**（[#43](https://github.com/Ciao1019/ArcMD/issues/43)、[#46](https://github.com/Ciao1019/ArcMD/pull/46)），并为 **独立 HTML 导出补齐代码语法高亮与 Mermaid 内联矢量 SVG**（[#51](https://github.com/Ciao1019/ArcMD/issues/51)、[#52](https://github.com/Ciao1019/ArcMD/pull/52)，感谢 `@NeverKnowsTomorrow`）；同时集中修复了侧栏误触、正文左侧 `+` 按钮裁切、白板画笔连续绘制与思维导图有序列表编号等多项体验问题（[#42](https://github.com/Ciao1019/ArcMD/issues/42)、[#47](https://github.com/Ciao1019/ArcMD/pull/47)、[#48](https://github.com/Ciao1019/ArcMD/pull/48)、[#49](https://github.com/Ciao1019/ArcMD/pull/49)、[#50](https://github.com/Ciao1019/ArcMD/pull/50)）。
+
+### 新功能与生态
+
+- **原生零 CGO PDF 阅读器、思维导图编辑与外部文件拖入（`internal/pdfdoc`、`internal/editor/pdfview.go`、`internal/editor/mindmap_actions.go`、`internal/app/filedrop.go`）**：基于系统原生能力（macOS PDFKit / Linux Poppler / Windows WinRT）实现零 CGO PDF 渲染与大纲/文本/全文检索集成；支持思维导图节点右键菜单、分支聚焦与结构化增删移动并导出 PNG/SVG；支持从系统访达/文件管理器拖拽 `.md` 与 `.pdf` 到窗口或侧边栏文件夹安全导入并支持一键撤销（[#36](https://github.com/Ciao1019/ArcMD/issues/36)、[#40](https://github.com/Ciao1019/ArcMD/issues/40)、[#44](https://github.com/Ciao1019/ArcMD/pull/44)）。
+- **独立插件市场（`arcmd-plugins`）与图床自动上传插件（`internal/plugin`、`internal/app/imagehost.go`、`internal/app/remoteimage.go`）**：将内置插件剥离至独立仓库 [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) 并按需从 `catalog` Release 下载安装（SHA-256 校验），减小主程序安装包体积；新增官方「图床上传（`dev.arcmd.image-host`）」插件，支持粘贴/拖入图片自动上传 S3 兼容存储或自定义 HTTP 图床并改写外链、本地独立目录懒加载缓存、上传失败回退本地与单步撤销迁移（[#45](https://github.com/Ciao1019/ArcMD/pull/45)）。
+- **长代码块与长图片紧凑高度及块内滚动（`internal/prefs`、`internal/editor/codewrap.go`、`internal/editor/images.go`、`internal/app/settings.go`）**：可在「设置 › 通用 › 写作」为长代码块和长图片分别配置紧凑最大高度与启用块内滚动，阅读时也可随时点击右上角展开/收起完整内容，且完全不污染原始 `.md` 文本或 PDF 打印输出（[#43](https://github.com/Ciao1019/ArcMD/issues/43)、[#46](https://github.com/Ciao1019/ArcMD/pull/46)）。
+- **HTML 网页导出支持代码语法高亮与 Mermaid 内联矢量 SVG（`internal/mermaid/svg.go`、`internal/editor/htmlexport.go`、`internal/app/export.go`）**：导出 `.html` 网页沿用编辑器词法高亮与主题 Token，并将 Mermaid 流程图/时序图渲染为跟随系统明暗切换的 crisp 内联 SVG（解析失败时保留源码）；复制到剪贴板的语义 HTML 保持纯文本代码与 Mermaid 源码不变（[#51](https://github.com/Ciao1019/ArcMD/issues/51)、[#52](https://github.com/Ciao1019/ArcMD/pull/52)，感谢 `@NeverKnowsTomorrow`）。
+
+### 体验优化与问题修复
+
+- **移除侧边栏文件缝隙悬停「+ 新建文档」按钮（`internal/app/sidebar.go`）**：取消鼠标在左侧文档列表项之间停留时弹出的内联新建按钮，保留列表末尾稳定的新建文档入口与文件夹右键菜单，避免浏览文档时频繁误触干扰（[#47](https://github.com/Ciao1019/ArcMD/pull/47)）。
+- **修复正文左侧 `+` 按钮裁切与点击拦截（`internal/editor/view.go`、`internal/editor/virtualize.go`、`internal/editor/blockselect.go`）**：将非打印布局左留白下限提升至 `80px`（窄分屏右侧自适应收敛），保证在打开思维导图、分屏、AI 问答、大纲或宽页面时，普通块、可折叠标题与表格左侧的 `+` 按钮完整可见，且不再被左空白拖拽框选拦截点击（[#48](https://github.com/Ciao1019/ArcMD/pull/48)）。
+- **手绘白板自由画笔支持无框连续绘制（`internal/editor/board.go`、`internal/editor/board_view.go`）**：切换至自由画笔或落笔绘制期间不再选中元素并绘制控制框，且未锁定工具时画完一笔仍保持画笔状态以便连续手绘，切换回选择工具后点选再显示编辑框，对齐网页版 Excalidraw 交互（[#42](https://github.com/Ciao1019/ArcMD/issues/42)、[#49](https://github.com/Ciao1019/ArcMD/pull/49)）。
+- **修复思维导图有序列表编号显示异常（`internal/editor/mindmap.go`、`internal/editor/view.go`）**：导图节点改为继承全文有序列表上下文计数器与原始缩进层级，修复所有条目都显示为 `1.` 的问题，并正确呈现嵌套 `a.` / `i.` 及两位数以上序号（[#50](https://github.com/Ciao1019/ArcMD/pull/50)）。
+
+### 贡献者
+
+- 特别感谢 **`@NeverKnowsTomorrow`**（[#52](https://github.com/Ciao1019/ArcMD/pull/52)）对本版本的贡献！
+
+### 下载说明
+
+提供 macOS（Apple Silicon / Intel）、Windows x64 与 Linux（x64 / ARM64）原生安装包，可使用 `SHA256SUMS.txt` 校验完整性，已安装版本支持应用内签名自动更新。官方插件随 [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins)（`v0.1.1`）同步更新，可在应用「设置 › 插件」按需下载或更新。
+
 ## 0.2.5
 
 This release adds **Sidebar Copy, Paste, and Duplicate** for documents, folders, and multi-selections ([#10](https://github.com/Ciao1019/ArcMD/issues/10), [#39](https://github.com/Ciao1019/ArcMD/pull/39)), **streaming Responses & Chat Completions protocol support** for Space Q&A ([#23](https://github.com/Ciao1019/ArcMD/pull/23)), **crisp math formula rendering, content-aware expanding tables, narrow-window sidebar hysteresis, and an optional Autosave toggle** ([#32](https://github.com/Ciao1019/ArcMD/issues/32)), plus targeted fixes for table row selection crashes ([#34](https://github.com/Ciao1019/ArcMD/issues/34), [#35](https://github.com/Ciao1019/ArcMD/pull/35)) and literal plain-text clipboard copying.
