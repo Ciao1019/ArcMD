@@ -258,6 +258,9 @@ func openPlatformFile(path string) (platformDoc, error) {
 	if !initDarwinPDF() {
 		return nil, errors.New("pdfkit unavailable")
 	}
+	if path == "" {
+		return nil, ErrInvalid
+	}
 	var out *darwinPDF
 	var retErr error
 	withAutoreleasePool(func() {
@@ -272,10 +275,23 @@ func openPlatformFile(path string) (platformDoc, error) {
 			return
 		}
 		rawDoc := objcCall(uintptr(clsPDFDocument), selAlloc)
+		if rawDoc == 0 {
+			retErr = ErrInvalid
+			return
+		}
 		pdfDoc := objc.ID(objcCall(rawDoc, selInitWithURL, uintptr(nsURL)))
 		out, retErr = wrapDarwinPDF(pdfDoc)
 	})
-	return out, retErr
+	if retErr != nil || out == nil {
+		if out != nil {
+			out.Close()
+		}
+		if retErr == nil {
+			retErr = ErrInvalid
+		}
+		return nil, retErr
+	}
+	return out, nil
 }
 
 func openPlatformBytes(data []byte) (platformDoc, error) {
@@ -295,10 +311,23 @@ func openPlatformBytes(data []byte) (platformDoc, error) {
 			return
 		}
 		rawDoc := objcCall(uintptr(clsPDFDocument), selAlloc)
+		if rawDoc == 0 {
+			retErr = ErrInvalid
+			return
+		}
 		pdfDoc := objc.ID(objcCall(rawDoc, selInitWithData, uintptr(nsData)))
 		out, retErr = wrapDarwinPDF(pdfDoc)
 	})
-	return out, retErr
+	if retErr != nil || out == nil {
+		if out != nil {
+			out.Close()
+		}
+		if retErr == nil {
+			retErr = ErrInvalid
+		}
+		return nil, retErr
+	}
+	return out, nil
 }
 
 func wrapDarwinPDF(pdfDoc objc.ID) (*darwinPDF, error) {
@@ -308,13 +337,13 @@ func wrapDarwinPDF(pdfDoc objc.ID) (*darwinPDF, error) {
 	locked := byte(objcCall(uintptr(pdfDoc), selIsLocked)) != 0
 	if locked {
 		empty := makeNSString("")
-		unlocked := byte(objcCall(uintptr(pdfDoc), selUnlockWithPassword, uintptr(empty))) != 0
+		unlocked := empty != 0 && byte(objcCall(uintptr(pdfDoc), selUnlockWithPassword, uintptr(empty))) != 0
 		if !unlocked {
 			objcCall(uintptr(pdfDoc), selRelease)
 			return nil, ErrEncrypted
 		}
 	}
-	cnt := int(objcCall(uintptr(pdfDoc), selPageCount))
+	cnt := min(int(objcCall(uintptr(pdfDoc), selPageCount)), maxPDFPages)
 	if cnt <= 0 {
 		objcCall(uintptr(pdfDoc), selRelease)
 		return nil, ErrInvalid
@@ -500,7 +529,7 @@ func (d *darwinPDF) readOutlineNode(node objc.ID, depth int) []OutlineItem {
 	if node == 0 || depth > 12 {
 		return nil
 	}
-	n := int(objcCall(uintptr(node), selNumChildren))
+	n := min(int(objcCall(uintptr(node), selNumChildren)), 2000)
 	if n <= 0 {
 		return nil
 	}

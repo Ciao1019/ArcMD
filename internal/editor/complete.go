@@ -185,15 +185,22 @@ func (e *Editor) completeKeys(ev ui.InputEvent) bool {
 	case ui.KeyEscape:
 		m.open, m.dismissed = false, m.start
 	case ui.KeyDown:
+		if len(m.items) == 0 {
+			return false
+		}
 		m.index = min(len(m.items)-1, m.index+1)
 		m.reveal = true
 	case ui.KeyUp:
+		if len(m.items) == 0 {
+			return false
+		}
 		m.index = max(0, m.index-1)
 		m.reveal = true
 	case ui.KeyEnter, ui.KeyTab:
-		if len(m.items) > 0 {
-			e.pick(m.items[m.index])
+		if len(m.items) == 0 {
+			return false
 		}
+		e.pick(m.items[m.index])
 	default:
 		return false
 	}

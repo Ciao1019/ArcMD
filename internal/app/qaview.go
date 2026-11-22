@@ -47,9 +47,18 @@ func (a *App) qaPanel(c *ui.Context) {
 			return
 		}
 		bar := c.TitleBar()
-		ui.Column(c.Key("qa")).Width(qaWidth).Grow(1).MinHeight(0).Padding(0, 8, 8, 0).Children(func() {
+		caption := a.captionWidth()
+		width := float32(qaWidth)
+		if caption > 0 {
+			width = w
+		}
+		ui.Column(c.Key("qa")).Width(width).Grow(1).MinHeight(0).Padding(0, 8, 8, 0).Children(func() {
 			s := a.qaSession(sp.ID)
-			ui.Row(c.Key("qa-head")).Height(max(bar.Height, 46)).Padding(0, bar.Right, 0, 6).Gap(6).AlignItems(ui.Center).DragWindow().Children(func() {
+			header := ui.Row(c.Key("qa-head")).Height(max(bar.Height, 46)).Padding(0, bar.Right+min(w, caption), 0, 6).Gap(6).AlignItems(ui.Center).DragWindow()
+			if caption > 0 {
+				header.Clip()
+			}
+			header.Children(func() {
 				ui.Icon(c, iconAsk).FontSize(15).TextColor(t.Text.Alpha(0.72))
 				ui.Text(c, i18n.T("问答")).FontWeight(600).NoWrap()
 				ui.Text(c, sp.Name).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)

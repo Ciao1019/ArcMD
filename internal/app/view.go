@@ -170,6 +170,7 @@ func (a *App) View(c *ui.Context) {
 		})
 		a.main(c, docked)
 	})
+	a.mainWindowButtons(c)
 	if a.folded() && docked < 0.5 && !a.library.open && !a.focus {
 		a.peekSidebar(c)
 	} else {
@@ -343,14 +344,22 @@ func (a *App) peekSidebar(c *ui.Context) {
 // main is the toolbar over the card holding the open document.
 func (a *App) main(c *ui.Context, docked float32) {
 	t := c.Theme()
+	w, _ := c.Size()
+	captionWidth := a.captionWidth()
 	main := ui.Row(c.Key("main")).Grow(1).MinWidth(0).AlignItems(ui.Stretch)
 	target := float32(0)
 	if a.qa.open && a.state.ActiveSpace() != nil && (!a.spaceForm.open || a.spaceForm.id != "") {
 		target = qaWidth
+		if captionWidth > 0 {
+			target = min(target, max(0, w-docked))
+		}
 	}
 	// Resolve the panel before the document: both must use this frame's
 	// width, and offscreen paragraphs can keep their shaping while it moves.
 	a.qa.shown = main.Animate("qa-width", target, slide)
+	if captionWidth > 0 {
+		a.qa.shown = min(a.qa.shown, max(0, w-docked))
+	}
 	a.qa.resizing = a.qa.shown != target
 	left := float32(8)
 	if docked > 0.5 {
@@ -369,10 +378,11 @@ func (a *App) main(c *ui.Context, docked float32) {
 				a.splitView(c)
 				return
 			}
-			a.toolbar(c)
+			const compactToolbarWidth = 400
+			caption := max(0, captionWidth-panel)
+			a.toolbar(c, a.library.open && panel <= 0.5 && caption > 0 && w-docked < compactToolbarWidth, caption)
 			card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
 				Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
-			w, _ := c.Size()
 			a.splitDropTarget(c, card)
 			a.tourMark("bookmarks", card)
 			card.Children(func() { a.documentContent(c, a.doc, w-docked-right-left-2-panel) })
@@ -497,7 +507,7 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 // toolbar is the row above the card: the history's arrows, the address
 // of the document, as Arc's, the editor's word count and format menu,
 // and the more menu. It drags the window.
-func (a *App) toolbar(c *ui.Context) {
+func (a *App) toolbar(c *ui.Context, compact bool, caption float32) {
 	bar := c.TitleBar()
 	// The sidebar reserves the left controls; Windows and Linux can keep
 	// their window buttons on the right, over this toolbar instead.
@@ -505,6 +515,7 @@ func (a *App) toolbar(c *ui.Context) {
 	if a.qa.shown > 0.5 {
 		right = 0 // the question panel's header holds the window buttons' room
 	}
+	right += caption
 	toolbar := ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow()
 	if a.qa.shown > 0.5 {
 		// A narrow document's controls must not paint or receive clicks over
@@ -512,6 +523,11 @@ func (a *App) toolbar(c *ui.Context) {
 		toolbar.Clip()
 	}
 	toolbar.Children(func() {
+		if compact {
+			ui.Spacer(c)
+			a.moreMenu(c)
+			return
+		}
 		if a.folded() {
 			ui.Box(c).Width(bar.Left + 4)
 			if iconButton(c, "show-sidebar", iconSidebar, i18n.T("展开侧边栏"), a.withKey(i18n.T("展开侧边栏"), "sidebar"), false).Clicked() {

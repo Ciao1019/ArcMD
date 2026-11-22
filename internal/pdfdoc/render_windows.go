@@ -237,7 +237,7 @@ func openPlatformFile(path string) (platformDoc, error) {
 		}
 		return nil, ErrInvalid
 	}
-	return &winPDF{doc: pdfDoc, stream: ras, cnt: int(cnt)}, nil
+	return &winPDF{doc: pdfDoc, stream: ras, cnt: min(int(cnt), maxPDFPages)}, nil
 }
 
 func openPlatformBytes(data []byte) (platformDoc, error) {

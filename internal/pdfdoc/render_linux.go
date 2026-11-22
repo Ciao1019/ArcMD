@@ -149,7 +149,7 @@ func openPlatformFile(path string) (platformDoc, error) {
 			}
 			return nil, errOut
 		}
-		cnt := int(popplerDocGetNPages(doc))
+		cnt := min(int(popplerDocGetNPages(doc)), maxPDFPages)
 		if cnt <= 0 {
 			gObjectUnref(doc)
 			return nil, ErrInvalid
@@ -186,7 +186,7 @@ func openPlatformBytes(data []byte) (platformDoc, error) {
 				}
 				return nil, errOut
 			}
-			cnt := int(popplerDocGetNPages(doc))
+			cnt := min(int(popplerDocGetNPages(doc)), maxPDFPages)
 			if cnt <= 0 {
 				gObjectUnref(doc)
 				return nil, ErrInvalid

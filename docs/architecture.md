@@ -22,6 +22,15 @@ serve a future CLI or plugin host.
 `internal/app` follows MyGo's immediate mode: `App` is the state, and
 `App.View(c)` rebuilds the window from it every frame.
 
+On KDE Wayland with alpha compositing, the main and detached document
+windows request client decorations before mapping. ArcMD draws the
+rounded frame and places minimize, maximize, and close in the existing top
+chrome. The main window anchors the buttons outside animated panels so they
+stay accessible while the layout changes. Alt or F10 opens the native menu
+without a permanent menu row. Other sessions keep their existing window
+frame. Use a desktop capture to check the outer corners; in-app snapshots
+cannot show the compositor's decorations.
+
 | File | Role |
 | --- | --- |
 | `app.go` | State, first run, window options, actions (open, new, switch space, pin, trash) |
