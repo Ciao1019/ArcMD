@@ -212,3 +212,78 @@ func TestToolbarCorner(t *testing.T) {
 		t.Fatal("format menu shown over the export preview")
 	}
 }
+
+func TestCompactBlockMaxHeightSettings(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.Frame()
+
+	// Create a document containing a 30-line code block before changing settings.
+	var lines []string
+	for i := 1; i <= 30; i++ {
+		lines = append(lines, fmt.Sprintf("line_%02d()", i))
+	}
+	if err := vault.Write(root(a), "LongCode.md", "# Code\n\n```go\n"+strings.Join(lines, "\n")+"\n```\n"); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("LongCode.md")
+	tt.Frame()
+	codeBlockID := a.doc.ed.Doc.Blocks[1].ID
+	if a.doc.ed.IsCodeCompact(codeBlockID) {
+		t.Fatal("expected code block not compact before configuring CodeMaxHeight")
+	}
+
+	// Open Settings -> General and pick preset heights.
+	if err := tt.Click("更多"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("设置…"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if r, ok := tt.Find("自动保存"); ok {
+		tt.Scroll(r.X+r.W/2, r.Y+r.H/2, 0, 520)
+		tt.Frame()
+	}
+	if err := tt.Click("300"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("320"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if dir := os.Getenv("ARCMD_SNAPSHOT"); dir != "" {
+		if f, err := os.Create(filepath.Join(dir, "settings-general-compact.png")); err == nil {
+			_ = png.Encode(f, tt.Image())
+			_ = f.Close()
+		}
+	}
+	if a.prefs.CodeMaxHeight != 300 || a.prefs.ImageMaxHeight != 320 {
+		t.Fatalf("unexpected presets saved: code=%v image=%v", a.prefs.CodeMaxHeight, a.prefs.ImageMaxHeight)
+	}
+
+	// Type custom code block max height into its numeric px field and submit.
+	if err := tt.Click("代码块最大高度 (px)"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("220")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if a.prefs.CodeMaxHeight != 220 {
+		t.Fatalf("expected custom CodeMaxHeight 220 after Enter, got %v", a.prefs.CodeMaxHeight)
+	}
+
+	// Verify persistence on disk and live effect in editor.
+	reloaded, err := a.prefStore.Load()
+	if err != nil || reloaded.CodeMaxHeight != 220 || reloaded.ImageMaxHeight != 320 {
+		t.Fatalf("reloaded prefs mismatch: %+v err=%v", reloaded, err)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !a.doc.ed.IsCodeCompact(codeBlockID) {
+		t.Fatal("expected live editor code block to compact after setting CodeMaxHeight=220")
+	}
+}

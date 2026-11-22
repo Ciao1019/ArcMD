@@ -1141,9 +1141,8 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 		r.layout = cached.layout
 		_, h := cached.layout.Size()
 		h = max(h, m.font.Size*m.font.LineHeight)
-		newH := m.top + h + m.bottom
+		newH := e.applyCodeCompact(r, m.top, m.bottom, m.gap, h)
 		r.y = origY + m.top
-		r.rect.H = newH
 		if b.Kind == "math" {
 			newH = e.mathRow(r, h)
 			r.rect.H = newH

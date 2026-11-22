@@ -30,6 +30,10 @@ type Prefs struct {
 	// CodeNoWrap disables soft wrapping in code blocks by default so long
 	// lines scroll horizontally instead.
 	CodeNoWrap bool `json:"codeNoWrap,omitempty"`
+	// CodeMaxHeight and ImageMaxHeight cap the display height (DIP) of long
+	// code blocks and images in the editor with internal scrolling; 0 means full height.
+	CodeMaxHeight  float32 `json:"codeMaxHeight,omitempty"`
+	ImageMaxHeight float32 `json:"imageMaxHeight,omitempty"`
 	// RecentCommands are the command bar's commands used last, latest
 	// first, which it lists first.
 	RecentCommands []string `json:"recentCommands,omitempty"`
@@ -180,4 +184,16 @@ func (p *Prefs) normalize() {
 	if !(p.LineHeight >= 1.2 && p.LineHeight <= 2.2) {
 		p.LineHeight = 0
 	}
+	p.CodeMaxHeight = sanitizeMaxHeight(p.CodeMaxHeight)
+	p.ImageMaxHeight = sanitizeMaxHeight(p.ImageMaxHeight)
+}
+
+func sanitizeMaxHeight(h float32) float32 {
+	if !(h > 0) {
+		return 0
+	}
+	if h > 2000 {
+		return 2000
+	}
+	return h
 }

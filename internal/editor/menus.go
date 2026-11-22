@@ -533,6 +533,15 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 						if hover(e.menuRow(c, "bm-wrap", iconWrapText, e.page.CodeText, i18n.T("自动换行"), "", !e.isCodeNoWrap(b)), "").Clicked() {
 							act(func() { e.ToggleCodeWrap(id) })()
 						}
+						if idx, ok := e.rowIDs[id]; ok && e.indexedRow(idx).codeExpandable {
+							label := i18n.T("收起代码")
+							if e.indexedRow(idx).codeCompact {
+								label = i18n.T("展开完整代码")
+							}
+							if hover(e.menuRow(c, "bm-code-expand", iconChevron, e.page.CodeText, label, "", !e.indexedRow(idx).codeCompact), "").Clicked() {
+								act(func() { e.ToggleCodeExpand(id) })()
+							}
+						}
 					}
 					menuSeparator(c)
 					for _, row := range []struct {

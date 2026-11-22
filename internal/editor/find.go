@@ -392,8 +392,9 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 			continue
 		}
 		dx, dy := e.visualOffset(r)
-		_, clipBox, _, _, scrollX, noWrap := e.codeScrollFor(r)
-		paintRowMatches := func(sx float32) {
+		_, hClipBox, _, _, scrollX, noWrap := e.codeScrollFor(r)
+		_, vClipBox, _, _, scrollY, compact := e.codeVScrollFor(r)
+		paintRowMatches := func(sx, sy float32) {
 			start := sort.Search(len(f.matches), func(i int) bool { return f.matches[i].End > r.leaf.Start })
 			for i := start; i < len(f.matches) && f.matches[i].Start < r.leaf.End+1; i++ {
 				m := f.matches[i]
@@ -405,7 +406,7 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 				}
 				for _, rect := range r.layout.SelectionRects(local) {
 					rect.X += bounds.X + r.x + dx - sx
-					rect.Y += bounds.Y + r.y + dy
+					rect.Y += bounds.Y + r.y + dy - sy
 					p.Fill(rect, color, 2.5)
 					if isCurrent && pulseU >= 0 {
 						pad := 1.5 + 4*(1-(1-pulseU)*(1-pulseU))
@@ -415,12 +416,23 @@ func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 				}
 			}
 		}
-		if noWrap {
-			p.Clip(ui.Rect{X: bounds.X + clipBox.X + dx, Y: bounds.Y + clipBox.Y + dy, W: clipBox.W, H: clipBox.H}, 0, func() {
-				paintRowMatches(scrollX)
+		if noWrap || compact {
+			var clip ui.Rect
+			switch {
+			case noWrap && compact:
+				clip = intersectRect(hClipBox, vClipBox)
+			case noWrap:
+				clip = hClipBox
+			default:
+				clip = vClipBox
+			}
+			clip.X += bounds.X + dx
+			clip.Y += bounds.Y + dy
+			p.Clip(clip, 0, func() {
+				paintRowMatches(scrollX, scrollY)
 			})
 		} else {
-			paintRowMatches(0)
+			paintRowMatches(0, 0)
 		}
 	}
 }

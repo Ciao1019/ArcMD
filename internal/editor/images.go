@@ -131,6 +131,9 @@ func (r ImageResource) frameAt(now time.Time) (*ui.Bitmap, time.Duration) {
 type imageFigure struct {
 	resource           ImageResource
 	bounds             ui.Rect
+	contentH           float32
+	compact            bool
+	expandable         bool
 	name               string
 	title, alt, reason *ui.TextLayout
 	altY, reasonY      float32
@@ -269,6 +272,14 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 			scale = min(scale, 850/float32(max(1, ih)))
 		}
 		pw, ph := float32(iw)*scale, float32(ih)*scale
+		f.contentH = ph
+		if !e.printing && e.imageMaxHeight > 0 && ph > e.imageMaxHeight {
+			f.expandable = true
+			if !e.imageExpanded[b.ID] {
+				f.compact = true
+				ph = e.imageMaxHeight
+			}
+		}
 		f.bounds = ui.Rect{X: x + (w-pw)/2, Y: y, W: pw, H: ph}
 		r.x, r.y = x, y+ph+8
 		bottom := y + ph
@@ -376,8 +387,13 @@ func (e *Editor) paintImage(p *ui.Painter, bounds ui.Rect, row row, t *ui.Theme)
 				}
 			}
 			p.Shadow(r, 8, 0, 2, 10, 0, e.page.ImageShadow)
+			barBox, viewH, contentH, scrollY, compact := e.imageVScrollFor(row)
 			p.Clip(r, 8, func() {
-				p.Image(bitmap, r, ui.Contain)
+				imgRect := r
+				if compact {
+					imgRect = ui.Rect{X: r.X, Y: r.Y - scrollY, W: r.W, H: contentH}
+				}
+				p.Image(bitmap, imgRect, ui.Contain)
 				if !e.printing && !e.reduceMotion && !f.resource.LoadedAt.IsZero() {
 					const fadeDur = 120 * time.Millisecond
 					if elapsed := p.Now().Sub(f.resource.LoadedAt); elapsed >= 0 && elapsed < fadeDur {
@@ -387,7 +403,21 @@ func (e *Editor) paintImage(p *ui.Painter, bounds ui.Rect, row row, t *ui.Theme)
 						p.AnimationFrame()
 					}
 				}
+				if compact && scrollY < contentH-viewH-1 {
+					fadeH := min(float32(36), r.H)
+					paintBottomFade(p, ui.Rect{
+						X: r.X,
+						Y: r.Y + r.H - fadeH,
+						W: r.W,
+						H: fadeH,
+					}, t.Background, 0.80)
+				}
 			})
+			if compact && (e.hovered(f.bounds, 0) || e.imageVBarDrag == row.leaf.Block.ID || scrollY > 0) {
+				barBox.X += bounds.X + dx
+				barBox.Y += bounds.Y + dy
+				p.Scrollbar(ui.Scrollbar{Box: barBox, Horizontal: false, View: viewH, Content: contentH, Offset: scrollY}, ui.ScrollbarState{Dragging: e.imageVBarDrag == row.leaf.Block.ID})
+			}
 			if !e.printing && e.imageResize.id == row.leaf.Block.ID && row.rect.W > 0 {
 				pct := max(1, min(100, int(math.Round(float64(f.bounds.W/row.rect.W*100)))))
 				txt := ui.ShapeText(fmt.Sprintf("%d%%", pct), ui.Font{Family: "system-ui", Size: 12, Weight: 600}, 0)
@@ -543,6 +573,9 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 			}
 		}
 		picture.HandleInput(func(ev ui.InputEvent) bool {
+			if e.handleImageBoxInput(id, r, ev) {
+				return true
+			}
 			if ev.Kind != ui.InputKeyDown {
 				return false
 			}
@@ -576,6 +609,13 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		}
 		picture.ContextMenu(func(m *ui.Menu) {
 			menuAction(m, i18n.T("放大查看"), open)
+			if f.expandable {
+				toggleLabel := i18n.T("展开完整图片")
+				if !f.compact {
+					toggleLabel = i18n.T("收起图片")
+				}
+				menuAction(m, toggleLabel, func() { e.ToggleImageExpand(id) })
+			}
 			if !e.ReadOnly {
 				menuAction(m, i18n.T("编辑图片说明…"), func() {
 					e.FocusBlock(id)
@@ -598,6 +638,19 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 			button.Background(e.page.Popover)
 			if button.Clicked() {
 				open()
+			}
+		}
+		if f.expandable && r.W >= 100 && r.H >= 72 {
+			toggleLabel := i18n.T("展开完整图片")
+			if !f.compact {
+				toggleLabel = i18n.T("收起图片")
+			}
+			tw, _ := ui.ShapeText(toggleLabel, ui.Font{Family: "system-ui", Size: 13}, 0).Size()
+			bw := min(r.W-16, max(float32(96), tw+28))
+			btn := e.imageButton(key.Key("expand"), toggleLabel, ui.Rect{X: r.X + (r.W-bw)/2, Y: r.Y + r.H - 36, W: bw, H: 28})
+			btn.Background(e.page.Popover.Alpha(0.92))
+			if btn.Clicked() {
+				e.ToggleImageExpand(id)
 			}
 		}
 	}
