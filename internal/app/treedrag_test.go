@@ -202,9 +202,9 @@ func TestNewDocSlidesButton(t *testing.T) {
 	}
 }
 
-// Resting the pointer on a seam between root items opens an inline "+ 新建文档"
-// slot that creates a document right at that index, and moving away closes it.
-func TestInlineNewDocSeam(t *testing.T) {
+// Resting the pointer between sidebar root items must NOT pop open an inline
+// "+ 新建文档" slot, while the bottom "+ 新建文档" button remains available.
+func TestSidebarSeamHoverDoesNotOpenInlineNewDoc(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.state.Favorites = nil
 	sp := a.state.ActiveSpace()
@@ -215,49 +215,21 @@ func TestInlineNewDocSeam(t *testing.T) {
 	tt.Advance(time.Second)
 	tt.Frame()
 
-	if got := rootNames(a); !slices.Equal(got, []string{"Journal", "Alpha.md", "Welcome.md"}) {
-		t.Fatalf("before: %v", got)
-	}
 	var alpha ui.Rect
 	for _, r := range a.rows {
 		if r.rel == "Alpha.md" {
 			alpha = r.r
 		}
 	}
-	seamX, seamY := alpha.X+40, alpha.Y+alpha.H+float32(rowGap)/2
-	tt.Move(seamX, seamY)
+	tt.Move(alpha.X+40, alpha.Y+alpha.H+float32(rowGap)/2)
+	tt.Frame()
+	tt.Advance(time.Second)
 	tt.Frame()
 	if _, ok := tt.Find("在此处新建文档"); ok {
-		t.Fatal("inline slot opened before hover delay")
+		t.Fatal("unexpected inline new-doc slot opened on seam hover")
 	}
-	tt.Advance(insertHoverDelay + 20*time.Millisecond)
-	tt.Frame()
-	if _, ok := tt.Find("在此处新建文档"); !ok {
-		t.Fatal("inline slot did not open on seam hover")
-	}
-	// Moving away collapses the inline slot without creating a document.
-	tt.Move(seamX, 20)
-	tt.Frame()
-	tt.Advance(300 * time.Millisecond)
-	tt.Frame()
-	if _, ok := tt.Find("在此处新建文档"); ok {
-		t.Fatal("inline slot stayed open after pointer left")
-	}
-
-	// Hovering the seam again and clicking inserts at that exact index.
-	tt.Move(seamX, seamY)
-	tt.Frame()
-	tt.Advance(insertHoverDelay + 20*time.Millisecond)
-	tt.Frame()
-	tt.Advance(240 * time.Millisecond)
-	tt.Frame()
-	if err := tt.Click("在此处新建文档"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	got := rootNames(a)
-	if len(got) != 4 || got[0] != "Journal" || got[1] != "Alpha.md" || got[3] != "Welcome.md" {
-		t.Fatalf("inserted at wrong index: %v", got)
+	if _, ok := tt.Find("新建文档"); !ok {
+		t.Fatal("bottom new-doc button missing")
 	}
 }
 
@@ -347,8 +319,7 @@ func TestListDragLiveSlotAndEscapeCancel(t *testing.T) {
 }
 
 // TestDragSnapshot renders a row dragged between rows, settling into its slot,
-// over a folder, over the favorites, the inline seam new-doc button, and the
-// empty favorites card, for review.
+// over a folder, over the favorites, and the empty favorites card, for review.
 func TestDragSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the drags")
 	hold := func(name string, setup func(a *App), from, to string, f float32) {
@@ -407,28 +378,4 @@ func TestDragSnapshot(t *testing.T) {
 	hold("drag-into", func(a *App) { a.state.ActiveSpace().SetExpanded("Journal", false) }, "Alpha.md", "Journal", 0.5)
 	hold("drag-favorites", nil, "Alpha.md", "favorites", 0.5)
 	hold("favorites-empty", func(a *App) { a.state.Favorites = nil }, "", "", 0)
-
-	t.Run("inline-new-doc", func(t *testing.T) {
-		a, tt := newTestApp(t)
-		tt.SetSize(900, 560)
-		a.state.Favorites = nil
-		sp := a.state.ActiveSpace()
-		sp.SetExpanded("Journal", false)
-		os.WriteFile(filepath.Join(sp.Root, "Alpha.md"), []byte("# A\n"), 0o644)
-		a.refreshTree()
-		tt.Frame()
-		tt.Advance(time.Second)
-		tt.Frame()
-		var alpha ui.Rect
-		for _, r := range a.rows {
-			if r.rel == "Alpha.md" {
-				alpha = r.r
-			}
-		}
-		tt.Move(alpha.X+40, alpha.Y+alpha.H+float32(rowGap)/2)
-		tt.Frame()
-		tt.Advance(insertHoverDelay + 250*time.Millisecond)
-		tt.Frame()
-		writePNG(t, filepath.Join(dir, "inline-new-doc.png"), tt.Image())
-	})
 }
