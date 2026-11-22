@@ -83,6 +83,7 @@ type App struct {
 
 	cfg                 Config
 	win                 *mygo.Window
+	testCaptionWindow   captionWindow
 	quitting            bool
 	hideAfterFullScreen bool
 	store               *space.Store
@@ -484,7 +485,7 @@ func (a *App) Run() error {
 			{Role: mygo.RoleWindow, Submenu: windowItems},
 		}))
 		a.watchFiles = a.watchFolder
-		a.win = mygo.NewWindow(mygo.WindowOptions{
+		a.win = newAppWindow(mygo.WindowOptions{
 			Title:                "ArcMD",
 			Width:                1240,
 			Height:               800,
@@ -494,8 +495,7 @@ func (a *App) Run() error {
 			TitleBarStyle:        mygo.TitleBarHidden,
 			TrafficLightPosition: &mygo.Point{X: 18, Y: 20},
 			Vibrancy:             mygo.VibrancySidebar,
-			Content:              a.Content(),
-		})
+		}, a.View)
 		a.win.OnLeaveFullScreen(func() {
 			if a.hideAfterFullScreen {
 				a.hideAfterFullScreen = false

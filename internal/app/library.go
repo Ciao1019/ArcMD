@@ -163,7 +163,11 @@ func (a *App) libraryWidth(window float32) float32 {
 	}
 	n := float32(len(a.state.Spaces))
 	want := libraryRail + libraryCardLead + n*libraryCardW + max(n-1, 0)*libraryCardGap + libraryPlusGap + libraryPlus + libraryTrail
-	return max(base, min(want, window-libraryPageRoom))
+	room := float32(libraryPageRoom)
+	if caption := a.captionWidth(); caption > 0 {
+		room = 8 + 30 + 2 + caption
+	}
+	return max(base, min(want, window-room))
 }
 
 // libraryInk is the library's ink: black on light chrome, white on dark,
