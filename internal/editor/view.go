@@ -183,6 +183,8 @@ type Editor struct {
 	printPageH      float32
 	mapTablePreview bool // compact cell metrics for read-only document map previews
 	mapMathPreview  bool // compact formula width (no full-column \tag stretch) in document map
+	mapListNumber   int  // explicit numbered-list ordinal for single-block document map previews
+	mapListIndent   int  // original list indent level for numbered-list marker style (1., a., i.)
 	// typewriter keeps the caret's line at the middle of the page; dim
 	// fades the blocks but the caret's, as focus mode does.
 	typewriter, dim bool
@@ -1332,6 +1334,9 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			}
 			counters[b.Indent]++
 			number = counters[b.Indent]
+			if e.mapListNumber > 0 {
+				number = e.mapListNumber
+			}
 		default:
 			counters = nil
 		}
@@ -2160,7 +2165,11 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 			p.Fill(ui.Rect{X: x - 19.75, Y: cy - 2.5, W: 5, H: 5}, pg.Marker, 0)
 		}
 	case "numbered":
-		label := listNumber(max(1, r.number), r.leaf.Block.Indent) + "."
+		indent := r.leaf.Block.Indent
+		if e.mapListNumber > 0 {
+			indent = e.mapListIndent
+		}
+		label := listNumber(max(1, r.number), indent) + "."
 		span := ui.Span{Text: label, Size: 16, Color: pg.Marker, Features: "tnum"}
 		w, h := p.MeasureText(0, span)
 		p.RichText(x-6-w, cy-h/2, 0, span)

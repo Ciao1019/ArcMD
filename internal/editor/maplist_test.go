@@ -53,3 +53,104 @@ func TestMapListCodePlacement(t *testing.T) {
 		})
 	}
 }
+
+func TestMapNumberedListPreservesNumbers(t *testing.T) {
+	source := strings.Join([]string{
+		"# 测试",
+		"",
+		"导图的有序列表显示不正确",
+		"",
+		"1. 你好",
+		"2. 他好",
+		"   1. 子项一",
+		"   2. 子项二",
+		"3. 大家好",
+		"",
+		"中间分隔段落",
+		"",
+		"1. 第二组第一",
+		"2. 第二组第二",
+		"3. 三",
+		"4. 四",
+		"5. 五",
+		"6. 六",
+		"7. 七",
+		"8. 八",
+		"9. 九",
+		"10. 十",
+	}, "\n")
+
+	ed := New(source)
+	m := &MindMap{}
+	opts := Options{Theme: ui.LightTheme()}
+	m.sync(ed, opts)
+	for _, it := range m.items {
+		if body := m.bodies[it.ID]; body != nil {
+			body.measure(opts)
+		}
+	}
+
+	want := map[string]struct {
+		num    int
+		indent int
+	}{
+		"你好":    {1, 0},
+		"他好":    {2, 0},
+		"子项一":   {1, 1},
+		"子项二":   {2, 1},
+		"大家好":   {3, 0},
+		"第二组第一": {1, 0},
+		"第二组第二": {2, 0},
+		"十":     {10, 0},
+	}
+	seen := 0
+	for _, b := range ed.Doc.Blocks {
+		exp, ok := want[b.Text()]
+		if !ok {
+			continue
+		}
+		seen++
+		body := m.bodies[b.ID]
+		if body == nil || body.editor == nil || len(body.editor.rows) != 1 {
+			t.Fatalf("missing measured numbered body for %q: %+v", b.Text(), body)
+		}
+		gotNum := body.editor.rows[0].number
+		if gotNum != exp.num || body.editor.mapListIndent != exp.indent {
+			t.Fatalf("item %q got number=%d indent=%d, want number=%d indent=%d",
+				b.Text(), gotNum, body.editor.mapListIndent, exp.num, exp.indent)
+		}
+		if b.Text() == "十" && body.span.X > body.editor.padding {
+			t.Fatalf("multi-digit marker shifted wrong way: span.X=%v padding=%v", body.span.X, body.editor.padding)
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("checked %d items, want %d", seen, len(want))
+	}
+
+	// Removing item "1. 你好" must invalidate cached numbers and renumber "他好" -> 1, "大家好" -> 2.
+	for _, b := range ed.Doc.Blocks {
+		if b.Text() == "你好" {
+			ed.Engine.DeleteBlocks([]string{b.ID})
+			break
+		}
+	}
+	m.sync(ed, opts)
+	afterWant := map[string]int{
+		"他好":  1,
+		"大家好": 2,
+	}
+	for _, b := range ed.Doc.Blocks {
+		exp, ok := afterWant[b.Text()]
+		if !ok {
+			continue
+		}
+		body := m.bodies[b.ID]
+		if body == nil {
+			t.Fatalf("missing body after renumber for %q", b.Text())
+		}
+		body.measure(opts)
+		if got := body.editor.rows[0].number; got != exp {
+			t.Fatalf("after deletion %q got number=%d, want %d", b.Text(), got, exp)
+		}
+	}
+}

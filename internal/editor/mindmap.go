@@ -91,11 +91,12 @@ func (m *MindMap) FocusRoot() string { return m.focusRoot }
 func (m *MindMap) HeadingsOnly() bool { return m.headingsOnly }
 
 type cachedMapBlock struct {
-	stamp    runsStamp
-	metaHash uint64
-	excerpt  string
-	rich     bool
-	body     *mapBody
+	stamp      runsStamp
+	metaHash   uint64
+	listNumber int
+	excerpt    string
+	rich       bool
+	body       *mapBody
 }
 
 type mapBody struct {
@@ -111,6 +112,7 @@ type mapBody struct {
 	rawW, rawH    float32
 	fitScale      float32
 	w, h          float32
+	listNumber    int
 	clipped       bool
 	heightClipped bool
 	isCode        bool
@@ -614,6 +616,7 @@ func (b *mapBody) measure(o Options) {
 			block.Runs[j].Style.Bold = true
 		}
 	}
+	origIndent := block.Indent
 	block.Indent = 0
 	b.w = b.limit
 	if block.Kind == "table" {
@@ -622,6 +625,10 @@ func (b *mapBody) measure(o Options) {
 	ed := FromOwnedDocument(&document.Document{Blocks: []*document.Block{block}})
 	ed.mapTablePreview = block.Kind == "table"
 	ed.mapMathPreview = block.Kind == "math"
+	if block.Kind == "numbered" && b.listNumber > 0 {
+		ed.mapListNumber = b.listNumber
+		ed.mapListIndent = origIndent
+	}
 	o.Width = b.w + 92 // native page layout reserves 46 DIP on each side
 	o.FontSize = 14
 	ed.Paginate(o, 1e8)
@@ -667,9 +674,16 @@ func (b *mapBody) measure(o Options) {
 		for _, line := range r.layout.Lines() {
 			right = max(right, line.Rect.X+line.Rect.W)
 		}
+		if block.Kind == "numbered" {
+			label := listNumber(max(1, r.number), origIndent) + "."
+			lw, _ := ui.ShapeText(label, ui.Font{Family: bodyFamily(ed.fontFamily), Size: 16}, 0).Size()
+			if need := lw + 8; need > r.x-ed.padding {
+				b.span.X = r.x - need
+			}
+		}
 		b.span.Y = r.y
 		b.span.H = h
-		b.w = max(12, float32(math.Ceil(float64(r.x-ed.padding+right))))
+		b.w = max(12, float32(math.Ceil(float64(r.x-b.span.X+right))))
 	}
 	mermaidVisual := false
 	if isMermaidBlock(block) && len(ed.rows) == 1 {
@@ -928,7 +942,7 @@ func (m *MindMap) sync(e *Editor, o Options) {
 			}
 			m.title = mindmap.Item{ID: rootBlk.ID, Text: fallbackTitle}
 		} else {
-			m.title = m.buildItem(rootBlk, 0, reuse, o.Theme)
+			m.title = m.buildItem(rootBlk, 0, 0, reuse, o.Theme)
 			// The root is always visible.
 			if body := m.bodies[m.title.ID]; body != nil && body.editor == nil && body.code == nil {
 				body.measure(o)
@@ -943,8 +957,22 @@ func (m *MindMap) sync(e *Editor, o Options) {
 	}
 
 	lastVisible := m.title.ID
-	var headings, lists []int
+	var headings, lists, counters []int
 	for _, b := range doc.Blocks[start:] {
+		listNum := 0
+		switch b.Kind {
+		case "bullet", "task":
+			counters = counters[:min(len(counters), b.Indent)]
+		case "numbered":
+			counters = counters[:min(len(counters), b.Indent+1)]
+			for len(counters) <= b.Indent {
+				counters = append(counters, 0)
+			}
+			counters[b.Indent]++
+			listNum = counters[b.Indent]
+		default:
+			counters = nil
+		}
 		if shouldSkipMapBlock(b) || (m.headingsOnly && b.Kind != "heading") {
 			m.itemIndex[b.ID] = -2
 			m.ownerMap[b.ID] = lastVisible
@@ -982,7 +1010,7 @@ func (m *MindMap) sync(e *Editor, o Options) {
 			lists = nil
 		}
 		m.itemIndex[b.ID] = len(m.items)
-		m.items = append(m.items, m.buildItem(b, depth, reuse, o.Theme))
+		m.items = append(m.items, m.buildItem(b, depth, listNum, reuse, o.Theme))
 		lastVisible = b.ID
 		if b.Kind == "heading" {
 			headings = append(headings, b.Level)
@@ -1010,7 +1038,7 @@ func (m *MindMap) tryIncrementalUpdate(blk *document.Block, idx int, reuse bool,
 		if emptyNow {
 			return true
 		}
-		m.title = m.buildItem(blk, 0, reuse, o.Theme)
+		m.title = m.buildItem(blk, 0, 0, reuse, o.Theme)
 		if body := m.bodies[m.title.ID]; body != nil && body.editor == nil && body.code == nil {
 			body.measure(o)
 			m.title.Width, m.title.Height = body.w, body.h
@@ -1021,7 +1049,11 @@ func (m *MindMap) tryIncrementalUpdate(blk *document.Block, idx int, reuse bool,
 		return false
 	}
 	depth := m.items[idx].Depth
-	item := m.buildItem(blk, depth, reuse, o.Theme)
+	listNum := 0
+	if entry := m.cache[blk.ID]; entry != nil {
+		listNum = entry.listNumber
+	}
+	item := m.buildItem(blk, depth, listNum, reuse, o.Theme)
 	if body := m.bodies[blk.ID]; body != nil {
 		body.measure(o)
 		item.Width, item.Height = body.w, body.h
@@ -1060,8 +1092,11 @@ func restoredListHints(doc *document.Document) map[string]document.ListPlacement
 	return hints
 }
 
-func (m *MindMap) buildItem(b *document.Block, depth int, reuse bool, t *ui.Theme) mindmap.Item {
+func (m *MindMap) buildItem(b *document.Block, depth int, listNumber int, reuse bool, t *ui.Theme) mindmap.Item {
 	st, mh := blockStamp(b)
+	if b != nil && b.Kind == "numbered" {
+		mh = fnvMixUint64(mh, uint64(listNumber))
+	}
 	entry := m.cache[b.ID]
 	unchanged := entry != nil && entry.stamp == st && entry.metaHash == mh
 	var excerpt string
@@ -1081,7 +1116,7 @@ func (m *MindMap) buildItem(b *document.Block, depth int, reuse bool, t *ui.Them
 			entry = &cachedMapBlock{}
 			m.cache[b.ID] = entry
 		}
-		entry.stamp, entry.metaHash = st, mh
+		entry.stamp, entry.metaHash, entry.listNumber = st, mh, listNumber
 		entry.excerpt, entry.rich = excerpt, rich
 		entry.body = nil
 	}
@@ -1104,6 +1139,7 @@ func (m *MindMap) buildItem(b *document.Block, depth int, reuse bool, t *ui.Them
 		entry.body = body
 	}
 	body.source = b
+	body.listNumber = listNumber
 	item.CodeBlock = b.Kind == "code" && b.Language != "mermaid" && !isWhiteboardBlock(b)
 	m.bodies[b.ID] = body
 	item.Image = b.Kind == "image" || b.Kind == "image_ref"
