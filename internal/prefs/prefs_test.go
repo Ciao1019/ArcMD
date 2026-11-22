@@ -78,3 +78,23 @@ func TestLoadUnknownAIProtocol(t *testing.T) {
 		t.Fatalf("loaded %+v, %v", p, err)
 	}
 }
+
+func TestMaxHeightNormalizeAndRoundTrip(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	p := &Prefs{CodeMaxHeight: 360, ImageMaxHeight: 480}
+	if err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Load()
+	if err != nil || got.CodeMaxHeight != 360 || got.ImageMaxHeight != 480 {
+		t.Fatalf("roundtrip = %+v, err=%v", got, err)
+	}
+
+	if err := os.WriteFile(s.Path, []byte(`{"version":1,"codeMaxHeight":-50,"imageMaxHeight":9999}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sanitized, err := s.Load()
+	if err != nil || sanitized.CodeMaxHeight != 0 || sanitized.ImageMaxHeight != 2000 {
+		t.Fatalf("sanitized = %+v, err=%v", sanitized, err)
+	}
+}

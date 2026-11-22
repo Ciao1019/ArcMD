@@ -204,6 +204,8 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		NoAutoPair:            a.prefs.NoAutoPair,
 		AutoSpace:             a.prefs.AutoSpace,
 		CodeNoWrap:            a.prefs.CodeNoWrap,
+		CodeMaxHeight:         a.prefs.CodeMaxHeight,
+		ImageMaxHeight:        a.prefs.ImageMaxHeight,
 		EmojiSuggest:          suggestEmoji,
 		Resizing:              a.splitResizing || a.qa.resizing || a.dockSliding,
 		Width:                 width,

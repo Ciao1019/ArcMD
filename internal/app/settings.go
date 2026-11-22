@@ -2,7 +2,10 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/prefs"
@@ -236,8 +239,111 @@ func (a *App) settingsGeneral(c *ui.Context) {
 			a.prefs.CodeNoWrap = !codeWrap
 			a.savePrefs()
 		}
+		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
+		a.compactHeightRow(c, "code-max-h", i18n.T("代码块最大高度"), i18n.T("超出高度时折叠并支持块内滚动，可随时展开完整代码。"),
+			[]float32{0, 300, 480, 640}, &a.prefs.CodeMaxHeight, &a.codeMaxHBuf, &a.codeMaxHSynced)
+		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
+		a.compactHeightRow(c, "image-max-h", i18n.T("图片最大高度"), i18n.T("超出高度时折叠并支持块内滚动，可随时展开完整图片。"),
+			[]float32{0, 320, 480, 640}, &a.prefs.ImageMaxHeight, &a.imageMaxHBuf, &a.imageMaxHSynced)
 	})
 	a.settingsUpdates(c)
+}
+
+func formatHeightSetting(h float32) string {
+	if !(h > 0) {
+		return ""
+	}
+	return strconv.Itoa(int(math.Round(float64(h))))
+}
+
+func (a *App) compactHeightRow(c *ui.Context, key, label, note string, presets []float32, current *float32, buf *string, synced *float32) {
+	t := c.Theme()
+	formatted := formatHeightSetting(*current)
+	if *synced != *current || (*synced == 0 && *current > 0 && *buf == "") {
+		*buf = formatted
+		*synced = *current
+	}
+
+	at := len(presets) // custom
+	for i, p := range presets {
+		if *current == p {
+			at = i
+			break
+		}
+	}
+	segLabels := make([]string, 0, len(presets)+1)
+	for _, p := range presets {
+		if p == 0 {
+			segLabels = append(segLabels, i18n.T("完整"))
+		} else {
+			segLabels = append(segLabels, strconv.Itoa(int(p)))
+		}
+	}
+	segLabels = append(segLabels, i18n.T("自定义"))
+
+	ui.Column(c.Key(key)).Padding(10, 12).Gap(8).Children(func() {
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, label)
+				ui.Text(c, note).FontSize(12).TextColor(t.TextMuted)
+			})
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+				inp := ui.TextInput(c.Key("input"), buf).Width(64).Placeholder("0").Label(label + " (px)")
+				ui.Text(c, "px").FontSize(12).TextColor(t.TextMuted)
+				commit := func() {
+					raw := strings.TrimSpace(*buf)
+					var next float32
+					if raw != "" {
+						v, err := strconv.Atoi(raw)
+						if err != nil {
+							*buf = formatHeightSetting(*current)
+							return
+						}
+						if v <= 0 {
+							next = 0
+						} else {
+							if v < 120 {
+								v = 120
+							}
+							if v > 2000 {
+								v = 2000
+							}
+							next = float32(v)
+						}
+					}
+					*buf = formatHeightSetting(next)
+					*synced = next
+					if next != *current {
+						*current = next
+						a.savePrefs()
+					}
+				}
+				if inp.Submitted() {
+					commit()
+				} else if !inp.Focused() && strings.TrimSpace(*buf) != formatted {
+					commit()
+				}
+			})
+		})
+		before := at
+		ui.Segmented(c.Key("choice"), &at, segLabels...).Label(label)
+		if at != before {
+			var next float32
+			if at < len(presets) {
+				next = presets[at]
+			} else {
+				if *current > 0 {
+					next = *current
+				} else {
+					next = 400
+				}
+			}
+			*current = next
+			*buf = formatHeightSetting(next)
+			*synced = next
+			a.savePrefs()
+		}
+	})
 }
 
 // settingsAppearance is how pages read: the body's typeface, the width

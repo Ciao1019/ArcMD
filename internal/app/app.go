@@ -208,8 +208,12 @@ type App struct {
 	library   library
 	spaceForm spaceForm
 	// settingsOpen shows the settings window on settingsTab.
-	settingsOpen bool
-	settingsTab  string
+	settingsOpen    bool
+	settingsTab     string
+	codeMaxHBuf     string
+	imageMaxHBuf    string
+	codeMaxHSynced  float32
+	imageMaxHSynced float32
 	// look is the window's look this frame, the two spaces either side
 	// mixed while paging; docTheme the system's theme the document's card
 	// keeps. paperDark is the active space's light or dark, which the

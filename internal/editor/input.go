@@ -18,6 +18,9 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 	if e.handleCodeScrollInput(ev) {
 		return true
 	}
+	if e.handleCompactScrollInput(ev) {
+		return true
+	}
 	if e.structuralPointer(ev) {
 		return true
 	}

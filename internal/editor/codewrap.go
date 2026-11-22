@@ -71,7 +71,11 @@ func (e *Editor) codeScrollFor(r row) (barBox ui.Rect, clipBox ui.Rect, availW, 
 	if e.codeScrollX != nil {
 		scrollX = min(max(0, e.codeScrollX[b.ID]), maxScroll)
 	}
-	barBox = ui.Rect{X: r.x, Y: r.rect.Y + 40, W: availW, H: max(20, r.rect.H-8-40)}
+	barH := max(20, r.rect.H-8-40)
+	if r.codeExpandable {
+		barH = max(20, r.codeViewH+22)
+	}
+	barBox = ui.Rect{X: r.x, Y: r.rect.Y + 40, W: availW, H: barH}
 	clipBox = ui.Rect{X: r.x - 2, Y: r.rect.Y, W: availW + 4, H: r.rect.H}
 	return barBox, clipBox, availW, contentW, scrollX, true
 }
