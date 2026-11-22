@@ -125,7 +125,7 @@ func (a *App) focusView(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c.Key("focus")).Grow(1).MinWidth(0).Padding(0, 8, 8, 8).Children(func() {
 		bar := c.TitleBar()
-		top := ui.Row(c.Key("focus-bar")).Height(max(bar.Height, 36)).Padding(0, bar.Right+a.captionWidth(), 0, bar.Left).AlignItems(ui.Center).DragWindow()
+		top := ui.Row(c.Key("focus-bar")).Height(max(bar.Height, 36)).Padding(0, bar.Right+a.captionWidth(), 0, bar.Left).Gap(2).AlignItems(ui.Center).DragWindow()
 		_, py, inside := c.Root().PointerPosition()
 		show := inside && py < 60
 		top.Children(func() {
@@ -135,6 +135,10 @@ func (a *App) focusView(c *ui.Context) {
 				words.Opacity(words.Animate("shown", b2f(show), 150*time.Millisecond))
 			}
 			ui.Spacer(c)
+			if a.canAdjustPageWidth(a.doc) {
+				pw := a.pageWidthButton(c, a.doc)
+				pw.Opacity(pw.Animate("shown", b2f(show || pw.Focused()), 150*time.Millisecond))
+			}
 			exit := iconButton(c, "focus-exit", iconMinimize, i18n.T("退出专注模式"), a.withKey(i18n.T("退出专注模式"), "focus"), false)
 			exit.Opacity(exit.Animate("shown", b2f(show || exit.Focused()), 150*time.Millisecond))
 			if exit.Clicked() {
@@ -201,6 +205,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		FontFamily:            a.prefs.BodyFamily(),
 		DocTitle:              docTitle,
 		Column:                a.prefs.Column(),
+		FullWidth:             a.prefs.FullWidth(),
 		NoAutoPair:            a.prefs.NoAutoPair,
 		AutoSpace:             a.prefs.AutoSpace,
 		CodeNoWrap:            a.prefs.CodeNoWrap,

@@ -49,6 +49,8 @@ type motionState struct {
 	at         time.Time
 	doc        *document.Document
 	width      float32
+	padding    float32
+	bodyWidth  float32
 	resizing   bool
 	ready      bool
 	moving     bool
@@ -116,8 +118,10 @@ func (e *Editor) visibleDecRange(fn func(int)) {
 	}
 }
 
-// reset clears transient offsets when switching documents, printing, or resizing.
-func (m *motionState) reset(doc *document.Document, width float32, now time.Time) {
+// reset clears transient offsets when switching documents, printing, resizing,
+// or changing page column width.
+func (m *motionState) reset(doc *document.Document, width, padding, bodyWidth float32, now time.Time) {
+	m.caret = caretGlide{}
 	clear(m.blocks)
 	clear(m.indents)
 	clear(m.tableRows)
@@ -132,6 +136,8 @@ func (m *motionState) reset(doc *document.Document, width float32, now time.Time
 	m.wasDim = false
 	m.doc = doc
 	m.width = width
+	m.padding = padding
+	m.bodyWidth = bodyWidth
 	m.at = now
 	m.moving = false
 }
@@ -156,9 +162,10 @@ func (e *Editor) updateMotion(now time.Time, o Options) {
 	hs, he := e.visibleHandleRange(winTop, winBottom)
 	fs, fe := e.visibleFoldRange(winTop, winBottom)
 	resizing := o.Resizing || e.resizePending
-	if e.printing || e.reduceMotion || !m.ready || m.doc != e.Doc || m.width != e.width || resizing || m.resizing {
+	bodyW := e.bodyWidth()
+	if e.printing || e.reduceMotion || !m.ready || m.doc != e.Doc || m.width != e.width || m.padding != e.padding || m.bodyWidth != bodyW || resizing || m.resizing {
 		e.unfoldPending = false
-		m.reset(e.Doc, e.width, now)
+		m.reset(e.Doc, e.width, e.padding, bodyW, now)
 		m.resizing = resizing
 		m.ready = true
 		for hi := hs; hi < he; hi++ {

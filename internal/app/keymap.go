@@ -56,6 +56,7 @@ var bindings = []binding{
 	{id: "save", label: "立即保存", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyS)}},
 	{id: "outline", label: "展开/收起目录", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyO)}},
 	{id: "mindmap", label: "思维导图", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyM)}},
+	{id: "full-width", label: "切换全宽显示", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyP)}},
 	{id: "bookmark", label: "添加/移除书签", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyD)}},
 	{id: "bookmarks", label: "书签列表", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyD)}},
 	{id: "prev-bookmark", label: "上一个书签", defaults: []editor.Combo{combo(ctrlCmd(), ui.KeyUp)}},

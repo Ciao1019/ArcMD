@@ -77,6 +77,7 @@ func (a *App) moreMenu(c *ui.Context) {
 		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || isPDF || d.source).Chosen() {
 			a.toggleDocumentMap(d)
 		}
+		m.Submenu(i18n.T("页面宽度"), a.pageWidthMenu).Disabled(noDoc || wb || isPDF || d.source)
 		if m.Item(i18n.T("打印…")).Disabled(noDoc).Chosen() {
 			a.printDoc()
 		}
@@ -372,7 +373,7 @@ func (a *App) settingsAppearance(c *ui.Context) {
 		}
 		language()
 		sep()
-		choice := func(key, label string, values []string, names []string, current *string) {
+		choice := func(key, label string, values []string, names []string, current *string, set func(string)) {
 			at := 0
 			for i, v := range values {
 				if v == *current {
@@ -384,14 +385,18 @@ func (a *App) settingsAppearance(c *ui.Context) {
 				before := at
 				ui.Segmented(c.Key("choice"), &at, names...).Label(label)
 				if at != before {
-					*current = values[at]
-					a.savePrefs()
+					if set != nil {
+						set(values[at])
+					} else {
+						*current = values[at]
+						a.savePrefs()
+					}
 				}
 			})
 		}
-		choice("font", i18n.T("正文字体"), prefs.Fonts, []string{i18n.T("系统"), i18n.T("衬线"), i18n.T("楷体"), i18n.T("等宽")}, &a.prefs.Font)
+		choice("font", i18n.T("正文字体"), prefs.Fonts, []string{i18n.T("系统"), i18n.T("衬线"), i18n.T("楷体"), i18n.T("等宽")}, &a.prefs.Font, nil)
 		sep()
-		choice("page", i18n.T("页面宽度"), prefs.Pages, []string{i18n.T("窄"), i18n.T("标准"), i18n.T("宽")}, &a.prefs.Page)
+		choice("page", i18n.T("页面宽度"), prefs.Pages, []string{i18n.T("窄"), i18n.T("标准"), i18n.T("宽"), i18n.T("全宽")}, &a.prefs.Page, a.setPageWidth)
 		sep()
 		for _, item := range []struct {
 			label string
@@ -434,6 +439,7 @@ func (a *App) settingsAppearance(c *ui.Context) {
 	})
 	if ui.Button(c.Key("appearance-reset"), i18n.T("恢复默认外观")).AlignSelf(ui.Start).Clicked() {
 		a.prefs.FontSize, a.prefs.LineHeight, a.prefs.Font, a.prefs.Page = 0, 0, "", ""
+		a.pageWidthBeforeFull = ""
 		a.savePrefs()
 	}
 }

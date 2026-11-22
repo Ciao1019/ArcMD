@@ -170,6 +170,9 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 	if a.pressed(c, "save") {
 		a.withDocument(d, func() { a.flushCurrent() })
 	}
+	if a.pressed(c, "full-width") && a.canAdjustPageWidth(d) {
+		a.withDocument(d, a.toggleFullWidth)
+	}
 	bar := c.TitleBar()
 	ui.Column(c.Key("window-doc")).Fill().Children(func() {
 		top := ui.Row(c.Key("window-bar")).Height(max(44, bar.Height)).PaddingX(12).Gap(8).AlignItems(ui.Center).DragWindow()
