@@ -271,7 +271,7 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 			// fixed height limit, so tall screenshots remain readable.
 			scale = min(scale, 850/float32(max(1, ih)))
 		}
-		pw, ph := float32(iw)*scale, float32(ih)*scale
+		pw, ph := min(w, float32(iw)*scale), float32(ih)*scale
 		f.contentH = ph
 		if !e.printing && e.imageMaxHeight > 0 && ph > e.imageMaxHeight {
 			f.expandable = true
@@ -489,7 +489,7 @@ func (e *Editor) paintFileDropPreview(p *ui.Painter, bounds ui.Rect, t *ui.Theme
 		return
 	}
 	y := bounds.Y + e.fileOver - 4
-	slot := ui.Rect{X: bounds.X + e.padding, Y: y - 14, W: max(48, e.width-2*e.padding), H: 28}
+	slot := ui.Rect{X: bounds.X + e.padding, Y: y - 14, W: max(48, e.bodyWidth()), H: 28}
 	p.Fill(slot, t.Accent.Alpha(0.06), 7)
 	p.StrokeDashed(slot, t.Accent.Alpha(0.65), 7, 1.25)
 	hint := ui.ShapeText(i18n.T("松手插入图片"), ui.Font{Family: "system-ui", Size: 12, Weight: 500}, 0)

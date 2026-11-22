@@ -69,7 +69,7 @@ func (e *Editor) starter(c *ui.Context) {
 	}
 	t := c.Theme()
 	top := e.contentEnd + 16
-	ui.Column(c.Key("starter")).Absolute().Left(e.padding).Top(top).Width(e.width - 2*e.padding).Gap(12).Children(func() {
+	ui.Column(c.Key("starter")).Absolute().Left(e.padding).Top(top).Width(e.bodyWidth()).Gap(12).Children(func() {
 		ui.Text(c, i18n.T("快速开始")).FontSize(13).TextColor(e.page.Caption)
 		ui.Row(c).Gap(8).Wrap().Children(func() {
 			for _, it := range e.starterItems() {

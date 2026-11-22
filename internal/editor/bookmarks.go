@@ -220,7 +220,7 @@ func (e *Editor) blockSpan(id string) (ui.Rect, bool) {
 		if j+1 < len(e.handles) {
 			bottom = e.indexedHandle(j + 1).top
 		}
-		bx, bw := e.padding, e.width-2*e.padding
+		bx, bw := e.padding, e.bodyWidth()
 		if d, ok := e.tableDecoration(id); ok {
 			bx = min(bx, d.rect.X)
 			bw = max(bw, d.rect.W)
@@ -283,7 +283,7 @@ func (e *Editor) bookmarkMarks(c *ui.Context) {
 		return
 	}
 	t := c.Theme()
-	x := e.width - e.padding + 12
+	x := e.width - e.rightPadding + 12
 	ghost := ""
 	winTop := e.Scroll.Y - 1200
 	winBottom := e.Scroll.Y + max(e.viewport, 900) + 64
