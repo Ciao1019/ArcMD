@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.7
+
+本版本紧急修复了 **macOS 空间内含损坏/异常 PDF 时启动后闪退及 PDF 解析器并发竞态问题**（[#57](https://github.com/Ciao1019/ArcMD/issues/57)、[#60](https://github.com/Ciao1019/ArcMD/pull/60)）与 **输入 `/` 后粘贴或无匹配结果时方向键失效的问题**（[#58](https://github.com/Ciao1019/ArcMD/pull/58)），同时新增 **飞书 / Notion 风格全宽页面模式与右上角页面宽度快速切换按钮**（[#41](https://github.com/Ciao1019/ArcMD/issues/41)、[#59](https://github.com/Ciao1019/ArcMD/pull/59)，感谢 `@tajiaoyezi`），并为 **Linux KDE Wayland 将窗口控制按钮融合进顶部工具栏**（[#56](https://github.com/Ciao1019/ArcMD/pull/56)，感谢 `@Lyrecoul`）。
+
+### 新功能与桌面体验
+
+- **全宽页面模式与右上角页面宽度切换（`internal/prefs`、`internal/editor/view.go`、`internal/app/pagewidth.go`）**：支持在文档右上角工具栏、专注模式顶栏、「⋯」更多菜单、「设置 › 外观」、命令栏与快捷键 `⌥⌘P`（Windows / Linux `Ctrl+Alt+P`）一键切换「窄（680）/ 标准（820）/ 较宽（1040）/ 全宽（铺满视口）」，全宽模式下自动保留左侧块手柄安全留白并避让大纲按钮，再次按下 `⌥⌘P` 自动恢复进入全宽前的栏宽（[#41](https://github.com/Ciao1019/ArcMD/issues/41)、[#59](https://github.com/Ciao1019/ArcMD/pull/59)，感谢 `@tajiaoyezi`）。
+- **KDE Wayland 窗口控制按钮融合进工具栏（`internal/app/windowframe_linux.go`、`internal/app/windowbuttons.go`）**：在支持透明合成的 KDE Wayland 会话下启用客户端圆角边框，将最小化、最大化/还原与关闭按钮直接嵌入主窗口与独立文档窗口的顶部工具栏右侧（问答面板展开、分屏与窄窗下均保持可达，全屏自动隐藏，`Alt`/`F10` 唤出原生菜单），省去额外的系统标题栏，不影响 macOS、Windows 与其他 Linux 会话（[#56](https://github.com/Ciao1019/ArcMD/pull/56)，感谢 `@Lyrecoul`）。
+
+### 关键修复
+
+- **修复 macOS 空间内含损坏/异常 PDF 时启动闪退及解析器并发竞态（`internal/pdfdoc`）**：修复 `render_darwin.go` 打开失败或 0 页 PDF 时返回带类型的 `nil` 接口导致后台搜索索引及打开 PDF 时触发 `SIGSEGV` 空指针闪退的问题；为纯 Go `rawPDF` 解析缓存增加互斥锁消除并发读写 `map` 竞态，并加固内容流/CMap 孤立分隔符游标推进与交叉引用表边界防护（[#57](https://github.com/Ciao1019/ArcMD/issues/57)、[#60](https://github.com/Ciao1019/ArcMD/pull/60)）。
+- **修复斜杠菜单与补全浮层拦截方向键的问题（`internal/editor/input.go`、`internal/editor/tools.go`）**：输入 `/` 后粘贴文本时立即关闭斜杠菜单；当 `/`、`[[`、`:`、`@` 过滤无匹配结果时放行上下左右与回车键，且在单列过滤列表中保留 `←` / `→` 移动查询光标（[#58](https://github.com/Ciao1019/ArcMD/pull/58)）。
+
+### 贡献者
+
+- 特别感谢 **`@tajiaoyezi`**（[#59](https://github.com/Ciao1019/ArcMD/pull/59)）与 **`@Lyrecoul`**（[#56](https://github.com/Ciao1019/ArcMD/pull/56)）对本版本的贡献！
+
+### 下载说明
+
+提供 macOS（Apple Silicon / Intel）、Windows x64 与 Linux（x64 / ARM64）原生安装包，可使用 `SHA256SUMS.txt` 校验完整性，已安装版本支持应用内签名自动更新。官方插件可在应用「设置 › 插件」按需从 [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) 下载或更新。
+
 ## 0.2.6
 
 本版本新增 **原生零 CGO PDF 阅读器与文档内嵌 PDF 块、思维导图编辑与右键菜单、外部 `.md`/`.pdf` 拖拽导入**（[#36](https://github.com/Ciao1019/ArcMD/issues/36)、[#40](https://github.com/Ciao1019/ArcMD/issues/40)、[#44](https://github.com/Ciao1019/ArcMD/pull/44)），将官方扩展拆分为 **独立远程插件市场与图床自动上传**（[`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins)，[#45](https://github.com/Ciao1019/ArcMD/pull/45)），新增 **长代码块与长图片紧凑高度折叠与块内滚动**（[#43](https://github.com/Ciao1019/ArcMD/issues/43)、[#46](https://github.com/Ciao1019/ArcMD/pull/46)），并为 **独立 HTML 导出补齐代码语法高亮与 Mermaid 内联矢量 SVG**（[#51](https://github.com/Ciao1019/ArcMD/issues/51)、[#52](https://github.com/Ciao1019/ArcMD/pull/52)，感谢 `@NeverKnowsTomorrow`）；同时集中修复了侧栏误触、正文左侧 `+` 按钮裁切、白板画笔连续绘制与思维导图有序列表编号等多项体验问题（[#42](https://github.com/Ciao1019/ArcMD/issues/42)、[#47](https://github.com/Ciao1019/ArcMD/pull/47)、[#48](https://github.com/Ciao1019/ArcMD/pull/48)、[#49](https://github.com/Ciao1019/ArcMD/pull/49)、[#50](https://github.com/Ciao1019/ArcMD/pull/50)）。
