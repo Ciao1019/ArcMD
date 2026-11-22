@@ -1037,3 +1037,81 @@ func TestBoardEditInsideLibraryComponentGroup(t *testing.T) {
 	tt.Advance(200 * time.Millisecond)
 	_ = outside
 }
+
+func TestBoardFreedrawContinuousWithoutSelectionBox(t *testing.T) {
+	scene := whiteboard.NewScene()
+	rect := whiteboard.NewElement(whiteboard.KindRectangle, 80, 80, 120, 70)
+	rect.ID = "existing-rect"
+	scene.Elements = append(scene.Elements, rect)
+
+	board := NewBoard(scene)
+	board.Selected = map[string]bool{rect.ID: true}
+	tt := ui.NewTester(func(c *ui.Context) {
+		BoardView(c, board, BoardOptions{Theme: c.Theme()})
+	}, 960, 640)
+	board.RequestFocus = true
+	tt.Frame()
+	tt.Frame()
+
+	// Switching to Freedraw clears prior selection and stays unlocked.
+	tt.Key(0, ui.KeyP)
+	tt.Frame()
+	if board.Tool != ToolFreedraw || board.ToolLocked {
+		t.Fatalf("expected unlocked ToolFreedraw after pressing P, tool=%v locked=%v", board.Tool, board.ToolLocked)
+	}
+	if len(board.Selected) != 0 {
+		t.Fatalf("expected switching to ToolFreedraw to clear selection, got %+v", board.Selected)
+	}
+
+	// First stroke: neither mid-drag nor release selects the stroke, and tool remains ToolFreedraw.
+	sx0, sy0 := board.sceneToScreen(board.lastRect, 260, 220)
+	sx1, sy1 := board.sceneToScreen(board.lastRect, 360, 220)
+	tt.Press(sx0, sy0)
+	tt.Frame()
+	tt.Move(sx1, sy1)
+	tt.Frame()
+	if board.dragMode != dragCreate || len(board.Selected) != 0 {
+		t.Fatalf("expected freedraw dragCreate with no selection box, dragMode=%v selected=%+v", board.dragMode, board.Selected)
+	}
+	tt.Release(sx1, sy1)
+	tt.Frame()
+	if board.Tool != ToolFreedraw {
+		t.Fatalf("expected ToolFreedraw to remain active after first stroke when unlocked, got %v", board.Tool)
+	}
+	if len(board.Selected) != 0 {
+		t.Fatalf("expected no selection box after freedraw stroke, got %+v", board.Selected)
+	}
+	if len(board.Scene.Elements) != 2 || board.Scene.Elements[1].Kind != whiteboard.KindFreedraw {
+		t.Fatalf("expected first freedraw stroke added, got %+v", board.Scene.Elements)
+	}
+	stroke1 := board.Scene.Elements[1]
+
+	// Second stroke directly without re-selecting tool or locking Q.
+	sx2, sy2 := board.sceneToScreen(board.lastRect, 260, 320)
+	sx3, sy3 := board.sceneToScreen(board.lastRect, 380, 360)
+	tt.Press(sx2, sy2)
+	tt.Frame()
+	tt.Move(sx3, sy3)
+	tt.Frame()
+	tt.Release(sx3, sy3)
+	tt.Frame()
+	if board.Tool != ToolFreedraw || len(board.Selected) != 0 {
+		t.Fatalf("expected continuous freedraw with no selection after 2nd stroke, tool=%v selected=%+v", board.Tool, board.Selected)
+	}
+	if len(board.Scene.Elements) != 3 || board.Scene.Elements[2].Kind != whiteboard.KindFreedraw {
+		t.Fatalf("expected second freedraw stroke added continuously, got %+v", board.Scene.Elements)
+	}
+
+	// Esc exits back to ToolSelect, where clicking stroke1 selects it and shows its edit box.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if board.Tool != ToolSelect {
+		t.Fatalf("expected Esc to return to ToolSelect, got %v", board.Tool)
+	}
+	cx, cy := board.sceneToScreen(board.lastRect, 310, 220)
+	tt.ClickAt(cx, cy)
+	tt.Frame()
+	if len(board.Selected) != 1 || !board.Selected[stroke1.ID] {
+		t.Fatalf("expected clicking stroke1 in ToolSelect to select it, got %+v", board.Selected)
+	}
+}

@@ -1170,7 +1170,7 @@ func (b *Board) paintOverlay(p *ui.Painter, rect ui.Rect, wb WhiteboardStyle, t 
 
 	// Selection boxes, resize handles, and quick-connect ports.
 	sel := b.selectedList()
-	if !b.ReadOnly && len(sel) > 0 {
+	if !b.ReadOnly && b.Tool != ToolFreedraw && len(sel) > 0 {
 		memberAlpha := float32(0.82)
 		memberStroke := float32(1.25)
 		if len(sel) >= 2 {

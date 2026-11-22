@@ -257,6 +257,9 @@ func (b *Board) floatingToolIsland(c *ui.Context, wb WhiteboardStyle, o BoardOpt
 				btn := b.islandIconBtn(c, "tool-"+def.key, def.icon, i18n.T(def.label)+" ("+def.key+")", active, wb, t)
 				if btn.Clicked() {
 					b.Tool = def.tool
+					if def.tool == ToolFreedraw {
+						b.Selected = map[string]bool{}
+					}
 					b.shapesPopoverOpen = false
 					b.RequestFocus = true
 				}
@@ -966,6 +969,7 @@ func (b *Board) handleKeyDown(ev ui.InputEvent, readClip func() string, writeCli
 		return true
 	case ui.KeyP, ui.Key7:
 		b.Tool = ToolFreedraw
+		b.Selected = map[string]bool{}
 		b.shapesPopoverOpen = false
 		return true
 	case ui.KeyT, ui.Key8:
@@ -1107,7 +1111,11 @@ func (b *Board) startBoundArrowCreate(el *whiteboard.Element, sx, sy, startX, st
 	}
 	b.Scene.Elements = append(b.Scene.Elements, el)
 	b.creatingID = el.ID
-	b.Selected = map[string]bool{el.ID: true}
+	if el.Kind == whiteboard.KindFreedraw {
+		b.Selected = map[string]bool{}
+	} else {
+		b.Selected = map[string]bool{el.ID: true}
+	}
 	b.dragMode = dragCreate
 	b.dragStartScene = [2]float32{startX, startY}
 	b.dragLastScene = [2]float32{sx, sy}
@@ -1656,7 +1664,7 @@ func (b *Board) handlePointerUp(ev ui.InputEvent, o BoardOptions) bool {
 		if el != nil && el.Kind == whiteboard.KindNote && !b.dragMoved {
 			b.startTextEdit(el)
 		}
-		if !b.ToolLocked {
+		if !b.ToolLocked && (el == nil || el.Kind != whiteboard.KindFreedraw) {
 			b.Tool = ToolSelect
 		}
 		return true
