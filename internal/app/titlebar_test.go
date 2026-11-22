@@ -74,6 +74,56 @@ func TestTitleBarControlsStayClear(t *testing.T) {
 	}
 }
 
+type testCaption struct {
+	fullscreen, maximized bool
+	minimized, closed     int
+}
+
+func (w *testCaption) IsFullScreen() bool { return w.fullscreen }
+func (w *testCaption) IsMaximized() bool  { return w.maximized }
+func (w *testCaption) Minimize()          { w.minimized++ }
+func (w *testCaption) ToggleMaximize()    { w.maximized = !w.maximized }
+func (w *testCaption) Close()             { w.closed++ }
+
+func TestClientCaptionStaysReachable(t *testing.T) {
+	a, tt := titleBarTestApp(t, "split", 640, ui.TitleBar{})
+	w := &testCaption{}
+	a.testCaptionWindow = w
+	click := func(label string) {
+		t.Helper()
+		r, ok := tt.Find(label)
+		if !ok || r.W < 30 || r.X < 0 || r.X+r.W > 640 || r.Y+r.H > 46 {
+			t.Fatalf("%q outside visible caption area: %+v", label, r)
+		}
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tt.Frame()
+	click("最大化窗口")
+	click("还原窗口")
+	if w.maximized {
+		t.Fatal("restore did not leave maximized mode")
+	}
+	a.openLibrary(libSpaces)
+	settle(tt)
+	a.qa.open = true
+	tt.Frame()
+	tt.Advance(50 * time.Millisecond)
+	tt.Frame()
+	click("最小化窗口")
+	settle(tt)
+	click("关闭窗口")
+	if w.minimized != 1 || w.closed != 1 {
+		t.Fatalf("caption actions: minimize=%d, close=%d", w.minimized, w.closed)
+	}
+	w.fullscreen = true
+	tt.Frame()
+	if _, ok := tt.Find("关闭窗口"); ok {
+		t.Fatal("caption buttons remain visible in fullscreen")
+	}
+}
+
 func TestWindowsTitleBarFullscreen(t *testing.T) {
 	_, tt := titleBarTestApp(t, "folded", 1240, windowsTitleBar)
 	// Display scaling must not turn the native button reserve into pixels.

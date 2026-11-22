@@ -19,8 +19,9 @@ func (a *App) splitView(c *ui.Context) {
 	a.syncSplit()
 	s := a.split
 	bar := c.TitleBar()
+	caption := max(0, a.captionWidth()-a.qa.shown)
 	if a.folded() {
-		ui.Row(c.Key("split-window-bar")).Height(max(36, bar.Height)).Padding(0, bar.Right, 0, bar.Left+4).AlignItems(ui.Center).DragWindow().Children(func() {
+		ui.Row(c.Key("split-window-bar")).Height(max(36, bar.Height)).Padding(0, bar.Right+caption, 0, bar.Left+4).AlignItems(ui.Center).DragWindow().Children(func() {
 			if iconButton(c, "sidebar", iconSidebar, i18n.T("展开侧边栏"), a.withKey(i18n.T("展开侧边栏"), "sidebar"), false).Clicked() {
 				a.toggleSidebar()
 			}
@@ -79,7 +80,11 @@ func (a *App) splitView(c *ui.Context) {
 				})
 			}
 			pane.bounds = e.Bounds()
-			e.Children(func() { a.splitPaneView(c, s, pane, i, w) })
+			reserve := float32(0)
+			if !a.folded() && (s.vertical && i == 0 || !s.vertical && i == len(panes)-1) && caption > 0 {
+				reserve = caption
+			}
+			e.Children(func() { a.splitPaneView(c, s, pane, i, w, reserve) })
 			if a.split != s || !slices.Equal(panes, s.panes) || vertical != s.vertical {
 				return
 			}
@@ -94,7 +99,7 @@ func (a *App) splitView(c *ui.Context) {
 	})
 }
 
-func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index int, width float32) {
+func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index int, width, caption float32) {
 	t := c.Theme()
 	d := pane.doc
 	card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinWidth(0).MinHeight(0).Radius(10).Clip().
@@ -104,7 +109,7 @@ func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index
 	}
 	a.splitDropTargetFor(c, card, index)
 	card.Children(func() {
-		a.paneToolbar(c, s, pane, index, width)
+		a.paneToolbar(c, s, pane, index, width, caption)
 		if d == nil {
 			ui.Box(c).Height(1).Background(c.Theme().Border.Alpha(0.4))
 			ui.Column(c).Grow(1).MinHeight(0).Center().Padding(16).Gap(12).Children(func() {
@@ -127,7 +132,7 @@ func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index
 	})
 }
 
-func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index int, width float32) {
+func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index int, width, caption float32) {
 	d := pane.doc
 	run := func(fn func()) {
 		if a.split == s {
@@ -136,7 +141,8 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 		}
 	}
 	t := c.Theme()
-	bar := ui.Row(c.Key("pane-toolbar")).Height(36).PaddingX(5).Gap(2).MinWidth(0).AlignItems(ui.Center)
+	bar := ui.Row(c.Key("pane-toolbar")).Height(36).Padding(0, 5+caption, 0, 5).Gap(2).MinWidth(0).AlignItems(ui.Center)
+	width -= caption
 	full := s.active == index || bar.Hovered()
 	bar.Children(func() {
 		if d != nil && width >= 260 {

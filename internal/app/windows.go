@@ -92,7 +92,7 @@ func (a *App) makeWindow(title string, view func(*ui.Context), close func() bool
 	if a.newWindow != nil {
 		return a.newWindow(title, view, close)
 	}
-	win := mygo.NewWindow(mygo.WindowOptions{
+	win := newAppWindow(mygo.WindowOptions{
 		Title:                title,
 		Width:                900,
 		Height:               760,
@@ -100,8 +100,7 @@ func (a *App) makeWindow(title string, view func(*ui.Context), close func() bool
 		MinHeight:            360,
 		TitleBarStyle:        mygo.TitleBarHidden,
 		TrafficLightPosition: &mygo.Point{X: 18, Y: 18},
-		Content:              ui.View(view),
-	})
+	}, view)
 	win.OnClose(func(e *mygo.CloseEvent) {
 		if !close() {
 			e.PreventDefault()
@@ -185,6 +184,9 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 				a.backToMain(w)
 			}
 			ui.Box(c).Width(bar.Right)
+			if win, ok := w.win.(*mygo.Window); ok && hasAppWindowControls() {
+				windowButtons(c, win)
+			}
 		})
 		if d.loadErr != nil {
 			ui.Text(c, i18n.T("文档无法打开。")+d.loadErr.Error()).TextColor(t.Danger).Padding(24)
@@ -204,7 +206,9 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 	if a.unsaved.open && len(a.unsaved.docs) == 1 && a.unsaved.docs[0] == d {
 		a.unsavedPromptView(c)
 	}
-	w.win.SetTitle(docName(d.title()))
+	if w.win != nil {
+		w.win.SetTitle(docName(d.title()))
+	}
 }
 
 // inWindow reports whether d is shown in a window of its own.
