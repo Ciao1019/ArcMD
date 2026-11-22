@@ -91,15 +91,15 @@ func TestPageWidthShortcutRestoresPrevious(t *testing.T) {
 	tt.SetSize(1500, 860)
 	settle(tt)
 
-	// Starting in wide -> Cmd+Shift+\ enters full -> Cmd+Shift+\ restores wide.
+	// Starting in wide -> Cmd+Alt+P enters full -> Cmd+Alt+P restores wide.
 	a.setPageWidth("wide")
 	tt.Frame()
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "full" {
 		t.Fatalf("expected full after shortcut, got %q", a.prefs.Page)
 	}
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "wide" {
 		t.Fatalf("expected wide restored after second shortcut, got %q", a.prefs.Page)
@@ -108,12 +108,12 @@ func TestPageWidthShortcutRestoresPrevious(t *testing.T) {
 	// Starting in narrow -> full -> narrow.
 	a.setPageWidth("narrow")
 	tt.Frame()
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "full" {
 		t.Fatalf("expected full from narrow, got %q", a.prefs.Page)
 	}
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "narrow" {
 		t.Fatalf("expected narrow restored, got %q", a.prefs.Page)
@@ -123,7 +123,7 @@ func TestPageWidthShortcutRestoresPrevious(t *testing.T) {
 	a.prefs.Page = "full"
 	a.pageWidthBeforeFull = ""
 	tt.Frame()
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "" {
 		t.Fatalf("expected fallback to standard, got %q", a.prefs.Page)
@@ -213,7 +213,7 @@ func TestPageWidthMoreMenuSettingsPaletteAndFocus(t *testing.T) {
 	if _, ok := tt.Find("页面宽度"); ok {
 		t.Fatal("page width button should be hidden in source export preview")
 	}
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "" {
 		t.Fatalf("shortcut should not toggle width in source preview: %q", a.prefs.Page)
@@ -227,7 +227,7 @@ func TestPageWidthMoreMenuSettingsPaletteAndFocus(t *testing.T) {
 	if _, ok := tt.Find("页面宽度"); ok {
 		t.Fatal("page width button should be hidden for whiteboards")
 	}
-	tt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	tt.Frame()
 	if a.prefs.Page != "" {
 		t.Fatalf("shortcut should not toggle width for whiteboards: %q", a.prefs.Page)
@@ -264,12 +264,12 @@ func TestPageWidthStandaloneWindow(t *testing.T) {
 	if a.prefs.Page != "wide" {
 		t.Fatalf("standalone button Page = %q; want wide", a.prefs.Page)
 	}
-	wt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	wt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	wt.Frame()
 	if !a.prefs.FullWidth() {
 		t.Fatalf("standalone shortcut did not toggle full width: %q", a.prefs.Page)
 	}
-	wt.Key(ui.Cmd|ui.Shift, ui.KeyBackslash)
+	wt.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	wt.Frame()
 	if a.prefs.Page != "wide" {
 		t.Fatalf("standalone shortcut did not restore wide: %q", a.prefs.Page)
@@ -291,7 +291,7 @@ func TestPageWidthSnapshot(t *testing.T) {
 			"| --- | --- | --- | --- |\n" +
 			"| internal/prefs | 持久化 page 选项（narrow / standard / wide / full） | 四档无缝兼容 | 不影响旧配置 |\n" +
 			"| internal/editor | 全宽视口排版、大纲避让与块手柄安全边距 | 铺满可用编辑区域 | 保留左侧 80px 留白 |\n" +
-			"| internal/app | 右上角页面宽度按钮、更多菜单、专注顶栏与命令栏 | 较宽与全宽一键切换 | 支持 ⇧⌘\\ 快捷键 |\n",
+			"| internal/app | 右上角页面宽度按钮、更多菜单、专注顶栏与命令栏 | 较宽与全宽一键切换 | 支持 ⌥⌘P 快捷键 |\n",
 	)
 	a.setOutline(false)
 	tt.Frame()
