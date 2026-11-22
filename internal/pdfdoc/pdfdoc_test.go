@@ -212,3 +212,39 @@ func TestConcurrentRenderSearchAndClose(t *testing.T) {
 	doc.Close()
 	wg.Wait()
 }
+
+type stubPartialPlatformDoc struct{ pages int }
+
+func (s *stubPartialPlatformDoc) PageCount() int                { return s.pages }
+func (s *stubPartialPlatformDoc) PageInfo(int) (PageInfo, bool) { return PageInfo{}, false }
+func (s *stubPartialPlatformDoc) RenderPage(int, int, int, int) (*image.RGBA, error) {
+	return image.NewRGBA(image.Rect(0, 0, 10, 10)), nil
+}
+func (s *stubPartialPlatformDoc) PageText(int) (string, bool)     { return "", false }
+func (s *stubPartialPlatformDoc) Outlines() ([]OutlineItem, bool) { return nil, false }
+func (s *stubPartialPlatformDoc) Find(string) ([]Match, bool)     { return nil, false }
+func (s *stubPartialPlatformDoc) Close()                          {}
+
+func TestOpenFallbackPageInfoAndOutlines(t *testing.T) {
+	data := buildSamplePDF(t)
+	pdfPath := filepath.Join(t.TempDir(), "fallback.pdf")
+	if err := os.WriteFile(pdfPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openFileDoc(pdfPath, func(string) (platformDoc, error) {
+		return &stubPartialPlatformDoc{pages: 2}, nil
+	})
+	if err != nil {
+		t.Fatalf("openFileDoc: %v", err)
+	}
+	defer doc.Close()
+
+	info1 := doc.PageInfo(1)
+	if math.Abs(info1.Width-800) > 1 || math.Abs(info1.Height-450) > 1 {
+		t.Fatalf("expected fallback page 1 size 800x450, got %+v", info1)
+	}
+	outlines := doc.Outlines()
+	if len(outlines) != 2 || outlines[0].Title != "第一章 架构总览" || len(outlines[0].Children) != 1 || outlines[1].Page != 1 {
+		t.Fatalf("expected fallback outlines, got %+v", outlines)
+	}
+}

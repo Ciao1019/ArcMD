@@ -246,29 +246,9 @@ func openPlatformBytes(data []byte) (platformDoc, error) {
 
 func (w *winPDF) PageCount() int { return w.cnt }
 
-func (w *winPDF) PageInfo(page int) (PageInfo, bool) {
-	if page < 0 || page >= w.cnt {
-		return PageInfo{}, false
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.doc == 0 {
-		return PageInfo{}, false
-	}
-	var pageObj uintptr
-	hr, _, _ := syscall.SyscallN(comVtbl(w.doc, 6), w.doc, uintptr(page), uintptr(unsafe.Pointer(&pageObj)))
-	if int32(hr) < 0 || pageObj == 0 {
-		return PageInfo{}, false
-	}
-	defer comRelease(pageObj)
-	// IPdfPage::get_Size is slot 9 (Size of two float32s: Width, Height in DIPs 96 DPI).
-	var size struct{ W, H float32 }
-	hr, _, _ = syscall.SyscallN(comVtbl(pageObj, 9), pageObj, uintptr(unsafe.Pointer(&size)))
-	if int32(hr) < 0 || size.W <= 0 || size.H <= 0 {
-		return PageInfo{}, false
-	}
-	return PageInfo{Width: float64(size.W) * 72.0 / 96.0, Height: float64(size.H) * 72.0 / 96.0}, true
-}
+// PageInfo delegates to the pure-Go parser via Open's fallback instead of
+// invoking IPdfPage WinRT property slots across COM ABIs.
+func (w *winPDF) PageInfo(page int) (PageInfo, bool) { return PageInfo{}, false }
 
 func (w *winPDF) RenderPage(page int, widthPx, heightPx int, extraRotate int) (*image.RGBA, error) {
 	rot := ((extraRotate % 360) + 360) % 360
