@@ -27,11 +27,6 @@ const (
 	dragLiftDur = 120 * time.Millisecond
 	// dragSettleDur is how long a released floating card takes to glide into its slot.
 	dragSettleDur = 220 * time.Millisecond
-	// insertHoverDelay is how long the pointer rests on a seam between rows
-	// before an inline new-document slot opens there.
-	insertHoverDelay = 350 * time.Millisecond
-	// insertSeamBand is the half-height in DIPs around a seam between rows.
-	insertSeamBand = 5
 )
 
 // listEase is SwiftUI's snappy curve, shared by row transitions and card settle.
@@ -261,22 +256,6 @@ type dragSettle struct {
 	toRect     ui.Rect
 	hasTarget  bool
 	started    time.Time
-}
-
-// seamPoint is a horizontal boundary between root items in today where
-// resting the pointer opens an inline new-document slot.
-type seamPoint struct {
-	index int
-	y     float32
-}
-
-// insertSeam tracks the pointer resting on a seam between root items.
-type insertSeam struct {
-	space string
-	index int
-	since time.Time
-	open  bool
-	slotY float32
 }
 
 // sidebarDrag is what the sidebar drags: a row of the list (dragged) or a
@@ -619,62 +598,6 @@ func (a *App) computeSlot(sp *space.Space, pins []*vault.Node, over sidebarDrag)
 		}
 	}
 	return slotState{}, restingPins
-}
-
-// updateInsertSeam opens an inline new-document slot when the pointer rests
-// on a horizontal seam between root items in today, and closes it once the
-// pointer moves away.
-func (a *App) updateInsertSeam(c *ui.Context, sp *space.Space, treeBox ui.Rect, seams []seamPoint) {
-	closeSeam := func() {
-		if a.insertSeam.open {
-			c.AnimationFrame()
-		}
-		a.insertSeam = insertSeam{index: -1}
-	}
-	if sp.IsExternal() || a.listDragging || a.carrying != nil || a.dragSettle.active ||
-		a.renaming != "" || a.palette.open || a.settingsOpen || a.tour.open || treeBox.W <= 0 {
-		closeSeam()
-		return
-	}
-	px, py, inside := c.Root().PointerPosition()
-	if !inside || px < treeBox.X || px >= treeBox.X+treeBox.W || py < treeBox.Y || py >= treeBox.Y+treeBox.H {
-		closeSeam()
-		return
-	}
-	if a.insertSeam.open && a.insertSeam.space == sp.ID {
-		if py >= a.insertSeam.slotY-6 && py <= a.insertSeam.slotY+rowHeight+6 {
-			return
-		}
-		closeSeam()
-	}
-	hit := -1
-	best := float32(insertSeamBand + 1)
-	for _, s := range seams {
-		dist := py - s.y
-		if dist < 0 {
-			dist = -dist
-		}
-		if dist <= insertSeamBand && dist < best {
-			best, hit = dist, s.index
-		}
-	}
-	if hit < 0 {
-		closeSeam()
-		return
-	}
-	now := c.Now()
-	switch {
-	case a.insertSeam.space != sp.ID || a.insertSeam.index != hit:
-		a.insertSeam = insertSeam{space: sp.ID, index: hit, since: now}
-		c.After(insertHoverDelay)
-	case now.Sub(a.insertSeam.since) >= insertHoverDelay:
-		if !a.insertSeam.open {
-			a.insertSeam.open = true
-			c.AnimationFrame()
-		}
-	default:
-		c.After(insertHoverDelay - now.Sub(a.insertSeam.since))
-	}
 }
 
 // dropSection is the section a drop lands in when that pins or unpins

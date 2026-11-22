@@ -117,9 +117,7 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 			nodes, err := a.treeOf(sp)
 			pins := pinnedNodes(sp, nodes)
 			tree := ui.Scroll(c.Key("tree")).Grow(1).MinHeight(0).TrackScroll(&a.session(sp.ID).tree)
-			tb := tree.Bounds()
 			var prev []rowFrame
-			var seams []seamPoint
 			restingPins := len(pins)
 			highlight := 0
 			if live {
@@ -211,16 +209,13 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 					if live {
 						a.splitSidebarRow(c, sp)
 					}
-					a.nodes(c, sp, nodes, 0, "", live, prev, &seams)
+					a.nodes(c, sp, nodes, 0, "", live, prev)
 					if err == nil && live {
 						a.newDocRow(c)
 					}
 				})
 				ui.Box(c).Height(40)
 			})
-			if live {
-				a.updateInsertSeam(c, sp, tb, seams)
-			}
 		})
 	}
 	// Every page sits in a Themed, the active one at rest in the window's
@@ -444,9 +439,8 @@ func (a *App) dropZone(e ui.Element, dir string) bool {
 // nodes builds the rows of folders and documents of the folder parent, the
 // open folders' children under them. What is pinned or a favorite shows
 // there alone: it has no row here.
-func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth int, parent string, live bool, prev []rowFrame, seams *[]seamPoint) {
+func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth int, parent string, live bool, prev []rowFrame) {
 	slotHere := live && a.slot.active && a.slot.parent == parent
-	shownRoot := 0
 	for i, n := range nodes {
 		if a.hidden(sp, n) {
 			continue
@@ -455,16 +449,6 @@ func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth i
 			a.dragSlot(c, depth, parent, a.slot.index, a.slot.self)
 			a.slot.emitted = true
 		}
-		if live && depth == 0 && parent == "" && shownRoot > 0 && len(a.rows) > 0 {
-			last := a.rows[len(a.rows)-1].r
-			seamY := last.Y + last.H + float32(rowGap)/2
-			if a.insertSeam.open && a.insertSeam.space == sp.ID && a.insertSeam.index == i {
-				a.inlineNewDocRow(c, i, seamY)
-			} else if seams != nil && last.W > 0 {
-				*seams = append(*seams, seamPoint{index: i, y: seamY})
-			}
-		}
-		shownRoot++
 		a.nodeRow(c, sp, n, depth, parent, i, live, prev)
 		if n.Dir {
 			a.folderContent(c, sp, n, depth+1, live, prev)
@@ -534,7 +518,7 @@ func (a *App) folderBody(c *ui.Context, sp *space.Space, n *vault.Node, depth in
 			Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: &ui.Motion{Y: -6}, Exit: &ui.Motion{}})
 		return
 	}
-	a.nodes(c, sp, n.Children, depth, n.Path, live, prev, nil)
+	a.nodes(c, sp, n.Children, depth, n.Path, live, prev)
 }
 
 // docCount is how many documents a folder holds, at any depth, as a closed
@@ -1252,50 +1236,6 @@ func (a *App) spaceBarGlyph(c *ui.Context, emoji, symbol, name string, on, hover
 		g.Opacity(0.8)
 	default:
 		g.Opacity(0.42)
-	}
-}
-
-// inlineNewDocRow opens in a hovered seam between root items in today so a
-// document can be created right at that index.
-func (a *App) inlineNewDocRow(c *ui.Context, index int, seamY float32) {
-	t := c.Theme()
-	label := i18n.T("新建文档")
-	row := ui.Row(c.Key("inline-new-doc")).Height(rowHeight).PaddingX(10).Gap(6).Radius(10).Center().
-		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("在此处新建文档")).Tooltip(label).
-		Background(ui.Transparent).
-		Transition(ui.ElementTransition{
-			Animation: &listAnim,
-			Position:  true,
-			Enter:     &ui.Motion{Collapse: true, Scale: 0.97},
-			Exit:      &ui.Motion{Collapse: true, Scale: 0.97},
-		})
-	if b := row.Bounds(); b.W > 0 {
-		a.insertSeam.slotY = b.Y
-	} else {
-		a.insertSeam.slotY = seamY
-	}
-	target := float32(0.55)
-	if row.Hovered() {
-		target = 1
-	}
-	lit := row.Animate("lit", target, 150*time.Millisecond)
-	fill, border := dashedSlotColors(t, lit)
-	row.Draw(func(p *ui.Painter, r ui.Rect) {
-		fr := ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: max(0, r.W-1), H: max(0, r.H-5)}
-		if fill.A > 0 {
-			p.Fill(fr, fill, 10)
-		}
-		p.StrokeDashed(fr, border, 10, 1)
-	})
-	alpha := 0.58 + 0.28*lit
-	row.Children(func() {
-		ui.Icon(c, iconPlus).FontSize(14).TextColor(t.Text.Alpha(alpha))
-		ui.Text(c, label).FontSize(13).FontWeight(500).TextColor(t.Text.Alpha(alpha)).NoWrap()
-	})
-	if row.Clicked() {
-		a.insertSeam = insertSeam{index: -1}
-		a.newDocPulse = c.Now()
-		a.newDocAt("", index)
 	}
 }
 

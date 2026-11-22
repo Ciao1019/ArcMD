@@ -198,7 +198,6 @@ type App struct {
 	dragGrab     dragGrab
 	dragSettle   dragSettle
 	fileDrop     fileDropState
-	insertSeam   insertSeam
 	newDocPulse  time.Time
 	favDrop      *favDrop
 	// preview is the card a folder or a document shows when the pointer
@@ -314,8 +313,7 @@ func New(cfg Config) (*App, error) {
 		bin:       trashbin.Bin{Dir: filepath.Join(cfg.ConfigDir, "trash")},
 		qa:        qaState{secrets: prefs.Secrets{Dir: filepath.Join(cfg.ConfigDir, "credentials")}},
 		// The spaces fade in on coming back from the library, not at start.
-		library:    library{frames: 1},
-		insertSeam: insertSeam{index: -1},
+		library: library{frames: 1},
 	}
 	if p, err := a.prefStore.Load(); err == nil {
 		a.prefs = p
