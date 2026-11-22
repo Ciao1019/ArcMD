@@ -425,7 +425,7 @@ func (e *Editor) watchSlash() {
 	wasOpen := e.slashOpen
 	leaf := e.Engine.LeafAt(e.Caret)
 	text := leaf.Block.Text()
-	show := !e.ReadOnly && !e.slashDismissed && e.Anchor == e.Caret && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
+	show := !e.ReadOnly && !e.slashDismissed && e.Anchor == e.Caret && e.Caret > leaf.Start && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
 	if !show {
 		e.slashOpen = false
 		return

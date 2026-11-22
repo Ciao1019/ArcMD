@@ -1384,3 +1384,92 @@ func TestLeftPlusClickOnFoldableHeadingAndTable(t *testing.T) {
 		}
 	}
 }
+
+func TestSlashMenuPasteAndEmptyResultsDoNotBlockArrows(t *testing.T) {
+	t.Run("paste-after-slash-dismisses-menu", func(t *testing.T) {
+		e, tt := newTester("")
+		focus(e, tt)
+		tt.Type("/")
+		if !e.slashOpen {
+			t.Fatal("expected slash menu after typing /")
+		}
+		tt.SetClipboard("hello world")
+		tt.Key(ui.Cmd, ui.KeyV)
+		tt.Frame()
+		if e.slashOpen {
+			t.Fatal("expected paste after / to dismiss slash menu")
+		}
+		if e.Text() != "/hello world" {
+			t.Fatalf("unexpected text after paste: %q", e.Text())
+		}
+		end := e.Caret
+		tt.Key(0, ui.KeyLeft)
+		if e.Caret != end-1 {
+			t.Fatalf("KeyLeft did not move caret: got %d want %d", e.Caret, end-1)
+		}
+		tt.Key(0, ui.KeyRight)
+		if e.Caret != end {
+			t.Fatalf("KeyRight did not move caret: got %d want %d", e.Caret, end)
+		}
+		tt.Key(0, ui.KeyEnter)
+		if len(e.Doc.Blocks) != 2 {
+			t.Fatalf("KeyEnter did not insert block: %d", len(e.Doc.Blocks))
+		}
+	})
+
+	t.Run("empty-slash-results-allow-arrows-and-enter", func(t *testing.T) {
+		e, tt := newTester("")
+		focus(e, tt)
+		tt.Type("/zzz")
+		if !e.slashOpen || len(e.slashEntries()) != 0 || !tt.HasText("未能找到相关结果") {
+			t.Fatalf("expected empty slash menu, open=%v len=%d", e.slashOpen, len(e.slashEntries()))
+		}
+		end := e.Caret
+		tt.Key(0, ui.KeyLeft)
+		if e.Caret != end-1 {
+			t.Fatalf("KeyLeft swallowed on empty slash results: got %d want %d", e.Caret, end-1)
+		}
+		tt.Key(0, ui.KeyRight)
+		if e.Caret != end {
+			t.Fatalf("KeyRight swallowed on empty slash results: got %d want %d", e.Caret, end)
+		}
+		tt.Key(0, ui.KeyEnter)
+		if len(e.Doc.Blocks) != 2 || e.slashOpen {
+			t.Fatalf("KeyEnter swallowed on empty slash results: blocks=%d open=%v", len(e.Doc.Blocks), e.slashOpen)
+		}
+	})
+
+	t.Run("filtered-slash-list-allows-horizontal-caret-move", func(t *testing.T) {
+		e, tt := newTester("")
+		focus(e, tt)
+		tt.Type("/bg")
+		entries := e.slashEntries()
+		if !e.slashOpen || len(entries) == 0 || entries[0].grid {
+			t.Fatalf("expected filtered non-grid slash list, open=%v len=%d", e.slashOpen, len(entries))
+		}
+		end := e.Caret
+		tt.Key(0, ui.KeyLeft)
+		if e.Caret != end-1 || !e.slashOpen {
+			t.Fatalf("KeyLeft inside filtered query: caret=%d want=%d open=%v", e.Caret, end-1, e.slashOpen)
+		}
+		tt.Key(0, ui.KeyLeft)
+		tt.Key(0, ui.KeyLeft) // now at 0, before '/'
+		tt.Frame()
+		if e.Caret != 0 || e.slashOpen {
+			t.Fatalf("moving before / should close slash menu: caret=%d open=%v", e.Caret, e.slashOpen)
+		}
+	})
+
+	t.Run("empty-slash-query-keeps-grid-horizontal-arrows", func(t *testing.T) {
+		e, tt := newTester("")
+		focus(e, tt)
+		tt.Type("/")
+		if !e.slashOpen || e.slashIndex != 0 || !e.slashEntries()[0].grid {
+			t.Fatalf("expected grid slash menu at index 0, open=%v idx=%d", e.slashOpen, e.slashIndex)
+		}
+		tt.Key(0, ui.KeyRight)
+		if e.slashIndex != 1 {
+			t.Fatalf("expected KeyRight in icon grid to move slashIndex to 1, got %d", e.slashIndex)
+		}
+	})
+}
