@@ -3,7 +3,6 @@
   "slug": "arcmd",
   "identifier": "com.cizai.arcmd",
   "version": "0.2.7",
-  "i18n": { "dir": "locales", "source": "en" },
   "license": "MIT",
   "icon": "resources/icon.png",
   "main": "./cmd/arcmd",

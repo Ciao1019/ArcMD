@@ -36,8 +36,15 @@ MyGo generates the `PKGBUILD` and its inputs from `mygo.json`. With the
 default `makepkg` configuration, the package is written to
 `dist/linux-amd64/arcmd-<version>-1-x86_64.pkg.tar.zst`.
 
-Launch ArcMD from the desktop menu or with `arcmd`. Use `pacman -U` with
-the next package to upgrade the system installation, not the in-app updater.
+Install the package below, replacing `<version>` with the version in the
+generated filename:
+
+```sh
+sudo pacman -U 'dist/linux-amd64/arcmd-<version>-1-x86_64.pkg.tar.zst'
+```
+
+Launch ArcMD from the desktop menu or with `arcmd`. Upgrade the system
+installation with `pacman -U` and the new package.
 
 ## GitHub Actions
 
@@ -114,6 +121,11 @@ To reproduce a CI build locally (Go required):
 go run ./tools/ci build darwin/arm64
 go run ./tools/ci build linux/amd64
 ```
+
+The Linux helper generates the `PKGBUILD` and collects the Debian package and
+tarball. To produce the Arch `.pkg.tar.zst` locally, run the `makepkg` step in
+[Arch Linux (x86-64)](#arch-linux-x86-64). GitHub Actions runs that step in an
+Arch Linux container.
 
 Collected downloads are in `dist/release/`. Build macOS DMGs on macOS;
 build Windows installers on Windows, where MyGo downloads NSIS if needed,

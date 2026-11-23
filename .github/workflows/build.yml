@@ -118,18 +118,25 @@ jobs:
       - name: Build Arch Linux package
         if: matrix.target == 'linux-amd64'
         run: |
-          docker run --rm \
-            -v "$PWD:/workspace" \
-            -w /workspace/dist/linux-amd64 \
-            archlinux:base-devel \
+          docker run --rm --network none \
+            -e HOST_UID="$(id -u)" \
+            -e HOST_GID="$(id -g)" \
+            -v "$PWD/dist/linux-amd64:/out" \
+            archlinux:base-devel@sha256:97119fd9e21219b02b3c14ba256c9d3c0d031d07fc26c836c41ed793beeb5b74 \
             bash -euxo pipefail -c '
-              pacman -Sy --noconfirm --needed base-devel gtk3 hicolor-icon-theme poppler-glib
               useradd --create-home builder
-              chown -R builder:builder /workspace/dist/linux-amd64
-              su builder -c "makepkg --clean --noconfirm"
+              cp -a /out /tmp/build
+              chown -R builder:builder /tmp/build
+              su builder -c "cd /tmp/build && makepkg --nodeps --clean --noconfirm"
+              install -o "$HOST_UID" -g "$HOST_GID" -m 0644 /tmp/build/arcmd-*.pkg.tar.zst /out/
             '
-          arch_pkg=$(find dist/linux-amd64 -maxdepth 1 -name '*.pkg.tar.*' -type f -printf '%f\n')
-          test -n "$arch_pkg"
+          shopt -s nullglob
+          arch_pkgs=(dist/linux-amd64/arcmd-*.pkg.tar.zst)
+          if [[ ${#arch_pkgs[@]} -ne 1 || ! -f "${arch_pkgs[0]}" || ! -s "${arch_pkgs[0]}" ]]; then
+            echo "Expected exactly one non-empty Arch package, found ${#arch_pkgs[@]}" >&2
+            exit 1
+          fi
+          arch_pkg=${arch_pkgs[0]##*/}
           cp "dist/linux-amd64/$arch_pkg" dist/release/
           printf '%s  %s\n' "$(sha256sum "dist/release/$arch_pkg" | cut -d' ' -f1)" "$arch_pkg" >> dist/release/SHA256SUMS-linux-amd64.txt
           sort -k2 -o dist/release/SHA256SUMS-linux-amd64.txt dist/release/SHA256SUMS-linux-amd64.txt
