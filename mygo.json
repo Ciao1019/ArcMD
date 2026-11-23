@@ -3,6 +3,7 @@
   "slug": "arcmd",
   "identifier": "com.cizai.arcmd",
   "version": "0.2.7",
+  "license": "MIT",
   "icon": "resources/icon.png",
   "main": "./cmd/arcmd",
   "out": "dist",
@@ -24,7 +25,15 @@
   "macos": {
     "icon": "resources/icon.icns"
   },
-  "linux": { "webview": false },
+  "linux": {
+    "webview": false,
+    "comment": "Native Markdown and rich-text editor",
+    "categories": ["Office"],
+    "command": "arcmd",
+    "depends": {
+      "arch": ["hicolor-icon-theme", "poppler-glib"]
+    }
+  },
   "updates": {
     "publicKey": "5WSm8Z4W2nF//KbuHmHZjP1uR8RC7vvS/xApNVO5nWc=",
     "github": "Ciao1019/ArcMD"

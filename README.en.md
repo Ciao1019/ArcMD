@@ -168,7 +168,8 @@ Download prebuilt packages from [GitHub Releases](https://github.com/Ciao1019/Ar
 | --- | --- | --- |
 | macOS | Apple Silicon, Intel | `.dmg` (currently ad-hoc signed, not notarized) |
 | Windows | x64 | Installer `.exe`, portable `.zip` (currently unsigned) |
-| Linux | x64, ARM64 | `.deb`, `.tar.gz` |
+| Linux | x64 | `.deb`, `.tar.gz`, Arch Linux `.pkg.tar.zst` |
+| Linux | ARM64 | `.deb`, `.tar.gz` |
 
 ### Build from source
 

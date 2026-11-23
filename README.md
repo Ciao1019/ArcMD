@@ -168,7 +168,8 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 | --- | --- | --- |
 | macOS | Apple Silicon、Intel | `.dmg`（当前为临时 ad-hoc 签名，尚未公证） |
 | Windows | x64 | `.exe` 安装程序、`.zip` 便携包（尚未代码签名） |
-| Linux | x64、ARM64 | `.deb`、`.tar.gz` |
+| Linux | x64 | `.deb`、`.tar.gz`、Arch Linux `.pkg.tar.zst` |
+| Linux | ARM64 | `.deb`、`.tar.gz` |
 
 ### 从源码运行
 
