@@ -23,6 +23,22 @@ alt text in both `README.md` (Chinese) and `README.en.md` (English). The README'
 to the workflow configuration; it does not claim a passing CI run. Download cards
 link to the releases page until versioned packages are published.
 
+## Arch Linux (x86-64)
+
+With Go and `base-devel` installed, run these commands as a regular user:
+
+```sh
+CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.10.0 build -platform linux/amd64
+(cd dist/linux-amd64 && makepkg --syncdeps --clean)
+```
+
+MyGo generates the `PKGBUILD` and its inputs from `mygo.json`. With the
+default `makepkg` configuration, the package is written to
+`dist/linux-amd64/arcmd-<version>-1-x86_64.pkg.tar.zst`.
+
+Launch ArcMD from the desktop menu or with `arcmd`. Use `pacman -U` with
+the next package to upgrade the system installation, not the in-app updater.
+
 ## GitHub Actions
 
 [CI and packages](../.github/workflows/build.yml) runs on pull requests, pushes to
@@ -35,7 +51,7 @@ macOS, then builds these packages with `CGO_ENABLED=0`:
 | macOS | Intel (`amd64`) | `.dmg` containing `ArcMD.app` |
 | macOS | Apple Silicon / M series (`arm64`) | `.dmg` containing `ArcMD.app` |
 | Windows | 64-bit (`amd64`) | NSIS installer `.exe` and portable `.zip` |
-| Linux | x86-64 (`amd64`) | `.deb` and `.tar.gz` |
+| Linux | x86-64 (`amd64`) | `.deb`, `.tar.gz`, and Arch Linux `.pkg.tar.zst` |
 | Linux | ARM64 (`arm64`) | `.deb` and `.tar.gz` |
 
 **Windows 32-bit is currently blocked by MyGo v0.10.0.** Its Windows backend
@@ -88,8 +104,9 @@ write permission, using GitHub's built-in `GITHUB_TOKEN`.
 
 For a validation run without publishing, push a preparation branch and use
 **Run workflow** with that branch selected. Manual runs build all five
-targets and upload Actions artifacts, but never create a Release. Do not
-push a version tag until publication is intended.
+targets and upload Actions artifacts, including the Arch Linux package in the
+`linux-amd64` artifact, but never create a Release. Do not push a version tag
+until publication is intended.
 
 To reproduce a CI build locally (Go required):
 

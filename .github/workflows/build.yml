@@ -115,6 +115,24 @@ jobs:
             exit 1
           fi
           go run ./tools/ci build "$TARGET_PLATFORM"
+      - name: Build Arch Linux package
+        if: matrix.target == 'linux-amd64'
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace/dist/linux-amd64 \
+            archlinux:base-devel \
+            bash -euxo pipefail -c '
+              pacman -Sy --noconfirm --needed base-devel gtk3 hicolor-icon-theme poppler-glib
+              useradd --create-home builder
+              chown -R builder:builder /workspace/dist/linux-amd64
+              su builder -c "makepkg --clean --noconfirm"
+            '
+          arch_pkg=$(find dist/linux-amd64 -maxdepth 1 -name '*.pkg.tar.*' -type f -printf '%f\n')
+          test -n "$arch_pkg"
+          cp "dist/linux-amd64/$arch_pkg" dist/release/
+          printf '%s  %s\n' "$(sha256sum "dist/release/$arch_pkg" | cut -d' ' -f1)" "$arch_pkg" >> dist/release/SHA256SUMS-linux-amd64.txt
+          sort -k2 -o dist/release/SHA256SUMS-linux-amd64.txt dist/release/SHA256SUMS-linux-amd64.txt
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: packages-${{ matrix.target }}
