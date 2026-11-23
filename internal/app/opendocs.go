@@ -125,6 +125,7 @@ func (a *App) followOpen(fromID, from, toID, to string) {
 		delete(a.openDocs, p)
 		rel := to + p.rel[len(from):]
 		d.space, d.rel = dst, rel
+		d.syncMovedPath()
 		a.openDocs[place{toID, rel}] = d
 	}
 }

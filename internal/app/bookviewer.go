@@ -35,6 +35,15 @@ func (d *document) isBook() bool {
 	return d != nil && d.book != nil
 }
 
+func (d *document) syncMovedPath() {
+	if !d.isBook() || d.book.Doc == nil || d.space == nil || d.rel == "" {
+		return
+	}
+	if full, err := resolveFile(d.space, d.rel); err == nil {
+		d.book.Doc.SetPath(full)
+	}
+}
+
 func openBookDocument(sp *space.Space, rel, diskStamp string) *document {
 	d := &document{
 		space:      sp,

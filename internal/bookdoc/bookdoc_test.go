@@ -288,3 +288,50 @@ func TestHTMLEncodingsOutlineDataURIAndMalformed(t *testing.T) {
 		t.Fatalf("expected ErrInvalid on empty html, got %v", err)
 	}
 }
+
+func TestEPUBDiskOpenAllowsRenameAndLazyChapterRead(t *testing.T) {
+	data := buildZipBytes(t, map[string][]byte{
+		"mimetype": []byte("application/epub+zip"),
+		"META-INF/container.xml": []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="package.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`),
+		"package.opf": []byte(`<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>重命名测试</dc:title></metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine>
+</package>`),
+		"ch1.xhtml": []byte(`<html><body><h1>第一章</h1><p>内容一</p></body></html>`),
+		"ch2.xhtml": []byte(`<html><body><h1>第二章</h1><p>重命名后延迟读取的内容</p></body></html>`),
+	})
+
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.epub")
+	newPath := filepath.Join(dir, "new.epub")
+	if err := os.WriteFile(oldPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := Open(oldPath)
+	if err != nil {
+		t.Fatalf("Open(old.epub): %v", err)
+	}
+	defer doc.Close()
+
+	// Without calling doc.Close(), renaming and removing on Windows require zero held file handles.
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatalf("Rename open EPUB failed: %v", err)
+	}
+	doc.SetPath(newPath)
+	if got := doc.Path(); got != newPath {
+		t.Fatalf("Path() = %q, want %q", got, newPath)
+	}
+	ch2, err := doc.ChapterHTML(1)
+	if err != nil || !strings.Contains(ch2, "重命名后延迟读取的内容") {
+		t.Fatalf("ChapterHTML(1) after rename = %q, err = %v", ch2, err)
+	}
+}

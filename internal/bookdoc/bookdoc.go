@@ -86,7 +86,7 @@ type Document struct {
 	rawSource string
 
 	// EPUB fields.
-	file         *os.File
+	zipSrc       *scopedZipFile
 	zr           *zip.Reader
 	entries      map[string]*zip.File
 	lowerEntries map[string]*zip.File
@@ -99,6 +99,42 @@ type Document struct {
 	chapterHTMLs map[int]string
 	chapterTexts map[int]string
 	closed       bool
+}
+
+// scopedZipFile backs zip.Reader without keeping a persistent OS file handle
+// open when idle, allowing Windows callers to rename, move, or delete an open
+// or cached EPUB file cleanly.
+type scopedZipFile struct {
+	path string
+	cur  *os.File // guarded by Document.mu (or single-goroutine openEPUBFile)
+}
+
+func (s *scopedZipFile) withFile(fn func() ([]byte, error)) ([]byte, error) {
+	if s.cur != nil {
+		return fn()
+	}
+	f, err := os.Open(s.path)
+	if err != nil {
+		return nil, err
+	}
+	s.cur = f
+	defer func() {
+		s.cur = nil
+		_ = f.Close()
+	}()
+	return fn()
+}
+
+func (s *scopedZipFile) ReadAt(p []byte, off int64) (int, error) {
+	if s.cur != nil {
+		return s.cur.ReadAt(p, off)
+	}
+	f, err := os.Open(s.path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	return f.ReadAt(p, off)
 }
 
 // Open opens an HTML (.html/.htm) or EPUB (.epub) file from disk.
@@ -166,26 +202,23 @@ func openEPUBFile(filePath string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
+	src := &scopedZipFile{path: filePath, cur: f}
+	defer func() {
+		src.cur = nil
+		_ = f.Close()
+	}()
 	info, err := f.Stat()
 	if err != nil {
-		_ = f.Close()
 		return nil, err
 	}
 	if info.Size() <= 0 {
-		_ = f.Close()
 		return nil, ErrInvalid
 	}
-	zr, err := zip.NewReader(f, info.Size())
+	zr, err := zip.NewReader(src, info.Size())
 	if err != nil {
-		_ = f.Close()
 		return nil, ErrInvalid
 	}
-	doc, err := parseEPUB(filePath, zr, f)
-	if err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return doc, nil
+	return parseEPUB(filePath, zr, src)
 }
 
 // Kind returns whether the document is KindHTML or KindEPUB.
@@ -201,7 +234,23 @@ func (d *Document) Path() string {
 	if d == nil {
 		return ""
 	}
-	return d.path
+	d.mu.Lock()
+	p := d.path
+	d.mu.Unlock()
+	return p
+}
+
+// SetPath updates the on-disk path after the underlying file is renamed or moved.
+func (d *Document) SetPath(filePath string) {
+	if d == nil || filePath == "" {
+		return
+	}
+	d.mu.Lock()
+	d.path = filePath
+	if d.zipSrc != nil {
+		d.zipSrc.path = filePath
+	}
+	d.mu.Unlock()
 }
 
 // Title returns the book or page title.
@@ -424,7 +473,7 @@ func (d *Document) ResolveLink(fromChapter int, href string) (chapter int, ancho
 	filePart, _, _ = strings.Cut(filePart, "?")
 	filePart = strings.TrimSpace(filePart)
 	if d.kind == KindHTML {
-		if filePart == "" || strings.EqualFold(path.Base(strings.ReplaceAll(filePart, `\`, "/")), path.Base(strings.ReplaceAll(d.path, `\`, "/"))) {
+		if filePart == "" || strings.EqualFold(path.Base(strings.ReplaceAll(filePart, `\`, "/")), path.Base(strings.ReplaceAll(d.Path(), `\`, "/"))) {
 			return 0, unescapeFragment(frag), "", true
 		}
 		return -1, "", "", false
@@ -556,7 +605,7 @@ func (d *Document) Find(query string) []Match {
 	return out
 }
 
-// Close releases underlying file handles held by an EPUB opened from disk.
+// Close releases cached payloads and marks the document closed.
 func (d *Document) Close() {
 	if d == nil {
 		return
@@ -567,14 +616,10 @@ func (d *Document) Close() {
 		return
 	}
 	d.closed = true
-	f := d.file
-	d.file = nil
+	d.zipSrc = nil
 	d.zr = nil
 	d.chapterHTMLs = nil
 	d.mu.Unlock()
-	if f != nil {
-		_ = f.Close()
-	}
 }
 
 func resolveRelativeZipPath(baseHref, rawRef string) (string, bool) {

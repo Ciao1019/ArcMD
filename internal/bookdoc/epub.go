@@ -20,14 +20,14 @@ const (
 	algAdobeFontObfus = "http://ns.adobe.com/pdf/enc#RC"
 )
 
-func parseEPUB(filePath string, zr *zip.Reader, f *os.File) (*Document, error) {
+func parseEPUB(filePath string, zr *zip.Reader, zipSrc *scopedZipFile) (*Document, error) {
 	if zr == nil {
 		return nil, ErrInvalid
 	}
 	d := &Document{
 		kind:         KindEPUB,
 		path:         filePath,
-		file:         f,
+		zipSrc:       zipSrc,
 		zr:           zr,
 		entries:      make(map[string]*zip.File, len(zr.File)),
 		lowerEntries: make(map[string]*zip.File, len(zr.File)),
@@ -224,17 +224,26 @@ func (d *Document) findZipFileLocked(zipPath string) *zip.File {
 	return nil
 }
 
+func (d *Document) withZipReadLocked(fn func() ([]byte, error)) ([]byte, error) {
+	if d.zipSrc != nil {
+		return d.zipSrc.withFile(fn)
+	}
+	return fn()
+}
+
 func (d *Document) readZipPrefixLocked(zipPath string, limit int64) ([]byte, error) {
 	zf := d.findZipFileLocked(zipPath)
 	if zf == nil {
 		return nil, os.ErrNotExist
 	}
-	rc, err := zf.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rc.Close() }()
-	return io.ReadAll(io.LimitReader(rc, limit))
+	return d.withZipReadLocked(func() ([]byte, error) {
+		rc, err := zf.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = rc.Close() }()
+		return io.ReadAll(io.LimitReader(rc, limit))
+	})
 }
 
 func (d *Document) readZipLocked(zipPath string, limit int64) ([]byte, error) {
@@ -245,19 +254,21 @@ func (d *Document) readZipLocked(zipPath string, limit int64) ([]byte, error) {
 	if zf.UncompressedSize64 > uint64(limit)*4 && zf.UncompressedSize64 > 64<<20 {
 		return nil, ErrInvalid
 	}
-	rc, err := zf.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rc.Close() }()
-	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, ErrInvalid
-	}
-	return data, nil
+	return d.withZipReadLocked(func() ([]byte, error) {
+		rc, err := zf.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = rc.Close() }()
+		data, err := io.ReadAll(io.LimitReader(rc, limit+1))
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) > limit {
+			return nil, ErrInvalid
+		}
+		return data, nil
+	})
 }
 
 func (d *Document) lookupSpineIndex(zipPath string) (int, bool) {
