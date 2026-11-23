@@ -498,6 +498,8 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 			editor.BoardView(c.Key(d.viewKey()), d.board, a.boardOptionsFor(c, d))
 		} else if d.isPDF() {
 			editor.PDFView(c.Key(d.viewKey()), d.pdf, a.pdfOptionsFor(c, d))
+		} else if d.isBook() {
+			editor.BookView(c.Key(d.viewKey()), d.book, a.bookOptionsFor(c, d))
 		} else {
 			a.documentMapWorkspace(c, d, cardWidth)
 		}

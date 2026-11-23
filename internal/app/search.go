@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/bookdoc"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
@@ -55,6 +56,14 @@ type hitsKey struct {
 func extractText(name, content string) (search.Extracted, error) {
 	if vault.IsPDF(name) {
 		doc, err := pdfdoc.OpenBytes([]byte(content))
+		if err != nil {
+			return search.Extracted{}, nil
+		}
+		defer doc.Close()
+		return search.Extracted{Text: doc.PlainText(200)}, nil
+	}
+	if vault.IsBook(name) {
+		doc, err := bookdoc.OpenBytes(name, []byte(content))
 		if err != nil {
 			return search.Extracted{}, nil
 		}
@@ -164,6 +173,15 @@ func (d *document) plainText() string {
 		}
 		return d.plain
 	}
+	if d.isBook() {
+		if !d.plainKnown {
+			if d.book != nil && d.book.Doc != nil {
+				d.plain = d.book.Doc.PlainText(200)
+			}
+			d.plainKnown = true
+		}
+		return d.plain
+	}
 	if d.isWhiteboard() {
 		if rev := d.board.Revision(); !d.plainKnown || rev != d.plainRev {
 			d.plain, d.plainRev, d.plainKnown = d.board.Scene.PlainText(), rev, true
@@ -217,6 +235,16 @@ func (a *App) openAtTextTerm(id, rel, query, term string) {
 		}
 		if needle != "" {
 			a.doc.pdf.FindText(needle)
+		}
+		return
+	}
+	if a.doc.isBook() {
+		needle := strings.TrimSpace(term)
+		if needle == "" {
+			needle = strings.TrimSpace(query)
+		}
+		if needle != "" {
+			a.doc.book.FindText(needle)
 		}
 		return
 	}

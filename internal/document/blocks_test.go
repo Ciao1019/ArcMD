@@ -1,6 +1,7 @@
 package document
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -136,7 +137,7 @@ func TestToggleFoldsItsContent(t *testing.T) {
 	if err != nil || !back.Blocks[0].Folded || back.Blocks[0].Kind != "toggle" {
 		t.Fatal("round trip", err)
 	}
-	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 7`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, fmt.Sprintf(`"version": %d`, CurrentVersion), `"version": 7`, 1)); err == nil {
 		t.Fatal("a v7 document has no toggles")
 	}
 	// Turned into a paragraph, it no longer folds.
@@ -180,7 +181,7 @@ func TestWordGoal(t *testing.T) {
 	if err != nil || !strings.Contains(s, `"goal": 1000`) {
 		t.Fatal(s, err)
 	}
-	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 7`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, fmt.Sprintf(`"version": %d`, CurrentVersion), `"version": 7`, 1)); err == nil {
 		t.Fatal("a v7 document has no goal")
 	}
 	e.SetGoal(-1)

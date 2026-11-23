@@ -209,6 +209,85 @@ func (s *spatialIndex) nearest(p ui.Point) int {
 	return best
 }
 
+// nearestVertical finds the closest row strictly above (dir < 0) or below
+// (dir > 0) boundY, preferring the smallest vertical gap and breaking vertical
+// ties by horizontal distance to x. Returns -1 when no row exists in that direction.
+func (s *spatialIndex) nearestVertical(x, boundY float32, dir, exclude int) int {
+	if s.n == 0 || dir == 0 {
+		return -1
+	}
+	const eps = float32(0.5)
+	best := -1
+	bestDY := float32(math.MaxFloat32)
+	bestDX := float32(math.MaxFloat32)
+
+	nodeBounds := func(b spatialBounds) (ok bool, minDY, minDX float32) {
+		if dir < 0 {
+			if b.top > boundY+eps {
+				return false, 0, 0
+			}
+			minDY = max(0, boundY-b.bottom)
+		} else {
+			if b.bottom < boundY-eps {
+				return false, 0, 0
+			}
+			minDY = max(0, b.top-boundY)
+		}
+		minDX = max(b.left-x, x-b.right, 0)
+		return true, minDY, minDX
+	}
+
+	var visit func(int, int, int)
+	visit = func(node, a, z int) {
+		ok, minDY, _ := nodeBounds(s.bounds[node])
+		if !ok {
+			return
+		}
+		if best >= 0 && minDY > bestDY+eps+1e-3 {
+			return
+		}
+		if z-a == 1 {
+			if a == exclude {
+				return
+			}
+			r := s.rect(a)
+			var dy float32
+			if dir < 0 {
+				if r.Y+r.H > boundY+eps {
+					return
+				}
+				dy = max(0, boundY-(r.Y+r.H))
+			} else {
+				if r.Y < boundY-eps {
+					return
+				}
+				dy = max(0, r.Y-boundY)
+			}
+			dx := max(r.X-x, x-(r.X+r.W), 0)
+			if best < 0 ||
+				dy < bestDY-eps ||
+				(dy <= bestDY+eps && (dx < bestDX || (dx == bestDX && (dy < bestDY || (dy == bestDY && a < best))))) {
+				best, bestDY, bestDX = a, dy, dx
+			}
+			return
+		}
+		s.push(node)
+		m := (a + z) / 2
+		okL, dyL, dxL := nodeBounds(s.bounds[node*2])
+		okR, dyR, dxR := nodeBounds(s.bounds[node*2+1])
+		leftFirst := okL && (!okR || dyL < dyR-eps || (dyL <= dyR+eps && dxL <= dxR))
+		if leftFirst {
+			visit(node*2, a, m)
+			visit(node*2+1, m, z)
+		} else {
+			visit(node*2+1, m, z)
+			visit(node*2, a, m)
+		}
+	}
+	visit(1, 0, s.n)
+	return best
+}
+
 func (e *Editor) visibleRows(margin float32) iter.Seq[int] {
 	return e.rowSpace.between(e.Scroll.Y-margin, e.Scroll.Y+e.viewport+margin)
 }

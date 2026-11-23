@@ -19,8 +19,8 @@ import (
 
 // finder is the state of the find box.
 type finder struct {
-	open, replace bool
-	query, with   string
+	open, replace, external bool
+	query, with             string
 	// matches are in document order, as UTF-16 ranges of the plain text;
 	// current indexes them.
 	matches []ui.TextInputRange
@@ -129,6 +129,38 @@ func (e *Editor) FindTextWithFallback(query, fallback string) {
 
 // FindQuery is the find box's query while it is open.
 func (e *Editor) FindQuery() (string, bool) { return e.find.query, e.find.open }
+
+// SetExternalSearch configures read-only external find highlighting (used by
+// BookView) without opening the editor's own find box.
+func (e *Editor) SetExternalSearch(query string, activeIdx int, scroll bool) {
+	f := &e.find
+	if strings.TrimSpace(query) == "" {
+		f.external = false
+		f.query = ""
+		f.matches = nil
+		f.key = ""
+		f.current = 0
+		return
+	}
+	f.external = true
+	f.open = false
+	f.replace = false
+	f.query = query
+	e.refreshMatches()
+	if len(f.matches) > 0 {
+		if activeIdx < 0 {
+			activeIdx = 0
+		} else if activeIdx >= len(f.matches) {
+			activeIdx = len(f.matches) - 1
+		}
+		f.current = activeIdx
+		if scroll {
+			e.showMatch()
+		}
+	} else {
+		f.current = 0
+	}
+}
 
 // closeFind puts the find box away and gives the page the keyboard back.
 func (e *Editor) closeFind() {
@@ -367,7 +399,7 @@ func (e *Editor) findBox(c *ui.Context) {
 // paintMatches marks the matches on the page, the current one stronger.
 func (e *Editor) paintMatches(p *ui.Painter, bounds ui.Rect) {
 	f := &e.find
-	if !f.open || len(f.matches) == 0 {
+	if (!f.open && !f.external) || len(f.matches) == 0 {
 		return
 	}
 	pulseU := float32(-1)

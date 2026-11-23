@@ -101,9 +101,11 @@ func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 					continue
 				}
 			}
-			// Huge PDFs remain discoverable by title without loading hundreds of
-			// megabytes into memory during background indexing.
-			if vault.IsPDF(d.Path) && info.Size() > 32<<20 {
+			// Huge PDFs, EPUBs, and HTML files remain discoverable by title without
+			// loading tens of megabytes into memory during background indexing.
+			if (vault.IsPDF(d.Path) && info.Size() > 32<<20) ||
+				(vault.IsEPUB(d.Path) && info.Size() > 32<<20) ||
+				(vault.IsHTML(d.Path) && info.Size() > 16<<20) {
 				changed = true
 				next.entries[k] = &entry{file: fullFile, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
 				next.order = append(next.order, k)

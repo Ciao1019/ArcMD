@@ -57,6 +57,8 @@ var insertions = []insertion{
 	{name: "分隔线", kind: "rule", search: "divider rule fengexian fgx line", icon: iconRule, grid: true, tint: "orange", md: "---"},
 	{name: "图片", kind: "image", search: "image picture tupian tp", icon: iconImage, group: 1, tint: "yellow"},
 	{name: "PDF 文档", kind: "pdf", search: "pdf document paper slide wendang wd", icon: iconFileDoc, group: 1, tint: "orange"},
+	{name: "EPUB 电子书", kind: "epub", search: "epub book ebook dianzishu dzs yuedu", icon: iconBookOpen, group: 1, tint: "teal"},
+	{name: "HTML 文档", kind: "html", search: "html htm web page wangye wy", icon: iconFileCode, group: 1, tint: "blue"},
 	{name: "表格", kind: "table", search: "table biaoge bg", icon: iconTable, group: 1, tint: "teal"},
 	{name: "折叠块", kind: "toggle", search: "toggle details fold collapse zhediekuai zdk zhedie", icon: iconToggle, group: 1, tint: "indigo"},
 	{name: "分栏", kind: "columns", search: "columns grid fenlan fl shuanglan", icon: iconColumns, group: 1, tint: "indigo"},
@@ -89,7 +91,7 @@ func (e *Editor) slashEntries() []slashEntry {
 			}
 		}
 		for _, it := range insertions {
-			if it.group == 1 && (e.attach != nil || it.kind != "image") && (e.attachPDF != nil || it.kind != "pdf") {
+			if it.group == 1 && (e.attach != nil || it.kind != "image") && (e.attachPDF != nil || it.kind != "pdf") && (e.attachEPUB != nil || it.kind != "epub") && (e.attachHTML != nil || it.kind != "html") {
 				out = append(out, slashEntry{it, false})
 			}
 		}
@@ -97,7 +99,7 @@ func (e *Editor) slashEntries() []slashEntry {
 	}
 	ranked := [4][]slashEntry{}
 	for _, it := range insertions {
-		if (e.attach == nil && it.kind == "image") || (e.attachPDF == nil && it.kind == "pdf") {
+		if (e.attach == nil && it.kind == "image") || (e.attachPDF == nil && it.kind == "pdf") || (e.attachEPUB == nil && it.kind == "epub") || (e.attachHTML == nil && it.kind == "html") {
 			continue
 		}
 		words := strings.Fields(strings.ToLower(it.label() + " " + it.search))
@@ -387,13 +389,13 @@ func (e *Editor) slashMenu(c *ui.Context, surface ui.Element) {
 // grid and the rows in order (or let the caret move horizontally when
 // filtered to a single column), Enter runs, Escape closes.
 func (e *Editor) slashKeys(ev ui.InputEvent) bool {
-	if !e.slashOpen || e.mark != nil {
+	if !e.slashOpen || e.mark != nil || ev.Mods != 0 {
 		return false
 	}
 	entries := e.slashEntries()
 	switch ev.Key {
 	case ui.KeyEscape:
-		e.slashOpen, e.slashDismissed = false, true
+		e.dismissSlash(e.Engine.LeafAt(e.Caret).Block.ID)
 	case ui.KeyDown, ui.KeyRight:
 		if len(entries) == 0 || (ev.Key == ui.KeyRight && !entries[0].grid) {
 			return false
@@ -455,6 +457,9 @@ func (e *Editor) blockMenuHeight(b *document.Block) float32 {
 	if b.Kind == "callout" {
 		h += 32
 	}
+	if b.Kind == "numbered" {
+		h += 32
+	}
 	if b.Kind == "code" && !isMermaidBlock(b) && !isWhiteboardBlock(b) {
 		h += 32
 	}
@@ -469,6 +474,9 @@ func (e *Editor) blockMenuHeight(b *document.Block) float32 {
 func blockSideMenuHeight(b *document.Block, sub string) float32 {
 	if sub == "color" {
 		return 70
+	}
+	if sub == "listnum" {
+		return 114
 	}
 	h := float32(82)
 	if b.Kind != "code" && b.Kind != "callout" && b.Kind != "rule" && b.Kind != "table" && b.Kind != "columns" {
@@ -537,6 +545,9 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 					if b.Kind == "callout" {
 						hover(e.menuRow(c, "bm-color", iconPalette, e.page.CodeText, i18n.T("颜色"), "›", e.menuSub == "color"), "color")
 					}
+					if b.Kind == "numbered" {
+						hover(e.menuRow(c, "bm-listnum", iconOrdered, e.page.CodeText, i18n.T("编号设置"), "›", e.menuSub == "listnum"), "listnum")
+					}
 					if b.Kind == "code" && !isMermaidBlock(b) && !isWhiteboardBlock(b) {
 						if hover(e.menuRow(c, "bm-wrap", iconWrapText, e.page.CodeText, i18n.T("自动换行"), "", !e.isCodeNoWrap(b)), "").Clicked() {
 							act(func() { e.ToggleCodeWrap(id) })()
@@ -603,7 +614,7 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 			if n := len(turnItems(b)); n > 0 {
 				rowOffset += float32((n+gridCols-1)/gridCols)*36 + 5
 			}
-			if e.menuSub == "color" {
+			if e.menuSub == "color" || e.menuSub == "listnum" {
 				rowOffset += 32
 			}
 			sideX := x + menuWidth + 4
@@ -643,6 +654,33 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 						case "color":
 							ui.Text(c, i18n.T("高亮块颜色")).FontSize(12).TextColor(t.Text).Margin(0, 0, 6, 0)
 							e.colorSwatches(c, id, done)
+						case "listnum":
+							_, curNum, prevNum, adjacent := e.listNumInfo(id)
+							if prevNum > 0 && (!adjacent || b.Start > 0) {
+								hint := listNumber(prevNum+1, b.Indent) + "."
+								if e.menuRow(c, "ln-side-continue", iconOrdered, e.page.CodeText, i18n.T("继续之前的编号"), hint, false).Clicked() {
+									act(func() { e.Engine.ContinueListNumbering(id) })()
+								}
+							}
+							if curNum > 1 {
+								hint := listNumber(1, b.Indent) + "."
+								if e.menuRow(c, "ln-side-restart", iconSquarePlus, e.page.CodeText, i18n.T("开始新列表"), hint, false).Clicked() {
+									act(func() { e.Engine.SetListStart(id, 1) })()
+								}
+							}
+							if e.menuRow(c, "ln-side-edit", iconPencil, e.page.CodeText, i18n.T("修改编号值…"), "", false).Clicked() {
+								mr := anchor
+								if idx, ok := e.rowIDs[id]; ok {
+									r := *e.indexedRow(idx)
+									if box := e.numberedMarkerRect(r); box.W > 0 {
+										dx, dy := e.visualOffset(r)
+										box.X += dx
+										box.Y += dy
+										mr = box
+									}
+								}
+								e.openListNumPopover(id, curNum, mr, true)
+							}
 						}
 					})
 				})

@@ -1,6 +1,7 @@
 package document
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"reflect"
 	"strings"
@@ -30,7 +31,7 @@ func TestVersionSixMigrationAndAttributes(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(decoded, e.Doc) {
 		t.Fatal("v6 round trip", err)
 	}
-	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 5`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, fmt.Sprintf(`"version": %d`, CurrentVersion), `"version": 5`, 1)); err == nil {
 		t.Fatal("accepted new attributes in v5")
 	}
 	e.Undo()
@@ -178,7 +179,7 @@ func TestKbdStyleToggleMigrationAndUndo(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(decoded, e.Doc) {
 		t.Fatalf("kbd round trip mismatch: err=%v", err)
 	}
-	if _, err := Decode(strings.Replace(s, `"version": 9`, `"version": 8`, 1)); err == nil {
+	if _, err := Decode(strings.Replace(s, fmt.Sprintf(`"version": %d`, CurrentVersion), `"version": 8`, 1)); err == nil {
 		t.Fatal("accepted kbd in v8 document")
 	}
 

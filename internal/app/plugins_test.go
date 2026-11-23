@@ -1111,3 +1111,34 @@ func TestPluginSnapshot(t *testing.T) {
 		a.notices = nil
 	})
 }
+
+func TestPluginRegistryRetryOnError(t *testing.T) {
+	a, tt := libraryApp(t)
+	regSrv := newMockPluginRegistry(t, "", testCloudSyncManifestJSON)
+	a.pluginsUI.registryURL = regSrv.URL + "/index.json"
+	a.pluginsUI.sync = true
+
+	// First attempt fails with a network error.
+	a.pluginsUI.httpClient = &http.Client{Transport: offlineTransport{}}
+	a.openPlugins()
+	settle(tt)
+	if !tt.HasText("获取插件市场失败") {
+		t.Fatalf("expected registry error text, got %q", tt.Texts())
+	}
+	if !tt.HasText("重试") {
+		t.Fatalf("expected retry button on registry error, got %q", tt.Texts())
+	}
+
+	// Switch to working transport and click Retry.
+	a.pluginsUI.httpClient = regSrv.Client()
+	if err := tt.Click("重试"); err != nil {
+		t.Fatalf("failed to click retry button: %v", err)
+	}
+	settle(tt)
+	if tt.HasText("获取插件市场失败") {
+		t.Fatalf("registry error should clear after retry, got %q", tt.Texts())
+	}
+	if !tt.HasText("云端同步") {
+		t.Fatalf("expected remote catalog plugin after retry, got %q", tt.Texts())
+	}
+}

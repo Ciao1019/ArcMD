@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/bookdoc"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdf"
@@ -37,7 +38,7 @@ func (a *App) printDoc()  { a.startPDF(true) }
 
 func (a *App) startPDF(printing bool) {
 	d := a.doc
-	if d == nil || d.loadErr != nil || d.isPDF() || a.pdfExport != nil {
+	if d == nil || d.loadErr != nil || d.isPDF() || d.isBook() || a.pdfExport != nil {
 		return
 	}
 	if d.isWhiteboard() {
@@ -136,6 +137,7 @@ func (a *App) pdfExportView(c *ui.Context) {
 			LoadRawImage:   job.source.rawImage,
 			LoadWhiteboard: func(url string) (*whiteboard.Scene, uint64, error) { return a.loadWhiteboardFor(job.source, url) },
 			LoadPDF:        func(url string) (*pdfdoc.Document, uint64, error) { return a.loadPDFFor(job.source, url) },
+			LoadBook:       func(url string) (*bookdoc.Document, uint64, error) { return a.loadBookFor(job.source, url) },
 		}
 		ui.Render(func(c *ui.Context) { job.tops = job.ed.Paginate(job.opts, paperHeight-2*paperMargin) }, 1, 1, 1)
 		job.writer.ReservePages(len(job.tops))

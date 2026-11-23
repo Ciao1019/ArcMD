@@ -33,7 +33,7 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			e.Engine.Insert(document.Columns())
 		case "rule":
 			e.Engine.Insert(document.NewBlock("rule", ""))
-		case "image", "pdf":
+		case "image", "pdf", "epub", "html":
 			// The host picks the file(s) and inserts them at the caret.
 		case "wiki":
 			e.Engine.Replace(e.Caret, e.Caret, "[[")
@@ -50,7 +50,12 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			e.Engine.SetKind(item.kind, item.level)
 		}
 	})
-	e.slashOpen, e.slashDismissed = false, true
+	e.slashOpen = false
+	if leaf := e.Engine.LeafAt(e.Caret); strings.HasPrefix(leaf.Block.Text(), "/") {
+		e.dismissSlash(leaf.Block.ID)
+	} else {
+		e.clearSlashDismissed(leaf.Block.ID)
+	}
 	e.RequestFocus, e.reveal = true, true
 	e.sync()
 	if item.kind == "image" && e.attach != nil {
@@ -58,6 +63,12 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 	}
 	if item.kind == "pdf" && e.attachPDF != nil {
 		e.attachPDF()
+	}
+	if item.kind == "epub" && e.attachEPUB != nil {
+		e.attachEPUB()
+	}
+	if item.kind == "html" && e.attachHTML != nil {
+		e.attachHTML()
 	}
 }
 
@@ -421,11 +432,57 @@ func toolSeparator(c *ui.Context) {
 	ui.Box(c).Width(1).Height(16).Margin(0, 6).Background(c.Theme().Border)
 }
 
+func (e *Editor) isSlashDismissed(id string) bool {
+	return id != "" && (id == e.slashDismissed[0] || id == e.slashDismissed[1])
+}
+
+func (e *Editor) dismissSlash(ids ...string) {
+	e.slashOpen = false
+	var kept [2]string
+	n := 0
+	for _, id := range ids {
+		if id == "" || (n == 1 && kept[0] == id) {
+			continue
+		}
+		kept[n] = id
+		n++
+		if n == len(kept) {
+			break
+		}
+	}
+	e.slashDismissed = kept
+}
+
+func (e *Editor) clearSlashDismissed(id string) {
+	if id == "" {
+		return
+	}
+	for i := range e.slashDismissed {
+		if e.slashDismissed[i] == id {
+			e.slashDismissed[i] = ""
+		}
+	}
+}
+
+func (e *Editor) dismissInlineMenusOnPaste(startID string) {
+	afterID := e.Engine.LeafAt(e.Caret).Block.ID
+	e.dismissSlash(startID, afterID)
+	if e.wiki.open {
+		e.wiki.open, e.wiki.dismissed = false, e.wiki.start
+	}
+	if e.complete.open {
+		e.complete.open, e.complete.dismissed = false, e.complete.start
+	}
+}
+
 func (e *Editor) watchSlash() {
 	wasOpen := e.slashOpen
 	leaf := e.Engine.LeafAt(e.Caret)
 	text := leaf.Block.Text()
-	show := !e.ReadOnly && !e.slashDismissed && e.Anchor == e.Caret && e.Caret > leaf.Start && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
+	if e.isSlashDismissed(leaf.Block.ID) && !strings.HasPrefix(text, "/") {
+		e.clearSlashDismissed(leaf.Block.ID)
+	}
+	show := !e.ReadOnly && !e.isSlashDismissed(leaf.Block.ID) && e.Anchor == e.Caret && e.Caret > leaf.Start && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
 	if !show {
 		e.slashOpen = false
 		return
@@ -443,6 +500,7 @@ func (e *Editor) popups(c *ui.Context, surface ui.Element) {
 	e.slashMenu(c, surface)
 	e.selectionBar(c, surface)
 	e.markBar(c, surface)
+	e.listNumPopover(c, surface)
 	if e.colorOpen && e.colorID != "" {
 		bounds := e.surfaceBounds(surface)
 		windowW, windowH := c.Size()

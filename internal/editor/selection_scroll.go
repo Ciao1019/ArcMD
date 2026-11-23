@@ -14,6 +14,11 @@ type selectionDrag struct {
 
 func (e *Editor) extendSelection(x, y float32) {
 	if at, ok := e.IndexForPoint(ui.Point{X: x, Y: y}); ok {
+		if at > e.Anchor {
+			if leaf := e.Engine.LeafAt(at); e.isAtomicOrHiddenImage(leaf.Block) {
+				at = leaf.End
+			}
+		}
 		e.SetSelection(e.Anchor, at)
 	}
 }

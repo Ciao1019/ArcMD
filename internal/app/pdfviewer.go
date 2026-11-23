@@ -113,7 +113,7 @@ func (a *App) pdfCorner(c *ui.Context, d *document) {
 	t := c.Theme()
 	ui.Row(c.Key("pdf-corner")).Gap(2).AlignItems(ui.Center).Children(func() {
 		if cnt := d.pdf.PageCount(); cnt > 0 {
-			ui.Box(c.Key("pdf-pages")).Height(28).PaddingX(8).Radius(7).AlignItems(ui.Center).Children(func() {
+			ui.Row(c.Key("pdf-pages")).Height(28).PaddingX(8).Radius(7).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, fmt.Sprintf(i18n.T("共 %d 页"), cnt)).FontSize(12.5).TextColor(t.TextMuted).NoWrap()
 			})
 		}
@@ -251,7 +251,7 @@ func (a *App) openPDFFrom(d *document, rawURL string, split bool) {
 // (or beside the document), and inserts them as inline PDF blocks at the caret.
 func (a *App) pickPDFs() {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.ed.ReadOnly {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.ed.ReadOnly {
 		return
 	}
 	done := func(paths []string) {

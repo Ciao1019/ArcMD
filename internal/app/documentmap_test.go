@@ -254,14 +254,14 @@ func TestDocumentMapShortcutPaletteCloseAndResponsive(t *testing.T) {
 	focusDocument(a, tt)
 	rev := a.doc.ed.Revision()
 
-	// ⌥⌘M toggles the mind map even while the writing surface has focus.
-	tt.Key(ui.Cmd|ui.Alt, ui.KeyM)
+	// ⌃⌘M (Ctrl+Alt+M off macOS) toggles the mind map even while the writing surface has focus.
+	tt.Key(ctrlCmd(), ui.KeyM)
 	tt.Frame()
 	if a.doc.mindMap == nil {
-		t.Fatal("⌥⌘M did not open the mind map while editing")
+		t.Fatal("⌃⌘M did not open the mind map while editing")
 	}
 	if a.doc.ed.Revision() != rev {
-		t.Fatal("⌥⌘M typed into the document")
+		t.Fatal("⌃⌘M typed into the document")
 	}
 
 	// Close button inside the mind map header closes it and updates prefs.
@@ -305,6 +305,15 @@ func TestDocumentMapShortcutPaletteCloseAndResponsive(t *testing.T) {
 	if a.split != nil && len(a.split.panes) > 1 {
 		if second := a.split.panes[1].doc; second != nil && second.mindMap != nil {
 			t.Fatal("secondary split pane auto-opened mind map")
+		}
+	}
+
+	if ui.Cmd == ui.Super {
+		if a.rebind("mindmap", &editor.Combo{Mods: ui.Cmd | ui.Alt, Key: ui.KeyM}) {
+			t.Fatal("rebind allowed macOS Minimize All shortcut ⌥⌘M")
+		}
+		if a.rebind("mindmap", &editor.Combo{Mods: ui.Cmd, Key: ui.KeyM}) {
+			t.Fatal("rebind allowed macOS Minimize shortcut ⌘M")
 		}
 	}
 }

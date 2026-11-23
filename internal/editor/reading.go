@@ -66,6 +66,11 @@ const (
 // paintReadOnlyNotice says, at the top of the visible page, why typing did
 // nothing: the page is locked, and where it unlocks.
 func (e *Editor) paintReadOnlyNotice(p *ui.Painter, bounds ui.Rect, t *ui.Theme) {
+	if e.hideReadOnlyNotice {
+		e.refused = false
+		e.refusedAt = time.Time{}
+		return
+	}
 	if e.refused {
 		e.refused = false
 		if e.ReadOnly {

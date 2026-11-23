@@ -291,7 +291,14 @@ func (a *App) actions() []action {
 		}
 		cmd(outline, a.keyLabel("outline"), a.toggleOutline)
 	}
-	if a.doc != nil && !a.doc.isWhiteboard() && !a.doc.isPDF() && a.doc.loadErr == nil && !a.doc.source {
+	if a.doc != nil && a.doc.isBook() && a.doc.loadErr == nil {
+		outline := i18n.T("展开目录")
+		if a.outlineOpen() {
+			outline = i18n.T("收起目录")
+		}
+		cmd(outline, a.keyLabel("outline"), a.toggleOutline)
+	}
+	if a.doc != nil && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() && a.doc.loadErr == nil && !a.doc.source {
 		outline := i18n.T("展开目录")
 		if a.outlineOpen() {
 			outline = i18n.T("收起目录")
@@ -455,6 +462,23 @@ func (a *App) actions() []action {
 				a.doc.pdf.GoToPage(a.doc.pdf.CurrentPage, true)
 			})
 			cmd(i18n.T("PDF：顺时针旋转 90°"), "", func() { a.doc.pdf.RotateCW() })
+		} else if a.doc.isBook() {
+			cmd(i18n.T("在文档中查找…"), a.keyLabel("find"), func() { a.doc.book.OpenFind() })
+			if a.doc.book.IsEPUB() {
+				if a.doc.book.ChapterCount() > 1 {
+					cmd(i18n.T("EPUB：上一章"), "", func() { a.doc.book.StepChapter(-1) })
+					cmd(i18n.T("EPUB：下一章"), "", func() { a.doc.book.StepChapter(1) })
+				}
+				cmd(i18n.T("EPUB：将当前章节另存为 Markdown"), "", func() { a.saveBookAsMarkdown(a.doc) })
+			} else if a.doc.book.IsHTML() {
+				srcLabel := i18n.T("HTML：查看源码")
+				if a.doc.book.ShowSource {
+					srcLabel = i18n.T("HTML：返回阅读视图")
+				}
+				cmd(srcLabel, "", func() { a.doc.book.ToggleSource() })
+				cmd(i18n.T("HTML：在默认浏览器中打开"), "", func() { a.openBookInBrowserFor(a.doc, "") })
+				cmd(i18n.T("HTML：另存为 Markdown 笔记"), "", func() { a.saveBookAsMarkdown(a.doc) })
+			}
 		} else if a.doc.isWhiteboard() {
 			cmd(i18n.T("导出 SVG 文件"), "", func() { a.exportWhiteboardSVG(a.doc) })
 			cmd(i18n.T("适应画布"), "", func() { a.doc.board.FitToContent(ui.Rect{}) })
@@ -469,7 +493,7 @@ func (a *App) actions() []action {
 			}
 			cmd(mode, a.keyLabel("source"), a.toggleSource)
 		}
-		if !a.doc.isPDF() {
+		if !a.doc.isPDF() && !a.doc.isBook() {
 			cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
 			cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
 			cmd(i18n.T("打印…"), "", a.printDoc)
@@ -479,7 +503,7 @@ func (a *App) actions() []action {
 		if !sp.IsExternal() {
 			cmd(i18n.T("创建当前文档副本"), "", func() { a.duplicateEntry(sp, rel) })
 		}
-		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() {
+		if a.canAdjustPageWidth(a.doc) {
 			if a.prefs.FullWidth() {
 				cmd(i18n.T("退出全宽显示"), a.keyLabel("full-width"), a.toggleFullWidth)
 			}
@@ -494,9 +518,11 @@ func (a *App) actions() []action {
 				}
 				cmd(fmt.Sprintf(i18n.T("页面宽度：%s"), i18n.T(opt.label)), key, func() { a.setPageWidth(page) })
 			}
+		}
+		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() {
 			a.editorActions(cmd)
 		}
-		if !a.doc.isWhiteboard() && !a.doc.isPDF() {
+		if !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() {
 			cmd(i18n.T("导出 Markdown 文件"), "", a.exportMarkdown)
 			cmd(i18n.T("将当前文档存为模板"), "", a.saveAsTemplate)
 			cmd(i18n.T("导出 HTML 网页"), "", a.exportHTML)
@@ -517,7 +543,7 @@ func (a *App) actions() []action {
 					continue
 				}
 			case "selection":
-				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.ed == nil {
+				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.ed == nil {
 					continue
 				}
 				s, e := a.doc.ed.Positions()
@@ -913,10 +939,12 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("减少缩进"), "", after(func() { ed.Engine.Indent(-1) }))
 	cmd(i18n.T("插入图片…"), "", a.pickImages)
 	cmd(i18n.T("插入 PDF…"), "", a.pickPDFs)
+	cmd(i18n.T("插入 EPUB…"), "", a.pickEPUBFiles)
+	cmd(i18n.T("插入 HTML…"), "", a.pickHTMLFiles)
 	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "code" && !strings.EqualFold(strings.TrimSpace(b.Language), "mermaid") {
 		cmd(i18n.T("代码块：切换自动换行"), "", after(func() { ed.ToggleCodeWrap(b.ID) }))
 	}
-	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" && !vault.IsWhiteboard(b.URL) && !editor.IsPDFURL(b.URL) {
+	if b := ed.Engine.LeafAt(ed.Caret).Block; b.Kind == "image" && !vault.IsWhiteboard(b.URL) && !editor.IsPDFURL(b.URL) && !editor.IsBookURL(b.URL) {
 		cmd(i18n.T("裁剪图片…"), "", func() { ed.OpenCropper(b.ID) })
 	}
 }

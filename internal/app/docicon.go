@@ -32,6 +32,18 @@ func fileIcon(c *ui.Context, rel, title string, size float32) ui.Element {
 			ui.Icon(c, iconFile).FontSize(size * 0.64).TextColor(ink)
 		})
 	}
+	if vault.IsEPUB(rel) && leadingEmoji(title) == "" {
+		ink, fill := docIconColors(c.Theme(), title)
+		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
+			ui.Icon(c, iconBookOpen).FontSize(size * 0.64).TextColor(ink)
+		})
+	}
+	if vault.IsHTML(rel) && leadingEmoji(title) == "" {
+		ink, fill := docIconColors(c.Theme(), title)
+		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
+			ui.Icon(c, iconFileCode).FontSize(size * 0.64).TextColor(ink)
+		})
+	}
 	return docIcon(c, title, size)
 }
 

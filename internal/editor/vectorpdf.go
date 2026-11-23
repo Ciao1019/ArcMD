@@ -459,6 +459,17 @@ func (e *Editor) exportVectorRows(
 			continue
 		}
 
+		if r.bookEmbed {
+			if r.bookError != nil {
+				ew, _ := r.bookError.Size()
+				vp.DrawText(r.bookErr, px(r.bookRect.X+(r.bookRect.W-ew)/2), py(r.bookRect.Y+24), pw(ew), 13*sy, pdf.TextStyle{Family: pdf.FontSans}, pdfRGBA(t.Danger))
+			} else if r.bookDoc != nil {
+				chIdx := e.bookCurrentChapterForBlock(r.leaf.Block, r.bookDoc)
+				ExportBookEmbedToVectorPage(vp, r.bookDoc, chIdx, pg, t, px(r.bookRect.X), py(r.bookRect.Y), pw(r.bookRect.W), ph(r.bookRect.H), sc)
+			}
+			continue
+		}
+
 		if r.layout == nil {
 			continue
 		}

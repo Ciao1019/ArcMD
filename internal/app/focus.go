@@ -4,6 +4,7 @@ import (
 	"image"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/bookdoc"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
@@ -68,6 +69,8 @@ func (a *App) toggleFocus() {
 			a.doc.board.RequestFocus = true
 		} else if a.doc.isPDF() {
 			a.doc.pdf.RequestFocus = true
+		} else if a.doc.isBook() {
+			a.doc.book.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -97,6 +100,10 @@ func (a *App) toggleOutline() {
 		a.doc.pdf.ToggleOutline()
 		return
 	}
+	if a.doc.isBook() {
+		a.doc.book.ToggleOutline()
+		return
+	}
 	if !a.doc.source && !a.doc.isWhiteboard() {
 		a.doc.ed.ToggleOutline()
 	}
@@ -109,6 +116,9 @@ func (a *App) outlineOpen() bool {
 	}
 	if a.doc.isPDF() {
 		return a.doc.pdf.SidebarOpen
+	}
+	if a.doc.isBook() {
+		return a.doc.book.SidebarOpen
 	}
 	return a.doc.ed.OutlineOpen()
 }
@@ -164,6 +174,8 @@ func (a *App) focusView(c *ui.Context) {
 					editor.BoardView(c.Key(a.doc.viewKey()), a.doc.board, a.boardOptionsFor(c, a.doc))
 				} else if a.doc.isPDF() {
 					editor.PDFView(c.Key(a.doc.viewKey()), a.doc.pdf, a.pdfOptionsFor(c, a.doc))
+				} else if a.doc.isBook() {
+					editor.BookView(c.Key(a.doc.viewKey()), a.doc.book, a.bookOptionsFor(c, a.doc))
 				} else {
 					editor.View(c.Key(a.doc.viewKey()), a.doc.ed, a.editorOptions(c, w-18, true))
 				}
@@ -199,6 +211,13 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 	if d != nil {
 		docTitle = d.title()
 	}
+	var htmlWVFn func(url, slot string, scrollToContainer bool) editor.HTMLWebView
+	if a.hostWindowFor(d) != nil || a.makeHTMLWebView != nil {
+		htmlWVFn = func(url, slot string, scrollToContainer bool) editor.HTMLWebView {
+			return a.htmlWebViewForEmbed(d, url, slot, scrollToContainer)
+		}
+	}
+
 	return editor.Options{
 		FontSize:              a.prefs.ReadingSize(),
 		LineHeight:            a.prefs.ReadingLine(),
@@ -251,6 +270,15 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		OpenPDF:               func(url string, split bool) { a.openPDFFrom(d, url, split) },
 		AttachPDF:             func() { run(a.pickPDFs) },
 		AsyncPDF:              a.win != nil,
+		LoadBook:              func(url string) (*bookdoc.Document, uint64, error) { return a.loadBookFor(d, url) },
+		OpenBook:              func(url string, split bool) { a.openBookFrom(d, url, split) },
+		OpenBookInBrowser:     func(url string) { a.openBookInBrowserFor(d, url) },
+		LoadBookExternalImg: func(bookURL, imgSrc string) editor.ImageResource {
+			return a.loadBookExternalImageFor(d, bookURL, imgSrc)
+		},
+		HTMLWebView: htmlWVFn,
+		AttachHTML:  func() { run(a.pickHTMLFiles) },
+		AttachEPUB:  func() { run(a.pickEPUBFiles) },
 		ToggleBookmark: func(id string) {
 			a.toggleBookmark(d, id)
 		},

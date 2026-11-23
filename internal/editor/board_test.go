@@ -2,10 +2,12 @@ package editor
 
 import (
 	"bytes"
+	"errors"
 	"image/png"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1113,5 +1115,342 @@ func TestBoardFreedrawContinuousWithoutSelectionBox(t *testing.T) {
 	tt.Frame()
 	if len(board.Selected) != 1 || !board.Selected[stroke1.ID] {
 		t.Fatalf("expected clicking stroke1 in ToolSelect to select it, got %+v", board.Selected)
+	}
+}
+
+func makeWhiteboardDocTester(t *testing.T, md string, stored map[string]*whiteboard.Scene, loadErr error, extraOpts func(*Options)) (*Editor, *ui.Tester) {
+	t.Helper()
+	e := New(md)
+	opts := Options{
+		LoadWhiteboard: func(url string) (*whiteboard.Scene, uint64, error) {
+			if loadErr != nil {
+				return nil, 0, loadErr
+			}
+			if s, ok := stored[url]; ok {
+				return s, 1, nil
+			}
+			return nil, 0, os.ErrNotExist
+		},
+		SaveWhiteboard: func(url string, scene *whiteboard.Scene) uint64 {
+			stored[url] = scene.Clone()
+			return 2
+		},
+	}
+	if extraOpts != nil {
+		extraOpts(&opts)
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		opts.Width = w
+		opts.Theme = c.Theme()
+		View(c, e, opts)
+	}, 900, 700)
+	tt.SetLocale("zh-Hans")
+	tt.Frame()
+	return e, tt
+}
+
+func TestWhiteboardEmbedClickBackspaceDeleteCutUndo(t *testing.T) {
+	scene := whiteboard.StarterScene()
+	stored := map[string]*whiteboard.Scene{"assets/diagram.excalidraw.svg": scene}
+	e, tt := makeWhiteboardDocTester(t, "Before\n\n![手绘白板](assets/diagram.excalidraw.svg)\n\nAfter", stored, nil, nil)
+
+	// Clicking resting .excalidraw.svg focuses it without opening image caption editing.
+	if err := tt.Click("手绘白板: diagram.excalidraw.svg"); err != nil {
+		t.Fatalf("Click whiteboard embed: %v", err)
+	}
+	tt.Frame()
+	if e.imageCaptionID != "" {
+		t.Fatalf("clicking whiteboard embed opened caption edit: %q", e.imageCaptionID)
+	}
+	if got := e.Engine.LeafAt(e.Caret).Block.ID; got != e.Doc.Blocks[1].ID {
+		t.Fatalf("caret block after click = %q; want %q", got, e.Doc.Blocks[1].ID)
+	}
+
+	// Backspace deletes the embed in one step; Cmd+Z restores it.
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Text() != "Before" || e.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("Backspace did not delete whiteboard embed: %+v", e.Doc.Blocks)
+	}
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 3 || !isWhiteboardEmbed(e.Doc.Blocks[1]) {
+		t.Fatalf("Cmd+Z did not restore whiteboard embed: %+v", e.Doc.Blocks)
+	}
+
+	// Click and press Delete key.
+	tt.Advance(600 * time.Millisecond)
+	if err := tt.Click("手绘白板: diagram.excalidraw.svg"); err != nil {
+		t.Fatalf("Click whiteboard embed before Delete: %v", err)
+	}
+	tt.Key(0, ui.KeyDelete)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Text() != "Before" || e.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("Delete did not remove whiteboard embed: %+v", e.Doc.Blocks)
+	}
+
+	// Restore, click, and Cmd+X cut removes the embed and copies Markdown to clipboard.
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	if err := tt.Click("手绘白板: diagram.excalidraw.svg"); err != nil {
+		t.Fatalf("Click whiteboard embed before Cmd+X: %v", err)
+	}
+	tt.Key(ui.Cmd, ui.KeyX)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 2 {
+		t.Fatalf("Cmd+X did not delete whiteboard embed: %+v", e.Doc.Blocks)
+	}
+	if clip := tt.Clipboard(); !strings.Contains(clip, "assets/diagram.excalidraw.svg") {
+		t.Fatalf("Cmd+X clipboard missing embed URL, got %q", clip)
+	}
+}
+
+func TestWhiteboardSoleBlockAndInlineCodeBlockDelete(t *testing.T) {
+	// Sole .excalidraw.svg embed deleted with Backspace leaves an empty paragraph.
+	scene := whiteboard.StarterScene()
+	stored := map[string]*whiteboard.Scene{"assets/sole.excalidraw.svg": scene}
+	e, tt := makeWhiteboardDocTester(t, "![手绘白板](assets/sole.excalidraw.svg)", stored, nil, nil)
+	if err := tt.Click("手绘白板: sole.excalidraw.svg"); err != nil {
+		t.Fatalf("Click sole whiteboard embed: %v", err)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 1 || e.Doc.Blocks[0].Kind != "paragraph" || e.Doc.Blocks[0].Text() != "" {
+		t.Fatalf("sole embed Backspace left unexpected blocks: %+v", e.Doc.Blocks)
+	}
+
+	// Inline ```excalidraw block deleted via Backspace/Delete and restored with Cmd+Z without JSON corruption.
+	rawJSON, err := scene.Encode()
+	if err != nil {
+		t.Fatalf("Encode scene: %v", err)
+	}
+	md := "Before\n\n```excalidraw\n" + rawJSON + "\n```\n\nAfter"
+	e2, tt2 := makeWhiteboardDocTester(t, md, map[string]*whiteboard.Scene{}, nil, nil)
+	if err := tt2.Click("手绘白板"); err != nil {
+		t.Fatalf("Click inline whiteboard block: %v", err)
+	}
+	tt2.Key(0, ui.KeyBackspace)
+	tt2.Frame()
+	if len(e2.Doc.Blocks) != 2 || e2.Doc.Blocks[0].Text() != "Before" || e2.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("Backspace did not delete inline whiteboard block: %+v", e2.Doc.Blocks)
+	}
+	tt2.Key(ui.Cmd, ui.KeyZ)
+	tt2.Frame()
+	if len(e2.Doc.Blocks) != 3 || !isWhiteboardBlock(e2.Doc.Blocks[1]) || e2.Doc.Blocks[1].Text() != rawJSON {
+		t.Fatalf("Cmd+Z did not cleanly restore inline whiteboard block: %+v", e2.Doc.Blocks)
+	}
+	tt2.Advance(600 * time.Millisecond)
+	if err := tt2.Click("手绘白板"); err != nil {
+		t.Fatalf("Click inline whiteboard before Delete: %v", err)
+	}
+	tt2.Key(0, ui.KeyDelete)
+	tt2.Frame()
+	if len(e2.Doc.Blocks) != 2 {
+		t.Fatalf("Delete did not delete inline whiteboard block: %+v", e2.Doc.Blocks)
+	}
+}
+
+func TestWhiteboardSurfaceKeyboardStepEnterAndRangeDelete(t *testing.T) {
+	scene := whiteboard.StarterScene()
+	stored := map[string]*whiteboard.Scene{"assets/diagram.excalidraw.svg": scene}
+	e, tt := makeWhiteboardDocTester(t, "Before\n\n![手绘白板](assets/diagram.excalidraw.svg)\n\nAfter", stored, nil, nil)
+	focus(e, tt)
+
+	// Surface Backspace from start of "After" steps onto embed, second Backspace deletes it.
+	afterLeaf := e.Doc.Leaves()[2]
+	e.SetSelection(afterLeaf.Start, afterLeaf.Start)
+	tt.Frame()
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 3 || e.Engine.LeafAt(e.Caret).Block.ID != e.Doc.Blocks[1].ID {
+		t.Fatalf("first Backspace from After should step onto whiteboard: blocks=%d caretBlock=%s", len(e.Doc.Blocks), e.Engine.LeafAt(e.Caret).Block.ID)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Text() != "Before" || e.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("second Backspace did not delete stepped whiteboard: %+v", e.Doc.Blocks)
+	}
+
+	// Undo, then surface Delete from end of "Before" steps onto embed, second Delete removes it.
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Frame()
+	beforeLeaf := e.Doc.Leaves()[0]
+	e.SetSelection(beforeLeaf.End, beforeLeaf.End)
+	tt.Frame()
+	tt.Key(0, ui.KeyDelete)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 3 || e.Engine.LeafAt(e.Caret).Block.ID != e.Doc.Blocks[1].ID {
+		t.Fatalf("first Delete from Before should step onto whiteboard: blocks=%d caretBlock=%s", len(e.Doc.Blocks), e.Engine.LeafAt(e.Caret).Block.ID)
+	}
+	tt.Key(0, ui.KeyDelete)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Text() != "Before" || e.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("second Delete did not delete stepped whiteboard: %+v", e.Doc.Blocks)
+	}
+
+	// Range drag from "Before" onto .excalidraw.svg + Backspace deletes cleanly without leaking "手绘白板".
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Frame()
+	r0, r1 := e.rows[0], e.rows[1]
+	bounds, _ := tt.Find("文档")
+	tt.Press(bounds.X+r0.x+20, bounds.Y+r0.y+8)
+	tt.Move(bounds.X+r1.boardRect.X+r1.boardRect.W/2, bounds.Y+r1.boardRect.Y+r1.boardRect.H/2)
+	tt.Release(bounds.X+r1.boardRect.X+r1.boardRect.W/2, bounds.Y+r1.boardRect.Y+r1.boardRect.H/2)
+	tt.Frame()
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if len(e.Doc.Blocks) != 2 || strings.Contains(e.Doc.Blocks[0].Text(), "手绘白板") || e.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("drag selection delete leaked text or failed: %+v", e.Doc.Blocks)
+	}
+
+	// Enter and typing on a surface-focused inline excalidraw block insert a paragraph below without corrupting JSON.
+	rawJSON, err := scene.Encode()
+	if err != nil {
+		t.Fatalf("Encode scene: %v", err)
+	}
+	e2, tt2 := makeWhiteboardDocTester(t, "```excalidraw\n"+rawJSON+"\n```", map[string]*whiteboard.Scene{}, nil, nil)
+	focus(e2, tt2)
+	e2.SetSelection(0, 0)
+	tt2.Frame()
+	tt2.Key(0, ui.KeyEnter)
+	tt2.Frame()
+	if len(e2.Doc.Blocks) != 2 || e2.Doc.Blocks[0].Text() != rawJSON || e2.Doc.Blocks[1].Kind != "paragraph" {
+		t.Fatalf("Enter on inline excalidraw corrupted JSON: %+v", e2.Doc.Blocks)
+	}
+
+	e2.SetSelection(0, 0)
+	tt2.Frame()
+	typeKeys(tt2, "说明文字")
+	tt2.Frame()
+	if len(e2.Doc.Blocks) != 3 || e2.Doc.Blocks[0].Text() != rawJSON || e2.Doc.Blocks[1].Text() != "说明文字" {
+		t.Fatalf("typing on inline excalidraw corrupted JSON: %+v", e2.Doc.Blocks)
+	}
+
+	// Range selection starting inside inline excalidraw + Backspace does not leak JSON.
+	leaves := e2.Doc.Leaves()
+	e2.SetSelection(leaves[0].Start+2, leaves[1].Start+2)
+	tt2.Frame()
+	tt2.Key(0, ui.KeyBackspace)
+	tt2.Frame()
+	if len(e2.Doc.Blocks) != 2 || e2.Doc.Blocks[0].Kind != "paragraph" || e2.Doc.Blocks[0].Text() != "文字" {
+		t.Fatalf("range delete starting on inline excalidraw leaked JSON: %+v", e2.Doc.Blocks)
+	}
+}
+
+func TestWhiteboardBrokenSVGRegularSVGColumnsReadOnlyAndMenu(t *testing.T) {
+	// 1. Broken .excalidraw.svg error card can be clicked and deleted with Backspace / Delete.
+	eErr, ttErr := makeWhiteboardDocTester(t, "Before\n\n![坏的白板](assets/broken.excalidraw.svg)\n\nAfter",
+		map[string]*whiteboard.Scene{}, errors.New("invalid svg"), nil)
+	if err := ttErr.Click("手绘白板: broken.excalidraw.svg"); err != nil {
+		t.Fatalf("Click broken whiteboard card: %v", err)
+	}
+	ttErr.Key(0, ui.KeyBackspace)
+	ttErr.Frame()
+	if len(eErr.Doc.Blocks) != 2 {
+		t.Fatalf("broken whiteboard Backspace failed: %+v", eErr.Doc.Blocks)
+	}
+	ttErr.Key(ui.Cmd, ui.KeyZ)
+	ttErr.Frame()
+	ttErr.Advance(600 * time.Millisecond)
+	if err := ttErr.Click("手绘白板: broken.excalidraw.svg"); err != nil {
+		t.Fatalf("Click broken whiteboard card before Delete: %v", err)
+	}
+	ttErr.Key(0, ui.KeyDelete)
+	ttErr.Frame()
+	if len(eErr.Doc.Blocks) != 2 {
+		t.Fatalf("broken whiteboard Delete failed: %+v", eErr.Doc.Blocks)
+	}
+
+	// 2. Unsupported regular .svg image card can be clicked and deleted with Backspace / Delete.
+	eSVG, ttSVG := imageTester("Before\n\n![图表](assets/chart.svg)\n\nAfter", 600,
+		ImageResource{Problem: ImageUnsupported, Local: true}, nil, nil)
+	ttSVG.SetLocale("zh-Hans")
+	ttSVG.Frame()
+	bounds, _ := ttSVG.Find("文档")
+	pic := eSVG.rows[1].picture.bounds
+	ttSVG.ClickAt(bounds.X+pic.X+pic.W/2, bounds.Y+pic.Y+pic.H/2)
+	ttSVG.Frame()
+	ttSVG.Key(0, ui.KeyBackspace)
+	ttSVG.Frame()
+	if len(eSVG.Doc.Blocks) != 2 || eSVG.Doc.Blocks[0].Text() != "Before" || eSVG.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("regular SVG Backspace failed: %+v", eSVG.Doc.Blocks)
+	}
+	ttSVG.Key(ui.Cmd, ui.KeyZ)
+	ttSVG.Frame()
+	ttSVG.Advance(600 * time.Millisecond)
+	pic = eSVG.rows[1].picture.bounds
+	ttSVG.ClickAt(bounds.X+pic.X+pic.W/2, bounds.Y+pic.Y+pic.H/2)
+	ttSVG.Frame()
+	ttSVG.Key(0, ui.KeyDelete)
+	ttSVG.Frame()
+	if len(eSVG.Doc.Blocks) != 2 {
+		t.Fatalf("regular SVG Delete failed: %+v", eSVG.Doc.Blocks)
+	}
+
+	// 3. .excalidraw.svg embed inside columns block can be clicked and deleted cleanly.
+	scene := whiteboard.StarterScene()
+	stored := map[string]*whiteboard.Scene{"assets/col.excalidraw.svg": scene}
+	colMD := strings.Join([]string{
+		`<div class="arcmd-columns" style="display:flex;gap:24px">`,
+		`<div class="arcmd-column" style="flex:1;min-width:0">`,
+		`![手绘白板](assets/col.excalidraw.svg)`,
+		`</div>`,
+		`<div class="arcmd-column" style="flex:1;min-width:0">`,
+		`Right`,
+		`</div>`,
+		`</div>`,
+	}, "\n\n")
+	eCol, ttCol := makeWhiteboardDocTester(t, colMD, stored, nil, nil)
+	if err := ttCol.Click("手绘白板: col.excalidraw.svg"); err != nil {
+		t.Fatalf("Click whiteboard in column: %v", err)
+	}
+	ttCol.Key(0, ui.KeyBackspace)
+	ttCol.Frame()
+	col0 := eCol.Doc.Blocks[0].Children[0]
+	if len(col0.Children) != 1 || col0.Children[0].Kind != "paragraph" || col0.Children[0].Text() != "" {
+		t.Fatalf("column whiteboard Backspace left unexpected blocks: %+v", col0.Children)
+	}
+	if err := eCol.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after column whiteboard delete: %v", err)
+	}
+
+	// 4. Read-only mode refuses Backspace/Delete on focused whiteboard and sets e.refused/e.refusedAt.
+	storedRO := map[string]*whiteboard.Scene{"assets/ro.excalidraw.svg": scene}
+	eRO, ttRO := makeWhiteboardDocTester(t, "![手绘白板](assets/ro.excalidraw.svg)", storedRO, nil, nil)
+	eRO.ReadOnly = true
+	ttRO.Frame()
+	if err := ttRO.Click("手绘白板: ro.excalidraw.svg"); err != nil {
+		t.Fatalf("Click read-only whiteboard: %v", err)
+	}
+	ttRO.Key(0, ui.KeyBackspace)
+	ttRO.Frame()
+	if len(eRO.Doc.Blocks) != 1 || !isWhiteboardEmbed(eRO.Doc.Blocks[0]) || eRO.refusedAt.IsZero() {
+		t.Fatalf("read-only Backspace modified doc or did not trigger refused notice: blocks=%+v refusedAt=%v", eRO.Doc.Blocks, eRO.refusedAt)
+	}
+	eRO.refusedAt = time.Time{}
+	ttRO.Key(0, ui.KeyDelete)
+	ttRO.Frame()
+	if len(eRO.Doc.Blocks) != 1 || !isWhiteboardEmbed(eRO.Doc.Blocks[0]) || eRO.refusedAt.IsZero() {
+		t.Fatalf("read-only Delete modified doc or did not trigger refused notice: blocks=%+v refusedAt=%v", eRO.Doc.Blocks, eRO.refusedAt)
+	}
+
+	// 5. Context menu on resting .excalidraw.svg offers "删除" and deletes the block.
+	storedCtx := map[string]*whiteboard.Scene{"assets/ctx.excalidraw.svg": scene}
+	eCtx, ttCtx := makeWhiteboardDocTester(t, "Before\n\n![手绘白板](assets/ctx.excalidraw.svg)\n\nAfter", storedCtx, nil, nil)
+	if err := ttCtx.RightClick("手绘白板: ctx.excalidraw.svg"); err != nil {
+		t.Fatalf("RightClick whiteboard embed: %v", err)
+	}
+	menu := ttCtx.Menu()
+	if !slices.Contains(menu, "删除") {
+		t.Fatalf("whiteboard context menu %v missing 删除", menu)
+	}
+	if err := ttCtx.ChooseMenuItem("删除"); err != nil {
+		t.Fatalf("ChooseMenuItem 删除: %v", err)
+	}
+	ttCtx.Frame()
+	if len(eCtx.Doc.Blocks) != 2 || eCtx.Doc.Blocks[0].Text() != "Before" || eCtx.Doc.Blocks[1].Text() != "After" {
+		t.Fatalf("context menu 删除 did not delete whiteboard embed: %+v", eCtx.Doc.Blocks)
 	}
 }

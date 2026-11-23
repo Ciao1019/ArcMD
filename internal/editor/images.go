@@ -66,6 +66,13 @@ func (e *Editor) ClearImages() {
 	}
 	clear(e.pdfs)
 	e.pdfs = nil
+	for _, v := range e.books {
+		if v != nil {
+			v.ClearBitmaps()
+		}
+	}
+	clear(e.books)
+	e.books = nil
 }
 
 type imageEnterState struct {
@@ -93,7 +100,7 @@ func (e *Editor) FocusInsertedImage(id string) {
 }
 
 func (e *Editor) captionVisible(b *document.Block) bool {
-	if e.printing || b == nil {
+	if e.printing || b == nil || isWhiteboardEmbed(b) || isPDFEmbed(b) || isBookEmbed(b) {
 		return false
 	}
 	if e.imageCaptionID == b.ID {
@@ -544,8 +551,36 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		}
 		if f.resource.Bitmap == nil {
 			r := f.bounds
-			ui.Box(key.Key("status")).Absolute().Left(r.X).Top(r.Y).Size(r.W, r.H).
+			status := ui.Box(key.Key("status")).Absolute().Left(r.X).Top(r.Y).Size(r.W, r.H).
 				Role(ui.RoleImage).Label(i18n.T("无法显示图片：") + f.name + "。" + row.leaf.Block.Text() + "。" + f.resource.Problem.text()).Tooltip(src)
+			if status.Hovered() {
+				e.hoverID = row.leaf.Owner
+			}
+			if status.Clicked() {
+				e.clearBlocks()
+				if e.imageCaptionID != "" {
+					e.imageCaptionID, e.ready = "", false
+				}
+				e.FocusBlock(id)
+				e.RequestFocus = true
+			}
+			status.ContextMenu(func(m *ui.Menu) {
+				if !e.ReadOnly && o.ReplaceImage != nil {
+					menuAction(m, i18n.T("重新选择图片…"), func() { o.ReplaceImage(id, src) })
+				}
+				if o.RevealImage != nil && f.resource.Local {
+					menuAction(m, i18n.T("在文件夹中显示"), func() { o.RevealImage(src) })
+				}
+				if !e.ReadOnly {
+					if o.ReplaceImage != nil || (o.RevealImage != nil && f.resource.Local) {
+						m.Separator()
+					}
+					menuAction(m, i18n.T("删除"), func() {
+						e.deleteAtomicBlock(id, true)
+						e.RequestFocus = true
+					})
+				}
+			})
 		}
 		for _, action := range f.actions {
 			b := e.imageButton(key.Key(action.key), action.label, action.bounds)
@@ -566,6 +601,9 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		r := f.bounds
 		picture := ui.Box(key).Absolute().Left(r.X).Top(r.Y).Size(r.W, r.H).
 			Focusable().Role(ui.RoleButton).Label(i18n.T("查看图片：") + f.name).Tooltip(row.leaf.Block.Text()).Cursor(ui.CursorPointer)
+		if picture.Hovered() {
+			e.hoverID = row.leaf.Owner
+		}
 		if picture.Clicked() {
 			e.FocusBlock(id)
 			if e.imageCaptionID != "" {
@@ -581,7 +619,11 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 			}
 			switch ev.Key {
 			case ui.KeyBackspace, ui.KeyDelete:
-				e.DeleteBlock(id)
+				if e.ReadOnly {
+					e.refused = true
+					return true
+				}
+				e.deleteAtomicBlock(id, ev.Key == ui.KeyBackspace)
 			case ui.KeyLeft, ui.KeyUp:
 				e.SetSelection(max(0, row.leaf.Start-1), max(0, row.leaf.Start-1))
 			case ui.KeyRight, ui.KeyDown:
@@ -672,7 +714,7 @@ func (e *Editor) imageButton(c *ui.Context, label string, r ui.Rect) ui.Element 
 // Explicit typing reveals the editable description; reading and pasting keep
 // filenames and alt text out of a successfully loaded picture's layout.
 func (e *Editor) editImageCaption() {
-	if b := e.Engine.LeafAt(e.Caret).Block; b.Kind == "image" {
+	if b := e.Engine.LeafAt(e.Caret).Block; b.Kind == "image" && !isWhiteboardEmbed(b) && !isPDFEmbed(b) && !isBookEmbed(b) {
 		if e.captionedImages == nil {
 			e.captionedImages = map[string]bool{}
 		}

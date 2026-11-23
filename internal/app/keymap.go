@@ -55,7 +55,7 @@ var bindings = []binding{
 	{id: "split-next", label: "下一个分屏", defaults: []editor.Combo{combo(ui.Ctrl|ui.Shift, ui.KeyTab)}},
 	{id: "save", label: "立即保存", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyS)}},
 	{id: "outline", label: "展开/收起目录", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyO)}},
-	{id: "mindmap", label: "思维导图", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyM)}},
+	{id: "mindmap", label: "思维导图", defaults: []editor.Combo{combo(ctrlCmd(), ui.KeyM)}},
 	{id: "full-width", label: "切换全宽显示", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.KeyP)}},
 	{id: "bookmark", label: "添加/移除书签", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyD)}},
 	{id: "bookmarks", label: "书签列表", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyD)}},
@@ -276,6 +276,9 @@ func reservedCombos() []editor.Combo {
 	}
 	for _, k := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4} {
 		out = append(out, combo(ui.Ctrl|ui.Shift, k))
+	}
+	if ui.Cmd == ui.Super {
+		out = append(out, combo(ui.Cmd, ui.KeyM), combo(ui.Cmd|ui.Alt, ui.KeyM))
 	}
 	return out
 }

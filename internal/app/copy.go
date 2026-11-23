@@ -423,7 +423,7 @@ func (a *App) copyWithResources(src *space.Space, rel string, dst *space.Space, 
 		if !sameDir {
 			for old := range d.urls {
 				oldBase, oldFrag, hasFrag := strings.Cut(old, "#")
-				if vault.IsWhiteboard(oldBase) || vault.IsPDF(oldBase) {
+				if vault.IsWhiteboard(oldBase) || vault.IsPDF(oldBase) || vault.IsBook(oldBase) {
 					clean := strings.TrimPrefix(path.Clean(unescapeImagePath(oldBase)), "/")
 					if !underAttachmentFolder(clean, assetsDir) && !underAttachmentFolder(clean, attachmentFolder(src)) {
 						continue
@@ -546,7 +546,7 @@ func (a *App) copyDocuments(sp *space.Space, rel string) ([]*movingDocument, err
 		if live := a.residentDocument(sp.ID, p.Path); live != nil {
 			live.waitAsyncSave()
 		}
-		if vault.IsPDF(p.Path) {
+		if vault.IsPDF(p.Path) || vault.IsBook(p.Path) {
 			docs = append(docs, &movingDocument{rel: p.Path, urls: map[string]string{}})
 			continue
 		}
@@ -573,7 +573,7 @@ func (a *App) copyDocuments(sp *space.Space, rel string) ([]*movingDocument, err
 // always receive fresh block IDs (and any rebased image URLs); Markdown files
 // stay byte-identical unless an image or cover URL changed.
 func copyDocumentText(rel, text string, urls, coverURLs map[string]string) (string, error) {
-	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) || vault.IsBook(rel) {
 		return text, nil
 	}
 	mapCopyURLs := func(doc *model.Document) {

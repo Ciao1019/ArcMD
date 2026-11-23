@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 
 	"github.com/Ciao1019/ArcMD/internal/app"
+	"github.com/Ciao1019/ArcMD/internal/sysproxy"
 )
 
 func main() {
+	sysproxy.Install()
 	cfg, err := app.DefaultConfig()
 	if err != nil {
 		log.Fatal(err)

@@ -137,6 +137,9 @@ func (a *App) closeWindow(w *docWindow) bool {
 			break
 		}
 	}
+	if mw, ok := w.win.(*mygo.Window); ok {
+		a.destroyHTMLWebViewsForWindow(mw)
+	}
 	a.retireClosedDocuments(w.doc)
 	return true
 }
@@ -201,6 +204,10 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 		}
 		if d.isPDF() {
 			editor.PDFView(c.Key(d.viewKey()), d.pdf, a.pdfOptionsFor(c, d))
+			return
+		}
+		if d.isBook() {
+			editor.BookView(c.Key(d.viewKey()), d.book, a.bookOptionsFor(c, d))
 			return
 		}
 		width, _ := c.Size()

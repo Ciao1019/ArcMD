@@ -56,6 +56,52 @@ func isWhiteboardEmbed(b *document.Block) bool {
 	return isWhiteboardURL(b.URL)
 }
 
+func isAtomicVisualBlock(b *document.Block) bool {
+	return isWhiteboardEmbed(b) || isWhiteboardBlock(b) || isPDFEmbed(b) || isBookEmbed(b)
+}
+
+func (e *Editor) deleteAtomicBlock(id string, backward bool) {
+	if e.ReadOnly || id == "" {
+		return
+	}
+	if e.boardEditing == id {
+		e.boardEditing = ""
+	}
+	if e.boardModalID == id {
+		e.boardModalID = ""
+	}
+	if e.pdfBrowsing == id {
+		e.pdfBrowsing = ""
+	}
+	if e.pdfModalID == id {
+		e.pdfModalID = ""
+	}
+	if e.bookBrowsing == id {
+		e.bookBrowsing = ""
+	}
+	if e.bookModalID == id {
+		e.bookModalID = ""
+	}
+	if e.imageCaptionID == id {
+		e.imageCaptionID = ""
+	}
+	e.clearBlocks()
+	e.Engine.RemoveBlock(id, backward)
+	e.sync()
+	e.ready = false
+	e.reveal = true
+	e.vertical = false
+}
+
+func (e *Editor) copySingleBlock(b *document.Block, write func(string)) {
+	if b == nil {
+		return
+	}
+	doc := document.New()
+	doc.Blocks = []*document.Block{b.Clone()}
+	e.writeFragment(doc, "", write)
+}
+
 func (e *Editor) startBoardEditing(id string) {
 	e.boardEditing = id
 	e.boardFocusPending = id != ""
@@ -366,21 +412,37 @@ func (e *Editor) paintWhiteboardRow(p *ui.Painter, bounds ui.Rect, r row, t *ui.
 	box.X += bounds.X + dx
 	box.Y += bounds.Y + dy
 
+	hovered := !e.printing && (e.hovered(r.boardRect, 0) || e.boardHoverID == r.leaf.Block.ID)
+	caretSelected := !e.printing && e.focused && len(e.blocks.ids) == 0 && e.Anchor == e.Caret && e.Engine.LeafAt(e.Caret).Block.ID == r.leaf.Block.ID
+	sel := e.Selection().Range
+	rangeSelected := !e.printing && e.focused && len(e.blocks.ids) == 0 && e.Anchor != e.Caret && sel.End > r.leaf.Start && sel.Start < r.leaf.End
+
 	if r.boardError != nil {
 		p.StrokeDashed(box, e.page.Caption, 8, 1)
 		ew, eh := r.boardError.Size()
 		p.TextLayout(r.boardError, box.X+(box.W-ew)/2, box.Y+(box.H-eh)/2, t.Danger)
+		if caretSelected {
+			p.Stroke(box, t.Accent, 8, 2)
+		}
+		if rangeSelected {
+			p.Fill(box, t.Selection, 8)
+		}
 		return true
 	}
 
 	wb := e.page.Whiteboard
-	if r.boardEmbed || (!e.printing && e.hovered(r.boardRect, 0)) {
+	if r.boardEmbed || hovered || caretSelected {
 		p.Fill(box, wb.Canvas, 10)
 		border := e.page.CodeBorder
-		if !e.printing && e.hovered(r.boardRect, 0) {
+		strokeW := float32(1)
+		switch {
+		case caretSelected:
+			border = t.Accent
+			strokeW = 2
+		case hovered:
 			border = t.Accent.Alpha(0.45)
 		}
-		p.Stroke(box, border, 10, 1)
+		p.Stroke(box, border, 10, strokeW)
 	}
 	if r.boardScene != nil && len(r.boardScene.Elements) > 0 {
 		PaintSceneFit(p, box, r.boardScene, wb, t, 20)
@@ -397,6 +459,9 @@ func (e *Editor) paintWhiteboardRow(p *ui.Painter, bounds ui.Rect, r row, t *ui.
 		p.Fill(pill, wb.IslandFill, 6)
 		p.Stroke(pill, wb.IslandBorder, 6, 1)
 		p.TextLayout(badge, pill.X+7, pill.Y+3, e.page.Caption)
+	}
+	if rangeSelected {
+		p.Fill(box, t.Selection, 10)
 	}
 	return true
 }
@@ -470,56 +535,8 @@ func (e *Editor) embedHoverPills(d decoration) []boardHoverPill {
 }
 
 func (e *Editor) paintWhiteboardHover(p *ui.Painter, bounds ui.Rect, d decoration, t *ui.Theme) {
-	if e.printing || d.boardEditing {
-		return
-	}
-	ddy := e.ownerVisualDY(d.ownerID)
-	copied := d.id == e.copiedID && p.Now().Sub(e.copiedAt) < 1500*time.Millisecond
-	if copied {
-		p.After(1500*time.Millisecond - p.Now().Sub(e.copiedAt))
-	}
-	if !copied && !e.hovered(d.rect, 0) {
-		return
-	}
-	wb := e.page.Whiteboard
-	drawPill := func(docRect ui.Rect, icon *ui.SVG, label string, active bool) {
-		r := ui.Rect{X: docRect.X + bounds.X, Y: docRect.Y + bounds.Y + ddy, W: docRect.W, H: docRect.H}
-		bg := wb.IslandFill
-		fg := e.page.Caption
-		if active {
-			bg = wb.ActiveFill
-			fg = wb.ActiveInk
-		} else if e.hovered(docRect, 0) {
-			bg = e.page.Hover
-			fg = t.Text
-		}
-		p.Fill(r, bg, 6)
-		p.Stroke(r, wb.IslandBorder, 6, 1)
-		p.Icon(icon, ui.Rect{X: r.X + 6, Y: r.Y + (r.H-13)/2, W: 13, H: 13}, fg)
-		sp := ui.Span{Text: label, Size: 11.5, Font: "system-ui", Color: fg}
-		_, th := p.MeasureText(0, sp)
-		p.RichText(r.X+22, r.Y+(r.H-th)/2, 0, sp)
-	}
-
-	if d.boardEmbed {
-		for _, pill := range e.embedHoverPills(d) {
-			drawPill(pill.rect, pill.icon, pill.label, false)
-		}
-		return
-	}
-
-	if !e.ReadOnly {
-		if e.saveBlockAsWhiteboard != nil && d.rect.W >= 370 {
-			drawPill(boardSaveFileButtonRect(d), iconWhiteboard, i18n.T("存为独立白板"), false)
-		}
-		drawPill(boardEditButtonRect(d), iconPencil, i18n.T("编辑画布"), false)
-		drawPill(boardExpandButtonRect(d), iconMaximize, i18n.T("放大画布"), false)
-	}
-	if copied {
-		drawPill(boardCopySVGButtonRect(d), iconCheck, i18n.T("已复制"), true)
-	} else {
-		drawPill(boardCopySVGButtonRect(d), iconCopy, i18n.T("复制 SVG"), false)
-	}
+	// Hover action pills are rendered as interactive buttons in boardControls.
+	_, _, _, _ = p, bounds, d, t
 }
 
 func (e *Editor) whiteboardControl(d decoration, x, y float32) bool {
@@ -581,84 +598,415 @@ func (e *Editor) whiteboardControl(d decoration, x, y float32) bool {
 	return false
 }
 
-// boardControls renders the interactive inline BoardView for e.boardEditing.
+// boardControls renders interactive inline BoardView overlays and rest-mode hit
+// boxes, context menus, and hover action pills for visible whiteboards.
 func (e *Editor) boardControls(c *ui.Context, o Options) {
-	if e.printing || e.ReadOnly || e.boardEditing == "" || e.boardModalID != "" {
+	if e.printing {
 		return
 	}
-	idx, ok := e.rowIDs[e.boardEditing]
-	if !ok {
-		return
-	}
-	r := e.indexedRow(idx)
-	if !r.boardEditing {
-		return
-	}
-	b := r.leaf.Block
-	board := e.boardForBlock(b)
-	if board == nil {
-		return
-	}
-	if e.boardFocusPending {
-		board.RequestFocus = true
-		e.boardFocusPending = false
-	}
-	box := r.boardRect
-	dy := e.ownerVisualDY(r.leaf.Owner)
 	t := o.Theme
+	services := c.Services()
 
-	card := ui.Column(c.Key("inline-board:"+b.ID)).Absolute().Left(box.X).Top(box.Y+dy).Size(box.W, box.H).
-		Radius(10).Background(e.page.Whiteboard.Canvas).Border(1.25, t.Accent.Alpha(0.45)).
-		Shadow(0, 4, 18, 0, e.page.MathShadow).Clip()
-	card.Children(func() {
-		BoardView(c, board, BoardOptions{
-			Theme:             t,
-			Page:              e.page,
-			Compact:           true,
-			ReadOnly:          e.ReadOnly,
-			WikiSuggest:       e.boardWikiSuggest,
-			OpenWiki:          e.openWikiSplit,
-			UserLibrary:       o.UserWhiteboardLib,
-			SaveUserLibrary:   o.SaveWhiteboardLib,
-			ImportLibraryFile: o.ImportWhiteboardLib,
-			ExpandModal:       func() { e.openBoardModal(b.ID) },
-			Done: func() {
-				e.commitBoardToBlock(b.ID, board)
-				e.boardEditing = ""
+	for i := range e.visibleRows(1) {
+		r := *e.indexedRow(i)
+		if !isWhiteboardBlock(r.leaf.Block) && !r.boardEmbed {
+			continue
+		}
+		if r.boardRect.W <= 0 {
+			continue
+		}
+		b := r.leaf.Block
+		id := b.ID
+		dy := e.ownerVisualDY(r.leaf.Owner)
+		box := r.boardRect
+		box.Y += dy
+
+		if !e.ReadOnly && r.boardEditing && id == e.boardEditing && e.boardModalID != id {
+			board := e.boardForBlock(b)
+			if board == nil {
+				continue
+			}
+			if e.boardFocusPending {
+				board.RequestFocus = true
+				e.boardFocusPending = false
+			}
+
+			card := ui.Column(c.Key("inline-board:"+id)).Absolute().Left(box.X).Top(box.Y).Size(box.W, box.H).
+				Radius(10).Background(e.page.Whiteboard.Canvas).Border(1.25, t.Accent.Alpha(0.45)).
+				Shadow(0, 4, 18, 0, e.page.MathShadow).Clip()
+			card.Children(func() {
+				BoardView(c, board, BoardOptions{
+					Theme:             t,
+					Page:              e.page,
+					Compact:           true,
+					ReadOnly:          e.ReadOnly,
+					WikiSuggest:       e.boardWikiSuggest,
+					OpenWiki:          e.openWikiSplit,
+					UserLibrary:       o.UserWhiteboardLib,
+					SaveUserLibrary:   o.SaveWhiteboardLib,
+					ImportLibraryFile: o.ImportWhiteboardLib,
+					ExpandModal:       func() { e.openBoardModal(id) },
+					Done: func() {
+						e.commitBoardToBlock(id, board)
+						e.boardEditing = ""
+						e.ready = false
+						e.RequestFocus = true
+					},
+					OnChange: func() {
+						e.commitBoardToBlock(id, board)
+					},
+				})
+			})
+
+			// Bottom resize handle bar to adjust inline canvas height.
+			grip := ui.Box(c.Key("board-resize:"+id)).Absolute().Left(box.X+box.W/2-36).Top(box.Y+box.H-5).
+				Size(72, 10).Radius(5).Cursor(ui.CursorResizeNS).Tooltip(i18n.T("拖动调整画布高度"))
+			if grip.Hovered() || e.boardDragID == id {
+				grip.Background(t.Accent.Alpha(0.28))
+			} else {
+				grip.Background(e.page.CodeBorder)
+			}
+			_, dragDY, pressed := grip.Dragged()
+			if pressed {
+				if e.boardDragID != id {
+					e.boardDragID = id
+					e.boardDragStartH = box.H
+				}
+				if e.boardHeights == nil {
+					e.boardHeights = map[string]float32{}
+				}
+				next := max(boardMinEditH, min(boardMaxEditH, e.boardHeights[id]+dragDY))
+				if e.boardHeights[id] == 0 {
+					next = max(boardMinEditH, min(boardMaxEditH, e.boardDragStartH+dragDY))
+				}
+				e.boardHeights[id] = next
 				e.ready = false
-				e.RequestFocus = true
-			},
-			OnChange: func() {
-				e.commitBoardToBlock(b.ID, board)
-			},
-		})
-	})
+			} else if e.boardDragID == id {
+				e.boardDragID = ""
+			}
+			continue
+		}
 
-	// Bottom resize handle bar to adjust inline canvas height.
-	grip := ui.Box(c.Key("board-resize:"+b.ID)).Absolute().Left(box.X+box.W/2-36).Top(box.Y+dy+box.H-5).
-		Size(72, 10).Radius(5).Cursor(ui.CursorResizeNS).Tooltip(i18n.T("拖动调整画布高度"))
-	if grip.Hovered() || e.boardDragID == b.ID {
-		grip.Background(t.Accent.Alpha(0.28))
-	} else {
-		grip.Background(e.page.CodeBorder)
-	}
-	_, dragDY, pressed := grip.Dragged()
-	if pressed {
-		if e.boardDragID != b.ID {
-			e.boardDragID = b.ID
-			e.boardDragStartH = box.H
+		label := i18n.T("手绘白板")
+		if r.boardEmbed && b.URL != "" {
+			label = i18n.T("手绘白板") + ": " + path.Base(b.URL)
 		}
-		if e.boardHeights == nil {
-			e.boardHeights = map[string]float32{}
+		hit := ui.Box(c.Key("board-rest:"+id)).Absolute().Left(box.X).Top(box.Y).
+			Size(box.W, max(24, box.H)).Focusable().Role(ui.RoleButton).
+			Label(label).Cursor(ui.CursorPointer)
+		if hit.Clicked() {
+			e.clearBlocks()
+			if e.imageCaptionID != "" {
+				e.imageCaptionID, e.ready = "", false
+			}
+			e.FocusBlock(id)
 		}
-		next := max(boardMinEditH, min(boardMaxEditH, e.boardHeights[b.ID]+dragDY))
-		if e.boardHeights[b.ID] == 0 {
-			next = max(boardMinEditH, min(boardMaxEditH, e.boardDragStartH+dragDY))
+		if hit.DoubleClicked() {
+			if !e.ReadOnly && (isWhiteboardBlock(b) || (isWhiteboardEmbed(b) && e.saveWhiteboard != nil)) {
+				e.startBoardEditing(id)
+			} else if r.boardEmbed && e.openWhiteboard != nil {
+				e.openWhiteboard(b.URL, false)
+			}
 		}
-		e.boardHeights[b.ID] = next
-		e.ready = false
-	} else if e.boardDragID == b.ID {
-		e.boardDragID = ""
+		if hit.Focused() {
+			radius := float32(10)
+			if r.boardError != nil {
+				radius = 8
+			}
+			hit.Border(2, t.Accent).Radius(radius)
+		}
+		hit.HandleInput(func(ev ui.InputEvent) bool {
+			switch ev.Kind {
+			case ui.InputCommand:
+				switch ev.Text {
+				case "delete":
+					if e.ReadOnly {
+						e.refused = true
+						return true
+					}
+					e.deleteAtomicBlock(id, true)
+					e.RequestFocus = true
+					return true
+				case "cut":
+					e.copySingleBlock(b, services.WriteClipboard)
+					if e.ReadOnly {
+						e.refused = true
+					} else {
+						e.deleteAtomicBlock(id, true)
+					}
+					e.RequestFocus = true
+					return true
+				case "copy":
+					e.copySingleBlock(b, services.WriteClipboard)
+					return true
+				case "undo":
+					e.Undo()
+					e.RequestFocus = true
+					return true
+				case "redo":
+					e.Redo()
+					e.RequestFocus = true
+					return true
+				case "selectAll":
+					e.selectAll()
+					e.RequestFocus = true
+					return true
+				}
+				return false
+			case ui.InputKeyDown:
+				for _, res := range e.reserved {
+					if res.Mods == ev.Mods && res.Key == ev.Key {
+						return false
+					}
+				}
+				switch {
+				case ev.Key == ui.KeyBackspace || ev.Key == ui.KeyDelete:
+					if e.ReadOnly {
+						e.refused = true
+						return true
+					}
+					e.deleteAtomicBlock(id, ev.Key == ui.KeyBackspace)
+					e.RequestFocus = true
+					return true
+				case ev.Key == ui.KeyEnter && ev.Mods == 0:
+					if !e.ReadOnly && (isWhiteboardBlock(b) || (isWhiteboardEmbed(b) && e.saveWhiteboard != nil)) {
+						e.startBoardEditing(id)
+						return true
+					}
+					if r.boardEmbed && e.openWhiteboard != nil {
+						e.openWhiteboard(b.URL, false)
+						return true
+					}
+					return false
+				case ev.Key == ui.KeyEscape && ev.Mods == 0:
+					e.RequestFocus = true
+					return true
+				case (ev.Key == ui.KeyLeft || ev.Key == ui.KeyUp) && ev.Mods == 0:
+					e.SetSelection(max(0, r.leaf.Start-1), max(0, r.leaf.Start-1))
+					e.RequestFocus = true
+					return true
+				case (ev.Key == ui.KeyRight || ev.Key == ui.KeyDown) && ev.Mods == 0:
+					e.SetSelection(min(e.Len(), r.leaf.End+1), min(e.Len(), r.leaf.End+1))
+					e.RequestFocus = true
+					return true
+				case ev.Mods == ui.Cmd && ev.Key == ui.KeyX:
+					e.copySingleBlock(b, services.WriteClipboard)
+					if e.ReadOnly {
+						e.refused = true
+					} else {
+						e.deleteAtomicBlock(id, true)
+					}
+					e.RequestFocus = true
+					return true
+				case ev.Mods == ui.Cmd && ev.Key == ui.KeyC:
+					e.copySingleBlock(b, services.WriteClipboard)
+					return true
+				case ev.Mods == ui.Cmd && ev.Key == ui.KeyZ:
+					e.Undo()
+					e.RequestFocus = true
+					return true
+				case ev.Mods == ui.Cmd|ui.Shift && ev.Key == ui.KeyZ:
+					e.Redo()
+					e.RequestFocus = true
+					return true
+				case ev.Mods == ui.Cmd && ev.Key == ui.KeyA:
+					e.selectAll()
+					e.RequestFocus = true
+					return true
+				}
+			}
+			return false
+		})
+		hit.ContextMenu(func(m *ui.Menu) {
+			hasItems := false
+			if r.boardEmbed {
+				if !e.ReadOnly && e.saveWhiteboard != nil {
+					menuAction(m, i18n.T("编辑画布"), func() { e.startBoardEditing(id) })
+					menuAction(m, i18n.T("放大画布"), func() { e.openBoardModal(id) })
+					hasItems = true
+				}
+				if e.openWhiteboard != nil {
+					menuAction(m, i18n.T("打开白板"), func() { e.openWhiteboard(b.URL, false) })
+					menuAction(m, i18n.T("在分屏中编辑"), func() { e.openWhiteboard(b.URL, true) })
+					hasItems = true
+				}
+				if o.RevealImage != nil {
+					if hasItems {
+						m.Separator()
+					}
+					menuAction(m, i18n.T("在文件夹中显示"), func() { o.RevealImage(b.URL) })
+					hasItems = true
+				}
+			} else {
+				if !e.ReadOnly {
+					menuAction(m, i18n.T("编辑画布"), func() { e.startBoardEditing(id) })
+					menuAction(m, i18n.T("放大画布"), func() { e.openBoardModal(id) })
+					hasItems = true
+					if e.saveBlockAsWhiteboard != nil && r.boardError == nil {
+						menuAction(m, i18n.T("存为独立白板"), func() {
+							if scene, err := e.whiteboardSceneFor(id, b.Text()); err == nil {
+								e.saveBlockAsWhiteboard(id, scene.Clone())
+							}
+						})
+					}
+				}
+				if r.boardError == nil {
+					menuAction(m, i18n.T("复制 SVG"), func() {
+						if scene, err := e.whiteboardSceneFor(id, b.Text()); err == nil && services != (ui.Services{}) {
+							services.WriteClipboard(whiteboard.ExportSVG(scene, whiteboard.DefaultLightPalette()))
+							e.copiedID, e.copiedAt = id, c.Now()
+						}
+					})
+					hasItems = true
+				}
+			}
+			if !e.ReadOnly {
+				if hasItems {
+					m.Separator()
+				}
+				menuAction(m, i18n.T("删除"), func() {
+					e.deleteAtomicBlock(id, true)
+					e.RequestFocus = true
+				})
+			}
+		})
+
+		type restPill struct {
+			key    string
+			rect   ui.Rect
+			icon   *ui.SVG
+			label  string
+			active bool
+			run    func()
+		}
+		var items []restPill
+		copied := id == e.copiedID && c.Now().Sub(e.copiedAt) < 1500*time.Millisecond
+		if copied {
+			c.After(1500*time.Millisecond - c.Now().Sub(e.copiedAt))
+		}
+		dec := decoration{rect: box}
+		if r.boardEmbed {
+			embedPills := e.embedHoverPills(dec)
+			for j := len(embedPills) - 1; j >= 0; j-- {
+				pill := embedPills[j]
+				key := "pill"
+				var run func()
+				switch pill.action {
+				case hoverEdit:
+					key = "edit"
+					run = func() { e.startBoardEditing(id) }
+				case hoverExpand:
+					key = "expand"
+					run = func() { e.openBoardModal(id) }
+				case hoverOpen:
+					key = "open"
+					run = func() {
+						if e.openWhiteboard != nil {
+							e.openWhiteboard(b.URL, false)
+						}
+					}
+				case hoverSplit:
+					key = "split"
+					run = func() {
+						if e.openWhiteboard != nil {
+							e.openWhiteboard(b.URL, true)
+						}
+					}
+				}
+				items = append(items, restPill{key: key, rect: pill.rect, icon: pill.icon, label: pill.label, run: run})
+			}
+		} else {
+			if !e.ReadOnly {
+				if e.saveBlockAsWhiteboard != nil && box.W >= 370 {
+					items = append(items, restPill{
+						key:   "save",
+						rect:  boardSaveFileButtonRect(dec),
+						icon:  iconWhiteboard,
+						label: i18n.T("存为独立白板"),
+						run: func() {
+							if scene, err := e.whiteboardSceneFor(id, b.Text()); err == nil {
+								e.saveBlockAsWhiteboard(id, scene.Clone())
+							}
+						},
+					})
+				}
+				items = append(items,
+					restPill{
+						key:   "edit",
+						rect:  boardEditButtonRect(dec),
+						icon:  iconPencil,
+						label: i18n.T("编辑画布"),
+						run:   func() { e.startBoardEditing(id) },
+					},
+					restPill{
+						key:   "expand",
+						rect:  boardExpandButtonRect(dec),
+						icon:  iconMaximize,
+						label: i18n.T("放大画布"),
+						run:   func() { e.openBoardModal(id) },
+					},
+				)
+			}
+			copyIcon, copyLabel := iconCopy, i18n.T("复制 SVG")
+			if copied {
+				copyIcon, copyLabel = iconCheck, i18n.T("已复制")
+			}
+			items = append(items, restPill{
+				key:    "copy",
+				rect:   boardCopySVGButtonRect(dec),
+				icon:   copyIcon,
+				label:  copyLabel,
+				active: copied,
+				run: func() {
+					if scene, err := e.whiteboardSceneFor(id, b.Text()); err == nil && services != (ui.Services{}) {
+						services.WriteClipboard(whiteboard.ExportSVG(scene, whiteboard.DefaultLightPalette()))
+						e.copiedID, e.copiedAt = id, c.Now()
+					}
+				},
+			})
+		}
+
+		wb := e.page.Whiteboard
+		pillsHovered := false
+		if e.boardModalID == "" && len(items) > 0 {
+			minX := items[0].rect.X
+			maxX := items[len(items)-1].rect.X + items[len(items)-1].rect.W
+			pillsRow := ui.Row(c.Key("board-pills:" + id)).Absolute().Left(minX).Top(box.Y + 8).
+				Width(maxX - minX).Height(24).Gap(6).AlignItems(ui.Center)
+			showPills := hit.Hovered() || pillsRow.Hovered() || hit.Focused() || copied
+			pillsHovered = pillsRow.Hovered()
+			if !showPills {
+				pillsRow.Invisible()
+			}
+			pillsRow.Children(func() {
+				for _, item := range items {
+					it := item
+					btn := ui.ButtonBase(c.Key(it.key)).Size(it.rect.W, it.rect.H).PaddingX(6).Gap(3).Radius(6).
+						AlignItems(ui.Center).Border(1, wb.IslandBorder).Cursor(ui.CursorPointer)
+					bg := wb.IslandFill
+					fg := e.page.Caption
+					if it.active {
+						bg = wb.ActiveFill
+						fg = wb.ActiveInk
+					} else if showPills && btn.Hovered() {
+						bg = e.page.Hover
+						fg = t.Text
+					}
+					btn.Background(bg)
+					btn.Children(func() {
+						ui.Icon(c, it.icon).FontSize(13).TextColor(fg)
+						ui.Text(c, it.label).FontSize(11.5).FontWeight(500).TextColor(fg).MinWidth(0).SingleLine()
+					})
+					if showPills && btn.Clicked() && it.run != nil {
+						it.run()
+					}
+				}
+			})
+		}
+		if hit.Hovered() || pillsHovered {
+			e.boardHoverID = id
+			e.hoverID = r.leaf.Owner
+		}
 	}
 }
 

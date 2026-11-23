@@ -278,7 +278,7 @@ func (a *App) fetchPluginRegistry(force bool) {
 
 	client := a.pluginsUI.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	finish := func(idx *plugin.Index, err error) {
 		a.pluginsUI.registryLoading = false
@@ -461,8 +461,13 @@ func (a *App) libraryPlugins(c *ui.Context) {
 			if a.pluginsUI.registryLoading {
 				ui.Text(c, i18n.T("正在获取远程插件列表…")).FontSize(12).TextColor(ink.Alpha(0.55)).Padding(2, 4)
 			} else if a.pluginsUI.registryErr != "" {
-				ui.Text(c, fmt.Sprintf(i18n.T("获取插件市场失败：%v"), a.pluginsUI.registryErr)).
-					FontSize(12).TextColor(t.Danger.Alpha(0.85)).Padding(2, 4)
+				ui.Column(c.Key("plugin-registry-error")).Gap(8).Padding(2, 4).AlignItems(ui.Start).Children(func() {
+					ui.Text(c, fmt.Sprintf(i18n.T("获取插件市场失败：%v"), a.pluginsUI.registryErr)).
+						FontSize(12).TextColor(t.Danger.Alpha(0.85))
+					if pluginGlassButton(c, "retry-plugin-registry", i18n.T("重试"), i18n.T("重试"), false).Clicked() {
+						a.fetchPluginRegistry(true)
+					}
+				})
 			}
 		}
 	})

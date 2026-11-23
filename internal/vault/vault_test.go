@@ -275,3 +275,48 @@ func TestPDFDocuments(t *testing.T) {
 		t.Fatalf("Copy PDF = %q, %v", dup, err)
 	}
 }
+
+func TestBookDocumentsHTMLAndEPUB(t *testing.T) {
+	root := t.TempDir()
+	if err := Write(root, "Books/Guide.epub", "PK\x03\x04"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(root, "Web/Article.html", "<h1>Hi</h1>"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(root, "Web/Legacy.HTM", "<p>Hi</p>"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(root, "assets/Embedded.epub", "PK\x03\x04"); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"Books/Guide.epub", "Web/Article.html", "Web/Legacy.HTM"} {
+		if !IsBook(p) || !IsDocument(p) || IsMarkdown(p) || IsPDF(p) {
+			t.Fatalf("classification mismatch for %q", p)
+		}
+	}
+	if !IsEPUB("Books/Guide.epub") || IsHTML("Books/Guide.epub") {
+		t.Fatal("EPUB vs HTML mismatch")
+	}
+	if !IsHTML("Web/Article.html") || !IsHTML("Web/Legacy.HTM") || IsEPUB("Web/Article.html") {
+		t.Fatal("HTML vs EPUB mismatch")
+	}
+	if IsBook(".html") || IsBook(".htm") || IsBook(".epub") {
+		t.Fatal("dotfiles without stem must not be classified as books")
+	}
+	nodes, err := Tree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Find(nodes, "Books/Guide.epub") == nil || Find(nodes, "Web/Article.html") == nil || Find(nodes, "assets/Embedded.epub") != nil {
+		t.Fatalf("unexpected Tree visibility for books: %+v", nodes)
+	}
+	renamed, err := Rename(root, "Web/Article.html", "Report")
+	if err != nil || renamed != "Web/Report.html" {
+		t.Fatalf("Rename HTML = %q, %v", renamed, err)
+	}
+	dup, err := Copy(root, "Books/Guide.epub", "Books")
+	if err != nil || dup != "Books/Guide 2.epub" {
+		t.Fatalf("Copy EPUB = %q, %v", dup, err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/bookdoc"
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/mermaid"
@@ -28,6 +29,7 @@ type layoutPageKey struct {
 	noteKey                       string
 	codeNoWrap                    bool
 	codeMaxHeight, imageMaxHeight float32
+	compactMargins                bool
 }
 
 func sameLayoutPageKey(a, b layoutPageKey) bool {
@@ -41,6 +43,7 @@ func sameLayoutPageKey(a, b layoutPageKey) bool {
 		a.codeNoWrap == b.codeNoWrap &&
 		a.codeMaxHeight == b.codeMaxHeight &&
 		a.imageMaxHeight == b.imageMaxHeight &&
+		a.compactMargins == b.compactMargins &&
 		samePage(a.page, b.page)
 }
 
@@ -133,7 +136,7 @@ type Editor struct {
 	slashOpen                 bool
 	slashQuery                string
 	slashIndex                int
-	slashDismissed            bool
+	slashDismissed            [2]string
 	slashReveal               bool
 	slashScroll               ui.ScrollState
 	linkOpen                  bool
@@ -152,6 +155,9 @@ type Editor struct {
 	readingSize, readingLine  float32
 	fontFamily                string
 	openLink                  func(string)
+	directLinks               bool
+	disableFind               bool
+	hideReadOnlyNotice        bool
 	outline                   []outlineItem
 	outlineState              outlineState
 	pointer                   ui.Point
@@ -166,6 +172,13 @@ type Editor struct {
 	langID                    string
 	langAt                    ui.Rect
 	colorAt                   ui.Rect
+	listNumOpen               bool
+	listNumOpened             bool
+	listNumID                 string
+	listNumAt                 ui.Rect
+	listNumText               string
+	listNumFocusInput         bool
+	listNumRevision           uint64
 	words                     int
 	wordsRevision             uint64
 	wordsReady                bool
@@ -197,6 +210,7 @@ type Editor struct {
 	mathEditing, laidMath       string
 	mermaidEditing, laidMermaid string
 	boardEditing, laidBoard     string
+	boardHoverID                string
 	boardFocusPending           bool
 	boardModalID                string
 	laidModalBoard              string
@@ -231,6 +245,24 @@ type Editor struct {
 	loadPDF                     func(string) (*pdfdoc.Document, uint64, error)
 	openPDF                     func(string, bool)
 	attachPDF                   func()
+	bookBrowsing, laidBook      string
+	bookFocusPending            bool
+	bookModalID, laidModalBook  string
+	bookModalFocusPending       bool
+	bookHeights                 map[string]float32
+	bookRestChapters            map[string]int
+	bookDragID                  string
+	bookDragStartH              float32
+	books                       map[string]*BookViewer
+	bookEmbedRev                map[string]uint64
+	embedBooks                  map[string]embedBookCache
+	loadBook                    func(string) (*bookdoc.Document, uint64, error)
+	openBook                    func(string, bool)
+	openBookInBrowser           func(string)
+	loadBookExternalImg         func(string, string) ImageResource
+	htmlWebView                 func(bookURL, slot string, scrollToContainer bool) HTMLWebView
+	attachHTML                  func()
+	attachEPUB                  func()
 	laidFindKey                 string
 	bindings                    map[string]Combo
 	openWiki, openTag           func(string)
@@ -347,6 +379,13 @@ type row struct {
 	pdfErr      string
 	pdfError    *ui.TextLayout
 
+	bookDoc      *bookdoc.Document
+	bookRect     ui.Rect
+	bookBrowsing bool
+	bookEmbed    bool
+	bookErr      string
+	bookError    *ui.TextLayout
+
 	codeContentH   float32
 	codeViewH      float32
 	codeCompact    bool
@@ -389,6 +428,9 @@ type decoration struct {
 	pdfBrowsing    bool
 	pdfEmbed       bool
 	pdfURL         string
+	bookBrowsing   bool
+	bookEmbed      bool
+	bookURL        string
 	yApplied       float64
 }
 
@@ -667,6 +709,19 @@ type Options struct {
 	OpenPDF   func(url string, split bool)
 	AttachPDF func()
 	AsyncPDF  bool
+	// HTML / EPUB embed integration callbacks.
+	LoadBook            func(url string) (*bookdoc.Document, uint64, error)
+	OpenBook            func(url string, split bool)
+	OpenBookInBrowser   func(url string)
+	LoadBookExternalImg func(bookURL, imgSrc string) ImageResource
+	HTMLWebView         func(bookURL, slot string, scrollToContainer bool) HTMLWebView
+	AttachHTML          func()
+	AttachEPUB          func()
+	// Reader behavior flags (used by BookView's embedded read-only chapter editors).
+	DirectLinks        bool
+	DisableFind        bool
+	HideReadOnlyNotice bool
+	CompactMargins     bool
 }
 
 func New(markdown string) *Editor { return FromOwnedDocument(ImportMarkdown(markdown)) }
@@ -685,6 +740,19 @@ func newEditorWithBuffer(buf *Buffer) *Editor {
 	return &Editor{Buffer: buf, cache: make(map[string]cachedShape), images: make(map[string]ImageResource), dropIndex: -1, lastAnnotation: "wavy",
 		wiki: wikiState{dismissed: -1}, complete: completion{dismissed: -1}}
 }
+func (e *Editor) insertParagraphAfterLeaf(leaf document.Leaf) {
+	if leaf.Parent == nil {
+		return
+	}
+	e.Engine.Edit(func() {
+		next := document.NewBlock("paragraph", "")
+		next.Indent = leaf.Block.Indent
+		*leaf.Parent = append((*leaf.Parent)[:leaf.Index+1], append([]*document.Block{next}, (*leaf.Parent)[leaf.Index+1:]...)...)
+		e.Engine.FocusBlock(next.ID)
+	})
+	e.sync()
+}
+
 func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	if e.ReadOnly {
 		if e.readOnlySpace && text == " " && r == nil {
@@ -696,6 +764,11 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 		return
 	}
 	e.readOnlySpace = false
+	if !e.Composing() && r == nil && e.Anchor == e.Caret && text != "" {
+		if leaf := e.Engine.LeafAt(e.Caret); isAtomicVisualBlock(leaf.Block) {
+			e.insertParagraphAfterLeaf(leaf)
+		}
+	}
 	e.editImageCaption()
 	e.clearBlocks()
 	if e.autoSpace {
@@ -711,7 +784,10 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 		e.Buffer.ReplaceText(r, text)
 	}
 	e.reveal, e.vertical = true, false
-	e.slashDismissed = false
+	leaf := e.Engine.LeafAt(e.Caret)
+	if e.isSlashDismissed(leaf.Block.ID) && (!strings.HasPrefix(leaf.Block.Text(), "/") || (text == "/" && leaf.Block.Text() == "/")) {
+		e.clearSlashDismissed(leaf.Block.ID)
+	}
 }
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
 	if e.ReadOnly {
@@ -720,6 +796,11 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 		return
 	}
 	e.readOnlySpace = false
+	if !e.Composing() && r == nil && e.Anchor == e.Caret && text != "" {
+		if leaf := e.Engine.LeafAt(e.Caret); isAtomicVisualBlock(leaf.Block) {
+			e.insertParagraphAfterLeaf(leaf)
+		}
+	}
 	e.editImageCaption()
 	e.Buffer.SetMarkedText(r, text, selected)
 	e.reveal = true
@@ -753,6 +834,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.openReveal = openReveal{checked: true, pending: o.DrawAnnotations && hasAnnotations(e.Doc.Blocks)}
 	}
 	e.openWiki, e.openTag, e.openLink = o.OpenWiki, o.OpenTag, o.OpenLink
+	e.directLinks, e.disableFind, e.hideReadOnlyNotice = o.DirectLinks, o.DisableFind, o.HideReadOnlyNotice
 	e.loadWhiteboard = o.LoadWhiteboard
 	e.createWhiteboard = o.CreateWhiteboard
 	e.saveWhiteboard = o.SaveWhiteboard
@@ -763,6 +845,13 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.loadPDF = o.LoadPDF
 	e.openPDF = o.OpenPDF
 	e.attachPDF = o.AttachPDF
+	e.loadBook = o.LoadBook
+	e.openBook = o.OpenBook
+	e.openBookInBrowser = o.OpenBookInBrowser
+	e.loadBookExternalImg = o.LoadBookExternalImg
+	e.htmlWebView = o.HTMLWebView
+	e.attachHTML = o.AttachHTML
+	e.attachEPUB = o.AttachEPUB
 	e.header.pickCover = o.PickCover
 	e.bookmarks.marks, e.bookmarks.toggle, e.bookmarks.label, e.bookmarks.key = o.Bookmarks, o.ToggleBookmark, o.LabelBookmark, o.BookmarkKey
 	e.reserved = o.Reserved
@@ -770,7 +859,9 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	if e.imageCaptionID != "" && e.Engine.LeafAt(e.Caret).Block.ID != e.imageCaptionID {
 		e.imageCaptionID, e.ready = "", false
 	}
-	e.findShortcuts(c)
+	if !e.disableFind {
+		e.findShortcuts(c)
+	}
 	e.revealCaret()
 	e.watchMath()
 	e.watchMermaid()
@@ -804,6 +895,8 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				e.glideScrollTo(c, max(0, r.Y-e.viewport/3), 0.055)
 			}
 			e.revealAt = nil
+		} else if e.revealAt != nil {
+			c.After(0)
 		}
 		if e.reveal && e.viewport > 0 {
 			e.revealCodeCaret()
@@ -873,6 +966,10 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 						e.pdfModalFocusPending = true
 					} else if e.pdfBrowsing != "" {
 						e.pdfFocusPending = true
+					} else if e.bookModalID != "" {
+						e.bookModalFocusPending = true
+					} else if e.bookBrowsing != "" {
+						e.bookFocusPending = true
 					} else {
 						surface.Focus()
 						e.lastInput = c.Now()
@@ -896,11 +993,18 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				}
 				if e.resizing != nil || e.hoveredResizer() != nil {
 					surface.Cursor(ui.CursorResizeEW)
+				} else if e.ReadOnly && e.directLinks {
+					if _, ok := e.linkAtPoint(px, py, false); inside && ok {
+						surface.Cursor(ui.CursorPointer)
+					}
+				} else if !e.ReadOnly && e.hoveredNumberedMarker() != nil {
+					surface.Cursor(ui.CursorPointer)
 				} else if _, ok := e.hoveredGap(); ok {
 					// A click here adds a paragraph rather than placing the caret.
 					surface.Cursor(ui.CursorPointer)
 				}
 				e.hoverID = ""
+				e.boardHoverID = ""
 				if inside {
 					if i := sort.Search(len(e.handles), func(i int) bool { return e.indexedHandle(i).top > py+4 }) - 1; i >= 0 {
 						e.hoverID = e.indexedHandle(i).id
@@ -928,6 +1032,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				e.imageControls(c, o)
 				e.boardControls(c, o)
 				e.pdfControls(c, o)
+				e.bookControls(c, o)
 				e.bookmarkMarks(c)
 				if o.Footer != nil {
 					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(e.bodyWidth())
@@ -940,7 +1045,9 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 			})
 		})
 		e.outlineView(c, pane, reserve)
-		e.findBox(c)
+		if !e.disableFind {
+			e.findBox(c)
+		}
 	})
 	if !e.ReadOnly {
 		e.popups(c, surface)
@@ -954,6 +1061,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.wikiPreview(c, surface, o.PreviewWiki)
 	e.boardModalView(c, o)
 	e.pdfModalView(c, o)
+	e.bookModalView(c, o)
 	return pane
 }
 
@@ -1045,6 +1153,7 @@ func (e *Editor) layout(o Options) {
 		codeNoWrap:     e.codeNoWrap,
 		codeMaxHeight:  o.CodeMaxHeight,
 		imageMaxHeight: o.ImageMaxHeight,
+		compactMargins: o.CompactMargins,
 	}
 	finishResize := e.resizePending && (!o.Resizing || e.resizeBatch)
 	refreshResize := e.resizePending && e.resizeScroll != e.Scroll.Y
@@ -1074,7 +1183,15 @@ func (e *Editor) layout(o Options) {
 			}
 		}
 	}
-	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidPDF == e.pdfBrowsing && e.laidModalPDF == e.pdfModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
+	if !embedStale && e.loadBook != nil && len(e.embedBooks) > 0 {
+		for url, cached := range e.embedBooks {
+			if _, rev, err := e.loadBook(url); err == nil && rev != cached.rev {
+				embedStale = true
+				break
+			}
+		}
+	}
+	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidPDF == e.pdfBrowsing && e.laidModalPDF == e.pdfModalID && e.laidBook == e.bookBrowsing && e.laidModalBook == e.bookModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
 	if same && e.cacheRevision == e.Revision() {
 		return
 	}
@@ -1111,6 +1228,8 @@ func (e *Editor) layout(o Options) {
 	e.laidModalBoard = e.boardModalID
 	e.laidPDF = e.pdfBrowsing
 	e.laidModalPDF = e.pdfModalID
+	e.laidBook = e.bookBrowsing
+	e.laidModalBook = e.bookModalID
 	e.laidFindKey = findKey
 	// The text column is 820 wide unless the reader picked another,
 	// or FullWidth spans the viewport keeping only the side gutters.
@@ -1125,6 +1244,9 @@ func (e *Editor) layout(o Options) {
 	if e.printing {
 		e.padding = max(46, centerPad)
 		e.rightPadding = e.padding
+	} else if o.CompactMargins {
+		e.padding = max(24, centerPad)
+		e.rightPadding = max(24, centerPad)
 	} else {
 		e.padding = max(80, centerPad)
 		minRight := min(float32(46), max(24, o.Width*0.12))
@@ -1336,22 +1458,10 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		m := e.blockMetrics(b, w, header)
 		font := m.font
 		left, top, bottom, gap, shapeWidth := m.left, m.top, m.bottom, m.gap, m.shapeWidth
-		number := 0
-		switch b.Kind {
-		case "bullet", "task":
-			counters = counters[:min(len(counters), b.Indent)]
-		case "numbered":
-			counters = counters[:min(len(counters), b.Indent+1)]
-			for len(counters) <= b.Indent {
-				counters = append(counters, 0)
-			}
-			counters[b.Indent]++
-			number = counters[b.Indent]
-			if e.mapListNumber > 0 {
-				number = e.mapListNumber
-			}
-		default:
-			counters = nil
+		var number int
+		counters, number = document.AdvanceListCounters(b, counters)
+		if b.Kind == "numbered" && e.mapListNumber > 0 {
+			number = e.mapListNumber
 		}
 		leaf := leafOf(b.ID)
 		key := e.blockShapeKey(b, font, header)
@@ -1403,12 +1513,14 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 					row.mermaidHidden = true
 				}
 				e.rows = append(e.rows, row)
-				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || isWhiteboardEmbed(b) || isPDFEmbed(b) {
+				if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || isWhiteboardEmbed(b) || isPDFEmbed(b) || isBookEmbed(b) {
 					d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
 					if isWhiteboardEmbed(b) {
 						d.kind, d.id, d.boardEmbed, d.boardURL, d.boardEditing = "whiteboard-embed", b.ID, true, b.URL, row.boardEditing
 					} else if isPDFEmbed(b) {
 						d.kind, d.id, d.pdfEmbed, d.pdfURL, d.pdfBrowsing = "pdf-embed", b.ID, true, b.URL, row.pdfBrowsing
+					} else if isBookEmbed(b) {
+						d.kind, d.id, d.bookEmbed, d.bookURL, d.bookBrowsing = "book-embed", b.ID, true, b.URL, row.bookBrowsing
 					} else if isWhiteboardBlock(b) {
 						d.kind, d.label, d.id = "whiteboard", b.Language, b.ID
 					} else if isMermaidBlock(b) {
@@ -1439,6 +1551,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			total = e.layoutWhiteboardEmbed(&row, o, gap)
 		} else if isPDFEmbed(b) {
 			total = e.layoutPDFEmbed(&row, o, gap)
+		} else if isBookEmbed(b) {
+			total = e.layoutBookEmbed(&row, o, gap)
 		} else if b.Kind == "image" {
 			total = e.layoutImage(&row, o)
 		}
@@ -1466,7 +1580,7 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			e.recordExactHeight(b.ID, e.hintWidthFor(b, shapeWidth), hintH, font, b.Runs)
 		}
 		e.rows = append(e.rows, row)
-		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" || isWhiteboardEmbed(b) || isPDFEmbed(b) {
+		if b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "quote" || b.Kind == "callout" || b.Kind == "rule" || isWhiteboardEmbed(b) || isPDFEmbed(b) || isBookEmbed(b) {
 			d := decoration{kind: b.Kind, id: b.ID, ownerID: leaf.Owner, rect: ui.Rect{X: x, Y: y, W: w, H: total - gap}}
 			if isWhiteboardEmbed(b) {
 				d.kind, d.id, d.boardEmbed, d.boardURL, d.boardEditing = "whiteboard-embed", b.ID, true, b.URL, row.boardEditing
@@ -1474,6 +1588,9 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			} else if isPDFEmbed(b) {
 				d.kind, d.id, d.pdfEmbed, d.pdfURL, d.pdfBrowsing = "pdf-embed", b.ID, true, b.URL, row.pdfBrowsing
 				d.rect = row.pdfRect
+			} else if isBookEmbed(b) {
+				d.kind, d.id, d.bookEmbed, d.bookURL, d.bookBrowsing = "book-embed", b.ID, true, b.URL, row.bookBrowsing
+				d.rect = row.bookRect
 			} else if isWhiteboardBlock(b) {
 				d.kind, d.label, d.id = "whiteboard", b.Language, b.ID
 				d.boardEditing = row.boardEditing
@@ -1793,7 +1910,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 					} else if r.mermaidHidden && r.mermaid != nil {
 						mw, mh := r.mermaid.W*r.mermaidScale, r.mermaid.H*r.mermaidScale
 						p.Fill(ui.Rect{X: bounds.X + r.rect.X + dx + (r.rect.W-mw)/2 - 3, Y: bounds.Y + r.rect.Y + dy + r.mermaidTop - 2, W: mw + 6, H: mh + 4}, t.Selection, 4)
-					} else {
+					} else if !isWhiteboardBlock(r.leaf.Block) && !r.boardEmbed && !r.pdfEmbed && !r.bookEmbed {
 						local := ui.TextInputRange{Start: max(0, selection.Start-r.leaf.Start), End: min(r.leaf.End, selection.End) - r.leaf.Start}
 						for _, rect := range r.layout.SelectionRects(local) {
 							rect.X += bounds.X + r.x + dx - scrollX - 1.5
@@ -1813,6 +1930,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 					return
 				}
 				if e.paintPDFRow(p, bounds, r, t) {
+					return
+				}
+				if e.paintBookRow(p, bounds, r, t) {
 					return
 				}
 				e.paintAnnotations(p, shiftedBounds, r, true)
@@ -1949,7 +2069,8 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	}
 	inlineCaretDoc, hasInlineCaret := e.paintInlineMathPopover(p, bounds, t)
 	caretMoving := false
-	if !e.ReadOnly && e.focused && len(e.blocks.ids) == 0 && selection.Start == selection.End && (e.Engine.LeafAt(e.Caret).Block.Kind != "image" || e.captionVisible(e.Engine.LeafAt(e.Caret).Block)) {
+	caretBlock := e.Engine.LeafAt(e.Caret).Block
+	if !e.ReadOnly && e.focused && len(e.blocks.ids) == 0 && selection.Start == selection.End && (caretBlock.Kind != "image" || e.captionVisible(caretBlock)) && !isAtomicVisualBlock(caretBlock) {
 		var targetDoc ui.Rect
 		hasTarget := false
 		if hasInlineCaret {
@@ -1996,6 +2117,8 @@ func (e *Editor) paintHoverControls(p *ui.Painter, bounds ui.Rect, t *ui.Theme) 
 			e.paintWhiteboardHover(p, bounds, d, t)
 		case d.kind == "pdf-embed" && d.id != "":
 			e.paintPDFHover(p, bounds, d, t)
+		case d.kind == "book-embed" && d.id != "":
+			e.paintBookHover(p, bounds, d, t)
 		case d.kind == "code" && d.id != "":
 			if idx, ok := e.rowIDs[d.id]; ok {
 				barBox, _, availW, contentW, scrollX, noWrap := e.codeScrollFor(*e.indexedRow(idx))
@@ -2183,7 +2306,17 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 			indent = e.mapListIndent
 		}
 		label := listNumber(max(1, r.number), indent) + "."
-		span := ui.Span{Text: label, Size: 16, Color: pg.Marker, Features: "tnum"}
+		fg := pg.Marker
+		if !e.printing && !e.ReadOnly {
+			mr := e.numberedMarkerRect(r)
+			mr.X += dx
+			mr.Y += dy
+			if e.hovered(mr, 0) || (e.listNumOpen && e.listNumID == r.leaf.Block.ID) {
+				p.Fill(ui.Rect{X: mr.X + bounds.X, Y: mr.Y + bounds.Y, W: mr.W, H: mr.H}, e.page.Hover, 4)
+				fg = t.Accent
+			}
+		}
+		span := ui.Span{Text: label, Size: 16, Color: fg, Features: "tnum"}
 		w, h := p.MeasureText(0, span)
 		p.RichText(x-6-w, cy-h/2, 0, span)
 	case "task":
@@ -2309,7 +2442,7 @@ func (e *Editor) insertAfter(id string) {
 	e.Engine.Insert(document.NewBlock("paragraph", "/"))
 	_, caret := e.Engine.Positions()
 	e.SetSelection(caret+1, caret+1)
-	e.slashDismissed = false
+	e.slashDismissed = [2]string{}
 	e.RequestFocus, e.reveal = true, true
 	e.sync()
 }

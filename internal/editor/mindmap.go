@@ -556,7 +556,16 @@ func (b *mapBody) needsMeasure(o Options) bool {
 		}
 		return !ok || doc != cached.doc || rev != cached.rev
 	}
-	if b.source.Kind == "image" && !isPDFEmbed(b.source) && o.LoadImage != nil && len(b.editor.rows) == 1 {
+	if isBookEmbed(b.source) && o.LoadBook != nil {
+		clean, _, _ := ParseBookURLRef(b.source.URL)
+		doc, rev, err := o.LoadBook(clean)
+		cached, ok := b.editor.embedBooks[clean]
+		if err != nil || doc == nil {
+			return ok
+		}
+		return !ok || doc != cached.doc || rev != cached.rev
+	}
+	if b.source.Kind == "image" && !isPDFEmbed(b.source) && !isBookEmbed(b.source) && o.LoadImage != nil && len(b.editor.rows) == 1 {
 		fig := b.editor.rows[0].picture
 		return fig != nil && fig.resource.Loading && !o.LoadImage(b.source.URL).Loading
 	}
@@ -708,7 +717,11 @@ func (b *mapBody) measure(o Options) {
 		b.span = ed.rows[0].pdfRect
 		b.w = b.span.W
 	}
-	if block.Kind == "image" && !isWhiteboardEmbed(block) && !isPDFEmbed(block) && len(ed.rows) == 1 {
+	if isBookEmbed(block) && len(ed.rows) == 1 && ed.rows[0].bookRect.W > 0 {
+		b.span = ed.rows[0].bookRect
+		b.w = b.span.W
+	}
+	if block.Kind == "image" && !isWhiteboardEmbed(block) && !isPDFEmbed(block) && !isBookEmbed(block) && len(ed.rows) == 1 {
 		row := ed.rows[0]
 		if fig := row.picture; fig != nil && !ed.captionVisible(block) {
 			b.span = fig.bounds
@@ -959,20 +972,8 @@ func (m *MindMap) sync(e *Editor, o Options) {
 	lastVisible := m.title.ID
 	var headings, lists, counters []int
 	for _, b := range doc.Blocks[start:] {
-		listNum := 0
-		switch b.Kind {
-		case "bullet", "task":
-			counters = counters[:min(len(counters), b.Indent)]
-		case "numbered":
-			counters = counters[:min(len(counters), b.Indent+1)]
-			for len(counters) <= b.Indent {
-				counters = append(counters, 0)
-			}
-			counters[b.Indent]++
-			listNum = counters[b.Indent]
-		default:
-			counters = nil
-		}
+		var listNum int
+		counters, listNum = document.AdvanceListCounters(b, counters)
 		if shouldSkipMapBlock(b) || (m.headingsOnly && b.Kind != "heading") {
 			m.itemIndex[b.ID] = -2
 			m.ownerMap[b.ID] = lastVisible
