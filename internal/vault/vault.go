@@ -23,11 +23,14 @@ import (
 // Extensions are the file extensions the vault lists, lowercase.
 var Extensions = []string{".md", ".markdown", ".mdx"}
 
-// Compound, raw whiteboard, and PDF extensions.
+// Compound, raw whiteboard, PDF, HTML, and EPUB extensions.
 const (
 	ExtWhiteboard    = ".excalidraw.svg"
 	ExtWhiteboardRaw = ".excalidraw"
 	ExtPDF           = ".pdf"
+	ExtHTML          = ".html"
+	ExtHTM           = ".htm"
+	ExtEPUB          = ".epub"
 )
 
 // FileExt returns the document extension of name, recognizing compound
@@ -40,9 +43,9 @@ func FileExt(name string) string {
 	return path.Ext(base)
 }
 
-// IsDocument includes native rich documents, Markdown sources, whiteboards, and PDFs.
+// IsDocument includes native rich documents, Markdown sources, whiteboards, PDFs, HTML, and EPUBs.
 func IsDocument(name string) bool {
-	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsWhiteboard(name) || IsPDF(name)
+	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsWhiteboard(name) || IsPDF(name) || IsBook(name)
 }
 
 // IsPDF reports whether name is a PDF document.
@@ -50,6 +53,25 @@ func IsPDF(name string) bool {
 	base := path.Base(filepath.ToSlash(name))
 	ext := strings.ToLower(FileExt(base))
 	return len(base) > len(ext) && ext == ExtPDF
+}
+
+// IsHTML reports whether name is an HTML document (.html or .htm).
+func IsHTML(name string) bool {
+	base := path.Base(filepath.ToSlash(name))
+	ext := strings.ToLower(FileExt(base))
+	return len(base) > len(ext) && (ext == ExtHTML || ext == ExtHTM)
+}
+
+// IsEPUB reports whether name is an EPUB e-book (.epub).
+func IsEPUB(name string) bool {
+	base := path.Base(filepath.ToSlash(name))
+	ext := strings.ToLower(FileExt(base))
+	return len(base) > len(ext) && ext == ExtEPUB
+}
+
+// IsBook reports whether name is a read-only HTML or EPUB document.
+func IsBook(name string) bool {
+	return IsHTML(name) || IsEPUB(name)
 }
 
 // IsWhiteboard reports whether name is an Excalidraw whiteboard document

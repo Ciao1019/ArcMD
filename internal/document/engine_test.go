@@ -806,3 +806,295 @@ func TestTypingAndEnterAfterLinkDoNotExtendLink(t *testing.T) {
 		t.Fatalf("expected interior caret to keep link, got %q", e.CurrentStyle().Link)
 	}
 }
+
+func TestRemoveBlockWhiteboardAndColumns(t *testing.T) {
+	// Top-level backward removal moves caret to end of previous block; forward focuses next.
+	wb := NewBlock("image", "手绘白板")
+	wb.URL = "assets/sketch.excalidraw.svg"
+	wb.ImageWidth = 420
+	e := blocks(NewBlock("paragraph", "Before"), wb, NewBlock("paragraph", "After"))
+	e.RemoveBlock(wb.ID, true)
+	if got := kinds(e); !reflect.DeepEqual(got, []string{"paragraph:Before", "paragraph:After"}) {
+		t.Fatalf("backward RemoveBlock: got %v", got)
+	}
+	if e.Caret != 6 {
+		t.Fatalf("backward RemoveBlock caret = %d; want 6", e.Caret)
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after backward RemoveBlock: %v", err)
+	}
+
+	e.Undo()
+	e.RemoveBlock(wb.ID, false)
+	if got := kinds(e); !reflect.DeepEqual(got, []string{"paragraph:Before", "paragraph:After"}) {
+		t.Fatalf("forward RemoveBlock: got %v", got)
+	}
+	if e.Caret != 7 {
+		t.Fatalf("forward RemoveBlock caret = %d; want 7", e.Caret)
+	}
+
+	// Sole block removal leaves one empty paragraph.
+	sole := NewBlock("image", "手绘白板")
+	sole.URL = "assets/sole.excalidraw.svg"
+	e = blocks(sole)
+	e.RemoveBlock(sole.ID, true)
+	if got := kinds(e); !reflect.DeepEqual(got, []string{"paragraph:"}) {
+		t.Fatalf("sole RemoveBlock: got %v", got)
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after sole RemoveBlock: %v", err)
+	}
+
+	// Removing a block inside a column preserves valid column content.
+	cols := Columns()
+	colBoard := NewBlock("image", "手绘白板")
+	colBoard.URL = "assets/col.excalidraw.svg"
+	cols.Children[0].Children = []*Block{colBoard}
+	e = blocks(cols)
+	e.RemoveBlock(colBoard.ID, true)
+	gotCols := e.Doc.Blocks[0]
+	if len(gotCols.Children[0].Children) != 1 || gotCols.Children[0].Children[0].Kind != "paragraph" || gotCols.Children[0].Children[0].Text() != "" {
+		t.Fatalf("column RemoveBlock left unexpected children: %+v", gotCols.Children[0].Children)
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after column RemoveBlock: %v", err)
+	}
+
+	// Structural table rows, cells, and columns are refused by RemoveBlock.
+	tbl := Table(2, 2)
+	e = blocks(tbl, cols)
+	gotTbl := e.Doc.Blocks[0]
+	gotCols = e.Doc.Blocks[1]
+	rowID := gotTbl.Children[0].ID
+	cellID := gotTbl.Children[0].Children[0].ID
+	colID := gotCols.Children[0].ID
+	e.RemoveBlock(rowID, true)
+	e.RemoveBlock(cellID, true)
+	e.RemoveBlock(colID, true)
+	if len(gotTbl.Children) != 2 || len(gotTbl.Children[0].Children) != 2 || len(gotCols.Children) != 2 {
+		t.Fatalf("RemoveBlock mutated structural container")
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after structural guard: %v", err)
+	}
+
+	// Enter on an inline excalidraw code block inserts a paragraph below instead of splitting JSON.
+	inlineBoard := NewBlock("code", `{"type":"excalidraw","version":2,"elements":[]}`)
+	inlineBoard.Language = "excalidraw"
+	e = blocks(inlineBoard)
+	e.SetSelection(4, 4)
+	e.Enter(false)
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[0].Kind != "code" || e.Doc.Blocks[0].Text() != `{"type":"excalidraw","version":2,"elements":[]}` || e.Doc.Blocks[1].Kind != "paragraph" {
+		t.Fatalf("Enter on excalidraw block corrupted blocks: %+v", e.Doc.Blocks)
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after Enter on excalidraw: %v", err)
+	}
+
+	// Multi-block Replace starting at an excalidraw code block or image clears metadata cleanly.
+	e = blocks(inlineBoard.Clone(), NewBlock("paragraph", "After"))
+	leaf0 := e.Doc.Leaves()[0]
+	leaf1 := e.Doc.Leaves()[1]
+	e.Replace(leaf0.Start, leaf1.Start+2, "")
+	if len(e.Doc.Blocks) != 1 || e.Doc.Blocks[0].Kind != "paragraph" || e.Doc.Blocks[0].Language != "" || e.Doc.Blocks[0].Text() != "ter" {
+		t.Fatalf("multi-block Replace from excalidraw leaked JSON/language: %+v", e.Doc.Blocks)
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after multi-block Replace from excalidraw: %v", err)
+	}
+
+	img := NewBlock("image", "手绘白板")
+	img.URL = "assets/w.excalidraw.svg"
+	img.ImageWidth = 360
+	e = blocks(img, NewBlock("paragraph", "After"))
+	leaf0 = e.Doc.Leaves()[0]
+	leaf1 = e.Doc.Leaves()[1]
+	e.Replace(leaf0.Start, leaf1.Start+2, "")
+	if len(e.Doc.Blocks) != 1 || e.Doc.Blocks[0].Kind != "paragraph" || e.Doc.Blocks[0].URL != "" || e.Doc.Blocks[0].ImageWidth != 0 || e.Doc.Blocks[0].Text() != "ter" {
+		t.Fatalf("multi-block Replace from image leaked URL/ImageWidth: %+v", e.Doc.Blocks)
+	}
+	if err := e.Doc.Validate(); err != nil {
+		t.Fatalf("Validate after multi-block Replace from image: %v", err)
+	}
+}
+
+func TestOrderedListStartAndNumbering(t *testing.T) {
+	if CurrentVersion != 10 {
+		t.Fatalf("CurrentVersion = %d, want 10", CurrentVersion)
+	}
+
+	bValid := NewBlock("numbered", "five")
+	bValid.Start = 5
+	doc := New()
+	doc.Blocks = []*Block{bValid}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("valid Start rejected: %v", err)
+	}
+	encoded, err := doc.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	decoded, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if decoded.Blocks[0].Start != 5 {
+		t.Fatalf("decoded Start = %d, want 5", decoded.Blocks[0].Start)
+	}
+
+	for _, bad := range []struct {
+		name string
+		blk  *Block
+	}{
+		{"negative start", func() *Block { b := NewBlock("numbered", "x"); b.Start = -1; return b }()},
+		{"over max start", func() *Block { b := NewBlock("numbered", "x"); b.Start = 1000000; return b }()},
+		{"non-numbered paragraph", func() *Block { b := NewBlock("paragraph", "x"); b.Start = 3; return b }()},
+		{"non-numbered bullet", func() *Block { b := NewBlock("bullet", "x"); b.Start = 2; return b }()},
+	} {
+		d := New()
+		d.Blocks = []*Block{bad.blk}
+		if err := d.Validate(); err == nil {
+			t.Fatalf("%s: expected Validate error, got nil", bad.name)
+		}
+	}
+
+	v9WithStart := `{"format":"arcmd","version":9,"blocks":[{"id":"1","kind":"numbered","start":3,"runs":[{"text":"hi"}]}]}`
+	if _, err := Decode(v9WithStart); err == nil {
+		t.Fatalf("expected v9 document with block start to be rejected")
+	}
+
+	n1 := NewBlock("numbered", "a")
+	n1.Start = 3
+	n2 := NewBlock("numbered", "b")
+	n3 := NewBlock("numbered", "c")
+	n3.Indent = 1
+	n4 := NewBlock("numbered", "d")
+	n4.Indent = 1
+	n5 := NewBlock("numbered", "e")
+	p := NewBlock("paragraph", "gap")
+	n6 := NewBlock("numbered", "f")
+	n7 := NewBlock("numbered", "g")
+	n7.Start = 10
+	slice := []*Block{n1, n2, n3, n4, n5, p, n6, n7}
+	wantNums := []int{3, 4, 1, 2, 5, 0, 1, 10}
+	if got := ListNumbers(slice); !reflect.DeepEqual(got, wantNums) {
+		t.Fatalf("ListNumbers = %v, want %v", got, wantNums)
+	}
+	if prev, adj := PreviousListNumber(slice, 1); prev != 3 || !adj {
+		t.Fatalf("PreviousListNumber(1) = (%d, %v), want (3, true)", prev, adj)
+	}
+	if prev, adj := PreviousListNumber(slice, 4); prev != 4 || !adj {
+		t.Fatalf("PreviousListNumber(4) = (%d, %v), want (4, true)", prev, adj)
+	}
+	if prev, adj := PreviousListNumber(slice, 6); prev != 5 || adj {
+		t.Fatalf("PreviousListNumber(6) = (%d, %v), want (5, false)", prev, adj)
+	}
+
+	// Sub-item scoping: an intervening indent-0 block breaks preceding indent-1 history.
+	s0 := NewBlock("numbered", "p1")
+	s1 := NewBlock("numbered", "c1")
+	s1.Indent = 1
+	s2 := NewBlock("bullet", "p2")
+	s3 := NewBlock("numbered", "c2")
+	s3.Indent = 1
+	if prev, adj := PreviousListNumber([]*Block{s0, s1, s2, s3}, 3); prev != 0 || adj {
+		t.Fatalf("PreviousListNumber scoped child = (%d, %v), want (0, false)", prev, adj)
+	}
+
+	// SetListStart / ContinueListNumbering / Undo / Redo / ReadOnly.
+	e := blocks(
+		NewBlock("numbered", "one"),
+		NewBlock("numbered", "two"),
+		NewBlock("paragraph", "mid"),
+		NewBlock("numbered", "three"),
+		NewBlock("numbered", "four"),
+	)
+	secondID := e.Doc.Blocks[1].ID
+	thirdID := e.Doc.Blocks[3].ID
+
+	e.SetListStart(thirdID, 8)
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{1, 2, 0, 8, 9}) {
+		t.Fatalf("after SetListStart(8): %v", got)
+	}
+	e.Undo()
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{1, 2, 0, 1, 2}) {
+		t.Fatalf("after Undo: %v", got)
+	}
+	e.Redo()
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{1, 2, 0, 8, 9}) {
+		t.Fatalf("after Redo: %v", got)
+	}
+	e.ContinueListNumbering(thirdID)
+	if e.Doc.Blocks[3].Start != 3 {
+		t.Fatalf("ContinueListNumbering across gap Start = %d, want 3", e.Doc.Blocks[3].Start)
+	}
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{1, 2, 0, 3, 4}) {
+		t.Fatalf("after ContinueListNumbering across gap: %v", got)
+	}
+
+	e.SetListStart(secondID, 1)
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{1, 1, 0, 3, 4}) {
+		t.Fatalf("mid-list restart: %v", got)
+	}
+	e.ContinueListNumbering(secondID)
+	if e.Doc.Blocks[1].Start != 0 {
+		t.Fatalf("ContinueListNumbering adjacent did not clear Start: %d", e.Doc.Blocks[1].Start)
+	}
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{1, 2, 0, 3, 4}) {
+		t.Fatalf("after restoring dynamic continuation: %v", got)
+	}
+
+	e.ReadOnly = true
+	e.SetListStart(thirdID, 42)
+	e.ContinueListNumbering(thirdID)
+	if e.Doc.Blocks[3].Start != 3 {
+		t.Fatalf("ReadOnly mutated Start = %d", e.Doc.Blocks[3].Start)
+	}
+	e.ReadOnly = false
+
+	// Typing "5. " autoformats to numbered with Start=5; Enter clears Start on new item.
+	e = textEngine("5.")
+	e.Replace(2, 2, " ")
+	if e.Doc.Blocks[0].Kind != "numbered" || e.Doc.Blocks[0].Start != 5 {
+		t.Fatalf("autoformat 5.: %+v", e.Doc.Blocks[0])
+	}
+	e.Replace(0, 0, "first")
+	e.Enter(false)
+	if len(e.Doc.Blocks) != 2 || e.Doc.Blocks[1].Kind != "numbered" || e.Doc.Blocks[1].Start != 0 {
+		t.Fatalf("Enter after Start=5 block: %+v", e.Doc.Blocks)
+	}
+	if got := ListNumbers(e.Doc.Blocks); !reflect.DeepEqual(got, []int{5, 6}) {
+		t.Fatalf("numbers after 5. + Enter: %v", got)
+	}
+
+	// Typing "6. " after item #5 stays dynamic (Start=0); typing "1. " immediately after sets Start=1.
+	b5 := NewBlock("numbered", "five")
+	b5.Start = 5
+	e = blocks(b5, NewBlock("paragraph", "6."))
+	leaf1 := e.Doc.Leaves()[1]
+	e.Replace(leaf1.End, leaf1.End, " ")
+	if e.Doc.Blocks[1].Kind != "numbered" || e.Doc.Blocks[1].Start != 0 {
+		t.Fatalf("autoformat 6. after 5.: Start=%d kind=%s", e.Doc.Blocks[1].Start, e.Doc.Blocks[1].Kind)
+	}
+	b1 := NewBlock("numbered", "one")
+	e = blocks(b1, NewBlock("paragraph", "1."))
+	leaf1 = e.Doc.Leaves()[1]
+	e.Replace(leaf1.End, leaf1.End, " ")
+	if e.Doc.Blocks[1].Kind != "numbered" || e.Doc.Blocks[1].Start != 1 {
+		t.Fatalf("autoformat 1. after 1.: Start=%d kind=%s", e.Doc.Blocks[1].Start, e.Doc.Blocks[1].Kind)
+	}
+
+	// Leaving numbered kind via SetKind or SetBlocksKind clears Start.
+	e.FocusBlock(e.Doc.Blocks[1].ID)
+	e.SetKind("paragraph", 0)
+	if e.Doc.Blocks[1].Kind != "paragraph" || e.Doc.Blocks[1].Start != 0 {
+		t.Fatalf("SetKind did not clear Start: %+v", e.Doc.Blocks[1])
+	}
+	bStart := NewBlock("numbered", "custom")
+	bStart.Start = 9
+	e = blocks(bStart)
+	e.SetBlocksKind([]string{bStart.ID}, "bullet", 0)
+	if e.Doc.Blocks[0].Kind != "bullet" || e.Doc.Blocks[0].Start != 0 {
+		t.Fatalf("SetBlocksKind did not clear Start: %+v", e.Doc.Blocks[0])
+	}
+}

@@ -470,7 +470,7 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 		}
 	}
 	for _, file := range files {
-		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) {
+		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) || vault.IsBook(file.rel) {
 			continue
 		}
 		sp := a.state.Get(file.space)
@@ -517,7 +517,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 	newBase := path.Base(newRel)
 	matchURL := func(docRel, raw string) (string, bool) {
 		rawBase, frag, hasFrag := strings.Cut(raw, "#")
-		if !vault.IsWhiteboard(rawBase) && !vault.IsPDF(rawBase) {
+		if !vault.IsWhiteboard(rawBase) && !vault.IsPDF(rawBase) && !vault.IsBook(rawBase) {
 			return "", false
 		}
 		clean := unescapeImagePath(strings.TrimSpace(rawBase))
@@ -550,7 +550,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 			continue
 		}
 		resident[d.rel] = true
-		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.ed.ReadOnly {
+		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.ed.ReadOnly {
 			continue
 		}
 		urls := map[string]string{}
@@ -571,7 +571,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 		return
 	}
 	for _, info := range docs {
-		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) {
+		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) || vault.IsBook(info.Path) {
 			continue
 		}
 		text, rErr := readFile(sp, info.Path)

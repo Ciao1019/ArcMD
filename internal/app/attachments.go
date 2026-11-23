@@ -99,7 +99,7 @@ func isImage(name string) bool {
 // pictures, folders included, are left out with a notice, as Markdown
 // has no attachments.
 func (a *App) insertImages(paths []string, at int) {
-	if a.doc == nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.ed.ReadOnly {
+	if a.doc == nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.ed.ReadOnly {
 		return
 	}
 	d := a.doc
@@ -112,7 +112,7 @@ func (a *App) insertImages(paths []string, at int) {
 	var skipped []string
 	for _, src := range paths {
 		info, statErr := os.Stat(src)
-		if statErr == nil && info.IsDir() || (!isImage(src) && !vault.IsPDF(src)) {
+		if statErr == nil && info.IsDir() || (!isImage(src) && !vault.IsPDF(src) && !vault.IsBook(src)) {
 			skipped = append(skipped, filepath.Base(src))
 			continue
 		}
@@ -137,8 +137,8 @@ func (a *App) insertImages(paths []string, at int) {
 		blocks = append(blocks, imageBlock(filepath.Base(src), rel))
 	}
 	if len(skipped) > 0 {
-		supported := append(slices.Clone(imageExtensions), "pdf")
-		a.notify("只能插入图片或 PDF（%s）：%s 未插入。", strings.Join(supported, "、"), strings.Join(skipped, "、"))
+		supported := append(slices.Clone(imageExtensions), "pdf", "epub", "html", "htm")
+		a.notify("只能插入图片、PDF、HTML 或 EPUB（%s）：%s 未插入。", strings.Join(supported, "、"), strings.Join(skipped, "、"))
 	}
 	a.placeImages(blocks, at)
 	if len(toUpload) > 0 {
@@ -200,7 +200,7 @@ func (a *App) placeImages(blocks []*model.Block, at int) {
 		})
 	}
 	last := blocks[len(blocks)-1]
-	if vault.IsPDF(last.URL) {
+	if vault.IsPDF(last.URL) || vault.IsBook(last.URL) {
 		ed.FocusBlock(last.ID)
 		ed.RequestFocus = true
 		return

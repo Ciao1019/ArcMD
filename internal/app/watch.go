@@ -288,6 +288,10 @@ func (a *App) replaceDoc(text string) {
 	} else if old.isPDF() && d.isPDF() {
 		d.pdf.GoToPage(old.pdf.CurrentPage, true)
 		d.pdf.SidebarOpen = old.pdf.SidebarOpen
+	} else if old.isBook() && d.isBook() {
+		d.book.GoToChapter(old.book.CurrentChapter, true)
+		d.book.SidebarOpen = old.book.SidebarOpen
+		d.book.ShowSource = old.book.ShowSource
 	} else {
 		d.ed.Scroll = old.ed.Scroll
 	}

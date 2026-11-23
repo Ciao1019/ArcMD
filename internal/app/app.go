@@ -34,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.7"
+const Version = "0.2.8"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -101,13 +101,18 @@ type App struct {
 	treeFor string
 	treeErr error
 
-	doc       *document
-	movingDoc *document
-	wbCache   map[string]cachedWhiteboard
-	wbOrder   []string
-	wbLib     whiteboardLibState
-	pdfCache  map[string]cachedPDFDoc
-	pdfOrder  []string
+	doc             *document
+	movingDoc       *document
+	wbCache         map[string]cachedWhiteboard
+	wbOrder         []string
+	wbLib           whiteboardLibState
+	pdfCache        map[string]cachedPDFDoc
+	pdfOrder        []string
+	bookCache       map[string]cachedBookDoc
+	bookOrder       []string
+	htmlViews       map[htmlWebViewKey]*htmlWebViewHandle
+	htmlViewOrder   []htmlWebViewKey
+	makeHTMLWebView func(win *mygo.Window, fullPath string, rev uint64, anchor string, scrollToContainer bool) editor.HTMLWebView
 	// split owns the visible panes; doc and history follow its focused pane.
 	split           *splitGroup
 	paneNavigation  bool
@@ -727,6 +732,7 @@ func (a *App) retireClosedDocuments(candidates ...*document) {
 	}
 	for _, d := range candidates {
 		if d != nil && !resident[d] {
+			a.destroyHTMLWebViewsForDoc(d)
 			d.close()
 		}
 	}
@@ -980,6 +986,10 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 			replacement := openDocument(sp, rel, text, resident.source)
 			if resident.isPDF() && replacement.isPDF() {
 				replacement.pdf.GoToPage(resident.pdf.CurrentPage, true)
+			} else if resident.isBook() && replacement.isBook() {
+				replacement.book.GoToChapter(resident.book.CurrentChapter, true)
+				replacement.book.SidebarOpen = resident.book.SidebarOpen
+				replacement.book.ShowSource = resident.book.ShowSource
 			} else {
 				replacement.ed.Scroll = resident.ed.Scroll
 			}
@@ -1006,6 +1016,8 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	if a.paneNavigation {
 		if a.doc.isPDF() {
 			a.doc.pdf.RequestFocus = true
+		} else if a.doc.isBook() {
+			a.doc.book.RequestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
 		} else {
@@ -1112,6 +1124,10 @@ func (a *App) reload() {
 	next := openDocument(a.doc.space, rel, text, source)
 	if a.doc.isPDF() && next.isPDF() {
 		next.pdf.GoToPage(a.doc.pdf.CurrentPage, true)
+	} else if a.doc.isBook() && next.isBook() {
+		next.book.GoToChapter(a.doc.book.CurrentChapter, true)
+		next.book.SidebarOpen = a.doc.book.SidebarOpen
+		next.book.ShowSource = a.doc.book.ShowSource
 	}
 	a.search.writeSeq++
 	next.savedSeq = a.search.writeSeq
@@ -1213,7 +1229,7 @@ func isUntitled(name string) bool {
 // by hand keeps its name. A title taken by another file is numbered.
 func (a *App) followTitle() {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
 	if _, composing := d.ed.MarkedRange(); composing {
@@ -1358,7 +1374,7 @@ func (a *App) finishRename(openDuplicated bool) {
 	}
 	if to != rel {
 		a.moved(sp, rel, to)
-		if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
+		if vault.IsWhiteboard(rel) || vault.IsPDF(rel) || vault.IsBook(rel) {
 			a.relinkWhiteboardEmbed(sp, rel, to)
 		}
 		if vault.IsDocument(rel) {
@@ -1370,7 +1386,7 @@ func (a *App) finishRename(openDuplicated bool) {
 	}
 	if openPending && sp == a.state.ActiveSpace() && vault.IsDocument(to) {
 		a.open(to)
-		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() {
+		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() {
 			d.ensureBodyParagraph()
 			leaves := d.ed.Doc.Leaves()
 			pos := 0
@@ -1663,7 +1679,7 @@ func writeNative(root, rel, markdown string) error {
 }
 
 func (a *App) exportMarkdown() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() {
 		return
 	}
 	a.doc.ed.UnmarkText()

@@ -59,7 +59,7 @@ func (e *Editor) ToggleCodeExpand(id string) {
 // for the image block with id in the current editing session.
 func (e *Editor) ToggleImageExpand(id string) {
 	b := e.blockByID(id)
-	if b == nil || b.Kind != "image" || isPDFEmbed(b) || isWhiteboardEmbed(b) {
+	if b == nil || b.Kind != "image" || isPDFEmbed(b) || isWhiteboardEmbed(b) || isBookEmbed(b) {
 		return
 	}
 	if e.imageExpanded == nil {

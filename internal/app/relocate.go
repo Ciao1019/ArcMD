@@ -88,7 +88,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		targetDir := path.Dir(target)
 		for old := range d.urls {
 			oldBase, oldFrag, hasFrag := strings.Cut(old, "#")
-			if vault.IsWhiteboard(oldBase) || vault.IsPDF(oldBase) {
+			if vault.IsWhiteboard(oldBase) || vault.IsPDF(oldBase) || vault.IsBook(oldBase) {
 				clean := strings.TrimPrefix(path.Clean(unescapeImagePath(oldBase)), "/")
 				if !underAttachmentFolder(clean, assetsDir) && !underAttachmentFolder(clean, attachmentFolder(src)) {
 					continue
@@ -200,7 +200,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 		if d.live == nil {
 			continue
 		}
-		if d.live.isWhiteboard() || d.live.isPDF() {
+		if d.live.isWhiteboard() || d.live.isPDF() || d.live.isBook() {
 			if d.live.isWhiteboard() {
 				d.live.diskText = d.original
 			}
@@ -250,7 +250,7 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 		if live != nil {
 			live.waitAsyncSave()
 		}
-		if vault.IsPDF(p.Path) {
+		if vault.IsPDF(p.Path) || vault.IsBook(p.Path) {
 			docs = append(docs, &movingDocument{rel: p.Path, urls: map[string]string{}, live: live})
 			continue
 		}
@@ -298,7 +298,7 @@ func (a *App) movingDocuments(sp *space.Space, rel string) ([]*movingDocument, e
 }
 
 func imageDocument(rel, text string) (*model.Document, error) {
-	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) || vault.IsBook(rel) {
 		return model.New(), nil
 	}
 	if vault.IsMarkdown(rel) {
@@ -313,7 +313,7 @@ func imageDocument(rel, text string) (*model.Document, error) {
 }
 
 func relocateText(rel, text string, urls map[string]string) (string, error) {
-	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) || vault.IsBook(rel) {
 		return text, nil
 	}
 	changed := false

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -411,5 +412,38 @@ func TestCorruptedPDFInSpaceDoesNotCrashSearchOrOpen(t *testing.T) {
 	hits := a.search.index.Search("回归验证", nil, 10)
 	if len(hits) != 1 || hits[0].Path != "good.md" {
 		t.Fatalf("expected search hit on good.md despite corrupted PDFs, got %+v", hits)
+	}
+}
+
+func TestPDFCornerVerticalAlignment(t *testing.T) {
+	a, tt := newTestApp(t)
+	if err := os.WriteFile(filepath.Join(root(a), "sample.pdf"), buildRichSamplePDF(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open("sample.pdf")
+	settle(tt)
+
+	badgeRect, ok := tt.Find("共 3 页")
+	if !ok {
+		t.Fatalf("missing PDF page badge in toolbar; texts=%q", tt.Texts())
+	}
+	outlineBtn, ok := tt.Access("缩略图与目录")
+	if !ok {
+		t.Fatal("missing PDF outline toolbar button")
+	}
+	addrBox, ok := tt.Access("文档路径")
+	if !ok {
+		t.Fatal("missing address bar")
+	}
+
+	badgeMid := badgeRect.Y + badgeRect.H/2
+	btnMid := outlineBtn.Bounds.Y + outlineBtn.Bounds.H/2
+	addrMid := addrBox.Bounds.Y + addrBox.Bounds.H/2
+	if math.Abs(float64(badgeMid-btnMid)) > 2 {
+		t.Fatalf("PDF page badge vertical midpoint %.2f differs from outline button %.2f (badge=%+v, btn=%+v)", badgeMid, btnMid, badgeRect, outlineBtn.Bounds)
+	}
+	if math.Abs(float64(badgeMid-addrMid)) > 2 {
+		t.Fatalf("PDF page badge vertical midpoint %.2f differs from address bar %.2f (badge=%+v, addr=%+v)", badgeMid, addrMid, badgeRect, addrBox.Bounds)
 	}
 }

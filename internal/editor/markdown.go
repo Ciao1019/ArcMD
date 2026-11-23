@@ -176,6 +176,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 				if node.Ordered {
 					kind = "numbered"
 				}
+				firstItem := true
 				for item := range parsed.Children(index) {
 					it := parsed.Block(item)
 					itemKind := kind
@@ -205,6 +206,14 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 							child.Checked = it.Task == parser.Checked
 						}
 					}
+					if node.Ordered && firstItem && len(children) > 0 && children[0].Kind == "numbered" && children[0].Indent == d {
+						if node.Number > 1 {
+							children[0].Start = node.Number
+						} else if prevNum, adj := document.PreviousListNumber(append(append([]*document.Block(nil), out...), children[0]), len(out)); adj && prevNum > 0 {
+							children[0].Start = 1
+						}
+					}
+					firstItem = false
 					out = append(out, children...)
 				}
 				listEnd = node.End
@@ -550,7 +559,7 @@ func overlapsProtectedInline(in []parser.Inline, start, end int) bool {
 }
 
 func isObsidianImageExt(target string) bool {
-	if isWhiteboardURL(target) || IsPDFURL(target) {
+	if isWhiteboardURL(target) || IsPDFURL(target) || IsBookURL(target) {
 		return true
 	}
 	ext := strings.ToLower(path.Ext(target))
@@ -609,7 +618,7 @@ func parseObsidianImageEmbed(line string) (url, alt string, width float32, ok bo
 	if target == "" || !isObsidianImageExt(target) {
 		return "", "", 0, false
 	}
-	if hasFrag && IsPDFURL(target) {
+	if hasFrag && (IsPDFURL(target) || IsBookURL(target)) {
 		frag = strings.TrimSpace(frag)
 		if frag != "" {
 			target = target + "#" + frag
@@ -1447,6 +1456,7 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 	}
 	items := make([]emittedItem, 0, len(blocks))
 	numberedSeq := map[int]int{}
+	numberedDelim := map[int]byte{}
 	listCols := map[int]int{}
 
 	for i := 0; i < len(blocks); {
@@ -1486,17 +1496,18 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 			isList := isMarkdownListKind(firstKind) && blocks[i].Align == ""
 			if !isList {
 				clear(numberedSeq)
+				clear(numberedDelim)
 				clear(listCols)
 			} else {
 				for bi := i; bi < i+spanLen; bi++ {
-					advanceListState(blocks[bi], numberedSeq, listCols)
+					advanceListState(blocks[bi], numberedSeq, listCols, numberedDelim)
 				}
 			}
 			items = append(items, emittedItem{text: ch.raw, isList: isList})
 			i += spanLen
 			continue
 		}
-		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols)
+		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols, numberedDelim)
 		items = append(items, emittedItem{text: text, isList: isList})
 		i += consumed
 	}
@@ -1539,10 +1550,11 @@ type MarkdownPart struct {
 func ExportMarkdownParts(doc *document.Document) []MarkdownPart {
 	var top []MarkdownPart
 	numberedSeq := map[int]int{}
+	numberedDelim := map[int]byte{}
 	listCols := map[int]int{}
 	for i := 0; i < len(doc.Blocks); {
 		b := doc.Blocks[i]
-		text, consumed, _ := renderSingleMarkdownItem(doc.Blocks, i, numberedSeq, listCols)
+		text, consumed, _ := renderSingleMarkdownItem(doc.Blocks, i, numberedSeq, listCols, numberedDelim)
 		top = append(top, MarkdownPart{Block: b.ID, Text: text})
 		i += consumed
 	}
@@ -1555,6 +1567,7 @@ func isMarkdownListKind(kind string) bool {
 
 func renderMarkdownBlockList(blocks []*document.Block) string {
 	numberedSeq := map[int]int{}
+	numberedDelim := map[int]byte{}
 	listCols := map[int]int{}
 	type item struct {
 		text   string
@@ -1562,7 +1575,7 @@ func renderMarkdownBlockList(blocks []*document.Block) string {
 	}
 	var items []item
 	for i := 0; i < len(blocks); {
-		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols)
+		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols, numberedDelim)
 		items = append(items, item{text: text, isList: isList})
 		i += consumed
 	}
@@ -1580,23 +1593,25 @@ func renderMarkdownBlockList(blocks []*document.Block) string {
 	return out.String() + "\n"
 }
 
-func advanceListState(b *document.Block, numberedSeq, listCols map[int]int) (padCols, num int) {
+func advanceListState(b *document.Block, numberedSeq, listCols map[int]int, numberedDelim map[int]byte) (padCols, num int, delim byte) {
 	if b.Kind != "numbered" {
 		for d := range numberedSeq {
 			if !isMarkdownListKind(b.Kind) || d >= b.Indent {
 				delete(numberedSeq, d)
+				delete(numberedDelim, d)
 			}
 		}
 	} else {
 		for d := range numberedSeq {
 			if d > b.Indent {
 				delete(numberedSeq, d)
+				delete(numberedDelim, d)
 			}
 		}
 	}
 	if !isMarkdownListKind(b.Kind) {
 		clear(listCols)
-		return 0, 0
+		return 0, 0, '.'
 	}
 	for d := range listCols {
 		if d >= b.Indent {
@@ -1610,23 +1625,42 @@ func advanceListState(b *document.Block, numberedSeq, listCols map[int]int) (pad
 		}
 	}
 	markerW := 2
+	delim = '.'
 	if b.Kind == "numbered" {
-		numberedSeq[b.Indent]++
+		prevNum, hadPrev := numberedSeq[b.Indent]
+		if !hadPrev {
+			numberedDelim[b.Indent] = '.'
+		}
+		if b.Start > 0 {
+			if hadPrev && b.Start != prevNum+1 {
+				if numberedDelim[b.Indent] == ')' {
+					numberedDelim[b.Indent] = '.'
+				} else {
+					numberedDelim[b.Indent] = ')'
+				}
+			}
+			numberedSeq[b.Indent] = b.Start
+		} else {
+			numberedSeq[b.Indent]++
+		}
 		num = numberedSeq[b.Indent]
-		markerW = len(fmt.Sprintf("%d. ", num))
+		if d := numberedDelim[b.Indent]; d != 0 {
+			delim = d
+		}
+		markerW = len(fmt.Sprintf("%d%c ", num, delim))
 	}
 	listCols[b.Indent] = padCols + markerW
-	return padCols, num
+	return padCols, num, delim
 }
 
-func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, listCols map[int]int) (text string, consumed int, isList bool) {
+func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, listCols map[int]int, numberedDelim map[int]byte) (text string, consumed int, isList bool) {
 	b := blocks[i]
 	consumed = 1
 	align := b.Align
 	if align == "left" {
 		align = ""
 	}
-	padCols, num := advanceListState(b, numberedSeq, listCols)
+	padCols, num, delim := advanceListState(b, numberedSeq, listCols, numberedDelim)
 	pad := strings.Repeat(" ", padCols)
 
 	inline := exportRunsWithComments(b.Runs, b.Comments, b.Kind != "heading")
@@ -1674,7 +1708,7 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		}
 	case "numbered":
 		cont := strings.Repeat(" ", listCols[b.Indent])
-		text = fmt.Sprintf("%s%d. %s", pad, num, strings.ReplaceAll(inline, "\n", "\n"+cont))
+		text = fmt.Sprintf("%s%d%c %s", pad, num, delim, strings.ReplaceAll(inline, "\n", "\n"+cont))
 		if align != "" {
 			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
 		} else {
@@ -2786,7 +2820,7 @@ func sameBlockSliceSemantics(a, b []*document.Block) bool {
 }
 
 func sameBlockSemantics(a, b *document.Block) bool {
-	if a.Kind != b.Kind || a.Level != b.Level || a.Indent != b.Indent ||
+	if a.Kind != b.Kind || a.Level != b.Level || a.Indent != b.Indent || a.Start != b.Start ||
 		a.Checked != b.Checked || a.Language != b.Language || a.URL != b.URL ||
 		normCellAlign(a.Align) != normCellAlign(b.Align) ||
 		a.Color != b.Color || a.Emoji != b.Emoji ||
@@ -2880,6 +2914,7 @@ func blockSemanticHash(b *document.Block) uint64 {
 	h = fnvMixString(h, b.Kind)
 	h = fnvMixUint64(h, uint64(b.Level))
 	h = fnvMixUint64(h, uint64(b.Indent))
+	h = fnvMixUint64(h, uint64(b.Start))
 	if b.Checked {
 		h = fnvMixByte(h, 1)
 	} else {

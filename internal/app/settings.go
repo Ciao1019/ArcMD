@@ -37,6 +37,7 @@ func (a *App) moreMenu(c *ui.Context) {
 		noDoc := d == nil || d.loadErr != nil
 		wb := a.doc != nil && a.doc.isWhiteboard()
 		isPDF := a.doc != nil && a.doc.isPDF()
+		isBook := a.doc != nil && a.doc.isBook()
 		if a.menuKey(m.Item(i18n.T("专注模式")), "focus").Checked(a.focus).Chosen() {
 			a.toggleFocus()
 		}
@@ -48,14 +49,14 @@ func (a *App) moreMenu(c *ui.Context) {
 		if a.doc != nil && a.doc.source {
 			mode = i18n.T("返回富文本编辑")
 		}
-		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb || isPDF).Chosen() {
+		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb || isPDF || isBook).Chosen() {
 			a.toggleSource()
 		}
 		if a.menuKey(m.Item(i18n.T("添加分屏")), "split-add").Disabled(a.doc == nil).Chosen() {
 			a.addSplitPane()
 		}
 		m.Separator()
-		if a.menuKey(m.Item(i18n.T("版本历史…")), "history").Disabled(noDoc || isPDF).Chosen() {
+		if a.menuKey(m.Item(i18n.T("版本历史…")), "history").Disabled(noDoc || isPDF || isBook).Chosen() {
 			a.openVersions()
 		}
 		m.Submenu(i18n.T("导出"), func(sub *ui.Menu) {
@@ -64,21 +65,21 @@ func (a *App) moreMenu(c *ui.Context) {
 					a.exportWhiteboardSVG(a.doc)
 				}
 			}
-			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb || isPDF).Chosen() {
+			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb || isPDF || isBook).Chosen() {
 				a.exportMarkdown()
 			}
-			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc || isPDF).Chosen() {
+			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc || isPDF || isBook).Chosen() {
 				a.exportPDF()
 			}
-			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb || isPDF).Chosen() {
+			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb || isPDF || isBook).Chosen() {
 				a.exportHTML()
 			}
-		}).Disabled(noDoc || isPDF)
-		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || isPDF || d.source).Chosen() {
+		}).Disabled(noDoc || isPDF || isBook)
+		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || isPDF || isBook || d.source).Chosen() {
 			a.toggleDocumentMap(d)
 		}
-		m.Submenu(i18n.T("页面宽度"), a.pageWidthMenu).Disabled(noDoc || wb || isPDF || d.source)
-		if m.Item(i18n.T("打印…")).Disabled(noDoc).Chosen() {
+		m.Submenu(i18n.T("页面宽度"), a.pageWidthMenu).Disabled(!a.canAdjustPageWidth(d))
+		if m.Item(i18n.T("打印…")).Disabled(noDoc || isBook).Chosen() {
 			a.printDoc()
 		}
 		if m.Item(i18n.T("在访达中显示文档")).Disabled(noDoc).Chosen() {

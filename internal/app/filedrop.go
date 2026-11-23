@@ -59,11 +59,13 @@ func fileDropCardLabels() (md, pdf *ui.TextLayout) {
 	return fileDropMDLabel, fileDropPDFLabel
 }
 
-// isImportableDoc reports whether name is a Markdown (.md) or PDF (.pdf) file
-// allowed for external drag-and-drop import.
+// isImportableDoc reports whether name is a Markdown (.md), PDF (.pdf), HTML,
+// or EPUB file allowed for external drag-and-drop import.
 func isImportableDoc(name string) bool {
 	ext := filepath.Ext(name)
-	return strings.EqualFold(ext, ".md") || strings.EqualFold(ext, ".pdf")
+	return strings.EqualFold(ext, ".md") || strings.EqualFold(ext, ".pdf") ||
+		strings.EqualFold(ext, ".html") || strings.EqualFold(ext, ".htm") ||
+		strings.EqualFold(ext, ".epub")
 }
 
 func isMarkdownFile(name string) bool {
@@ -155,7 +157,7 @@ func (a *App) importDroppedFiles(sp *space.Space, dir string, paths []string) {
 		created = append(created, rel)
 	}
 	if len(skipped) > 0 {
-		a.notify("仅支持拖入 Markdown (.md) 和 PDF (.pdf) 文档：%s 未导入。", strings.Join(skipped, "、"))
+		a.notify("仅支持拖入 Markdown (.md)、PDF、HTML 和 EPUB 文档：%s 未导入。", strings.Join(skipped, "、"))
 	}
 	if len(created) == 0 && len(existing) == 0 {
 		return
@@ -329,7 +331,7 @@ func (a *App) fileDropOverlayView(c *ui.Context) {
 					})
 					ui.Text(c, fmt.Sprintf(i18n.T("松手导入到「%s」"), name)).
 						FontSize(15).FontWeight(600).TextColor(cols.title).SingleLine()
-					ui.Text(c, i18n.T("仅支持 Markdown (.md) 和 PDF (.pdf)")).
+					ui.Text(c, i18n.T("仅支持 Markdown (.md)、PDF、HTML 和 EPUB")).
 						FontSize(12).TextColor(cols.muted).SingleLine()
 				})
 			})
@@ -353,7 +355,7 @@ func (a *App) fileDropOverlayView(c *ui.Context) {
 					ui.Column(c.Key("file-drop-pill-text")).Grow(1).MinWidth(0).Gap(2).Children(func() {
 						ui.Text(c, fmt.Sprintf(i18n.T("导入到「%s」"), name)).
 							FontSize(12.5).FontWeight(600).TextColor(cols.title).SingleLine()
-						ui.Text(c, i18n.T("仅支持 .md / .pdf")).
+						ui.Text(c, i18n.T("仅支持 .md / .pdf / .html / .epub")).
 							FontSize(11).TextColor(cols.muted).SingleLine()
 					})
 				})

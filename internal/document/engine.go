@@ -112,6 +112,9 @@ func dropStrayColors(blocks []*Block) {
 		if b.Kind != "image" {
 			b.ImageWidth = 0
 		}
+		if b.Kind != "numbered" {
+			b.Start = 0
+		}
 		if b.Kind != "footnote" {
 			b.NoteLabel = ""
 		}
@@ -298,10 +301,10 @@ func (e *Engine) replace(a, z int, text string) {
 			return
 		}
 	} else {
-		if first.Block != last.Block && a == first.Start && (isRule(first.Block) || isMedia(first.Block)) {
+		if first.Block != last.Block && a == first.Start && (isRule(first.Block) || isMedia(first.Block) || isWhiteboardBlockLang(first.Block)) {
 			// A rule or attachment selected whole goes with the selection
 			// rather than taking the text after it.
-			first.Block.Kind, first.Block.URL = "paragraph", ""
+			first.Block.Kind, first.Block.URL, first.Block.Language, first.Block.ImageWidth = "paragraph", "", "", 0
 		}
 		first.Block.Runs = runs
 		first.Block.Comments = mergedComments
@@ -324,6 +327,7 @@ func (e *Engine) replace(a, z int, text string) {
 				if i > 0 {
 					block.ID = NewID()
 					block.Checked = false
+					block.Start = 0
 					if block.Kind != "bullet" && block.Kind != "numbered" && block.Kind != "task" && block.Kind != "quote" {
 						block.Kind, block.Level = "paragraph", 0
 					}
@@ -412,16 +416,26 @@ func splitRunsByNewline(runs []Run) [][]Run {
 	return out
 }
 
-func isOrderedListPrefix(s string) bool {
-	if len(s) < 3 || len(s) > 5 || !strings.HasSuffix(s, ". ") {
-		return false
+func orderedListPrefix(s string) (int, bool) {
+	if len(s) < 3 || len(s) > 8 || !strings.HasSuffix(s, ". ") {
+		return 0, false
 	}
+	n := 0
 	for i := 0; i < len(s)-2; i++ {
 		if s[i] < '0' || s[i] > '9' {
-			return false
+			return 0, false
 		}
+		n = n*10 + int(s[i]-'0')
 	}
-	return true
+	if n < 1 || n > 999999 {
+		return 0, false
+	}
+	return n, true
+}
+
+func isOrderedListPrefix(s string) bool {
+	_, ok := orderedListPrefix(s)
+	return ok
 }
 
 func (e *Engine) autoformat(inserted string) {
@@ -434,7 +448,7 @@ func (e *Engine) autoformat(inserted string) {
 		return
 	}
 	prefixUnits := e.Caret - leaf.Start
-	if prefixUnits <= 0 || prefixUnits > 10 {
+	if prefixUnits <= 0 || prefixUnits > 11 {
 		return
 	}
 	for _, r := range SliceRuns(b.Runs, 0, prefixUnits) {
@@ -449,7 +463,7 @@ func (e *Engine) autoformat(inserted string) {
 		return
 	}
 	prefix := rawPrefix[lead:]
-	kind, level, checked := "", 0, false
+	kind, level, listNum, checked := "", 0, 0, false
 	if b.Kind == "bullet" {
 		switch prefix {
 		case "[] ", "[ ] ":
@@ -474,8 +488,8 @@ func (e *Engine) autoformat(inserted string) {
 		case "$$ ":
 			kind = "math"
 		default:
-			if isOrderedListPrefix(prefix) {
-				kind = "numbered"
+			if n, ok := orderedListPrefix(prefix); ok {
+				kind, listNum = "numbered", n
 			}
 		}
 	}
@@ -505,6 +519,23 @@ func (e *Engine) autoformat(inserted string) {
 		b.Comments = SliceComments(b.Comments, prefixUnits, leaf.End-leaf.Start)
 	}
 	b.Kind, b.Level, b.Checked, b.Runs = kind, level, checked, rest
+	if kind == "numbered" {
+		if parent, idx := e.find(b.ID); parent != nil {
+			prevNum, adjacent := PreviousListNumber(*parent, idx)
+			switch {
+			case listNum > 1 && (!adjacent || listNum != prevNum+1):
+				b.Start = listNum
+			case listNum == 1 && adjacent && prevNum > 0:
+				b.Start = 1
+			default:
+				b.Start = 0
+			}
+		} else if listNum > 1 {
+			b.Start = listNum
+		}
+	} else {
+		b.Start = 0
+	}
 	e.Anchor, e.Caret = leaf.Start, leaf.Start
 }
 
@@ -517,7 +548,7 @@ func (e *Engine) Enter(soft bool) {
 	if e.enterMath(leaf) || e.enterCodeFence(leaf) || e.enterMermaidExit(leaf) || e.enterRawExit(leaf) || e.enterPipeTable(leaf) {
 		return
 	}
-	if leaf.Block.Kind == "image" && leaf.Parent != nil {
+	if (leaf.Block.Kind == "image" || isWhiteboardBlockLang(leaf.Block)) && leaf.Parent != nil {
 		e.Edit(func() {
 			next := NewBlock("paragraph", "")
 			next.Indent = leaf.Block.Indent
@@ -756,6 +787,9 @@ func (e *Engine) SetKind(kind string, level int) {
 			}
 			leaf.Block.Kind, leaf.Block.Level = kind, level
 			leaf.Block.URL = ""
+			if kind != "numbered" {
+				leaf.Block.Start = 0
+			}
 			if !AllowsInlineComments(kind) {
 				leaf.Block.Comments = nil
 			}
@@ -961,14 +995,31 @@ func (e *Engine) InsertAt(index int, blocks ...*Block) {
 }
 
 func (e *Engine) DeleteBlock(id string) {
+	e.RemoveBlock(id, false)
+}
+
+// RemoveBlock deletes block id from its parent slice (top-level or column) and
+// moves the caret to the preceding block's end when backward is true, or
+// focuses the replacement/next block otherwise.
+func (e *Engine) RemoveBlock(id string, backward bool) {
 	e.Edit(func() {
 		parent, index := e.find(id)
-		if parent == nil || parent != &e.Doc.Blocks {
+		if parent == nil {
 			return
+		}
+		if parent != &e.Doc.Blocks {
+			switch (*parent)[index].Kind {
+			case "row", "cell", "column":
+				return
+			}
 		}
 		*parent = append((*parent)[:index], (*parent)[index+1:]...)
 		if len(*parent) == 0 {
 			*parent = []*Block{NewBlock("paragraph", "")}
+		}
+		if backward && index > 0 {
+			e.caretAtEnd((*parent)[index-1])
+			return
 		}
 		e.FocusBlock((*parent)[min(index, len(*parent)-1)].ID)
 	})
@@ -1011,6 +1062,69 @@ func (e *Engine) ToggleTask(id string) {
 		if parent, index := e.find(id); parent != nil {
 			b := (*parent)[index]
 			b.Checked = !b.Checked
+		}
+	})
+}
+
+// BlockSlice returns the sibling slice holding block id and its index in that slice.
+func (e *Engine) BlockSlice(id string) ([]*Block, int) {
+	parent, index := e.find(id)
+	if parent == nil {
+		return nil, -1
+	}
+	return *parent, index
+}
+
+// SetListStart sets the explicit starting/override number (1..999999, or 0 for
+// automatic sequential numbering) on numbered list block id.
+func (e *Engine) SetListStart(id string, start int) {
+	if e.ReadOnly {
+		return
+	}
+	if start < 0 {
+		start = 0
+	} else if start > 999999 {
+		start = 999999
+	}
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent == nil {
+			return
+		}
+		b := (*parent)[index]
+		if b.Kind != "numbered" {
+			return
+		}
+		b.Start = start
+	})
+}
+
+// ContinueListNumbering makes numbered list block id continue from the nearest
+// preceding numbered list item at the same indent level.
+func (e *Engine) ContinueListNumbering(id string) {
+	if e.ReadOnly {
+		return
+	}
+	e.Edit(func() {
+		parent, index := e.find(id)
+		if parent == nil {
+			return
+		}
+		b := (*parent)[index]
+		if b.Kind != "numbered" {
+			return
+		}
+		prevNum, adjacent := PreviousListNumber(*parent, index)
+		if adjacent {
+			b.Start = 0
+			return
+		}
+		if prevNum > 0 {
+			next := prevNum + 1
+			if next > 999999 {
+				next = 999999
+			}
+			b.Start = next
 		}
 	})
 }

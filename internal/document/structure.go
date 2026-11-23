@@ -152,7 +152,7 @@ func (e *Engine) Join(backward bool) bool {
 				e.Anchor, e.Caret = here.Start, here.Start
 				return
 			}
-			b.Kind, b.Level, b.Checked, b.Language, b.Color, b.URL = "paragraph", 0, false, "", "", ""
+			b.Kind, b.Level, b.Start, b.Checked, b.Language, b.Color, b.URL = "paragraph", 0, 0, false, "", "", ""
 			e.Anchor, e.Caret = here.Start, here.Start
 		case there == nil:
 			handled = false

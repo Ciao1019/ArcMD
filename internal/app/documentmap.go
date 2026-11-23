@@ -32,7 +32,7 @@ func (a *App) toggleDocumentMap(d *document) {
 }
 
 func (a *App) toggleActiveDocumentMap() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.source {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.source {
 		return
 	}
 	if a.focus {

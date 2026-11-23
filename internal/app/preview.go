@@ -390,7 +390,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	p := &a.preview
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
 		key := "open/" + sp.ID + "/" + rel
-		if a.doc.isPDF() {
+		if a.doc.isPDF() || a.doc.isBook() {
 			return a.doc
 		}
 		if a.doc.isWhiteboard() {
@@ -431,6 +431,11 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	}
 	if vault.IsPDF(rel) {
 		d := openPDFDocument(sp, rel, "")
+		a.putThumb(key, thumb{d, info.ModTime()})
+		return d
+	}
+	if vault.IsBook(rel) {
+		d := openBookDocument(sp, rel, "")
 		a.putThumb(key, thumb{d, info.ModTime()})
 		return d
 	}
@@ -633,6 +638,8 @@ func (a *App) pickPreview(c *ui.Context, rel string) {
 	if a.doc != nil {
 		if a.doc.isPDF() {
 			a.doc.pdf.RequestFocus = true
+		} else if a.doc.isBook() {
+			a.doc.book.RequestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
 		} else {
@@ -689,6 +696,37 @@ func (a *App) docPreview(c *ui.Context) {
 				})
 			}
 			pt.Stroke(dst, ui.RGBA(0, 0, 0, 0.10), 3, 1)
+		})
+	} else if d.isBook() {
+		paper.Draw(func(pt *ui.Painter, r ui.Rect) {
+			if d.book == nil || d.book.Doc == nil || d.book.ChapterCount() == 0 {
+				return
+			}
+			pad := float32(12)
+			x, y, w := r.X+pad, r.Y+pad, max(20, r.W-2*pad)
+			if d.book.IsEPUB() {
+				if bmp := d.book.CoverBitmap(); bmp != nil {
+					covW, covH := float32(46), float32(66)
+					cov := ui.Rect{X: x, Y: y, W: covW, H: covH}
+					pt.Clip(cov, 3, func() { pt.Image(bmp, cov, ui.Cover) })
+					pt.Stroke(cov, dt.Border, 3, 1)
+					x += covW + 10
+					w = max(20, w-covW-10)
+				}
+			}
+			tag := "HTML"
+			if d.book.IsEPUB() {
+				tag = "EPUB"
+			}
+			head := ui.ShapeText(tag+" · "+d.book.Doc.Title(), ui.Font{Family: "system-ui", Size: 11, Weight: 600}, w)
+			_, hh := head.Size()
+			pt.TextLayout(head, x, y, dt.Text)
+			y += hh + 6
+			_, paras := d.book.Doc.ChapterPreview(d.book.CurrentChapter, 3)
+			if len(paras) > 0 {
+				body := ui.ShapeText(strings.Join(paras, "\n"), ui.Font{Family: "system-ui", Size: 9.5, LineHeight: 1.45}, w)
+				pt.TextLayout(body, x, y, dt.TextMuted)
+			}
 		})
 	} else {
 		paper.Children(func() {

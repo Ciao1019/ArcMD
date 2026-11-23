@@ -246,7 +246,7 @@ func (e *Editor) completeWiki(it WikiItem) {
 // Tab complete, Escape closes.
 func (e *Editor) wikiKeys(ev ui.InputEvent) bool {
 	w := &e.wiki
-	if !w.open || e.mark != nil {
+	if !w.open || e.mark != nil || ev.Mods != 0 {
 		return false
 	}
 	switch ev.Key {

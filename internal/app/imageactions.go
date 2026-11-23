@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/bookdoc"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
@@ -24,6 +25,8 @@ import (
 // native dialog. Switching panes or deleting the block cannot redirect it.
 func (a *App) pickReplacementImage(d *document, id, expected string) {
 	isPDF := editor.IsPDFURL(expected)
+	isHTML := editor.IsHTMLURL(expected)
+	isEPUB := editor.IsEPUBURL(expected)
 	current := func() bool {
 		if d == nil || d.ed.ReadOnly || d.loadErr != nil || d.source || a.residentDocument(d.space.ID, d.rel) != d {
 			return false
@@ -44,20 +47,30 @@ func (a *App) pickReplacementImage(d *document, id, expected string) {
 		}
 		data, err := os.ReadFile(files[0])
 		if err == nil {
-			if isPDF {
+			switch {
+			case isPDF:
 				if pdoc, pErr := pdfdoc.OpenBytes(data); pErr != nil {
 					err = pErr
 				} else {
 					pdoc.Close()
 				}
-			} else {
+			case isHTML || isEPUB:
+				if bdoc, bErr := bookdoc.OpenBytes(filepath.Base(files[0]), data); bErr != nil {
+					err = bErr
+				} else {
+					bdoc.Close()
+				}
+			default:
 				_, err = ui.DecodeBitmap(data)
 			}
 		}
 		if err != nil {
-			if isPDF {
+			switch {
+			case isPDF:
 				a.notify("无法使用所选的 PDF。%v", err)
-			} else {
+			case isHTML || isEPUB:
+				a.notify("无法使用所选的文档。%v", err)
+			default:
 				a.notify("无法使用所选的图片。%v", err)
 			}
 			return
@@ -84,9 +97,16 @@ func (a *App) pickReplacementImage(d *document, id, expected string) {
 	}
 	title := i18n.T("重新选择图片")
 	filters := []mygo.FileFilter{{Name: i18n.T("图片"), Extensions: imageExtensions}}
-	if isPDF {
+	switch {
+	case isPDF:
 		title = i18n.T("重新选择 PDF")
 		filters = []mygo.FileFilter{{Name: "PDF", Extensions: []string{"pdf"}}}
+	case isEPUB:
+		title = i18n.T("重新选择 EPUB")
+		filters = []mygo.FileFilter{{Name: "EPUB", Extensions: []string{"epub"}}}
+	case isHTML:
+		title = i18n.T("重新选择 HTML")
+		filters = []mygo.FileFilter{{Name: "HTML", Extensions: []string{"html", "htm"}}}
 	}
 	opts := mygo.OpenDialogOptions{Parent: win, Title: title, Filters: filters}
 	go func() {

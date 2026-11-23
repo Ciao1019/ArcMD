@@ -157,6 +157,9 @@ func (e *Engine) SetBlocksKind(ids []string, kind string, level int) {
 			if kind != "heading" {
 				b.Level = 0
 			}
+			if kind != "numbered" {
+				b.Start = 0
+			}
 		}
 	})
 }

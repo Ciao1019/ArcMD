@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/agent"
+	"github.com/Ciao1019/ArcMD/internal/bookdoc"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -238,6 +239,35 @@ func QAPage(name, content string) (*spacefs.Page, error) {
 			}
 			parts = append(parts, spacefs.Part{
 				Block: fmt.Sprintf("page:%d", i+1),
+				Text:  head,
+			})
+		}
+		return spacefs.PageOf(name, parts), nil
+	}
+	if vault.IsBook(name) {
+		doc, err := bookdoc.OpenBytes(name, []byte(content))
+		if err != nil {
+			return nil, err
+		}
+		defer doc.Close()
+		if doc.Kind() == bookdoc.KindHTML {
+			res := editor.ImportHTMLDocument(doc.RawSource(), editor.HTMLImportOptions{EmbedImages: true})
+			return pageOfDocument(name, res.Doc), nil
+		}
+		cnt := min(doc.ChapterCount(), 200)
+		var parts []spacefs.Part
+		for i := range cnt {
+			ch := doc.Chapter(i)
+			txt := strings.TrimSpace(doc.ChapterText(i))
+			head := "## " + ch.Title
+			if strings.TrimSpace(ch.Title) == "" {
+				head = fmt.Sprintf("## Chapter %d", i+1)
+			}
+			if txt != "" {
+				head += "\n" + txt
+			}
+			parts = append(parts, spacefs.Part{
+				Block: fmt.Sprintf("chapter:%d", i+1),
 				Text:  head,
 			})
 		}
@@ -517,6 +547,21 @@ func (a *App) openCitation(spaceID string, c agent.Citation) {
 			}
 		}
 		a.doc.pdf.RequestFocus = true
+		return
+	}
+	if a.doc.isBook() {
+		if page, err := fs.Page(c.Path); err == nil {
+			if at, ok := page.Locate(c.From); ok {
+				if chStr, has := strings.CutPrefix(at.Block, "chapter:"); has {
+					if chNum, convErr := strconv.Atoi(chStr); convErr == nil && chNum >= 1 {
+						a.doc.book.GoToChapter(chNum-1, false)
+					}
+				} else {
+					a.doc.book.RevealBlockIndex(0, at.Index)
+				}
+			}
+		}
+		a.doc.book.RequestFocus = true
 		return
 	}
 	if a.doc.isWhiteboard() {

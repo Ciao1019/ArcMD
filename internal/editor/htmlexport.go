@@ -95,12 +95,21 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 				list = func(depth int) {
 					kind := bs[i].Kind
 					listTag := "ul"
+					startAttr := ""
 					if kind == "numbered" {
 						listTag = "ol"
+						if bs[i].Start > 1 {
+							startAttr = fmt.Sprintf(` start="%d"`, bs[i].Start)
+						}
 					}
-					out.WriteString("<" + listTag + ">")
+					out.WriteString("<" + listTag + startAttr + ">")
+					firstAtDepth := true
 					for i < len(bs) && bs[i].Indent == depth && bs[i].Kind == kind {
 						item := bs[i]
+						if !firstAtDepth && kind == "numbered" && item.Start > 0 {
+							break
+						}
+						firstAtDepth = false
 						out.WriteString("<li>")
 						if item.Kind == "task" {
 							if item.Checked {
@@ -175,6 +184,10 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 					if IsPDFURL(b.URL) {
 						h := float32(480)
 						out.WriteString(`<figure class="arcmd-pdf"><object data="` + html.EscapeString(b.URL) + `" type="application/pdf" width="100%" height="` + fmt.Sprintf("%.0f", h) + `"><a href="` + html.EscapeString(b.URL) + `">` + html.EscapeString(imageName(b.URL)) + `</a></object></figure>`)
+						continue
+					}
+					if IsBookURL(b.URL) {
+						out.WriteString(`<figure class="arcmd-book"><a href="` + html.EscapeString(b.URL) + `">` + html.EscapeString(imageName(b.URL)) + `</a></figure>`)
 						continue
 					}
 					out.WriteString("<img src=\"" + html.EscapeString(b.URL) + "\" alt=\"" + html.EscapeString(b.Text()) + "\"")

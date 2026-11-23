@@ -556,6 +556,7 @@ func (a *App) followSplitPaths(fromID, from, toID, to string) {
 		if d.space.ID == fromID && within(d.rel, from) {
 			d.space = a.state.Get(toID)
 			d.rel = to + d.rel[len(from):]
+			d.syncMovedPath()
 		}
 	}
 	rewrite := func(h []place) {

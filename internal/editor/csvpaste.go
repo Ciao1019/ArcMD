@@ -64,11 +64,13 @@ func (e *Editor) PasteAsTable() bool {
 	text := e.services.ReadClipboard()
 	for _, sep := range []rune{'\t', ',', ';'} {
 		if rows, ok := parseDelimited(text, sep, false); ok {
+			startID := e.Engine.LeafAt(e.Caret).Block.ID
 			doc := document.New()
 			doc.Blocks = []*document.Block{document.DelimitedTable(rows)}
 			e.UnmarkText()
 			e.Engine.Paste(doc)
 			e.sync()
+			e.dismissInlineMenusOnPaste(startID)
 			e.reveal = true
 			return true
 		}

@@ -178,7 +178,7 @@ func (e *Editor) pick(it completeItem) {
 // completeKeys moves through the list.
 func (e *Editor) completeKeys(ev ui.InputEvent) bool {
 	m := &e.complete
-	if !m.open || e.mark != nil {
+	if !m.open || e.mark != nil || ev.Mods != 0 {
 		return false
 	}
 	switch ev.Key {

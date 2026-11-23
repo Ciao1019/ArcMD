@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"math"
 	"runtime"
 	"strings"
 	"unicode/utf8"
@@ -66,8 +67,11 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if e.toggleTask(at, ev.X) {
 			return true
 		}
-		if !e.ReadOnly && ev.Mods == 0 && ev.Clicks < 2 {
-			if span, ok := e.linkAtPoint(ev.X, ev.Y, true); ok {
+		if e.clickNumberedMarker(ev.X, ev.Y) {
+			return true
+		}
+		if (!e.ReadOnly || e.directLinks) && ev.Mods == 0 && ev.Clicks < 2 {
+			if span, ok := e.linkAtPoint(ev.X, ev.Y, !e.directLinks); ok {
 				e.pendingLink = span
 				e.pendingLinkDown = ui.Point{X: ev.X, Y: ev.Y}
 			}
@@ -89,6 +93,10 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if ev.Clicks == 2 {
 			if r := e.rowAt(at); r != nil && isPDFEmbed(r.leaf.Block) && !r.pdfBrowsing && r.pdfError == nil {
 				e.openPDFModal(r.leaf.Block.ID)
+				return true
+			}
+			if r := e.rowAt(at); r != nil && isBookEmbed(r.leaf.Block) && !r.bookBrowsing && r.bookError == nil {
+				e.openBookModal(r.leaf.Block.ID)
 				return true
 			}
 			if !e.ReadOnly {
@@ -130,9 +138,13 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		e.dragging = false
 		if span := e.pendingLink; span.url != "" {
 			e.pendingLink = linkSpan{}
-			if !e.ReadOnly && e.Anchor == e.Caret {
-				if hit, ok := e.linkAtPoint(ev.X, ev.Y, true); ok && hit == span {
-					e.openLinkSpan(span)
+			if e.Anchor == e.Caret {
+				if hit, ok := e.linkAtPoint(ev.X, ev.Y, !e.directLinks); ok && hit == span {
+					if e.ReadOnly && e.directLinks && open != nil {
+						open(span.url)
+					} else if !e.ReadOnly {
+						e.openLinkSpan(span)
+					}
 				}
 			}
 		}
@@ -159,6 +171,12 @@ func (e *Editor) command(command string, read func() string, write func(string))
 			e.copyBlocks(e.BlockSelection(), write)
 			return true
 		}
+		if e.Anchor == e.Caret {
+			if leaf := e.Engine.LeafAt(e.Caret); isAtomicVisualBlock(leaf.Block) {
+				e.copySingleBlock(leaf.Block, write)
+				return true
+			}
+		}
 		e.copySelection(write)
 		return true
 	}
@@ -170,6 +188,17 @@ func (e *Editor) command(command string, read func() string, write func(string))
 			e.sync()
 		}
 		return true
+	}
+	if command == "cut" && e.Anchor == e.Caret && len(e.blocks.ids) == 0 {
+		if leaf := e.Engine.LeafAt(e.Caret); isAtomicVisualBlock(leaf.Block) {
+			e.copySingleBlock(leaf.Block, write)
+			if e.ReadOnly {
+				e.refused = true
+			} else {
+				e.deleteAtomicBlock(leaf.Block.ID, true)
+			}
+			return true
+		}
 	}
 	if command == "selectAll" {
 		if len(e.blocks.ids) > 0 {
@@ -186,16 +215,18 @@ func (e *Editor) command(command string, read func() string, write func(string))
 		e.copySelection(write)
 		e.ReplaceText(nil, "")
 	case "paste":
+		startID := e.Engine.LeafAt(e.Caret).Block.ID
 		e.pasteSelection(read)
-		e.slashOpen, e.slashDismissed = false, true
+		e.dismissInlineMenusOnPaste(startID)
 	case "pasteAndMatchStyle":
 		if e.ReadOnly {
 			return true
 		}
+		startID := e.Engine.LeafAt(e.Caret).Block.ID
 		e.UnmarkText()
 		e.clearBlocks()
 		e.Buffer.ReplaceText(nil, read())
-		e.slashOpen, e.slashDismissed = false, true
+		e.dismissInlineMenusOnPaste(startID)
 	case "undo":
 		e.Undo()
 	case "redo":
@@ -252,6 +283,10 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 	}
 	if e.menuOpen && key == ui.KeyEscape {
 		e.menuOpen, e.menuSub = false, ""
+		return true
+	}
+	if e.listNumOpen && key == ui.KeyEscape {
+		e.listNumOpen = false
 		return true
 	}
 	if e.colorOpen || e.langOpen {
@@ -401,21 +436,16 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 				position = e.Len()
 			}
 		} else {
-			r, _, ok := e.BoundsForRange(ui.TextInputRange{Start: position, End: position})
+			dir := 1
+			if key == ui.KeyUp || key == ui.KeyPageUp {
+				dir = -1
+			}
+			page := key == ui.KeyPageUp || key == ui.KeyPageDown
+			next, ok := e.moveVertical(position, dir, page)
 			if !ok {
 				return false
 			}
-			if !e.vertical {
-				e.preferredX = r.X
-			}
-			distance := r.H
-			if key == ui.KeyPageUp || key == ui.KeyPageDown {
-				distance = max(r.H, e.viewport-48)
-			}
-			if key == ui.KeyUp || key == ui.KeyPageUp {
-				distance = -distance
-			}
-			position, _ = e.IndexForPoint(ui.Point{X: e.preferredX, Y: r.Y + r.H/2 + distance})
+			position = next
 			e.vertical = true
 		}
 	case ui.KeyHome, ui.KeyEnd:
@@ -484,6 +514,10 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 	return true
 }
 
+func (e *Editor) isAtomicOrHiddenImage(b *document.Block) bool {
+	return isAtomicVisualBlock(b) || (b != nil && b.Kind == "image" && !e.captionVisible(b))
+}
+
 func (e *Editor) delete(direction int, word, line bool) {
 	if e.ReadOnly {
 		e.refused = true
@@ -493,6 +527,20 @@ func (e *Editor) delete(direction int, word, line bool) {
 		return
 	}
 	r := e.Selection().Range
+	first := e.Engine.LeafAt(r.Start)
+	last := e.Engine.LeafAt(r.End)
+	if first.Block.ID == last.Block.ID && e.isAtomicOrHiddenImage(first.Block) {
+		e.deleteAtomicBlock(first.Block.ID, direction < 0)
+		return
+	}
+	if r.Start != r.End && first.Block.ID != last.Block.ID {
+		if e.isAtomicOrHiddenImage(first.Block) {
+			r.Start = first.Start
+		}
+		if e.isAtomicOrHiddenImage(last.Block) {
+			r.End = last.End
+		}
+	}
 	if r.Start == r.End {
 		// At a block edge the engine decides: tables, columns and attachments
 		// are removed when empty or stepped over, never merged into text.
@@ -512,6 +560,15 @@ func (e *Editor) delete(direction int, word, line bool) {
 			}
 		}
 		r.Start, r.End = min(e.Caret, at), max(e.Caret, at)
+		nextFirst, nextLast := e.Engine.LeafAt(r.Start), e.Engine.LeafAt(r.End)
+		if nextFirst.Block.ID != nextLast.Block.ID {
+			if e.isAtomicOrHiddenImage(nextFirst.Block) {
+				r.Start = nextFirst.Start
+			}
+			if e.isAtomicOrHiddenImage(nextLast.Block) {
+				r.End = nextLast.End
+			}
+		}
 	}
 	e.ReplaceText(&r, "")
 }
@@ -607,7 +664,7 @@ func (e *Editor) selectAll() {
 	last := e.Engine.LeafAt(sel.End)
 	if first.Block.ID == last.Block.ID && first.Start < first.End {
 		b := first.Block
-		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !isPDFEmbed(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
+		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !isPDFEmbed(b) && !isBookEmbed(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
 		if editable {
 			candidates = append(candidates, ui.TextInputRange{Start: first.Start, End: first.End})
 		}
@@ -730,4 +787,87 @@ func exitCapsuleMarks(cur, nextAfter document.Style) (document.Style, bool) {
 		changed = true
 	}
 	return cur, changed
+}
+
+func (e *Editor) moveVertical(position, dir int, page bool) (int, bool) {
+	r, _, ok := e.BoundsForRange(ui.TextInputRange{Start: position, End: position})
+	if !ok {
+		return position, false
+	}
+	if !e.vertical {
+		e.preferredX = r.X
+	}
+	if page {
+		distance := max(r.H, e.viewport-48)
+		if dir < 0 {
+			distance = -distance
+		}
+		next, _ := e.IndexForPoint(ui.Point{X: e.preferredX, Y: r.Y + r.H/2 + distance})
+		if next != position {
+			return next, true
+		}
+	}
+	idx := e.rowIndexAt(position)
+	if idx < 0 {
+		return position, false
+	}
+	cur := e.ensureRow(idx)
+	opaque := func(row *row) bool {
+		return (row.picture != nil && !e.captionVisible(row.leaf.Block)) || row.mermaidHidden || isWhiteboardBlock(row.leaf.Block) || row.boardEmbed
+	}
+	if !opaque(cur) && cur.layout != nil {
+		lines := cur.layout.Lines()
+		if len(lines) > 1 {
+			local := max(0, min(position-cur.leaf.Start, cur.leaf.End-cur.leaf.Start))
+			caret := cur.layout.Caret(local)
+			cy := caret.Y + caret.H/2
+			lineIdx := 0
+			bestDist := float32(math.MaxFloat32)
+			for i, ln := range lines {
+				d := max(ln.Rect.Y-cy, cy-(ln.Rect.Y+ln.Rect.H), 0)
+				if d < bestDist {
+					bestDist = d
+					lineIdx = i
+				}
+			}
+			targetLine := lineIdx + dir
+			if targetLine >= 0 && targetLine < len(lines) {
+				px := e.preferredX - cur.x
+				if _, _, _, _, scrollX, noWrap := e.codeScrollFor(*cur); noWrap {
+					px += scrollX
+				}
+				ln := lines[targetLine]
+				return cur.leaf.Start + cur.layout.IndexAt(ui.Point{X: px, Y: ln.Rect.Y + ln.Rect.H/2}), true
+			}
+		}
+	}
+	boundY := cur.rect.Y
+	if dir > 0 {
+		boundY = cur.rect.Y + cur.rect.H
+	}
+	nextIdx := e.rowSpace.nearestVertical(e.preferredX, boundY, dir, idx)
+	if nextIdx < 0 {
+		return position, true
+	}
+	next := e.ensureRow(nextIdx)
+	if opaque(next) || next.layout == nil {
+		return next.leaf.Start, true
+	}
+	px := e.preferredX - next.x
+	if _, _, _, _, scrollX, noWrap := e.codeScrollFor(*next); noWrap {
+		px += scrollX
+	}
+	lines := next.layout.Lines()
+	var py float32
+	if len(lines) > 0 {
+		ln := lines[0]
+		if dir < 0 {
+			ln = lines[len(lines)-1]
+		}
+		py = ln.Rect.Y + ln.Rect.H/2
+	} else if dir < 0 {
+		_, h := next.layout.Size()
+		py = max(0, h-1)
+	}
+	return next.leaf.Start + next.layout.IndexAt(ui.Point{X: px, Y: py}), true
 }

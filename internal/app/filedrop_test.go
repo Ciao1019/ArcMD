@@ -200,23 +200,24 @@ func TestDropImportRejectsNonMDAndNonPDF(t *testing.T) {
 			t.Errorf("unsupported entry %s should not be imported", name)
 		}
 	}
-	if !tt.HasText("仅支持拖入 Markdown (.md) 和 PDF (.pdf) 文档") {
+	if !tt.HasText("仅支持拖入 Markdown (.md)、PDF、HTML 和 EPUB 文档") {
 		t.Fatalf("expected unsupported notice, got %q", tt.Texts())
 	}
 
-	// Mixed drop imports only .md and .pdf while skipping .txt.
+	// Mixed drop imports .md, .pdf, .html, and .epub while skipping .txt.
 	mdPath := writeExternalFile(t, srcDir, "Valid.md", []byte("# Valid\n"))
 	pdfPath := writeExternalFile(t, srcDir, "Valid.pdf", buildRichSamplePDF(t))
-	if !tt.DropFiles(x, y, txtFile, mdPath, pdfPath) {
+	htmlPath := writeExternalFile(t, srcDir, "Valid.html", []byte("<html><head><title>Valid HTML</title></head><body><p>Body</p></body></html>"))
+	epubPath := writeExternalFile(t, srcDir, "Valid.epub", buildSampleEPUB(t))
+	if !tt.DropFiles(x, y, txtFile, mdPath, pdfPath, htmlPath, epubPath) {
 		t.Fatal("mixed drop failed")
 	}
 	tt.Frame()
 
-	if _, err := os.Stat(filepath.Join(sp.Root, "Valid.md")); err != nil {
-		t.Fatalf("Valid.md should be imported: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(sp.Root, "Valid.pdf")); err != nil {
-		t.Fatalf("Valid.pdf should be imported: %v", err)
+	for _, name := range []string{"Valid.md", "Valid.pdf", "Valid.html", "Valid.epub"} {
+		if _, err := os.Stat(filepath.Join(sp.Root, name)); err != nil {
+			t.Fatalf("%s should be imported: %v", name, err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(sp.Root, "notes.txt")); !os.IsNotExist(err) {
 		t.Fatal("notes.txt should not be imported")
@@ -274,7 +275,7 @@ func TestFileDropOverlayAnimations(t *testing.T) {
 	tt.Frame()
 	tt.Advance(100 * time.Millisecond)
 	tt.Frame()
-	if !tt.HasText("松手导入到「工作」") || !tt.HasText("仅支持 Markdown (.md) 和 PDF (.pdf)") {
+	if !tt.HasText("松手导入到「工作」") || !tt.HasText("仅支持 Markdown (.md)、PDF、HTML 和 EPUB") {
 		t.Fatalf("expected window drop card texts, got %q", tt.Texts())
 	}
 
@@ -284,7 +285,7 @@ func TestFileDropOverlayAnimations(t *testing.T) {
 	tt.Frame()
 	tt.Advance(90 * time.Millisecond)
 	tt.Frame()
-	if !tt.HasText("导入到「Inbox」") || !tt.HasText("仅支持 .md / .pdf") {
+	if !tt.HasText("导入到「Inbox」") || !tt.HasText("仅支持 .md / .pdf / .html / .epub") {
 		t.Fatalf("expected sidebar pill texts, got %q", tt.Texts())
 	}
 

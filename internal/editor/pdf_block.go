@@ -282,6 +282,7 @@ func (e *Editor) paintPDFRow(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 
 	cleanURL, pinned := ParsePDFURLPage(r.leaf.Block.URL)
 	fileName := imageName(cleanURL)
+	caretSelected := !e.printing && e.focused && len(e.blocks.ids) == 0 && e.Anchor == e.Caret && e.Engine.LeafAt(e.Caret).Block.ID == r.leaf.Block.ID
 
 	if r.pdfError != nil {
 		p.Fill(box, t.Background.Mix(t.Text, 0.025), 10)
@@ -289,6 +290,9 @@ func (e *Editor) paintPDFRow(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 		p.Icon(iconFileDoc, ui.Rect{X: box.X + (box.W-20)/2, Y: box.Y + 14, W: 20, H: 20}, e.page.Caption)
 		ew, _ := r.pdfError.Size()
 		p.TextLayout(r.pdfError, box.X+(box.W-ew)/2, box.Y+42, t.TextMuted)
+		if caretSelected {
+			p.Stroke(box, t.Accent, 10, 2)
+		}
 		return true
 	}
 
@@ -299,10 +303,15 @@ func (e *Editor) paintPDFRow(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 	desk := t.Background.Mix(t.Text, 0.035)
 	p.Fill(box, desk, 10)
 	border := e.page.CodeBorder
-	if !e.printing && e.hovered(r.pdfRect, 0) {
+	strokeW := float32(1)
+	switch {
+	case caretSelected:
+		border = t.Accent
+		strokeW = 2
+	case !e.printing && e.hovered(r.pdfRect, 0):
 		border = t.Accent.Alpha(0.45)
 	}
-	p.Stroke(box, border, 10, 1)
+	p.Stroke(box, border, 10, strokeW)
 
 	v := e.pdfViewerForBlock(r.leaf.Block)
 	pageIdx := e.pdfCurrentPageForBlock(r.leaf.Block, r.pdfDoc)
@@ -610,6 +619,9 @@ func (e *Editor) pdfControls(c *ui.Context, o Options) {
 		hit := ui.Box(c.Key("pdf-rest:"+id)).Absolute().Left(box.X).Top(box.Y).
 			Size(box.W, max(24, box.H)).Focusable().Role(ui.RoleButton).
 			Label("PDF: " + imageName(b.URL)).Cursor(ui.CursorPointer)
+		if hit.Hovered() {
+			e.hoverID = r.leaf.Owner
+		}
 		if hit.Clicked() {
 			e.FocusBlock(id)
 		}
@@ -625,11 +637,13 @@ func (e *Editor) pdfControls(c *ui.Context, o Options) {
 			}
 			switch ev.Key {
 			case ui.KeyBackspace, ui.KeyDelete:
-				if !e.ReadOnly {
-					e.DeleteBlock(id)
-					e.RequestFocus = true
+				if e.ReadOnly {
+					e.refused = true
 					return true
 				}
+				e.deleteAtomicBlock(id, ev.Key == ui.KeyBackspace)
+				e.RequestFocus = true
+				return true
 			case ui.KeyLeft:
 				e.stepRestPDFPage(b, r.pdfDoc, -1)
 				return true
@@ -672,7 +686,10 @@ func (e *Editor) pdfControls(c *ui.Context, o Options) {
 			}
 			if !e.ReadOnly {
 				m.Separator()
-				menuAction(m, i18n.T("删除"), func() { e.DeleteBlock(id) })
+				menuAction(m, i18n.T("删除"), func() {
+					e.deleteAtomicBlock(id, true)
+					e.RequestFocus = true
+				})
 			}
 		})
 

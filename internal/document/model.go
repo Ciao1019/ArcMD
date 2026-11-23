@@ -25,9 +25,10 @@ import (
 // headings and list items, cell backgrounds, merged cells and callout
 // emoji, version 5 the page's icon and cover, version 6 scripts, image widths
 // and footnotes, version 7 hand-drawn text annotations, version 8 toggle
-// blocks and the word goal, version 9 keyboard key marks. Older documents are
-// read and migrated in memory, and written back as the current version only when edited.
-const CurrentVersion = 9
+// blocks and the word goal, version 9 keyboard key marks, version 10 ordered
+// list start numbers. Older documents are read and migrated in memory, and
+// written back as the current version only when edited.
+const CurrentVersion = 10
 
 // CoverGradients are the covers drawn rather than pictured, as
 // "gradient:name" in Document.Cover.
@@ -119,6 +120,7 @@ type Block struct {
 	Comments   []InlineComment `json:"comments,omitempty"` // Preserved inline HTML comments (version 9).
 	Level      int             `json:"level,omitempty"`
 	Indent     int             `json:"indent,omitempty"`
+	Start      int             `json:"start,omitempty"`
 	Checked    bool            `json:"checked,omitempty"`
 	Language   string          `json:"language,omitempty"`
 	URL        string          `json:"url,omitempty"`
@@ -403,6 +405,18 @@ func (d *Document) migrate() error {
 	if d.Version < 9 && v9(d.Blocks) {
 		return errors.New("document: keyboard keys and inline comments require version 9")
 	}
+	var v10 func([]*Block) bool
+	v10 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b != nil && (b.Start != 0 || v10(b.Children)) {
+				return true
+			}
+		}
+		return false
+	}
+	if d.Version < 10 && v10(d.Blocks) {
+		return errors.New("document: ordered list start values require version 10")
+	}
 	d.Version = CurrentVersion
 	return nil
 }
@@ -550,6 +564,7 @@ func (dh *docHasher) block(b *Block, includeLeafRuns bool, leafOverrides map[str
 	}
 	dh.uint64(uint64(b.Level))
 	dh.uint64(uint64(b.Indent))
+	dh.uint64(uint64(b.Start))
 	dh.bool(b.Checked)
 	dh.str(b.Language)
 	dh.str(b.URL)
@@ -672,7 +687,7 @@ func SameBlock(a, b *Block) bool {
 	}
 	if a.ImageWidth != b.ImageWidth || a.NoteLabel != b.NoteLabel ||
 		a.ID != b.ID || a.Kind != b.Kind ||
-		a.Level != b.Level || a.Indent != b.Indent ||
+		a.Level != b.Level || a.Indent != b.Indent || a.Start != b.Start ||
 		a.Checked != b.Checked || a.Language != b.Language ||
 		a.URL != b.URL || a.Align != b.Align ||
 		a.Color != b.Color || a.Folded != b.Folded ||
@@ -748,6 +763,9 @@ func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 		ids[b.ID] = struct{}{}
 		if b.Level < 0 || b.Level > 6 || b.Indent < 0 || b.Indent > 12 {
 			return errors.New("document: invalid block attributes")
+		}
+		if b.Start < 0 || b.Start > 999999 || (b.Start != 0 && b.Kind != "numbered") {
+			return errors.New("document: invalid list start")
 		}
 		if b.Align != "" && b.Align != "left" && b.Align != "center" && b.Align != "right" {
 			return errors.New("document: invalid alignment")
@@ -882,6 +900,76 @@ func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 		}
 	}
 	return nil
+}
+
+// AdvanceListCounters updates ordered-list counters across sibling blocks and
+// returns the 1-based number for b when b.Kind == "numbered".
+func AdvanceListCounters(b *Block, counters []int) (next []int, num int) {
+	if b == nil {
+		return nil, 0
+	}
+	switch b.Kind {
+	case "bullet", "task":
+		return counters[:min(len(counters), b.Indent)], 0
+	case "numbered":
+		counters = counters[:min(len(counters), b.Indent+1)]
+		for len(counters) <= b.Indent {
+			counters = append(counters, 0)
+		}
+		if b.Start > 0 {
+			counters[b.Indent] = b.Start
+		} else {
+			counters[b.Indent]++
+		}
+		return counters, counters[b.Indent]
+	default:
+		return nil, 0
+	}
+}
+
+// ListNumbers computes the displayed 1-based number for every block in blocks
+// (0 for blocks that are not numbered list items).
+func ListNumbers(blocks []*Block) []int {
+	out := make([]int, len(blocks))
+	var counters []int
+	for i, b := range blocks {
+		counters, out[i] = AdvanceListCounters(b, counters)
+	}
+	return out
+}
+
+// PreviousListNumber returns the resolved 1-based number of the most recent
+// preceding numbered item at blocks[index]'s indent level within the same parent
+// slice, and reports whether only deeper list items lie between them.
+func PreviousListNumber(blocks []*Block, index int) (prevNum int, adjacent bool) {
+	if index <= 0 || index >= len(blocks) || blocks[index] == nil || blocks[index].Kind != "numbered" {
+		return 0, false
+	}
+	indent := blocks[index].Indent
+	nums := ListNumbers(blocks[:index])
+	onlyDeeper := true
+	for i := index - 1; i >= 0; i-- {
+		b := blocks[i]
+		if b == nil {
+			continue
+		}
+		isListItem := b.Kind == "bullet" || b.Kind == "numbered" || b.Kind == "task"
+		if !isListItem {
+			onlyDeeper = false
+			continue
+		}
+		if b.Indent < indent {
+			break
+		}
+		if b.Indent > indent {
+			continue
+		}
+		if b.Kind == "numbered" {
+			return nums[i], onlyDeeper
+		}
+		onlyDeeper = false
+	}
+	return 0, false
 }
 
 // ValidCover reports whether a cover is one Document.Cover may hold: none,

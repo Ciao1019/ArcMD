@@ -10,30 +10,69 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
+// HTMLImportOptions configures ImportHTMLDocument for read-only HTML/EPUB reading.
+type HTMLImportOptions struct {
+	EmbedImages bool
+	ResolveSrc  func(string) string
+}
+
+// HTMLImportResult holds the parsed document, HTML id/name-to-block-ID mapping,
+// and any <title> extracted from <head>.
+type HTMLImportResult struct {
+	Doc     *document.Document
+	Anchors map[string]string
+	Title   string
+}
+
 // ImportHTML turns HTML copied from a browser, Feishu, Notion or a word
 // processor into a document: headings, paragraphs, lists and tasks, quotes,
 // code, tables, rules and images, with bold, italic, underline, strike,
 // code and links. Styles, scripts and what ArcMD cannot show are left out;
 // the text always survives.
 func ImportHTML(source string) *document.Document {
+	return ImportHTMLDocument(source, HTMLImportOptions{}).Doc
+}
+
+// ImportHTMLDocument imports HTML with optional real image block emission and
+// anchor ID mapping for native HTML and EPUB reading.
+func ImportHTMLDocument(source string, opts HTMLImportOptions) HTMLImportResult {
 	root, err := html.Parse(strings.NewReader(source))
 	doc := document.New()
 	doc.Blocks = nil
 	if err != nil {
 		doc.Blocks = []*document.Block{document.NewBlock("paragraph", strings.TrimSpace(source))}
-		return doc
+		return HTMLImportResult{Doc: doc}
 	}
-	h := &htmlImporter{}
+	h := &htmlImporter{
+		embedImages: opts.EmbedImages,
+		resolveSrc:  opts.ResolveSrc,
+		anchors:     make(map[string]string),
+	}
 	h.walk(root, document.Style{})
 	h.flush()
+	if len(h.pendingIDs) > 0 && len(h.blocks) > 0 {
+		h.bindPendingIDs(h.blocks[len(h.blocks)-1].ID)
+	}
 	doc.Blocks = h.blocks
 	if len(doc.Blocks) == 0 {
-		doc.Blocks = []*document.Block{document.NewBlock("paragraph", "")}
+		b := document.NewBlock("paragraph", "")
+		h.bindPendingIDs(b.ID)
+		doc.Blocks = []*document.Block{b}
 	}
-	return doc
+	return HTMLImportResult{
+		Doc:     doc,
+		Anchors: h.anchors,
+		Title:   h.title,
+	}
 }
 
 type htmlImporter struct {
+	embedImages bool
+	resolveSrc  func(string) string
+	anchors     map[string]string
+	pendingIDs  []string
+	title       string
+
 	blocks []*document.Block
 	// cur is the block text goes in, made on the first text.
 	cur *document.Block
@@ -45,8 +84,53 @@ type htmlImporter struct {
 	align   string
 	checked *bool
 	// lists are the kinds of the lists the text is in, innermost last.
-	lists []string
-	pre   bool
+	lists     []string
+	listStart int
+	pre       bool
+}
+
+func (h *htmlImporter) recordID(id string) {
+	if !h.embedImages {
+		return
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	for _, existing := range h.pendingIDs {
+		if existing == id {
+			return
+		}
+	}
+	h.pendingIDs = append(h.pendingIDs, id)
+}
+
+func (h *htmlImporter) bindPendingIDs(blockID string) {
+	if !h.embedImages || blockID == "" || len(h.pendingIDs) == 0 {
+		return
+	}
+	if h.anchors == nil {
+		h.anchors = make(map[string]string)
+	}
+	for _, id := range h.pendingIDs {
+		if _, exists := h.anchors[id]; !exists {
+			h.anchors[id] = blockID
+		}
+		if low := strings.ToLower(id); low != id {
+			if _, exists := h.anchors[low]; !exists {
+				h.anchors[low] = blockID
+			}
+		}
+	}
+	h.pendingIDs = h.pendingIDs[:0]
+}
+
+func (h *htmlImporter) appendBlock(b *document.Block) {
+	if b == nil {
+		return
+	}
+	h.bindPendingIDs(b.ID)
+	h.blocks = append(h.blocks, b)
 }
 
 // flush ends the block being written; an empty one is dropped.
@@ -78,7 +162,7 @@ func (h *htmlImporter) flush() {
 	if len(b.Runs) == 0 {
 		b.Runs = []document.Run{{Text: ""}}
 	}
-	h.blocks = append(h.blocks, b)
+	h.appendBlock(b)
 }
 
 func collapseSpace(s string) string {
@@ -196,9 +280,36 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 	default:
 		return
 	}
+	if h.embedImages && htmlElementHidden(n) {
+		return
+	}
+	h.recordID(attr(n, "id"))
+	if n.DataAtom == atom.A {
+		h.recordID(attr(n, "name"))
+	}
 	style = applyNodeRichStyle(n, styled(n, style))
 	switch n.DataAtom {
-	case atom.Script, atom.Style, atom.Head, atom.Title, atom.Meta, atom.Link, atom.Noscript, atom.Template, atom.Button, atom.Svg:
+	case atom.Head:
+		if h.embedImages && h.title == "" {
+			h.title = extractHTMLHeadTitle(n)
+		}
+		return
+	case atom.Script, atom.Style, atom.Title, atom.Meta, atom.Link, atom.Noscript, atom.Template, atom.Button:
+		return
+	case atom.Svg:
+		if h.embedImages {
+			if src := svgImageHref(n); src != "" {
+				if h.resolveSrc != nil {
+					src = h.resolveSrc(src)
+				}
+				if safeImageEmbedURL(src) {
+					h.flush()
+					b := document.NewBlock("image", "")
+					b.URL = src
+					h.appendBlock(b)
+				}
+			}
+		}
 		return
 	case atom.B, atom.Strong:
 		style.Bold = true
@@ -247,7 +358,7 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 			h.block("heading", level, func() { h.children(n, style) })
 		})
 		return
-	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav, atom.Figure, atom.Figcaption, atom.Dt, atom.Dd, atom.Address, atom.Center:
+	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav, atom.Figure, atom.Figcaption, atom.Dt, atom.Dd, atom.Address, atom.Center, atom.Details, atom.Summary, atom.Dl:
 		if h.pre {
 			if h.cur != nil && len(h.cur.Runs) > 0 && !strings.HasSuffix(h.cur.Text(), "\n") {
 				h.text("\n", document.Style{})
@@ -255,10 +366,32 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 			h.children(n, document.Style{})
 			return
 		}
+		if h.embedImages {
+			switch n.DataAtom {
+			case atom.Figcaption:
+				capStyle := style
+				capStyle.Italic = true
+				h.withAlign("center", true, func() {
+					h.block("paragraph", 0, func() { h.children(n, capStyle) })
+				})
+				return
+			case atom.Dt, atom.Summary:
+				dtStyle := style
+				dtStyle.Bold = true
+				h.block("paragraph", 0, func() { h.children(n, dtStyle) })
+				return
+			case atom.Dd:
+				savedIndent := h.indent
+				h.indent = min(12, h.indent+1)
+				h.block("paragraph", 0, func() { h.children(n, style) })
+				h.indent = savedIndent
+				return
+			}
+		}
 		if n.DataAtom == atom.Div && hasHTMLClass(n, "arcmd-columns") {
 			h.flush()
 			if cols := columnsOfHTML(n); cols != nil {
-				h.blocks = append(h.blocks, cols)
+				h.appendBlock(cols)
 				return
 			}
 		}
@@ -301,11 +434,25 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		return
 	case atom.Hr:
 		h.flush()
-		h.blocks = append(h.blocks, document.NewBlock("rule", ""))
+		h.appendBlock(document.NewBlock("rule", ""))
 		return
 	case atom.Img:
 		h.flush()
-		src := attr(n, "src")
+		src := strings.TrimSpace(attr(n, "src"))
+		if h.embedImages {
+			if isTinyTrackingPixel(n) {
+				return
+			}
+			if h.resolveSrc != nil && src != "" {
+				src = h.resolveSrc(src)
+			}
+			if src != "" && safeImageEmbedURL(src) {
+				b := document.NewBlock("image", strings.TrimSpace(attr(n, "alt")))
+				b.URL = src
+				h.appendBlock(b)
+				return
+			}
+		}
 		if src == "" || strings.HasPrefix(src, "data:") {
 			if alt := attr(n, "alt"); alt != "" {
 				h.text(alt, style)
@@ -327,17 +474,36 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 			return
 		}
 		kind := "bullet"
+		startVal := 0
 		if n.DataAtom == atom.Ol {
 			kind = "numbered"
+			if s := strings.TrimSpace(attr(n, "start")); s != "" {
+				if v, err := strconv.Atoi(s); err == nil && v >= 1 && v <= 999999 {
+					startVal = v
+				}
+			}
 		}
 		h.flush()
 		h.lists = append(h.lists, kind)
 		savedIndent := h.indent
+		savedStart := h.listStart
 		h.indent = min(12, len(h.lists)-1)
+		if n.DataAtom == atom.Ol {
+			if startVal == 0 {
+				probe := &document.Block{Kind: "numbered", Indent: h.indent}
+				if prevNum, adj := document.PreviousListNumber(append(append([]*document.Block(nil), h.blocks...), probe), len(h.blocks)); adj && prevNum > 0 {
+					startVal = 1
+				}
+			}
+			h.listStart = startVal
+		} else {
+			h.listStart = 0
+		}
 		h.children(n, style)
 		h.flush()
 		h.lists = h.lists[:len(h.lists)-1]
 		h.indent = savedIndent
+		h.listStart = savedStart
 		return
 	case atom.Li:
 		if h.pre {
@@ -352,22 +518,129 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 			kind = h.lists[len(h.lists)-1]
 		}
 		h.flush()
-		saved, savedChecked := h.kind, h.checked
-		h.kind, h.checked = kind, taskState(n)
+		liStart := h.listStart
+		h.listStart = 0
+		if s := strings.TrimSpace(attr(n, "value")); s != "" {
+			if v, err := strconv.Atoi(s); err == nil && v >= 1 && v <= 999999 {
+				liStart = v
+			}
+		}
+		saved, savedChecked, savedListStart := h.kind, h.checked, h.listStart
+		h.kind, h.checked, h.listStart = kind, taskState(n), 0
+		beforeLen := len(h.blocks)
 		h.children(n, style)
 		h.flush()
-		h.kind, h.checked = saved, savedChecked
+		h.kind, h.checked, h.listStart = saved, savedChecked, savedListStart
+		if liStart > 0 && len(h.blocks) > beforeLen {
+			first := h.blocks[beforeLen]
+			if first.Kind == "numbered" {
+				if liStart > 1 {
+					first.Start = liStart
+				} else if prevNum, adj := document.PreviousListNumber(h.blocks, beforeLen); adj && prevNum > 0 {
+					first.Start = 1
+				}
+			}
+		}
 		return
 	case atom.Input:
 		return
 	case atom.Table:
 		h.flush()
+		if h.embedImages {
+			h.emitTableCaption(n, style)
+		}
 		if t := tableOf(n); t != nil {
-			h.blocks = append(h.blocks, t)
+			h.appendBlock(t)
 		}
 		return
 	}
 	h.children(n, style)
+}
+
+func htmlElementHidden(n *html.Node) bool {
+	for _, a := range n.Attr {
+		if strings.EqualFold(a.Key, "hidden") {
+			return true
+		}
+		if strings.EqualFold(a.Key, "style") {
+			css := strings.ToLower(strings.ReplaceAll(a.Val, " ", ""))
+			if strings.Contains(css, "display:none") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func extractHTMLHeadTitle(head *html.Node) string {
+	for c := head.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && c.DataAtom == atom.Title {
+			var b strings.Builder
+			for t := c.FirstChild; t != nil; t = t.NextSibling {
+				if t.Type == html.TextNode {
+					b.WriteString(t.Data)
+				}
+			}
+			return strings.TrimSpace(collapseSpace(b.String()))
+		}
+	}
+	return ""
+}
+
+func svgImageHref(svg *html.Node) string {
+	var found string
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if found != "" {
+			return
+		}
+		if n.Type == html.ElementNode && strings.EqualFold(n.Data, "image") {
+			for _, name := range []string{"href", "xlink:href"} {
+				if v := strings.TrimSpace(attr(n, name)); v != "" {
+					found = v
+					return
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(svg)
+	return found
+}
+
+func isTinyTrackingPixel(img *html.Node) bool {
+	w := strings.TrimSpace(strings.TrimSuffix(strings.ToLower(attr(img, "width")), "px"))
+	h := strings.TrimSpace(strings.TrimSuffix(strings.ToLower(attr(img, "height")), "px"))
+	return (w == "1" && h == "1") || w == "0" || h == "0"
+}
+
+func safeImageEmbedURL(src string) bool {
+	low := strings.ToLower(strings.TrimSpace(src))
+	if low == "" {
+		return false
+	}
+	if strings.HasPrefix(low, "javascript:") || strings.HasPrefix(low, "vbscript:") {
+		return false
+	}
+	if strings.HasPrefix(low, "data:") {
+		return strings.HasPrefix(low, "data:image/")
+	}
+	return true
+}
+
+func (h *htmlImporter) emitTableCaption(table *html.Node, style document.Style) {
+	for c := table.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && c.DataAtom == atom.Caption {
+			capStyle := style
+			capStyle.Bold = true
+			h.withAlign("center", true, func() {
+				h.block("paragraph", 0, func() { h.children(c, capStyle) })
+			})
+			return
+		}
+	}
 }
 
 // taskState is whether a list item is a task, by the check box it starts
