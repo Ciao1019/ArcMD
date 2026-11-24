@@ -299,6 +299,11 @@ type App struct {
 	cachedEditorBindings map[string]editor.Combo
 	cachedReserved       []editor.Combo
 	cachedBookmarkKey    string
+
+	dbPeek             dbPeekState
+	pageDBCache        map[string]*pageDBEntry
+	embedDBs           map[string]*embedDBEntry
+	pagePropsCollapsed map[string]bool
 }
 
 // trashItem moves the file or folder at p to the system's trash.
@@ -820,6 +825,7 @@ func (a *App) session(id string) *spaceSession {
 // refreshTree reads the active space's folder again.
 func (a *App) refreshTree() {
 	a.treeFor = ""
+	a.invalidatePageDBCache("")
 	a.syncTree()
 }
 
@@ -990,6 +996,10 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 				replacement.book.GoToChapter(resident.book.CurrentChapter, true)
 				replacement.book.SidebarOpen = resident.book.SidebarOpen
 				replacement.book.ShowSource = resident.book.ShowSource
+			} else if resident.isDatabase() && replacement.isDatabase() {
+				if v := resident.dbView.Store.Database().ActiveView; v != "" {
+					replacement.dbView.SetActiveView(v)
+				}
 			} else {
 				replacement.ed.Scroll = resident.ed.Scroll
 			}
@@ -1004,6 +1014,21 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	} else {
 		preferSource := cached != nil && cached.rel == rel && cached.source
 		a.doc = openDocument(sp, rel, text, preferSource)
+	}
+	if a.doc.isDatabase() {
+		a.refreshOpenDatabases(sp.ID)
+	}
+	if a.dbPeek.open && a.dbPeek.dbDoc != nil && a.dbPeek.dbDoc != a.doc {
+		stillOpen := false
+		for _, r := range a.residentDocuments() {
+			if r == a.dbPeek.dbDoc {
+				stillOpen = true
+				break
+			}
+		}
+		if !stillOpen {
+			a.closeRecordPeek()
+		}
 	}
 	var prevSessionDoc *document
 	if activeSp != nil && a.documentContext == 0 {
@@ -1020,6 +1045,8 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 			a.doc.book.RequestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
+		} else if a.doc.isDatabase() {
+			a.doc.dbView.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -1229,7 +1256,7 @@ func isUntitled(name string) bool {
 // by hand keeps its name. A title taken by another file is numbered.
 func (a *App) followTitle() {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
 	if _, composing := d.ed.MarkedRange(); composing {
@@ -1386,7 +1413,7 @@ func (a *App) finishRename(openDuplicated bool) {
 	}
 	if openPending && sp == a.state.ActiveSpace() && vault.IsDocument(to) {
 		a.open(to)
-		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() {
+		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() && !d.isDatabase() {
 			d.ensureBodyParagraph()
 			leaves := d.ed.Doc.Leaves()
 			pos := 0
@@ -1435,6 +1462,7 @@ func (a *App) moved(sp *space.Space, from, to string) {
 	a.followCopied(sp.ID, from, sp.ID, to)
 	a.followOpen(sp.ID, from, sp.ID, to)
 	a.followSplitPaths(sp.ID, from, sp.ID, to)
+	a.followDatabaseRecordMove(sp, from, to)
 	a.saveState()
 	a.refreshTree()
 }
@@ -1679,7 +1707,7 @@ func writeNative(root, rel, markdown string) error {
 }
 
 func (a *App) exportMarkdown() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() {
 		return
 	}
 	a.doc.ed.UnmarkText()

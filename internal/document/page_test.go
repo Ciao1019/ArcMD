@@ -138,3 +138,29 @@ func TestReplaceDocumentAndMapText(t *testing.T) {
 		t.Errorf("undo: %q", headings(e.Doc))
 	}
 }
+
+func TestSetFrontmatterUndoRedo(t *testing.T) {
+	e := NewEngine(New())
+	v0 := e.Version()
+	e.SetFrontmatter("status: todo\npriority: high\r\n")
+	if e.Doc.Frontmatter != "status: todo\npriority: high" {
+		t.Fatalf("Frontmatter = %q", e.Doc.Frontmatter)
+	}
+	if e.Version() == v0 {
+		t.Fatal("SetFrontmatter did not advance version")
+	}
+	v1 := e.Version()
+	// Setting identical content should be a no-op.
+	e.SetFrontmatter("status: todo\npriority: high")
+	if e.Version() != v1 {
+		t.Fatal("unchanged SetFrontmatter advanced version")
+	}
+	e.Undo()
+	if e.Doc.Frontmatter != "" {
+		t.Fatalf("after Undo Frontmatter = %q, want empty", e.Doc.Frontmatter)
+	}
+	e.Redo()
+	if e.Doc.Frontmatter != "status: todo\npriority: high" {
+		t.Fatalf("after Redo Frontmatter = %q", e.Doc.Frontmatter)
+	}
+}

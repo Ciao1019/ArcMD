@@ -28,6 +28,16 @@ func (e *Engine) SetCoverY(y float64) {
 	e.Edit(func() { e.Doc.CoverY = y })
 }
 
+// SetFrontmatter updates the document's preserved user YAML frontmatter as
+// one step of the history.
+func (e *Engine) SetFrontmatter(fm string) {
+	trimmed := strings.TrimRight(fm, "\r\n")
+	if trimmed == e.Doc.Frontmatter {
+		return
+	}
+	e.Edit(func() { e.Doc.Frontmatter = trimmed })
+}
+
 // ReplaceDocument puts the blocks, icon and cover of doc in place of the
 // document's, as one step of the history, as restoring an earlier version
 // does; the caret goes to the start.

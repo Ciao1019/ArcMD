@@ -66,6 +66,8 @@ var insertions = []insertion{
 	{name: "流程图", kind: "mermaid-flow", search: "mermaid flowchart graph diagram liuchengtu lct", icon: iconWorkflow, group: 1, tint: "teal", md: "```mermaid"},
 	{name: "时序图", kind: "mermaid-seq", search: "mermaid sequence diagram shixutu sxt", icon: iconSequence, group: 1, tint: "teal"},
 	{name: "手绘白板", kind: "whiteboard", search: "whiteboard excalidraw sketch canvas draw baiban bb shouhui sh", icon: iconWhiteboard, group: 1, tint: "indigo", md: "```excalidraw"},
+	{name: "关联数据库视图", kind: "db-link", search: "database linked view db guanlianshitu glst shujuku sjk", icon: iconDatabase, group: 1, tint: "blue", md: "<!-- arcmd-db:view -->"},
+	{name: "内嵌数据库", kind: "db-new", search: "database embed inline db neiqianshujuku nqsjk", icon: iconDatabase, group: 1, tint: "teal"},
 	{name: "链接到文档", kind: "wiki", search: "wiki link backlink shuanglian sl lianjie wendang", icon: iconLink, group: 1, tint: "blue", md: "[["},
 }
 
@@ -91,7 +93,9 @@ func (e *Editor) slashEntries() []slashEntry {
 			}
 		}
 		for _, it := range insertions {
-			if it.group == 1 && (e.attach != nil || it.kind != "image") && (e.attachPDF != nil || it.kind != "pdf") && (e.attachEPUB != nil || it.kind != "epub") && (e.attachHTML != nil || it.kind != "html") {
+			if it.group == 1 && (e.attach != nil || it.kind != "image") && (e.attachPDF != nil || it.kind != "pdf") &&
+				(e.attachEPUB != nil || it.kind != "epub") && (e.attachHTML != nil || it.kind != "html") &&
+				(e.listDatabases != nil || it.kind != "db-link") && (e.createDatabase != nil || it.kind != "db-new") {
 				out = append(out, slashEntry{it, false})
 			}
 		}
@@ -99,7 +103,9 @@ func (e *Editor) slashEntries() []slashEntry {
 	}
 	ranked := [4][]slashEntry{}
 	for _, it := range insertions {
-		if (e.attach == nil && it.kind == "image") || (e.attachPDF == nil && it.kind == "pdf") || (e.attachEPUB == nil && it.kind == "epub") || (e.attachHTML == nil && it.kind == "html") {
+		if (e.attach == nil && it.kind == "image") || (e.attachPDF == nil && it.kind == "pdf") ||
+			(e.attachEPUB == nil && it.kind == "epub") || (e.attachHTML == nil && it.kind == "html") ||
+			(e.listDatabases == nil && it.kind == "db-link") || (e.createDatabase == nil && it.kind == "db-new") {
 			continue
 		}
 		words := strings.Fields(strings.ToLower(it.label() + " " + it.search))
@@ -431,7 +437,7 @@ func turnItems(b *document.Block) []insertion {
 	}
 	for _, it := range insertions {
 		switch {
-		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "pdf" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq" || it.kind == "whiteboard":
+		case it.kind == "rule" || it.kind == "table" || it.kind == "columns" || it.kind == "image" || it.kind == "pdf" || it.kind == "mermaid-flow" || it.kind == "mermaid-seq" || it.kind == "whiteboard" || it.kind == "db-link" || it.kind == "db-new":
 		case b.Kind == "code" && it.kind == "callout":
 		case b.Kind == "callout" && (it.kind == "code" || it.kind == "quote"):
 		default:

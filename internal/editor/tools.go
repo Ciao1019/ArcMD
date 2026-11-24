@@ -33,8 +33,8 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			e.Engine.Insert(document.Columns())
 		case "rule":
 			e.Engine.Insert(document.NewBlock("rule", ""))
-		case "image", "pdf", "epub", "html":
-			// The host picks the file(s) and inserts them at the caret.
+		case "image", "pdf", "epub", "html", "db-link", "db-new":
+			// The host or inline picker completes the insertion after slash cleanup.
 		case "wiki":
 			e.Engine.Replace(e.Caret, e.Caret, "[[")
 		case "mermaid-flow":
@@ -69,6 +69,15 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 	}
 	if item.kind == "html" && e.attachHTML != nil {
 		e.attachHTML()
+	}
+	if item.kind == "db-link" && e.listDatabases != nil {
+		e.dbPickerOpen = true
+		e.dbPickerQuery = ""
+	}
+	if item.kind == "db-new" && e.createDatabase != nil {
+		if targetRel, viewID, snapMD, err := e.createDatabase(i18n.T("未命名数据库")); err == nil && targetRel != "" {
+			e.InsertDatabaseEmbed(targetRel, viewID, snapMD, dbDefaultInlineH)
+		}
 	}
 }
 

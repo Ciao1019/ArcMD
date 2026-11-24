@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/bookdoc"
+	"github.com/Ciao1019/ArcMD/internal/database"
+	"github.com/Ciao1019/ArcMD/internal/dbview"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
@@ -71,6 +73,8 @@ func (a *App) toggleFocus() {
 			a.doc.pdf.RequestFocus = true
 		} else if a.doc.isBook() {
 			a.doc.book.RequestFocus = true
+		} else if a.doc.isDatabase() {
+			a.doc.dbView.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -104,14 +108,14 @@ func (a *App) toggleOutline() {
 		a.doc.book.ToggleOutline()
 		return
 	}
-	if !a.doc.source && !a.doc.isWhiteboard() {
+	if !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isDatabase() {
 		a.doc.ed.ToggleOutline()
 	}
 }
 
 // outlineOpen reports whether the document in front shows its outline.
 func (a *App) outlineOpen() bool {
-	if a.doc == nil || a.doc.isWhiteboard() {
+	if a.doc == nil || a.doc.isWhiteboard() || a.doc.isDatabase() {
 		return false
 	}
 	if a.doc.isPDF() {
@@ -176,6 +180,8 @@ func (a *App) focusView(c *ui.Context) {
 					editor.PDFView(c.Key(a.doc.viewKey()), a.doc.pdf, a.pdfOptionsFor(c, a.doc))
 				} else if a.doc.isBook() {
 					editor.BookView(c.Key(a.doc.viewKey()), a.doc.book, a.bookOptionsFor(c, a.doc))
+				} else if a.doc.isDatabase() {
+					a.databaseWorkspace(c, a.doc, w-18)
 				} else {
 					editor.View(c.Key(a.doc.viewKey()), a.doc.ed, a.editorOptions(c, w-18, true))
 				}
@@ -202,6 +208,8 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		switch {
 		case a.activateDocument(d):
 			fn()
+		case a.dbPeek.open && a.dbPeek.doc == d:
+			a.withDocument(d, fn)
 		case a.inWindow(d):
 			// A document in its own window acts as the document.
 			a.withDocument(d, fn)
@@ -279,6 +287,19 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		HTMLWebView: htmlWVFn,
 		AttachHTML:  func() { run(a.pickHTMLFiles) },
 		AttachEPUB:  func() { run(a.pickEPUBFiles) },
+		LoadDatabase: func(target string) (*database.Store, dbview.Options, uint64, error) {
+			return a.loadDatabaseFor(d, target)
+		},
+		OpenDatabase: func(target, viewID string, split bool) { a.openDatabaseFrom(d, target, viewID, split) },
+		ListDatabases: func() []database.SpaceDBInfo {
+			if d.space == nil || d.space.IsExternal() || d.space.Root == "" {
+				return nil
+			}
+			dbs, _ := database.ListSpaceDatabases(d.space.Root)
+			return dbs
+		},
+		CreateDatabase:   func(title string) (string, string, string, error) { return a.createEmbeddedDatabaseFor(d, title) },
+		DatabaseSnapshot: func(target, viewID string) string { return a.databaseSnapshotFor(d, target, viewID) },
 		ToggleBookmark: func(id string) {
 			a.toggleBookmark(d, id)
 		},

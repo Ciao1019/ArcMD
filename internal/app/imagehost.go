@@ -212,7 +212,7 @@ func (a *App) uploadCurrentDocumentImages(p *plugin.Installed) {
 		return
 	}
 	d := a.doc
-	if d == nil || d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.source || d.ed.ReadOnly {
+	if d == nil || d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() || d.source || d.ed.ReadOnly {
 		a.notify("请先打开一篇可编辑的文档。")
 		return
 	}
@@ -438,7 +438,7 @@ func (a *App) countLocalImageReferences(sp *space.Space, targetEval string) int 
 		return count
 	}
 	for _, entry := range docs {
-		if resident[entry.Path] || vault.IsWhiteboard(entry.Path) || vault.IsPDF(entry.Path) || vault.IsBook(entry.Path) {
+		if resident[entry.Path] || vault.IsWhiteboard(entry.Path) || vault.IsPDF(entry.Path) || vault.IsBook(entry.Path) || vault.IsDatabase(entry.Path) {
 			continue
 		}
 		text, rerr := vault.Read(sp.Root, entry.Path)

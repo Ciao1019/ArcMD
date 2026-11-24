@@ -99,7 +99,7 @@ func isImage(name string) bool {
 // pictures, folders included, are left out with a notice, as Markdown
 // has no attachments.
 func (a *App) insertImages(paths []string, at int) {
-	if a.doc == nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.ed.ReadOnly {
+	if a.doc == nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() || a.doc.ed.ReadOnly {
 		return
 	}
 	d := a.doc

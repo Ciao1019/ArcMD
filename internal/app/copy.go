@@ -555,7 +555,7 @@ func (a *App) copyDocuments(sp *space.Space, rel string) ([]*movingDocument, err
 			return nil, err
 		}
 		d := &movingDocument{rel: p.Path, original: text, urls: map[string]string{}}
-		if vault.IsWhiteboard(p.Path) {
+		if vault.IsWhiteboard(p.Path) || vault.IsDatabase(p.Path) {
 			docs = append(docs, d)
 			continue
 		}
@@ -573,7 +573,7 @@ func (a *App) copyDocuments(sp *space.Space, rel string) ([]*movingDocument, err
 // always receive fresh block IDs (and any rebased image URLs); Markdown files
 // stay byte-identical unless an image or cover URL changed.
 func copyDocumentText(rel, text string, urls, coverURLs map[string]string) (string, error) {
-	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) || vault.IsBook(rel) {
+	if vault.IsWhiteboard(rel) || vault.IsPDF(rel) || vault.IsBook(rel) || vault.IsDatabase(rel) {
 		return text, nil
 	}
 	mapCopyURLs := func(doc *model.Document) {

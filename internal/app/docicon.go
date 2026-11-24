@@ -20,6 +20,12 @@ import (
 // fileIcon draws the icon of rel/title: whiteboards and PDFs without a leading
 // emoji show their type glyph on their title color tile; Markdown files show docIcon.
 func fileIcon(c *ui.Context, rel, title string, size float32) ui.Element {
+	if vault.IsDatabase(rel) && leadingEmoji(title) == "" {
+		ink, fill := docIconColors(c.Theme(), title)
+		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
+			ui.Icon(c, iconDatabase).FontSize(size * 0.64).TextColor(ink)
+		})
+	}
 	if vault.IsWhiteboard(rel) && leadingEmoji(title) == "" {
 		ink, fill := docIconColors(c.Theme(), title)
 		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {

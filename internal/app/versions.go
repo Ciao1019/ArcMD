@@ -35,6 +35,7 @@ type versionsState struct {
 	shown          string
 	doc            *model.Document
 	boardScene     *whiteboard.Scene
+	dbText         string
 	diff           []history.Line
 	added          int
 	gone           int
@@ -97,7 +98,7 @@ func (a *App) selectVersion(i int) {
 	if v.shown == ver.File {
 		return
 	}
-	v.shown, v.doc, v.boardScene, v.diff, v.err = ver.File, nil, nil, nil, nil
+	v.shown, v.doc, v.boardScene, v.dbText, v.diff, v.err = ver.File, nil, nil, "", nil, nil
 	text, err := history.Read(v.for_.space.Root, v.for_.rel, ver)
 	if err != nil {
 		v.err = err
@@ -115,6 +116,12 @@ func (a *App) selectVersion(i int) {
 			nowText = v.for_.board.Scene.PlainText()
 		}
 		thenText = scene.PlainText()
+	} else if vault.IsDatabase(ver.File) || v.for_.isDatabase() {
+		v.dbText = text
+		if v.for_.isDatabase() {
+			nowText = extractDatabaseSearchText(v.for_.rel, v.for_.text()).Text
+		}
+		thenText = extractDatabaseSearchText(ver.File, text).Text
 	} else {
 		if strings.EqualFold(path.Ext(ver.File), ".arcmd") {
 			v.doc, err = model.Decode(text)
@@ -146,7 +153,7 @@ func (a *App) selectVersion(i int) {
 // step of the editor's history.
 func (a *App) restoreVersion() {
 	v := &a.versions
-	if v.for_ != a.doc || (v.doc == nil && v.boardScene == nil) {
+	if v.for_ != a.doc || (v.doc == nil && v.boardScene == nil && v.dbText == "") {
 		return
 	}
 	at := v.versions[v.sel].Time
@@ -156,6 +163,21 @@ func (a *App) restoreVersion() {
 		v.open = false
 		_ = a.doc.write(true)
 		a.notify("已恢复到 %s 的版本，可用 ⌘Z 撤销。", versionTime(at, time.Now()))
+		return
+	}
+	if v.dbText != "" && a.doc.isDatabase() {
+		reloaded := openDatabaseDocument(a.doc.space, a.doc.rel, v.dbText)
+		if reloaded.loadErr != nil {
+			a.notify("恢复版本失败。%v", reloaded.loadErr)
+			return
+		}
+		a.doc.dbView = reloaded.dbView
+		a.doc.dbView.RequestFocus = true
+		a.doc.dbDirtySnapshot = true
+		v.open = false
+		_ = a.doc.write(true)
+		a.invalidatePageDBCache(a.doc.space.ID)
+		a.notify("已恢复到 %s 的版本。", versionTime(at, time.Now()))
 		return
 	}
 	a.doc.ed.Engine.ReplaceDocument(v.doc)
@@ -178,6 +200,8 @@ func (a *App) createMilestone() {
 	if content == "" {
 		if d.isWhiteboard() {
 			content, _ = encodeWhiteboardFile(d.rel, d.board.SceneSnapshot())
+		} else if d.isDatabase() {
+			content = d.text()
 		} else {
 			committed := d.ed.Committed()
 			if strings.EqualFold(path.Ext(d.rel), ".arcmd") {

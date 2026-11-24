@@ -189,6 +189,8 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 						a.nodeRow(c, sp, n, 0, pinRoot, i, live, prev)
 						if n.Dir {
 							a.folderContent(c, sp, n, 1, live, prev)
+						} else if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+							a.folderContent(c, sp, mdir, 1, live, prev)
 						}
 					}
 					if slotHere && !a.slot.emitted {
@@ -452,6 +454,8 @@ func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth i
 		a.nodeRow(c, sp, n, depth, parent, i, live, prev)
 		if n.Dir {
 			a.folderContent(c, sp, n, depth+1, live, prev)
+		} else if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+			a.folderContent(c, sp, mdir, depth+1, live, prev)
 		}
 	}
 	if slotHere && !a.slot.emitted {
@@ -817,6 +821,28 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				// A closed folder tells how many documents it holds.
 				ui.Text(c, fmt.Sprint(docCount(n))).FontSize(11).FontWeight(500).TextColor(t.TextMuted)
 			}
+			if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+				mdirOpen := sp.IsExpanded(mdir.Path)
+				if hovered || mdirOpen || a.holdsOpen(sp, mdir.Path) {
+					glyph := iconChevronRight
+					tip := i18n.T("展开数据文件")
+					if mdirOpen {
+						glyph = iconChevronDown
+						tip = i18n.T("收起数据文件")
+					}
+					fb := ui.Box(c.Key("db-fold")).Size(20, 20).Radius(5).Shrink(0).Center().Cursor(ui.CursorPointer).
+						Focusable().Role(ui.RoleButton).Label(tip).Tooltip(tip)
+					if fb.Hovered() {
+						fb.Background(hoverFill(t))
+					}
+					fb.Children(func() { ui.Icon(c, glyph).FontSize(12).TextColor(t.TextMuted) })
+					if fb.Clicked() {
+						sp.SetExpanded(mdir.Path, !mdirOpen)
+						a.saveState()
+						closed = true
+					}
+				}
+			}
 			switch {
 			case minus:
 				// The button takes the dot's place while hovered, as Arc's.
@@ -936,6 +962,9 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		if a.menuKey(m.Item(i18n.T("新建白板")), "new-board").Chosen() {
 			a.newWhiteboard(n.Path)
 		}
+		if a.menuKey(m.Item(i18n.T("新建数据库")), "new-database").Chosen() {
+			a.newDatabase(n.Path)
+		}
 		a.templateMenu(m, n.Path)
 		if m.Item(i18n.T("在其中新建文件夹")).Chosen() {
 			a.newFolder(n.Path)
@@ -979,6 +1008,16 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		}
 		if m.Item(i18n.T("在新窗口中打开")).Chosen() {
 			a.openInWindow(sp, n.Path)
+		}
+		if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+			label := i18n.T("展开数据文件")
+			if sp.IsExpanded(mdir.Path) {
+				label = i18n.T("收起数据文件")
+			}
+			if m.Item(label).Chosen() {
+				sp.SetExpanded(mdir.Path, !sp.IsExpanded(mdir.Path))
+				a.saveState()
+			}
 		}
 		if inPins(sp, n.Path) && a.isOpen(sp, n.Path) {
 			if m.Item(i18n.T("关闭并保持置顶")).Chosen() {
@@ -1078,6 +1117,9 @@ func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 	}
 	if a.menuKey(m.Item(i18n.T("新建白板")), "new-board").Chosen() {
 		a.newWhiteboard("")
+	}
+	if a.menuKey(m.Item(i18n.T("新建数据库")), "new-database").Chosen() {
+		a.newDatabase("")
 	}
 	a.templateMenu(m, "")
 	a.sortMenu(m, sp, "")

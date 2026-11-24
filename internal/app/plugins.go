@@ -1431,7 +1431,7 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 	if a.doc != nil && a.doc.loadErr == nil && slices.Contains(p.Manifest.Permissions, plugin.PermDocumentRead) {
 		docText := a.doc.text()
 		var sel plugin.Range
-		if !a.doc.isWhiteboard() && a.doc.ed != nil {
+		if !a.doc.isWhiteboard() && !a.doc.isDatabase() && a.doc.ed != nil {
 			s, e := a.doc.ed.Positions()
 			if s > e {
 				s, e = e, s
@@ -1457,7 +1457,7 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 		if d.space == nil || d.space.IsExternal() {
 			continue
 		}
-		if d.dirty() || d.saving || d.conflict || d.missing || (!d.isWhiteboard() && d.ed != nil && d.ed.Composing()) {
+		if d.dirty() || d.saving || d.conflict || d.missing || (!d.isWhiteboard() && !d.isDatabase() && d.ed != nil && d.ed.Composing()) {
 			dirty[plugin.SpaceFileKey{SpaceID: d.space.ID, Path: d.rel}] = true
 		}
 	}

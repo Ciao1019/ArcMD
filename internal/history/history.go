@@ -95,6 +95,8 @@ func snapshotStem(name string) (base string, ok bool) {
 	switch {
 	case strings.HasSuffix(name, ".excalidraw.svg"):
 		return strings.TrimSuffix(name, ".excalidraw.svg"), true
+	case strings.HasSuffix(name, ".db.md"):
+		return strings.TrimSuffix(name, ".db.md"), true
 	case strings.HasSuffix(name, ".md"):
 		return strings.TrimSuffix(name, ".md"), true
 	case strings.HasSuffix(name, ".arcmd"):
@@ -113,6 +115,8 @@ func snapshotExt(rel string) string {
 		return ".excalidraw.svg"
 	case ".excalidraw":
 		return ".excalidraw"
+	case ".db.md":
+		return ".db.md"
 	default:
 		return ".md"
 	}

@@ -215,6 +215,10 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 	if attachmentsMoved {
 		a.relinkAttachments(sp, moves)
 	}
+	if len(events) > 0 {
+		a.invalidatePageDBCache(id)
+		a.refreshOpenDatabases(id)
+	}
 
 }
 
@@ -292,6 +296,10 @@ func (a *App) replaceDoc(text string) {
 		d.book.GoToChapter(old.book.CurrentChapter, true)
 		d.book.SidebarOpen = old.book.SidebarOpen
 		d.book.ShowSource = old.book.ShowSource
+	} else if old.isDatabase() && d.isDatabase() {
+		if v := old.dbView.Store.Database().ActiveView; v != "" {
+			d.dbView.SetActiveView(v)
+		}
 	} else {
 		d.ed.Scroll = old.ed.Scroll
 	}
@@ -362,7 +370,7 @@ func (a *App) conflictBarFor(c *ui.Context, d *document) {
 		Background(t.Warning.Alpha(0.14)).Role(ui.RoleStatus).Children(func() {
 		ui.Icon(c, iconAlert).FontSize(15).TextColor(t.Warning)
 		ui.Text(c, msg).Grow(1).MinWidth(0)
-		if d.conflict && !d.missing && !d.isWhiteboard() {
+		if d.conflict && !d.missing && !d.isWhiteboard() && !d.isDatabase() {
 			if ui.Button(c.Key("merge3"), i18n.T("三栏合并…")).Clicked() {
 				a.activateDocument(d)
 				a.openMergeForDiskConflict(d)

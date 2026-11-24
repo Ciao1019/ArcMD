@@ -320,3 +320,31 @@ func TestBookDocumentsHTMLAndEPUB(t *testing.T) {
 		t.Fatalf("Copy EPUB = %q, %v", dup, err)
 	}
 }
+
+func TestDatabaseDocuments(t *testing.T) {
+	root := t.TempDir()
+	rel, err := CreateFile(root, "Projects", "Roadmap", ExtDatabase, "# Roadmap\n")
+	if err != nil || rel != "Projects/Roadmap.db.md" {
+		t.Fatalf("CreateFile = %q, %v", rel, err)
+	}
+	if FileExt(rel) != ".db.md" {
+		t.Fatalf("FileExt(%q) = %q, want .db.md", rel, FileExt(rel))
+	}
+	if !IsDatabase(rel) || !IsDocument(rel) || IsMarkdown(rel) || Title(rel) != "Roadmap" {
+		t.Fatalf("classification/Title failed for %q", rel)
+	}
+	if IsDatabase(".db.md") || IsDocument(".db.md") || IsMarkdown(".db.md") {
+		t.Fatal("bare .db.md should not be classified as a document")
+	}
+	docs, err := List(root)
+	if err != nil || len(docs) != 1 || docs[0].Path != rel {
+		t.Fatalf("List = %+v, %v", docs, err)
+	}
+	renamed, err := Rename(root, rel, "Backlog")
+	if err != nil || renamed != "Projects/Backlog.db.md" {
+		t.Fatalf("Rename = %q, %v", renamed, err)
+	}
+	if !IsDatabase(renamed) {
+		t.Fatalf("renamed file lost database classification: %q", renamed)
+	}
+}

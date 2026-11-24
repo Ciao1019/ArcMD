@@ -664,7 +664,7 @@ func (e *Editor) selectAll() {
 	last := e.Engine.LeafAt(sel.End)
 	if first.Block.ID == last.Block.ID && first.Start < first.End {
 		b := first.Block
-		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !isPDFEmbed(b) && !isBookEmbed(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
+		editable := !isWhiteboardBlock(b) && !isWhiteboardEmbed(b) && !isPDFEmbed(b) && !isBookEmbed(b) && !isDatabaseBlock(b) && !(b.Kind == "image" && !e.captionVisible(b)) && !(e.ReadOnly && (b.Kind == "math" || isMermaidBlock(b)))
 		if editable {
 			candidates = append(candidates, ui.TextInputRange{Start: first.Start, End: first.End})
 		}
