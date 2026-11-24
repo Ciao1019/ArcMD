@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/database"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -24,18 +25,14 @@ func feedView(
 		fcfg = *view.Feed
 	}
 
-	var statusProp *database.Property
-	var dateProp *database.Property
+	statusProp := resolveFeedStatusProp(db, fcfg)
+	dateProp := resolveFeedDateProp(db, fcfg)
 	excludeIDs := make([]string, 0, 2)
-	for i := range db.Properties {
-		if statusProp == nil && db.Properties[i].Type == database.PropStatus {
-			statusProp = &db.Properties[i]
-			excludeIDs = append(excludeIDs, db.Properties[i].ID)
-		}
-		if dateProp == nil && db.Properties[i].Type == database.PropDate {
-			dateProp = &db.Properties[i]
-			excludeIDs = append(excludeIDs, db.Properties[i].ID)
-		}
+	if statusProp != nil && statusProp.ID != "" {
+		excludeIDs = append(excludeIDs, statusProp.ID)
+	}
+	if dateProp != nil && dateProp.ID != "" && dateProp.Type == database.PropDate {
+		excludeIDs = append(excludeIDs, dateProp.ID)
 	}
 	cardProps := visibleNonTitleProps(db, &view, excludeIDs...)
 
@@ -100,6 +97,7 @@ func renderFeedQuickCompose(
 			}
 			return
 		}
+		st.Motion.TrackCreated(rec.ID)
 		if opts.OnAfterCreate != nil {
 			opts.OnAfterCreate(rec)
 		}
@@ -160,18 +158,35 @@ func renderFeedCard(
 	if tinted {
 		cardBg = tintBg
 	}
-	card := ui.Column(c.Key("fcard:"+rec.ID)).Radius(11).Background(cardBg).
+	card := ui.Column(c.Key("fcard:"+rec.ID)).Radius(12).Background(cardBg).
 		Border(1, pal.Border).Shadow(0, 1, 4, 0, pal.ShadowEdge).
 		Padding(padY, padX).Gap(gap).Cursor(ui.CursorPointer).Clip().
-		Focusable().Role(ui.RoleArticle).Label(rec.Title)
+		Focusable().Role(ui.RoleArticle).Label(rec.Title).
+		Transition(ui.ElementTransition{
+			Animation:    &dbSpringCard,
+			Position:     true,
+			Colors:       true,
+			Shadows:      true,
+			ExitDuration: 150 * time.Millisecond,
+			Enter:        &ui.Motion{Y: -8, Scale: 0.97, Opacity: 0.78},
+			Exit:         &ui.Motion{Scale: 0.95, Opacity: 0},
+		})
 	if tinted {
 		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
 			p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 3, H: r.H}, tintAccent, 0)
 		})
 	}
-	if card.Hovered() {
-		card.Border(1, pal.BorderStrong)
+	pulse := st.Motion.pulseAlpha(c, rec.ID)
+	if pulse > 0.01 {
+		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			paintCreationPulse(p, r, 12, pulse, pal.Accent)
+		})
 	}
+	hovered := card.Hovered()
+	if hovered {
+		card.Border(1, pal.BorderStrong).Shadow(0, 6, 16, -3, pal.ShadowEdge)
+	}
+	applyCardHoverLift(card, hovered, false)
 	attachRecordContextMenu(card, st, rec, opts)
 
 	var consumedTitle, consumedProps bool

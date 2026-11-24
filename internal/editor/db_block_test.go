@@ -86,6 +86,11 @@ func TestDBBlockMarkdownRoundTripAndHTMLDegradation(t *testing.T) {
 
 func TestDBBlockInteractiveLiveViewSlashPickerAndVectorPDF(t *testing.T) {
 	store := seedEmbedTestStore(t)
+	boardView := dbview.NewViewConfig(database.ViewBoard, "看板", store.Database())
+	boardView.ID = "view_board"
+	if err := store.AddView(boardView, false); err != nil {
+		t.Fatal(err)
+	}
 	openedTarget := ""
 	openedView := ""
 	createdCalled := false
@@ -101,7 +106,14 @@ func TestDBBlockInteractiveLiveViewSlashPickerAndVectorPDF(t *testing.T) {
 			openedTarget, openedView = target, viewID
 		},
 		ListDatabases: func() []database.SpaceDBInfo {
-			return []database.SpaceDBInfo{{RelPath: "sprint.db.md", Title: "Sprint Board"}}
+			return []database.SpaceDBInfo{{
+				RelPath: "sprint.db.md",
+				Title:   "Sprint Board",
+				Views: []database.SpaceDBViewInfo{
+					{ID: "view_table", Name: "表格视图", Type: database.ViewTable},
+					{ID: "view_board", Name: "看板", Type: database.ViewBoard},
+				},
+			}}
 		},
 		CreateDatabase: func(title string) (string, string, string, error) {
 			createdCalled = true
@@ -137,35 +149,43 @@ func TestDBBlockInteractiveLiveViewSlashPickerAndVectorPDF(t *testing.T) {
 	}
 	tt.Frame()
 
-	if !tt.HasText("Sprint Board") {
-		t.Fatalf("expected Sprint Board in inline database picker, texts=%v", tt.Texts())
+	if !tt.HasText("Sprint Board") || !tt.HasText("表格视图") || !tt.HasText("看板") {
+		t.Fatalf("expected Sprint Board views in inline picker, texts=%v", tt.Texts())
 	}
-	opt, ok := tt.AccessByRole(ui.RoleOption, "Sprint Board")
+	opt, ok := tt.AccessByRole(ui.RoleOption, "Sprint Board / 表格视图")
 	if !ok {
-		t.Fatalf("missing Sprint Board option, access=%+v", tt.AccessAll())
+		t.Fatalf("missing Sprint Board / 表格视图 option, access=%+v", tt.AccessAll())
 	}
 	tt.ClickAt(opt.Bounds.X+opt.Bounds.W/2, opt.Bounds.Y+opt.Bounds.H/2)
 	tt.Frame()
 	tt.Frame()
 
-	// Live embedded dbview.View should display database records directly inside the editor.
-	for _, want := range []string{"关联视图", "Implement Linked View", "Ship CSV Importer"} {
+	// Live embedded dbview.View renders ONLY the linked view without pulling all database tabs into the card.
+	for _, want := range []string{"关联视图", "表格视图", "Implement Linked View", "Ship CSV Importer"} {
 		if !tt.HasText(want) {
 			t.Fatalf("expected %q rendered in embedded database card, texts=%v", want, tt.Texts())
 		}
 	}
-
-	// Switch to Board view inside the embedded card -> should update block's spec.ViewID cleanly without dirtying store.ActiveView.
-	boardTab, ok := tt.AccessByRole(ui.RoleTab, "看板")
-	if !ok {
-		t.Fatalf("missing 看板 tab in embedded view, access=%+v", tt.AccessAll())
+	if _, hasBoardTab := tt.AccessByRole(ui.RoleTab, "看板"); hasBoardTab {
+		t.Fatalf("embedded linked view should not render a multi-view tab bar, access=%+v", tt.AccessAll())
 	}
-	tt.ClickAt(boardTab.Bounds.X+boardTab.Bounds.W/2, boardTab.Bounds.Y+boardTab.Bounds.H/2)
+	if tt.HasText("新建视图") {
+		t.Fatalf("embedded linked view should not show add-view button, texts=%v", tt.Texts())
+	}
+
+	// Switch the linked view via header "切换视图" menu -> updates block's spec.ViewID cleanly without mutating store.ActiveView.
+	if err := tt.Click("切换视图"); err != nil {
+		t.Fatalf("open 切换视图 menu: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("看板"); err != nil {
+		t.Fatalf("select 看板 in 切换视图 menu: %v", err)
+	}
 	tt.Frame()
 	tt.Frame()
 
 	if store.Database().ActiveView != "view_table" {
-		t.Fatalf("expected LocalView tab switch not to mutate shared store.ActiveView, got %q", store.Database().ActiveView)
+		t.Fatalf("expected embedded view switch not to mutate shared store.ActiveView, got %q", store.Database().ActiveView)
 	}
 	mdNow := editor.ExportMarkdown(ed.Committed())
 	if !strings.Contains(mdNow, `"view":"view_board"`) {

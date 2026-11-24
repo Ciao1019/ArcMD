@@ -1221,10 +1221,16 @@ func (s *Store) AddProperty(prop Property) error {
 	nextDB := s.db.Clone()
 	propSnap := prop.Clone()
 	nextDB.Properties = append(nextDB.Properties, propSnap.Clone())
+	primaryID := nextDB.PrimaryViewID()
 	for vi := range nextDB.Views {
+		// Show newly added properties automatically in the primary table view and
+		// the currently active view; keep other derived views' column visibility
+		// undisturbed so editing one view does not clutter unrelated views.
+		vID := nextDB.Views[vi].ID
+		visible := vID == primaryID || vID == nextDB.ActiveView
 		nextDB.Views[vi].Properties = append(nextDB.Views[vi].Properties, ViewProperty{
 			PropertyID: propSnap.ID,
-			Visible:    true,
+			Visible:    visible,
 			Width:      propSnap.Width,
 			Wrap:       propSnap.Wrap,
 		})
@@ -1290,8 +1296,12 @@ func (s *Store) UpdateProperty(prop Property) ([]string, error) {
 		return nil, errors.New("database: cannot convert property to title")
 	}
 
+	oldViews := cloneViews(s.db.Views)
 	nextDB := s.db.Clone()
 	nextDB.Properties[idx] = prop.Clone()
+	if oldProp.Type != prop.Type {
+		sanitizeViewBindingsForPropertyType(nextDB.Views, prop)
+	}
 	if err := nextDB.Validate(); err != nil {
 		return nil, err
 	}
@@ -1320,7 +1330,9 @@ func (s *Store) UpdateProperty(prop Property) ([]string, error) {
 
 	oldPropSnap := oldProp.Clone()
 	newPropSnap := prop.Clone()
+	newViews := cloneViews(nextDB.Views)
 	s.db.Properties[idx] = newPropSnap.Clone()
+	s.db.Views = cloneViews(newViews)
 	s.rebuildPropMap()
 	affected := s.applyCellDeltasLocked(deltas, true)
 
@@ -1328,11 +1340,13 @@ func (s *Store) UpdateProperty(prop Property) ([]string, error) {
 		label: "update property",
 		undo: func(st *Store) []string {
 			st.db.Properties[idx] = oldPropSnap.Clone()
+			st.db.Views = cloneViews(oldViews)
 			st.rebuildPropMap()
 			return st.applyCellDeltasLocked(deltas, false)
 		},
 		redo: func(st *Store) []string {
 			st.db.Properties[idx] = newPropSnap.Clone()
+			st.db.Views = cloneViews(newViews)
 			st.rebuildPropMap()
 			return st.applyCellDeltasLocked(deltas, true)
 		},
@@ -1366,22 +1380,7 @@ func (s *Store) DeleteProperty(propID string) ([]string, error) {
 	nextDB := s.db.Clone()
 	nextDB.Properties = slices.Delete(nextDB.Properties, idx, idx+1)
 	for vi := range nextDB.Views {
-		v := &nextDB.Views[vi]
-		v.Properties = slices.DeleteFunc(v.Properties, func(vp ViewProperty) bool {
-			return vp.PropertyID == propID
-		})
-		v.Sorts = slices.DeleteFunc(v.Sorts, func(sr SortRule) bool {
-			return sr.PropertyID == propID
-		})
-		if v.Group != nil && v.Group.PropertyID == propID {
-			v.Group = nil
-		}
-		if v.Board != nil && v.Board.SubGroup != nil && v.Board.SubGroup.PropertyID == propID {
-			v.Board.SubGroup = nil
-		}
-		if v.Table != nil && v.Table.Aggregations != nil {
-			delete(v.Table.Aggregations, propID)
-		}
+		pruneDeletedPropertyFromView(&nextDB.Views[vi], propID)
 	}
 
 	var deltas []cellDelta
@@ -1439,6 +1438,9 @@ func (s *Store) AddView(v ViewConfig, activate bool) error {
 	if strings.TrimSpace(v.ID) == "" {
 		v.ID = "view_" + NewID()[:8]
 	}
+	if s.db.PrimaryViewID() != "" {
+		v.Primary = false
+	}
 	nextDB := s.db.Clone()
 	nextDB.Views = append(nextDB.Views, v.Clone())
 	if activate || nextDB.ActiveView == "" {
@@ -1451,7 +1453,7 @@ func (s *Store) AddView(v ViewConfig, activate bool) error {
 	return nil
 }
 
-// UpdateView replaces an existing ViewConfig with v.
+// UpdateView replaces an existing ViewConfig with v without affecting other views.
 func (s *Store) UpdateView(v ViewConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1459,10 +1461,11 @@ func (s *Store) UpdateView(v ViewConfig) error {
 	if s.db == nil {
 		return errors.New("database: nil schema")
 	}
-	_, idx := s.db.ViewByID(v.ID)
+	existing, idx := s.db.ViewByID(v.ID)
 	if idx < 0 {
 		return fmt.Errorf("database: view %q not found", v.ID)
 	}
+	v.Primary = existing.Primary
 	nextDB := s.db.Clone()
 	nextDB.Views[idx] = v.Clone()
 	if err := nextDB.Validate(); err != nil {
@@ -1472,7 +1475,8 @@ func (s *Store) UpdateView(v ViewConfig) error {
 	return nil
 }
 
-// DeleteView removes viewID (preventing deletion of the last remaining view).
+// DeleteView removes viewID (preventing deletion of the protected primary view
+// or the last remaining view).
 func (s *Store) DeleteView(viewID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1483,6 +1487,9 @@ func (s *Store) DeleteView(viewID string) error {
 	if len(s.db.Views) <= 1 {
 		return errors.New("database: cannot delete the last remaining view")
 	}
+	if s.db.IsPrimaryView(viewID) {
+		return errors.New("database: cannot delete primary table view")
+	}
 	_, idx := s.db.ViewByID(viewID)
 	if idx < 0 {
 		return fmt.Errorf("database: view %q not found", viewID)
@@ -1490,7 +1497,11 @@ func (s *Store) DeleteView(viewID string) error {
 	nextDB := s.db.Clone()
 	nextDB.Views = slices.Delete(nextDB.Views, idx, idx+1)
 	if nextDB.ActiveView == viewID {
-		nextDB.ActiveView = nextDB.Views[0].ID
+		if pid := nextDB.PrimaryViewID(); pid != "" {
+			nextDB.ActiveView = pid
+		} else {
+			nextDB.ActiveView = nextDB.Views[0].ID
+		}
 	}
 	s.commitViewsLocked("delete view", nextDB.Views, nextDB.ActiveView)
 	return nil
@@ -1511,6 +1522,7 @@ func (s *Store) DuplicateView(viewID string) (*ViewConfig, error) {
 	dup := orig.Clone()
 	dup.ID = "view_" + NewID()[:8]
 	dup.Name = orig.Name + " 副本"
+	dup.Primary = false
 	nextDB := s.db.Clone()
 	nextDB.Views = slices.Insert(nextDB.Views, idx+1, dup)
 	nextDB.ActiveView = dup.ID
@@ -1646,4 +1658,120 @@ func (s *Store) Redo() ([]string, bool) {
 		s.bumpRevisionLocked()
 	}
 	return paths, ok
+}
+
+func isDateLikePropType(t PropertyType) bool {
+	return t == PropDate || t == PropCreatedTime || t == PropEditedTime
+}
+
+// pruneFilterProperty removes rules referencing propID from fg recursively,
+// returning nil when no rules or non-empty sub-groups remain.
+func pruneFilterProperty(fg *FilterGroup, propID string) *FilterGroup {
+	if fg == nil {
+		return nil
+	}
+	out := &FilterGroup{Conjunction: fg.Conjunction}
+	for _, r := range fg.Rules {
+		if r.PropertyID != propID {
+			out.Rules = append(out.Rules, r.Clone())
+		}
+	}
+	for i := range fg.Groups {
+		if sub := pruneFilterProperty(&fg.Groups[i], propID); sub != nil {
+			out.Groups = append(out.Groups, *sub)
+		}
+	}
+	if len(out.Rules) == 0 && len(out.Groups) == 0 {
+		return nil
+	}
+	return out
+}
+
+// pruneDeletedPropertyFromView strips all references to a deleted property from
+// one ViewConfig so derived views (Gantt, Calendar, Chart, etc.) never retain
+// dangling property bindings.
+func pruneDeletedPropertyFromView(v *ViewConfig, propID string) {
+	v.Properties = slices.DeleteFunc(v.Properties, func(vp ViewProperty) bool {
+		return vp.PropertyID == propID
+	})
+	v.Sorts = slices.DeleteFunc(v.Sorts, func(sr SortRule) bool {
+		return sr.PropertyID == propID
+	})
+	v.Filter = pruneFilterProperty(v.Filter, propID)
+	if len(v.Colors) > 0 {
+		kept := v.Colors[:0]
+		for _, cr := range v.Colors {
+			if pruned := pruneFilterProperty(&cr.Filter, propID); pruned != nil {
+				cr.Filter = *pruned
+				kept = append(kept, cr)
+			}
+		}
+		if len(kept) == 0 {
+			v.Colors = nil
+		} else {
+			v.Colors = kept
+		}
+	}
+	if v.Group != nil && v.Group.PropertyID == propID {
+		v.Group = nil
+	}
+	if v.Board != nil && v.Board.SubGroup != nil && v.Board.SubGroup.PropertyID == propID {
+		v.Board.SubGroup = nil
+	}
+	if v.Table != nil && v.Table.Aggregations != nil {
+		delete(v.Table.Aggregations, propID)
+	}
+	if v.Timeline != nil {
+		if v.Timeline.StartPropID == propID {
+			v.Timeline.StartPropID = ""
+		}
+		if v.Timeline.EndPropID == propID {
+			v.Timeline.EndPropID = ""
+		}
+		v.Timeline.TableProps = slices.DeleteFunc(v.Timeline.TableProps, func(id string) bool {
+			return id == propID
+		})
+	}
+	if v.Calendar != nil && v.Calendar.DatePropID == propID {
+		v.Calendar.DatePropID = ""
+	}
+	if v.Chart != nil {
+		if v.Chart.XPropID == propID {
+			v.Chart.XPropID = ""
+		}
+		if v.Chart.YPropID == propID {
+			v.Chart.YPropID = ""
+		}
+		if v.Chart.StackPropID == propID {
+			v.Chart.StackPropID = ""
+		}
+	}
+	if v.Form != nil {
+		v.Form.Fields = slices.DeleteFunc(v.Form.Fields, func(f FormFieldConfig) bool {
+			return f.PropertyID == propID
+		})
+	}
+}
+
+// sanitizeViewBindingsForPropertyType clears view-specific field bindings that
+// become incompatible when a property's PropertyType changes (for example,
+// converting a Date column into plain text clears Gantt/Calendar date bindings).
+func sanitizeViewBindingsForPropertyType(views []ViewConfig, prop Property) {
+	if isDateLikePropType(prop.Type) {
+		return
+	}
+	for i := range views {
+		v := &views[i]
+		if v.Timeline != nil {
+			if v.Timeline.StartPropID == prop.ID {
+				v.Timeline.StartPropID = ""
+			}
+			if v.Timeline.EndPropID == prop.ID {
+				v.Timeline.EndPropID = ""
+			}
+		}
+		if v.Calendar != nil && v.Calendar.DatePropID == prop.ID {
+			v.Calendar.DatePropID = ""
+		}
+	}
 }

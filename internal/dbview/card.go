@@ -122,14 +122,14 @@ func renderCardPreview(
 
 	if coverSource == "content" {
 		txt := excerptPreviewText(rec)
-		box := ui.Column(c.Key("prev-content:"+rec.ID)).Height(height).Background(pal.HeaderBg).
-			BorderWidth(0, 0, 1, 0).BorderColor(pal.Border).Padding(10, 12).Clip()
+		box := ui.Column(c.Key("prev-content:"+rec.ID)).Height(height).Background(pal.Surface).
+			BorderWidth(0, 0, 1, 0).BorderColor(pal.Border.Alpha(0.75)).Padding(14, 14).Clip()
 		box.Children(func() {
 			if txt != "" {
-				ui.Text(c, txt).FontSize(11.5).LineHeight(1.5).TextColor(pal.TextMuted).Wrap()
+				ui.Text(c, txt).FontSize(12).LineHeight(1.6).TextColor(pal.TextMuted).Wrap()
 			} else {
 				ui.Box(c).Grow(1).Center().Children(func() {
-					ui.Text(c, i18n.T("暂无正文内容")).FontSize(11.5).TextColor(pal.TextMuted.Alpha(0.6))
+					ui.Text(c, i18n.T("暂无正文内容")).FontSize(12).TextColor(pal.TextMuted.Alpha(0.55))
 				})
 			}
 		})
@@ -144,7 +144,7 @@ func renderCardPreview(
 				fit = ui.Contain
 			}
 			ui.Box(c.Key("prev-img:"+rec.ID)).Height(height).Background(pal.Surface).
-				BorderWidth(0, 0, 1, 0).BorderColor(pal.Border).Clip().Children(func() {
+				BorderWidth(0, 0, 1, 0).BorderColor(pal.Border.Alpha(0.75)).Clip().Children(func() {
 				ui.Image(c.Key("img:"+rec.ID), bmp).WidthPercent(100).Height(height).Fit(fit)
 			})
 			return
@@ -156,16 +156,20 @@ func renderCardPreview(
 	}
 
 	if txt := excerptPreviewText(rec); txt != "" {
-		ui.Column(c.Key("prev-excerpt:"+rec.ID)).Height(height).Background(pal.HeaderBg).
-			BorderWidth(0, 0, 1, 0).BorderColor(pal.Border).Padding(10, 12).Clip().Children(func() {
-			ui.Text(c, txt).FontSize(11.5).LineHeight(1.5).TextColor(pal.TextMuted).Wrap()
+		ui.Column(c.Key("prev-excerpt:"+rec.ID)).Height(height).Background(pal.Surface).
+			BorderWidth(0, 0, 1, 0).BorderColor(pal.Border.Alpha(0.75)).Padding(14, 14).Gap(6).Clip().Children(func() {
+			ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconFileDoc).FontSize(11).TextColor(pal.TextMuted.Alpha(0.45))
+				ui.Box(c).Height(1).Grow(1).Background(pal.Border.Alpha(0.5))
+			})
+			ui.Text(c, txt).FontSize(12).LineHeight(1.6).TextColor(pal.TextMuted).Wrap()
 		})
 		return
 	}
 
-	ui.Box(c.Key("prev-empty:"+rec.ID)).Height(height).Background(pal.HeaderBg).
-		BorderWidth(0, 0, 1, 0).BorderColor(pal.Border).Center().Children(func() {
-		ui.Icon(c, iconImage).FontSize(22).TextColor(pal.TextMuted.Alpha(0.35))
+	ui.Box(c.Key("prev-empty:"+rec.ID)).Height(height).Background(pal.Surface).
+		BorderWidth(0, 0, 1, 0).BorderColor(pal.Border.Alpha(0.75)).Center().Children(func() {
+		ui.Icon(c, iconImage).FontSize(22).TextColor(pal.TextMuted.Alpha(0.32))
 	})
 }
 
@@ -309,19 +313,8 @@ func renderCompactCardProp(
 			row.Cursor(ui.CursorPointer)
 		}
 		row.Children(func() {
-			cb := ui.CheckboxBase(c.Key("cchk"), &checked).Size(15, 15).Radius(4).Center().
-				Disabled(readOnly).Label(prop.Name + ": " + rec.Title)
-			if !readOnly {
-				cb.Cursor(ui.CursorPointer)
-			}
-			cb.Draw(func(p *ui.Painter, r ui.Rect) {
-				if checked {
-					p.Fill(r, pal.Accent, 3.5)
-					p.Icon(iconCheck, rectInset(r, 2.5), ui.RGB(255, 255, 255))
-				} else {
-					p.Stroke(rectInset(r, 0.5), pal.BorderStrong, 3.5, 1.2)
-				}
-			})
+			be := beTablePalette(pal)
+			cb := renderBeuiCheckbox(c, "cchk", &checked, false, 15, 4.5, readOnly, prop.Name+": "+rec.Title, be)
 			if !inlineRow {
 				ui.Text(c, prop.Name).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 			}
@@ -396,10 +389,13 @@ func renderCompactCardProp(
 		return consumed
 
 	case database.PropNumber:
-		row := ui.Row(c.Key("cp:" + prop.ID)).Gap(4).AlignItems(ui.Center)
+		row := ui.Row(c.Key("cp:" + prop.ID)).Gap(5).AlignItems(ui.Center)
+		if !inlineRow {
+			row.AlignSelf(ui.Start).Padding(2, 7).Radius(6).Background(pal.Surface)
+		}
 		row.Children(func() {
 			if !inlineRow {
-				ui.Text(c, prop.Name+":").FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
+				ui.Text(c, prop.Name).FontSize(11).TextColor(pal.TextMuted).SingleLine()
 			}
 			renderNumberCell(c, prop, val, true, pal)
 		})

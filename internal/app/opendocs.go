@@ -3,9 +3,11 @@ package app
 import (
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -143,6 +145,9 @@ func (a *App) closeOpen(sp *space.Space, rel string) {
 				a.closePane(i)
 				if len(group.panes) < count {
 					delete(a.openDocs, place{sp.ID, rel})
+					if !a.isOpen(sp, rel) {
+						a.collapseClosedDatabase(sp, rel)
+					}
 					a.bounce = bounce{place{sp.ID, rel}, a.now}
 				}
 				return
@@ -163,6 +168,7 @@ func (a *App) closeOpen(sp *space.Space, rel string) {
 			return
 		}
 		delete(a.openDocs, p)
+		a.collapseClosedDatabase(sp, rel)
 		a.bounce = bounce{p, a.now}
 		a.retireClosedDocuments(closed)
 		return
@@ -172,9 +178,31 @@ func (a *App) closeOpen(sp *space.Space, rel string) {
 	}
 	closed := a.doc
 	delete(a.openDocs, p)
+	a.collapseClosedDatabase(sp, rel)
 	a.bounce = bounce{p, a.now}
 	a.showAfter(sp, rel)
 	a.retireClosedDocuments(closed)
+}
+
+// collapseClosedDatabase folds a closed pinned database's view list and
+// managed backing folder so closing it leaves a single clean pinned row.
+func (a *App) collapseClosedDatabase(sp *space.Space, rel string) {
+	if sp == nil || !vault.IsDatabase(rel) {
+		return
+	}
+	changed := false
+	if sp.IsExpanded(rel) {
+		sp.SetExpanded(rel, false)
+		changed = true
+	}
+	mdir := strings.TrimSuffix(rel, vault.ExtDatabase)
+	if mdir != "" && !sp.IsPinned(mdir) && sp.IsExpanded(mdir) {
+		sp.SetExpanded(mdir, false)
+		changed = true
+	}
+	if changed {
+		a.saveState()
+	}
 }
 
 // showAfter shows, in place of the shown document at rel of the space sp

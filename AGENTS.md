@@ -46,11 +46,13 @@ internal/spacefs/     问答 Agent 读文档的只读视图：每篇文档投影
 internal/agent/       问答 Agent：与服务无关的消息模型、工具调用循环（并行工具、步数与上下文预算、重试、取消）、Chat Completions 流式适配器、服务预设、系统提示与 [路径#L12-L18] 引用解析（不依赖 UI）
 internal/i18n/        界面语言：i18n.T 把中文界面文字查成当前语言（en.go 是英文对照表），Pick 按系统语言选择（不依赖 UI）
 internal/whiteboard/  Excalidraw 风格手绘白板：场景模型、两栖 .excalidraw.svg 编解码、Rough 矢量曲线、几何绑定与撤销栈（不依赖 UI）
+internal/database/    两栖多维数据库内核：.db.md Schema/快照编解码、Frontmatter 双向同步、18 种属性、Formula 2.0、双向 Relation / Rollup、筛选/排序/分组/图表与 CSV / Notion 导入导出（不依赖 UI）
+internal/dbview/      纯 Go 原生数据库 9 视图 UI（表格/看板/日历/甘特/列表/画廊/图表/动态流/表单）与 120 Hz 弹簧微动效/悬浮拖拽引擎（依赖 ui）
 internal/mindmap/     原生文档思维导图排版与交互视图：单/双侧树布局、分支折线、视口裁剪与键盘导航（依赖 ui）
 docs/                 architecture.md（架构）、plugins.md（插件与市场规范）
 ```
 
-**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, merge, trashbin, prefs, pdf, pdfdoc, bookdoc, update, templates, i18n, agent, spacefs, whiteboard}`，`editor → {document, wiki, tex, mermaid, pdf, pdfdoc, bookdoc, i18n, whiteboard, mindmap}`，`mindmap → ui`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`merge → history`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/merge/trashbin/prefs/pdf/pdfdoc/bookdoc/update/templates/i18n/agent/spacefs/whiteboard）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor` 与 `mindmap` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
+**依赖方向**：`cmd → internal/app → {space, vault, plugin, document, editor, fuzzy, search, fsutil, wiki, tex, mermaid, history, merge, trashbin, prefs, pdf, pdfdoc, bookdoc, update, templates, i18n, agent, spacefs, whiteboard, database, dbview}`，`editor → {document, wiki, tex, mermaid, pdf, pdfdoc, bookdoc, i18n, whiteboard, mindmap, database, dbview}`，`dbview → {database, i18n, ui}`，`database → {vault, pinyin, i18n}`，`mindmap → ui`，`whiteboard → wiki`，`fuzzy → pinyin`，`search → wiki`，`merge → history`，`templates → document`，`update → i18n`，`agent → spacefs`，`spacefs → {vault, wiki}`；`cmd/arcmd` 的 `ask` 子命令直接用 `agent` / `spacefs`；`i18n` 不依赖任何项目包，谁都可以用。领域包（document/space/vault/plugin/fuzzy/pinyin/search/fsutil/wiki/tex/mermaid/history/merge/trashbin/prefs/pdf/pdfdoc/bookdoc/update/templates/i18n/agent/spacefs/whiteboard/database）**不得** import `mygo` 或 `mygo/ui`，这样它们可以独立测试，将来也能被 CLI 或插件 Host 复用。`editor`、`dbview` 与 `mindmap` 依赖 `ui` 的绘图与输入原语，可通过 `ui.Tester` 无窗口测试。
 
 ## 常用命令
 

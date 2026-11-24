@@ -21,6 +21,7 @@ const (
 type Options struct {
 	ReadOnly             bool
 	Embedded             bool
+	HideViewTabs         bool
 	Now                  time.Time
 	LoadImage            func(recPath, imgURL string) *ui.Bitmap
 	OnChanged            func(affectedPaths []string)
@@ -89,24 +90,64 @@ type State struct {
 
 	SelectedIDs map[string]bool
 
-	RowScroll     ui.ListState
-	TableScrollX  ui.ScrollState
-	TabScroll     ui.ScrollState
-	BoardScrollX  ui.ScrollState
-	BoardScrollY  ui.ScrollState
-	ListScroll    ui.ListState
-	GalleryScroll ui.ScrollState
+	RowScroll            ui.ListState
+	TableScrollX         ui.ScrollState
+	TableColMenuPropID   string
+	TableColMenuOpen     bool
+	TableRowMenuRecordID string
+	TableRowMenuOpen     bool
+	TabScroll            ui.ScrollState
+	BoardScrollX         ui.ScrollState
+	BoardScrollY         ui.ScrollState
+	ListScroll           ui.ListState
+	GalleryScroll        ui.ScrollState
 
 	AddingGroup          bool
 	NewGroupName         string
 	NewGroupFocusPending bool
 
-	CalendarCursor          time.Time
-	CalendarUnscheduledOpen bool
-	CalendarOverflowDay     string
-	CalendarOverflowOpen    bool
-	CalendarScroll          ui.ScrollState
-	CalendarUnschedScroll   ui.ScrollState
+	BoardAssigneeFilter     string
+	BoardFocusedCardID      string
+	BoardFocusPending       bool
+	BoardRenamingColKey     string
+	BoardRenamingColDraft   string
+	BoardRenamingColPending bool
+
+	CalendarCursor            time.Time
+	CalendarMiniMonth         time.Time
+	CalendarHiddenCats        map[string]bool
+	CalendarAutoUnschedViewID string
+	CalendarUnscheduledOpen   bool
+	CalendarOverflowDay       string
+	CalendarOverflowOpen      bool
+	CalendarScroll            ui.ScrollState
+	CalendarTimeScroll        ui.ScrollState
+	CalendarTimeScrolledKey   string
+	CalendarYearScroll        ui.ScrollState
+	CalendarAgendaScroll      ui.ScrollState
+	CalendarUnschedScroll     ui.ScrollState
+	CalendarDetailOpen        bool
+	CalendarDetailRecordID    string
+	CalendarDetailAnchorKey   string
+	CalendarDetailTitleDraft  string
+	CalendarDetailPickerOpen  bool
+	CalendarDetailEditingEnd  bool
+	CalendarDetailPickerMonth time.Time
+	CalendarDetailHourScroll  ui.ScrollState
+	CalendarDetailMinScroll   ui.ScrollState
+	calDetailMatchedAnchor    bool
+	calDetailFallbackKey      string
+	calDetailFallbackAnchor   ui.Element
+	calDetailFallbackEv       calEvent
+	CalendarDragActive        bool
+	CalendarDragRecordID      string
+	CalendarDragMode          uint8
+	CalendarDragDX            float32
+	CalendarDragDY            float32
+	CalendarDragMoved         bool
+	CalendarDragOrigStart     time.Time
+	CalendarDragOrigEnd       time.Time
+	CalendarDragOrigVal       database.DateValue
 
 	TimelineScrollX         ui.ScrollState
 	TimelineRowScroll       ui.ListState
@@ -164,24 +205,26 @@ type State struct {
 
 	RootHandle   ui.Handle
 	RequestFocus bool
+	Motion       dbMotionState
 }
 
 // NewState initializes UI state backed by store.
 func NewState(store *database.Store) *State {
 	return &State{
-		Store:             store,
-		FocusRow:          -1,
-		FocusCol:          -1,
-		NewPropType:       database.PropText,
-		NewViewType:       database.ViewTable,
-		SelectedIDs:       make(map[string]bool),
-		FilterDrafts:      make(map[string]string),
-		FormDraft:         make(map[string]database.Value),
-		FormTextDrafts:    make(map[string]*string),
-		FormDateEndDrafts: make(map[string]*string),
-		FormErrors:        make(map[string]string),
-		ColorRuleDrafts:   make(map[string]*string),
-		TplPropDrafts:     make(map[string]*string),
+		Store:              store,
+		FocusRow:           -1,
+		FocusCol:           -1,
+		NewPropType:        database.PropText,
+		NewViewType:        database.ViewTable,
+		SelectedIDs:        make(map[string]bool),
+		CalendarHiddenCats: make(map[string]bool),
+		FilterDrafts:       make(map[string]string),
+		FormDraft:          make(map[string]database.Value),
+		FormTextDrafts:     make(map[string]*string),
+		FormDateEndDrafts:  make(map[string]*string),
+		FormErrors:         make(map[string]string),
+		ColorRuleDrafts:    make(map[string]*string),
+		TplPropDrafts:      make(map[string]*string),
 	}
 }
 
@@ -241,6 +284,8 @@ func (s *State) SetActiveView(viewID string) {
 	s.CloseToolbarPopovers()
 	s.FocusRow, s.FocusCol = -1, -1
 	s.FormSubmittedTitle = ""
+	s.Motion.drag = dbDragPreview{}
+	s.Motion.settle = dbDragSettle{}
 	if s.LocalView {
 		s.LocalViewID = viewID
 		return
@@ -261,7 +306,15 @@ func (s *State) CloseToolbarPopovers() {
 	s.TemplatesOpen = false
 	s.EditPropOpen = false
 	s.AddingGroup = false
+	s.BoardRenamingColKey = ""
+	s.TableColMenuOpen = false
+	s.TableColMenuPropID = ""
+	s.TableRowMenuOpen = false
+	s.TableRowMenuRecordID = ""
 	s.CalendarOverflowOpen = false
+	s.CalendarDetailOpen = false
+	s.CalendarDetailPickerOpen = false
+	s.CalendarDragActive = false
 	s.TimelineDragActive = false
 }
 

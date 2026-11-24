@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/database"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -104,9 +105,9 @@ func chartView(
 		renderChartSubToolbar(c, st, &view, db, *cfg, opts, pal)
 		ui.Box(c).Height(1).Background(pal.Border)
 
-		ui.Column(c.Key("chart-wrap")).Grow(1).MinWidth(0).MinHeight(0).Padding(16, 22, 20, 22).Children(func() {
+		ui.Column(c.Key("chart-wrap")).Grow(1).MinWidth(0).MinHeight(0).Padding(14, 22, 20, 22).Children(func() {
 			card := ui.Column(c.Key("chart-card")).Grow(1).MinWidth(0).MinHeight(300).
-				Radius(12).Background(pal.Paper).Border(1, pal.Border).Padding(18, 22).Gap(14).
+				Radius(14).Background(pal.Paper).Border(1, pal.Border).Padding(18, 22).Gap(14).
 				Shadow(0, 1, 4, 0, pal.ShadowEdge)
 
 			card.Children(func() {
@@ -137,7 +138,12 @@ func chartView(
 					return
 				}
 
-				canvas := ui.Box(c.Key("chart-canvas:" + cfg.Kind)).Grow(1).MinWidth(0).MinHeight(220)
+				canvas := ui.Box(c.Key("chart-canvas:" + cfg.Kind)).Grow(1).MinWidth(0).MinHeight(220).
+					Transition(ui.ElementTransition{
+						Duration: 150 * time.Millisecond,
+						Ease:     dbEaseOut,
+						Enter:    &ui.Motion{Y: 5, Opacity: 0.78},
+					})
 				px, py, hasPtr := canvas.PointerPosition()
 				canvas.Draw(func(p *ui.Painter, r ui.Rect) {
 					switch cfg.Kind {
@@ -169,26 +175,36 @@ func renderChartSubToolbar(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Row(c.Key("chart-bar")).Height(42).Padding(4, 18).Gap(8).AlignItems(ui.Center).Children(func() {
-		// 4-kind segmented switcher.
-		ui.Row(c.Key("chart-kinds")).Gap(2).Padding(2).Radius(7).Background(pal.Surface).Children(func() {
+	ui.Row(c.Key("chart-bar")).Height(40).Padding(4, 22).Gap(8).AlignItems(ui.Center).Children(func() {
+		// 4-kind segmented switcher with spring-matched sliding active pill.
+		ui.Row(c.Key("chart-kinds")).Gap(2).Padding(2).Radius(9).Background(pal.Surface).Children(func() {
 			for _, k := range chartKindsList() {
 				cand := k
 				active := cfg.Kind == cand.id
-				btn := ui.ButtonBase(c.Key("ck:"+cand.id)).Height(26).Padding(0, 10).Radius(5).
+				btn := ui.ButtonBase(c.Key("ck:"+cand.id)).Height(25).Padding(0, 10).Radius(7).
 					AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
-					Role(ui.RoleTab).Selected(active).Label(cand.label)
-				if active {
-					btn.Background(pal.Paper).Shadow(0, 1, 2, 0, pal.ShadowEdge)
-				} else if btn.Hovered() {
+					Role(ui.RoleTab).Selected(active).Label(cand.label).
+					Background(ui.Transparent).TextColor(pal.Text).
+					Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
+				if !active && btn.Hovered() {
 					btn.Background(pal.RowHover)
 				}
+				applyPressSpring(btn, false)
 				btn.Children(func() {
+					if active {
+						ui.Box(c.Key("ck-pill")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(7).
+							Background(pal.Paper).Shadow(0, 1, 2, 0, pal.ShadowEdge).
+							IgnoreInput(true).ZIndex(0).
+							Transition(ui.ElementTransition{
+								Animation: &dbSpringSnappy,
+								Match:     chartKindPillMatch{},
+							})
+					}
 					ink := pal.TextMuted
 					if active {
 						ink = pal.Text
 					}
-					ui.Text(c, cand.label).FontSize(12).FontWeight(500).TextColor(ink).SingleLine()
+					ui.Text(c, cand.label).FontSize(12).FontWeight(500).TextColor(ink).SingleLine().ZIndex(1)
 				})
 				if btn.Clicked() && !active {
 					vc := view.Clone()

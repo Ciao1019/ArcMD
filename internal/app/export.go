@@ -148,7 +148,7 @@ func (a *App) exportHTML() {
 		return
 	}
 	d.ed.UnmarkText()
-	doc := d.ed.Committed()
+	doc := a.documentForExport(d)
 	page := htmlPage(docName(d.title()), editor.ExportHTMLPage(doc, editor.HTMLTheme{
 		Light: editor.HTMLStyle{Theme: documentTheme(false), Page: pageStyle(false)},
 		Dark:  editor.HTMLStyle{Theme: documentTheme(true), Page: pageStyle(true)},

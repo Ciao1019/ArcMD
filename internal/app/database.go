@@ -34,7 +34,7 @@ type dbPeekState struct {
 	doc            *document
 	inlineBody     string
 	inlineTargetID string
-	propsCollapsed bool
+	propsExpanded  bool
 	panelWidth     float32
 	lastDocVer     uint64
 	resizing       bool
@@ -44,6 +44,27 @@ type pageDBEntry struct {
 	dbRel string
 	store *database.Store
 	state *dbview.State
+}
+
+type sidebarDBView struct {
+	ID      string
+	Name    string
+	Type    database.ViewType
+	Primary bool
+}
+
+type sidebarDBMeta struct {
+	modTime time.Time
+	size    int64
+	views   []sidebarDBView
+}
+
+type sidebarDBViewRename struct {
+	spaceID string
+	dbRel   string
+	viewID  string
+	draft   string
+	pending bool
 }
 
 func (d *document) isDatabase() bool {
@@ -148,47 +169,7 @@ func (d *document) writeDatabase(force bool) error {
 // newDatabase creates a new amphibious .db.md database in dir of the active
 // space and opens it immediately.
 func (a *App) newDatabase(dir string) {
-	sp := a.state.ActiveSpace()
-	if sp == nil {
-		return
-	}
-	if sp.IsExternal() {
-		a.notify("请在普通空间中新建数据库。")
-		return
-	}
-	if !a.flush() {
-		return
-	}
-	baseTitle := i18n.T(untitledDatabase)
-	db := database.NewDefault(baseTitle, database.SourceConfig{Type: database.SourceFolder})
-	content, err := database.EncodeDatabaseMarkdownRelative(dir, db, nil)
-	if err != nil {
-		a.notify("新建数据库失败。%v", err)
-		return
-	}
-	rel, err := vault.CreateFile(sp.Root, dir, baseTitle, vault.ExtDatabase, content)
-	if err != nil {
-		a.notify("新建数据库失败。%v", err)
-		return
-	}
-	actualTitle := vault.Title(rel)
-	if actualTitle != "" && actualTitle != db.Title {
-		db.Title = actualTitle
-		if updated, encErr := database.EncodeDatabaseMarkdownRelative(dir, db, nil); encErr == nil {
-			_ = writeFile(sp, rel, updated)
-		}
-	}
-	if dir != "" {
-		sp.SetExpanded(dir, true)
-		a.saveState()
-	}
-	a.clearPicks("")
-	a.refreshTree()
-	a.refreshSearch()
-	a.open(rel)
-	if d := a.doc; d != nil && d.rel == rel && d.isDatabase() {
-		d.dbView.RequestFocus = true
-	}
+	a.newDatabaseNamed(dir, "")
 }
 
 func (a *App) liveDocsForSpace(sp *space.Space) []database.LiveDoc {
@@ -807,6 +788,9 @@ func (a *App) openRecordPeek(dbDoc *document, store *database.Store, sp *space.S
 		a.detachPeekDoc()
 	}
 
+	if !a.dbPeek.open || a.dbPeek.recordID != rec.ID {
+		a.dbPeek.propsExpanded = false
+	}
 	a.dbPeek.open = true
 	a.dbPeek.mode = mode
 	a.dbPeek.dbDoc = dbDoc
@@ -872,6 +856,7 @@ func (a *App) closeRecordPeek() {
 	a.dbPeek.recordID = ""
 	a.dbPeek.inlineBody = ""
 	a.dbPeek.inlineTargetID = ""
+	a.dbPeek.propsExpanded = false
 	a.dbPeek.resizing = false
 }
 
@@ -911,13 +896,11 @@ func (a *App) databaseWorkspace(c *ui.Context, d *document, cardWidth float32) {
 		return
 	}
 	opts := a.databaseOptionsFor(c, d)
+	opts.HideViewTabs = true
 	peekOpen := a.dbPeek.open && a.dbPeek.dbDoc == d && a.dbPeek.mode == dbview.OpenSidePeek
-	if !peekOpen {
-		dbview.View(c.Key(d.viewKey()), d.dbView, opts)
-		return
+	if peekOpen {
+		a.syncPeekBodyEdits(c)
 	}
-
-	a.syncPeekBodyEdits(c)
 
 	if a.dbPeek.panelWidth <= 0 {
 		a.dbPeek.panelWidth = min(float32(500), max(float32(340), cardWidth*0.44))
@@ -926,10 +909,17 @@ func (a *App) databaseWorkspace(c *ui.Context, d *document, cardWidth float32) {
 	minSide := min(maxSide, float32(300))
 	sideW := min(maxSide, max(minSide, a.dbPeek.panelWidth))
 
+	peekSpring := ui.Animation{Spring: ui.SpringOptions{Duration: 240 * time.Millisecond, Bounce: 0.03}}
+
 	ui.Row(c.Key(d.viewKey() + ":ws")).Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		ui.Column(c.Key(d.viewKey() + ":main")).Grow(1).MinWidth(0).MinHeight(0).Clip().Children(func() {
 			dbview.View(c.Key(d.viewKey()), d.dbView, opts)
 		})
+
+		if !peekOpen {
+			a.dbPeek.resizing = false
+			return
+		}
 
 		t := c.Theme()
 		div := ui.Box(c.Key("db-peek-divider")).Width(6).HeightPercent(100).Center().Focusable().Role(ui.RoleSplitter).
@@ -951,7 +941,18 @@ func (a *App) databaseWorkspace(c *ui.Context, d *document, cardWidth float32) {
 
 		dt := documentTheme(a.paperDark)
 		drawer := ui.Themed(c.Key("db-side-peek"), dt).Width(sideW).Shrink(0).MinHeight(0).
-			BorderWidth(0, 0, 0, 1).BorderColor(dt.Border).Clip()
+			BorderWidth(0, 0, 0, 1).BorderColor(dt.Border).
+			Shadow(-6, 0, 20, -4, black.Alpha(0.08)).Clip()
+		if !a.reduceMotion {
+			drawer.Transition(ui.ElementTransition{
+				Animation:    &peekSpring,
+				Width:        !a.dbPeek.resizing,
+				ExitDuration: 150 * time.Millisecond,
+				ExitEase:     ui.EaseIn,
+				Enter:        &ui.Motion{X: 24, Opacity: 0.88},
+				Exit:         &ui.Motion{X: 24, Collapse: true, Opacity: 0},
+			})
+		}
 		drawer.Children(func() {
 			a.databasePeekContent(c, d, sideW)
 		})
@@ -971,12 +972,26 @@ func (a *App) databasePeekModal(c *ui.Context) {
 
 	open := true
 	dt := documentTheme(a.paperDark)
+	modalSpring := ui.Animation{Spring: ui.SpringOptions{Duration: 220 * time.Millisecond, Bounce: 0.04}}
 	ui.DialogBase(c.Key("db-center-peek"), &open, func(backdrop, panel ui.Element) {
 		backdrop.Background(black.Alpha(0.38)).Padding(28, 32)
 		panel.Width(760).MaxWidthPercent(90).HeightPercent(86).MinHeight(360).
-			Background(dt.Background).Radius(12).
+			Background(dt.Background).Radius(14).
 			Border(1, dt.Border).
-			Shadow(0, 18, 48, 0, black.Alpha(0.24)).Clip()
+			Shadow(0, 20, 56, -6, black.Alpha(0.28)).Clip()
+		if !a.reduceMotion {
+			backdrop.Transition(ui.ElementTransition{
+				Duration: 150 * time.Millisecond,
+				Enter:    &ui.Motion{Opacity: 0},
+				Exit:     &ui.Motion{Opacity: 0},
+			})
+			panel.Transition(ui.ElementTransition{
+				Animation:    &modalSpring,
+				ExitDuration: 130 * time.Millisecond,
+				Enter:        &ui.Motion{Y: 12, Scale: 0.96, Opacity: 0.85},
+				Exit:         &ui.Motion{Y: 10, Scale: 0.97, Opacity: 0},
+			})
+		}
 		panel.Children(func() {
 			ui.Themed(c.Key("db-center-peek-theme"), dt).Grow(1).MinWidth(0).MinHeight(0).
 				Background(ui.Transparent).Children(func() {
@@ -1036,8 +1051,10 @@ func (a *App) databasePeekContent(c *ui.Context, dbDoc *document, width float32)
 		}
 	})
 
-	// Collapsible property table above document body.
-	dbview.PagePropertiesView(c.Key("peek-props"), store, rec.ID, dbDoc.dbView, &a.dbPeek.propsCollapsed, opts)
+	// Collapsible property table above document body (collapsed by default).
+	peekCollapsed := !a.dbPeek.propsExpanded
+	dbview.PagePropertiesView(c.Key("peek-props"), store, rec.ID, dbDoc.dbView, &peekCollapsed, opts)
+	a.dbPeek.propsExpanded = !peekCollapsed
 
 	// Record body editor or inline note editor.
 	if pd := a.dbPeek.doc; pd != nil {
@@ -1179,16 +1196,16 @@ func (a *App) pagePropertiesHeader(c *ui.Context, d *document) {
 	if store == nil || recID == "" {
 		return
 	}
-	if a.pagePropsCollapsed == nil {
-		a.pagePropsCollapsed = make(map[string]bool)
+	if a.pagePropsExpanded == nil {
+		a.pagePropsExpanded = make(map[string]bool)
 	}
 	key := d.space.ID + "\x00" + d.rel
-	collapsed := a.pagePropsCollapsed[key]
+	collapsed := !a.pagePropsExpanded[key]
 	opts := a.databaseOptionsForStore(c, d.space, store, dbDoc)
 	ui.Themed(c.Key("page-props:"+key), documentTheme(a.paperDark)).Background(ui.Transparent).Children(func() {
 		dbview.PagePropertiesView(c.Key("page-props-view:"+key), store, recID, st, &collapsed, opts)
 	})
-	a.pagePropsCollapsed[key] = collapsed
+	a.pagePropsExpanded[key] = !collapsed
 }
 
 func siblingsInNodes(tree []*vault.Node, dir string) []*vault.Node {
@@ -1218,15 +1235,343 @@ func (a *App) managedFolderFor(sp *space.Space, dbNode *vault.Node) *vault.Node 
 	return nil
 }
 
-// isFoldedDBFolder reports whether folder n is hidden at its own level because
-// its sibling "<name>.db.md" row is visible in the tree and folds it underneath.
-func (a *App) isFoldedDBFolder(sp *space.Space, n *vault.Node) bool {
-	if sp == nil || n == nil || !n.Dir || sp.IsPinned(n.Path) {
+func sidebarViewsFromDatabase(db *database.Database) []sidebarDBView {
+	if db == nil {
+		return nil
+	}
+	primaryID := db.PrimaryViewID()
+	views := make([]sidebarDBView, 0, len(db.Views))
+	for _, v := range db.Views {
+		name := strings.TrimSpace(v.Name)
+		if name == "" {
+			if spec, ok := dbview.ViewSpecFor(v.Type); ok {
+				name = spec.Label()
+			} else {
+				name = string(v.Type)
+			}
+		}
+		views = append(views, sidebarDBView{
+			ID:      v.ID,
+			Name:    name,
+			Type:    v.Type,
+			Primary: v.ID == primaryID,
+		})
+	}
+	return views
+}
+
+// sidebarViewsFor returns the cached view list of dbRel in sp without doing
+// redundant disk I/O per frame. Resident open databases always return live views.
+func (a *App) sidebarViewsFor(sp *space.Space, dbRel string) []sidebarDBView {
+	if sp == nil || !vault.IsDatabase(dbRel) {
+		return nil
+	}
+	if res := a.residentDocument(sp.ID, dbRel); res != nil && res.loadErr == nil && res.isDatabase() {
+		return sidebarViewsFromDatabase(res.dbView.Store.Database())
+	}
+	full, err := resolveFile(sp, dbRel)
+	if err != nil {
+		return nil
+	}
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		return nil
+	}
+	key := sp.ID + "\x00" + dbRel
+	if a.dbViewListCache != nil {
+		if entry, ok := a.dbViewListCache[key]; ok && entry != nil &&
+			entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+			return entry.views
+		}
+	}
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		return nil
+	}
+	db, err := database.DecodeDatabaseMarkdown(string(raw))
+	if err != nil {
+		return nil
+	}
+	views := sidebarViewsFromDatabase(db)
+	if a.dbViewListCache == nil {
+		a.dbViewListCache = make(map[string]*sidebarDBMeta)
+	}
+	a.dbViewListCache[key] = &sidebarDBMeta{
+		modTime: info.ModTime(),
+		size:    info.Size(),
+		views:   views,
+	}
+	return views
+}
+
+func (a *App) openDatabaseView(sp *space.Space, dbRel, viewID string) {
+	if sp == nil || !vault.IsDatabase(dbRel) {
+		return
+	}
+	if a.doc == nil || a.doc.space != sp || a.doc.rel != dbRel {
+		a.openIn(sp, dbRel)
+	}
+	if a.doc != nil && a.doc.space == sp && a.doc.rel == dbRel && a.doc.isDatabase() {
+		if viewID != "" {
+			a.doc.dbView.SetActiveView(viewID)
+			a.doc.dbView.RequestFocus = true
+			a.syncDatabaseEditsToDocs(sp, a.doc, a.doc.dbView.Store, nil)
+		}
+	}
+}
+
+func (a *App) addDatabaseViewInSidebar(sp *space.Space, dbRel string, vt database.ViewType) {
+	if sp == nil || sp.IsExternal() || !vault.IsDatabase(dbRel) {
+		return
+	}
+	a.openIn(sp, dbRel)
+	if a.doc == nil || a.doc.space != sp || a.doc.rel != dbRel || !a.doc.isDatabase() {
+		return
+	}
+	st := a.doc.dbView
+	db := st.Store.Database()
+	vc := dbview.NewViewConfig(vt, "", db)
+	if err := st.Store.AddView(vc, true); err != nil {
+		a.notify("%v", err)
+		return
+	}
+	sp.SetExpanded(dbRel, true)
+	a.saveState()
+	a.syncDatabaseEditsToDocs(sp, a.doc, st.Store, nil)
+	st.RequestFocus = true
+}
+
+func (a *App) duplicateDatabaseViewInSidebar(sp *space.Space, dbRel, viewID string) {
+	if sp == nil || sp.IsExternal() || !vault.IsDatabase(dbRel) {
+		return
+	}
+	a.openIn(sp, dbRel)
+	if a.doc == nil || a.doc.space != sp || a.doc.rel != dbRel || !a.doc.isDatabase() {
+		return
+	}
+	if _, err := a.doc.dbView.Store.DuplicateView(viewID); err != nil {
+		a.notify("%v", err)
+		return
+	}
+	sp.SetExpanded(dbRel, true)
+	a.saveState()
+	a.syncDatabaseEditsToDocs(sp, a.doc, a.doc.dbView.Store, nil)
+}
+
+func (a *App) deleteDatabaseViewInSidebar(sp *space.Space, dbRel, viewID string) {
+	if sp == nil || sp.IsExternal() || !vault.IsDatabase(dbRel) {
+		return
+	}
+	a.openIn(sp, dbRel)
+	if a.doc == nil || a.doc.space != sp || a.doc.rel != dbRel || !a.doc.isDatabase() {
+		return
+	}
+	if err := a.doc.dbView.Store.DeleteView(viewID); err != nil {
+		a.notify("%v", err)
+		return
+	}
+	a.syncDatabaseEditsToDocs(sp, a.doc, a.doc.dbView.Store, nil)
+}
+
+func (a *App) renameDatabaseViewInSidebar(sp *space.Space, dbRel, viewID, newName string) {
+	newName = strings.TrimSpace(newName)
+	if newName == "" || sp == nil || sp.IsExternal() || !vault.IsDatabase(dbRel) {
+		return
+	}
+	a.openIn(sp, dbRel)
+	if a.doc == nil || a.doc.space != sp || a.doc.rel != dbRel || !a.doc.isDatabase() {
+		return
+	}
+	db := a.doc.dbView.Store.Database()
+	for _, v := range db.Views {
+		if v.ID == viewID {
+			if v.Name == newName {
+				return
+			}
+			updated := v.Clone()
+			updated.Name = newName
+			if err := a.doc.dbView.Store.UpdateView(updated); err != nil {
+				a.notify("%v", err)
+				return
+			}
+			a.syncDatabaseEditsToDocs(sp, a.doc, a.doc.dbView.Store, nil)
+			return
+		}
+	}
+}
+
+// databaseNodeMenu appends database-specific view creation and folder toggle
+// entries to a database node's sidebar context menu.
+func (a *App) databaseNodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
+	if sp == nil || n == nil || n.Dir || !vault.IsDatabase(n.Path) {
+		return
+	}
+	if !sp.IsExternal() {
+		m.Submenu(i18n.T("新建视图"), func(sub *ui.Menu) {
+			for _, spec := range dbview.EnabledViewSpecs() {
+				vt := spec.Type
+				if sub.Item(spec.Label()).Chosen() {
+					a.addDatabaseViewInSidebar(sp, n.Path, vt)
+				}
+			}
+		})
+	}
+	viewLabel := i18n.T("展开视图")
+	if sp.IsExpanded(n.Path) {
+		viewLabel = i18n.T("收起视图")
+	}
+	if m.Item(viewLabel).Chosen() {
+		sp.SetExpanded(n.Path, !sp.IsExpanded(n.Path))
+		a.saveState()
+	}
+	if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+		label := i18n.T("展开数据文件")
+		if sp.IsExpanded(mdir.Path) {
+			label = i18n.T("收起数据文件")
+		}
+		if m.Item(label).Chosen() {
+			sp.SetExpanded(mdir.Path, !sp.IsExpanded(mdir.Path))
+			a.saveState()
+		}
+	}
+	m.Separator()
+}
+
+// databaseViewTree renders a Feishu/WPS-style collapsible child tree of views
+// directly beneath a database node in the sidebar.
+func (a *App) databaseViewTree(c *ui.Context, sp *space.Space, n *vault.Node, depth int, live bool) {
+	if sp == nil || n == nil || n.Dir || !vault.IsDatabase(n.Path) || !sp.IsExpanded(n.Path) {
+		return
+	}
+	views := a.sidebarViewsFor(sp, n.Path)
+	if len(views) == 0 {
+		return
+	}
+	t := c.Theme()
+	indent := float32(depth * 16)
+	isDocActive := a.doc != nil && a.doc.space == sp && a.doc.rel == n.Path && a.doc.isDatabase()
+	activeViewID := ""
+	if isDocActive {
+		activeViewID = a.doc.dbView.ActiveViewID()
+	}
+
+	ui.Column(c.Key("db-views:" + sp.ID + "/" + n.Path)).Gap(1).Children(func() {
+		for _, v := range views {
+			vw := v
+			chosen := isDocActive && activeViewID == vw.ID
+			renaming := live && a.dbViewRename.spaceID == sp.ID && a.dbViewRename.dbRel == n.Path && a.dbViewRename.viewID == vw.ID
+			if renaming {
+				ui.Row(c.Key("dbv-ren:"+sp.ID+"/"+n.Path+"/"+vw.ID)).Height(32).
+					Margin(0, 0, 0, indent).Padding(0, 8, 0, 10).Radius(8).Gap(7).
+					Background(glass(t)).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, dbview.ViewIcon(vw.Type)).FontSize(13).TextColor(t.Accent)
+					in := ui.TextInput(c.Key("dbv-in:"+vw.ID), &a.dbViewRename.draft).
+						Grow(1).MinWidth(0).Height(24).Padding(0, 6).Radius(5).
+						Background(t.Background).Border(1, t.Accent).FontSize(13).TextColor(t.Text).
+						AutoFocus().Label(i18n.T("视图名称"))
+					if a.dbViewRename.pending {
+						in.Focus()
+						a.dbViewRename.pending = false
+					}
+					if in.Shortcut(0, ui.KeyEscape) {
+						a.dbViewRename = sidebarDBViewRename{}
+					} else if in.Submitted() || (!in.Focused() && !a.dbViewRename.pending) {
+						next := a.dbViewRename.draft
+						a.dbViewRename = sidebarDBViewRename{}
+						a.renameDatabaseViewInSidebar(sp, n.Path, vw.ID, next)
+					}
+				})
+				continue
+			}
+
+			row := ui.Row(c.Key("dbv:"+sp.ID+"/"+n.Path+"/"+vw.ID)).Height(32).
+				Margin(0, 0, 0, indent).Padding(0, 8, 0, 10).Radius(8).Gap(7).
+				AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
+				Role(ui.RoleTreeItem).Selected(chosen).Label(vw.Name)
+			switch {
+			case chosen:
+				row.Background(glass(t))
+			case live && row.Hovered():
+				row.Background(hoverFill(t))
+			}
+			row.Children(func() {
+				iconCol := t.TextMuted
+				textCol := t.Text
+				if chosen {
+					iconCol = t.Accent
+				}
+				ui.Icon(c, dbview.ViewIcon(vw.Type)).FontSize(13).TextColor(iconCol)
+				lbl := ui.Text(c, vw.Name).FontSize(13).TextColor(textCol).SingleLine().Grow(1).MinWidth(0)
+				if chosen {
+					lbl.FontWeight(500)
+				}
+				if vw.Primary {
+					ui.Box(c).Padding(1, 5).Radius(4).Background(t.Text.Alpha(0.06)).Shrink(0).Children(func() {
+						ui.Text(c, i18n.T("主视图")).FontSize(10).TextColor(t.TextMuted).NoWrap()
+					})
+				}
+			})
+			if live && row.Clicked() {
+				a.openDatabaseView(sp, n.Path, vw.ID)
+			}
+			if live && !sp.IsExternal() {
+				row.ContextMenu(func(m *ui.Menu) {
+					if m.Item(i18n.T("重命名视图…")).Chosen() {
+						a.dbViewRename = sidebarDBViewRename{
+							spaceID: sp.ID,
+							dbRel:   n.Path,
+							viewID:  vw.ID,
+							draft:   vw.Name,
+							pending: true,
+						}
+					}
+					if m.Item(i18n.T("复制视图")).Chosen() {
+						a.duplicateDatabaseViewInSidebar(sp, n.Path, vw.ID)
+					}
+					if !vw.Primary && len(views) > 1 {
+						m.Separator()
+						if m.Item(i18n.T("删除视图")).Chosen() {
+							a.deleteDatabaseViewInSidebar(sp, n.Path, vw.ID)
+						}
+					}
+				})
+			}
+		}
+
+		if live && !sp.IsExternal() {
+			addRow := ui.Row(c.Key("dbv-add:"+sp.ID+"/"+n.Path)).Height(28).
+				Margin(0, 0, 0, indent).Padding(0, 8, 0, 10).Radius(8).Gap(6).
+				AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
+				Role(ui.RoleButton).Label(i18n.T("新建视图"))
+			if addRow.Hovered() {
+				addRow.Background(hoverFill(t))
+			}
+			addRow.Children(func() {
+				ui.Icon(c, iconPlus).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, i18n.T("新建视图")).FontSize(12).TextColor(t.TextMuted).SingleLine()
+			})
+			addRow.PopoverMenuButton(func(m *ui.Menu) {
+				for _, spec := range dbview.EnabledViewSpecs() {
+					vt := spec.Type
+					if m.Item(spec.Label()).Chosen() {
+						a.addDatabaseViewInSidebar(sp, n.Path, vt)
+					}
+				}
+			})
+		}
+	})
+}
+
+// isFoldedDBDir reports whether folder path dir is hidden at its own level
+// because its sibling "<dir>.db.md" row is visible in the tree and folds it
+// underneath.
+func (a *App) isFoldedDBDir(sp *space.Space, dir string) bool {
+	if sp == nil || dir == "" || dir == "." || sp.IsPinned(dir) {
 		return false
 	}
 	tree, _ := a.treeOf(sp)
-	sibs := siblingsInNodes(tree, parentDir(n.Path))
-	dbPath := n.Path + vault.ExtDatabase
+	sibs := siblingsInNodes(tree, parentDir(dir))
+	dbPath := dir + vault.ExtDatabase
 	for _, s := range sibs {
 		if !s.Dir && s.Path == dbPath {
 			if a.state.IsFavorite(sp.ID, dbPath) || a.grouped(sp, dbPath) {
@@ -1236,6 +1581,15 @@ func (a *App) isFoldedDBFolder(sp *space.Space, n *vault.Node) bool {
 		}
 	}
 	return false
+}
+
+// isFoldedDBFolder reports whether folder n is hidden at its own level because
+// its sibling "<name>.db.md" row is visible in the tree and folds it underneath.
+func (a *App) isFoldedDBFolder(sp *space.Space, n *vault.Node) bool {
+	if n == nil || !n.Dir {
+		return false
+	}
+	return a.isFoldedDBDir(sp, n.Path)
 }
 
 type embedDBEntry struct {
@@ -1382,6 +1736,9 @@ func (a *App) databaseSnapshotFor(d *document, target, viewID string) string {
 	if err != nil || store == nil || store.Database() == nil {
 		return ""
 	}
+	if d != nil && d.space != nil {
+		_, _ = store.Refresh(a.liveDocsForSpace(d.space))
+	}
 	docDir := ""
 	if d != nil {
 		docDir = path.Dir(filepath.ToSlash(d.rel))
@@ -1392,6 +1749,63 @@ func (a *App) databaseSnapshotFor(d *document, target, viewID string) string {
 	db := store.Database()
 	res := store.Query(viewID, database.QueryOptions{Now: time.Now()})
 	return database.RenderGFMSnapshot(docDir, db, res)
+}
+
+// documentForExport returns d's committed document with any embedded database
+// Linked View snapshots refreshed from their live databases. The live editor
+// buffer and undo history are not modified.
+func (a *App) documentForExport(d *document) *model.Document {
+	if d == nil || d.ed == nil {
+		return nil
+	}
+	doc := d.ed.Committed()
+	if doc == nil {
+		return nil
+	}
+	var hasEmbed func(blocks []*model.Block) bool
+	hasEmbed = func(blocks []*model.Block) bool {
+		for _, b := range blocks {
+			if b == nil {
+				continue
+			}
+			if b.Kind == "raw" {
+				if spec, _, ok := editor.ParseDatabaseEmbed(b.Text()); ok && spec.Target != "" {
+					return true
+				}
+			}
+			if len(b.Children) > 0 && hasEmbed(b.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasEmbed(doc.Blocks) {
+		return doc
+	}
+	cloned := doc.Clone()
+	var refreshBlocks func(blocks []*model.Block)
+	refreshBlocks = func(blocks []*model.Block) {
+		for _, b := range blocks {
+			if b == nil {
+				continue
+			}
+			if b.Kind == "raw" {
+				if spec, _, ok := editor.ParseDatabaseEmbed(b.Text()); ok && spec.Target != "" {
+					if snap := strings.TrimSpace(a.databaseSnapshotFor(d, spec.Target, spec.ViewID)); snap != "" {
+						formatted := editor.FormatDatabaseEmbed(spec, snap)
+						if formatted != b.Text() {
+							b.Runs = []model.Run{{Text: formatted}}
+						}
+					}
+				}
+			}
+			if len(b.Children) > 0 {
+				refreshBlocks(b.Children)
+			}
+		}
+	}
+	refreshBlocks(cloned.Blocks)
+	return cloned
 }
 
 func (a *App) exportDatabaseCSV(d *document) (string, error) {

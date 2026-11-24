@@ -161,8 +161,8 @@ func TestListDropNoop(t *testing.T) {
 	}
 }
 
-// Clicking "+ 新建文档" creates a document above the button while the dashed
-// button stays lit and glides down smoothly over several frames.
+// Clicking "+ 新建" and choosing "新建文档" creates a document above the button
+// while the dashed button stays lit and glides down smoothly over several frames.
 func TestNewDocSlidesButton(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.state.Favorites = nil
@@ -171,18 +171,25 @@ func TestNewDocSlidesButton(t *testing.T) {
 	tt.Frame()
 
 	btnY := func() float32 {
-		r, ok := tt.Find("新建文档")
+		r, ok := tt.Find("新建")
 		if !ok {
-			t.Fatal("missing 新建文档 row")
+			t.Fatal("missing 新建 row")
 		}
 		return r.Y
 	}
 	before := btnY()
+	if err := tt.Click("新建"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.newModal.open {
+		t.Fatal("expected newModal open after clicking 新建")
+	}
 	if err := tt.Click("新建文档"); err != nil {
 		t.Fatal(err)
 	}
 	if a.newDocPulse.IsZero() {
-		t.Fatal("newDocPulse was not armed on click")
+		t.Fatal("newDocPulse was not armed on creation")
 	}
 	ys := []float32{btnY()}
 	for range 16 {
@@ -195,15 +202,15 @@ func TestNewDocSlidesButton(t *testing.T) {
 		maxStep = max(maxStep, ys[i]-ys[i-1])
 	}
 	if maxStep > 28 {
-		t.Fatalf("新建文档 jumped %v DIPs in one frame: %v", maxStep, ys)
+		t.Fatalf("新建 jumped %v DIPs in one frame: %v", maxStep, ys)
 	}
 	if total := ys[len(ys)-1] - before; total < 38 || total > 44 {
-		t.Fatalf("新建文档 moved %v DIPs, want ~41: %v", total, ys)
+		t.Fatalf("新建 moved %v DIPs, want ~41: %v", total, ys)
 	}
 }
 
 // Resting the pointer between sidebar root items must NOT pop open an inline
-// "+ 新建文档" slot, while the bottom "+ 新建文档" button remains available.
+// "+ 新建文档" slot, while the bottom "+ 新建" button remains available.
 func TestSidebarSeamHoverDoesNotOpenInlineNewDoc(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.state.Favorites = nil
@@ -228,8 +235,8 @@ func TestSidebarSeamHoverDoesNotOpenInlineNewDoc(t *testing.T) {
 	if _, ok := tt.Find("在此处新建文档"); ok {
 		t.Fatal("unexpected inline new-doc slot opened on seam hover")
 	}
-	if _, ok := tt.Find("新建文档"); !ok {
-		t.Fatal("bottom new-doc button missing")
+	if _, ok := tt.Find("新建"); !ok {
+		t.Fatal("bottom new button missing")
 	}
 }
 

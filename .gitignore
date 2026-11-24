@@ -11,6 +11,7 @@
 # Editors and OS
 .DS_Store
 .idea/
+.openidea/
 .vscode/
 *.swp
 

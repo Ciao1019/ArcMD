@@ -83,22 +83,10 @@ func timelineView(
 			tcfg.Zoom = "month"
 		}
 	}
-	var startProp *database.Property
-	if tcfg.StartPropID != "" {
-		if p, idx := db.PropertyByID(tcfg.StartPropID); idx >= 0 {
-			startProp = p
-		}
-	}
-	if startProp == nil {
-		startProp = defaultDateProp(db)
-	}
-	if startProp == nil {
-		renderMissingDatePrompt(c, st, view, db, opts, pal, false)
-		return
-	}
+	startProp, isBuiltinDate, _ := resolveDateBinding(db, tcfg.StartPropID)
 
 	var endProp *database.Property
-	if tcfg.EndPropID != "" && tcfg.EndPropID != startProp.ID {
+	if !isBuiltinDate && tcfg.EndPropID != "" && tcfg.EndPropID != startProp.ID {
 		if p, idx := db.PropertyByID(tcfg.EndPropID); idx >= 0 {
 			endProp = p
 		}
@@ -118,7 +106,7 @@ func timelineView(
 	maxDay := today.AddDate(0, 0, spec.spanAfter)
 	if res != nil {
 		for _, r := range res.Rows {
-			sDay, eDay, _, _, ok := parseRecordDateRange(r, *startProp, endProp, loc)
+			sDay, eDay, _, _, ok := parseRecordDateRange(r, startProp, endProp, loc)
 			if !ok {
 				continue
 			}
@@ -136,14 +124,7 @@ func timelineView(
 	canvasW := float32(totalDays) * spec.dayW
 	todayX := float32(daysBetween(originDay, today)) * spec.dayW
 
-	// Status property for compact indicator in frozen left table.
-	var statusProp *database.Property
-	for i := range db.Properties {
-		if db.Properties[i].Type == database.PropStatus {
-			statusProp = &db.Properties[i]
-			break
-		}
-	}
+	colorProp := resolveColorProp(db, tcfg.ColorPropID)
 
 	items := buildTableItems(view, res)
 	readOnlyDate := opts.ReadOnly || startProp.Type != database.PropDate
@@ -156,8 +137,17 @@ func timelineView(
 			viewportW = 900
 		}
 
-		// 1. Sub-toolbar at the top (Show Table toggle, Today jump, Left/Right scroll, Zoom selector).
-		renderTimelineSubToolbar(c, st, &view, db, tcfg, spec, today, originDay, todayX, leftW, canvasW, viewportW, opts, pal)
+		// 1. Sub-toolbar at the top (Show Table toggle, explicit bindings, Today jump, Left/Right scroll, Zoom selector).
+		renderTimelineSubToolbar(c, st, &view, db, tcfg, startProp, colorProp, spec, today, originDay, todayX, leftW, canvasW, viewportW, opts, pal)
+		if isBuiltinDate && len(datePropertiesOf(db)) == 0 {
+			action := ""
+			if !opts.ReadOnly {
+				action = "+ " + i18n.T("添加「排期」字段")
+			}
+			renderFallbackBindingBanner(c, "tl-fallback", i18n.T("当前按「修改时间」展示"), action, pal, func() {
+				addDefaultDateProperty(st, db, view, opts)
+			})
+		}
 		ui.Box(c).Height(1).Background(pal.Border)
 
 		// 2. Horizontally scrollable Timeline ruler + virtualized rows.
@@ -186,6 +176,8 @@ func timelineView(
 				renderTimelineHeaderRow(c, st, leftW, canvasW, contentW, scrollX, viewportW, originDay, totalDays, today, todayX, spec, tcfg.ShowTable, pal)
 
 				// Synchronized rows list.
+				st.TimelineRowScroll.KeepOffset = true
+				st.TimelineRowScroll.MoveAnimation = &dbSpringList
 				list := ui.List(c.Key("tl-rows"), &st.TimelineRowScroll, len(items)).
 					Grow(1).MinHeight(0).ItemKey(func(i int) any { return items[i].key })
 				list.Rows(func(row ui.ListRow) {
@@ -195,9 +187,9 @@ func timelineView(
 					case itemGroupHeader:
 						renderGroupHeaderRow(rc, st, &view, it.group, contentW, scrollX, opts, pal)
 					case itemAddRow:
-						renderTimelineAddRow(rc, st, db, *startProp, it.groupProp, it.groupValue, today, contentW, scrollX, opts, pal)
+						renderTimelineAddRow(rc, st, db, startProp, it.groupProp, it.groupValue, today, contentW, scrollX, opts, pal)
 					case itemRecord:
-						renderTimelineRecordRow(rc, st, &view, db, res, it.record, *startProp, endProp, statusProp,
+						renderTimelineRecordRow(rc, st, &view, db, res, it.record, startProp, endProp, colorProp,
 							originDay, totalDays, today, todayX, spec, leftW, canvasW, contentW, scrollX, viewportW,
 							tcfg.ShowTable, readOnlyDate, openMode, opts, pal, loc)
 					}
@@ -213,6 +205,8 @@ func renderTimelineSubToolbar(
 	view *database.ViewConfig,
 	db *database.Database,
 	tcfg database.TimelineViewConfig,
+	startProp database.Property,
+	colorProp *database.Property,
 	spec timelineScaleSpec,
 	today, originDay time.Time,
 	todayX, leftW, canvasW, viewportW float32,
@@ -233,6 +227,33 @@ func renderTimelineSubToolbar(
 		}
 
 		ui.Text(c, anchorLabel).FontSize(13.5).FontWeight(600).TextColor(pal.Text).SingleLine()
+
+		dateBtn := renderFieldBindingPill(c, "tl-bind-date", i18n.T("时间"), startProp.Name, startProp.Type != database.PropDate, pal)
+		dateBtn.PopoverMenuButton(func(m *ui.Menu) {
+			appendDatePropMenuItems(m, db, startProp.ID, false, opts.ReadOnly, func(propID string) {
+				vc := view.Clone()
+				ensureTimelineConfig(&vc, db).StartPropID = propID
+				saveViewAndNotify(st, vc, opts)
+			}, func() {
+				addDefaultDateProperty(st, db, *view, opts)
+			})
+		})
+
+		colorLabel := i18n.T("无")
+		if colorProp != nil {
+			colorLabel = colorProp.Name
+		}
+		colorBtn := renderFieldBindingPill(c, "tl-bind-color", i18n.T("配色"), colorLabel, colorProp == nil, pal)
+		colorBtn.PopoverMenuButton(func(m *ui.Menu) {
+			appendColorPropMenuItems(m, db, colorProp, tcfg.ColorPropID, i18n.T("不按属性着色"), opts.ReadOnly, func(propID string) {
+				vc := view.Clone()
+				ensureTimelineConfig(&vc, db).ColorPropID = propID
+				saveViewAndNotify(st, vc, opts)
+			}, func() {
+				addDefaultStatusProperty(st, db, *view, opts)
+			})
+		})
+
 		ui.Spacer(c)
 
 		maxScroll := max(float32(0), leftW+canvasW-viewportW)
@@ -564,7 +585,7 @@ func renderTimelineRecordRow(
 					colName = res.RowColors[rec.ID]
 				}
 				if colName == "" {
-					colName = recordAccentColor(db, rec)
+					colName = recordAccentColorForProp(statusProp, rec)
 				}
 				if colName != "" {
 					accent = StatusDotColor(pal.Dark, colName)
@@ -573,12 +594,28 @@ func renderTimelineRecordRow(
 				}
 
 				bar := ui.Row(c.Key("tlbar:"+rec.ID)).Absolute().Left(leftW+barX).Top(5).Width(barW).Height(30).
-					Radius(6).Background(barBg).Border(1, accent.Alpha(0.45)).
+					Radius(7).Background(barBg).Border(1, accent.Alpha(0.45)).
 					BorderWidth(1, 1, 1, 3).AlignItems(ui.Center).Clip().
 					Role(ui.RoleListItem).Label(rec.Title)
-				if bar.Hovered() || draggingThis {
-					bar.Shadow(0, 2, 8, 0, pal.ShadowEdge).Border(1, accent)
+				if !draggingThis {
+					bar.Transition(ui.ElementTransition{
+						Animation: &dbSpringList,
+						Position:  true,
+						Width:     true,
+						Colors:    true,
+						Shadows:   true,
+					})
 				}
+				barHovered := bar.Hovered()
+				if barHovered || draggingThis {
+					bar.Shadow(0, 4, 12, -2, pal.ShadowEdge).Border(1, accent)
+				}
+				if pulse := st.Motion.pulseAlpha(c, rec.ID); pulse > 0.01 {
+					bar.DrawOver(func(p *ui.Painter, r ui.Rect) {
+						paintCreationPulse(p, r, 7, pulse, accent)
+					})
+				}
+				applyCardHoverLift(bar, barHovered && !draggingThis, false)
 				attachRecordContextMenu(bar, st, rec, opts)
 
 				bar.Children(func() {
@@ -625,19 +662,23 @@ func renderTimelineRecordRow(
 					}
 				})
 			} else if !readOnlyDate {
-				// Undated record: quiet hover pill near Today line to schedule in one click.
-				slotX := min(max(todayX, 6), max(6, canvasW-110))
+				// Undated record: always-discoverable quick schedule pill right after Today line.
+				slotX := min(max(todayX+spec.dayW*0.5+8, 6), max(6, canvasW-116))
 				schedBtn := ui.ButtonBase(c.Key("tl-sched:"+rec.ID)).Absolute().Left(leftW+slotX).Top(7).Height(26).Padding(0, 10).
-					Radius(5).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-					Role(ui.RoleButton).Label(i18n.T("排至今天") + ": " + rec.Title)
+					Radius(5).Background(pal.Paper).Border(1, pal.Border).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+					Role(ui.RoleButton).Label(i18n.T("安排排期") + ": " + rec.Title)
+				txtCol := pal.TextMuted
 				if hovered || schedBtn.Hovered() {
-					schedBtn.Background(pal.Surface).Border(1, pal.BorderStrong)
-					schedBtn.Children(func() {
-						ui.Text(c, "+ "+i18n.T("排至今天")).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
-					})
+					schedBtn.Background(pal.AccentSoft).Border(1, pal.Accent.Alpha(0.45))
+					txtCol = pal.Accent
 				}
+				schedBtn.Children(func() {
+					ui.Text(c, "+ "+i18n.T("安排排期")).FontSize(11.5).FontWeight(500).TextColor(txtCol).SingleLine()
+				})
 				if schedBtn.Clicked() {
-					st.setCellAndNotify(rec.ID, startProp.ID, database.DateRangeValue(today.Format("2006-01-02"), "", false), opts)
+					sKey := today.Format("2006-01-02")
+					eKey := today.AddDate(0, 0, 2).Format("2006-01-02")
+					st.setCellAndNotify(rec.ID, startProp.ID, database.DateRangeValue(sKey, eKey, false), opts)
 				}
 			}
 		})

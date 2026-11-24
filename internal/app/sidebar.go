@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -189,8 +190,11 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 						a.nodeRow(c, sp, n, 0, pinRoot, i, live, prev)
 						if n.Dir {
 							a.folderContent(c, sp, n, 1, live, prev)
-						} else if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
-							a.folderContent(c, sp, mdir, 1, live, prev)
+						} else if vault.IsDatabase(n.Path) {
+							a.databaseViewTree(c, sp, n, 1, live)
+							if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+								a.databaseManagedFolderContent(c, sp, mdir, 1, live, prev)
+							}
 						}
 					}
 					if slotHere && !a.slot.emitted {
@@ -454,8 +458,11 @@ func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth i
 		a.nodeRow(c, sp, n, depth, parent, i, live, prev)
 		if n.Dir {
 			a.folderContent(c, sp, n, depth+1, live, prev)
-		} else if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
-			a.folderContent(c, sp, mdir, depth+1, live, prev)
+		} else if vault.IsDatabase(n.Path) {
+			a.databaseViewTree(c, sp, n, depth+1, live)
+			if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
+				a.databaseManagedFolderContent(c, sp, mdir, depth+1, live, prev)
+			}
 		}
 	}
 	if slotHere && !a.slot.emitted {
@@ -465,9 +472,56 @@ func (a *App) nodes(c *ui.Context, sp *space.Space, nodes []*vault.Node, depth i
 }
 
 // holdsOpen reports whether the open document is rel of the space sp or
-// inside it.
+// inside it (including a database's folded managed folder).
 func (a *App) holdsOpen(sp *space.Space, rel string) bool {
-	return a.doc != nil && a.doc.space == sp && under(a.doc.rel, rel)
+	if a.doc == nil || a.doc.space != sp {
+		return false
+	}
+	if under(a.doc.rel, rel) {
+		return true
+	}
+	if vault.IsDatabase(rel) {
+		mdir := strings.TrimSuffix(rel, vault.ExtDatabase)
+		return mdir != "" && !sp.IsPinned(mdir) && under(a.doc.rel, mdir)
+	}
+	return false
+}
+
+// databaseManagedFolderContent renders a database's folded backing folder:
+// when collapsed it peeks only the active open record (Arc FolderPeek); when
+// expanded it shows a collapsible header row so the user can fold the raw data
+// files away in one click without collapsing the database's views.
+func (a *App) databaseManagedFolderContent(c *ui.Context, sp *space.Space, mdir *vault.Node, depth int, live bool, prev []rowFrame) {
+	if mdir == nil || sp.IsPinned(mdir.Path) {
+		return
+	}
+	if !sp.IsExpanded(mdir.Path) {
+		a.folderContent(c, sp, mdir, depth, live, prev)
+		return
+	}
+	t := c.Theme()
+	indent := float32(depth * rowIndent)
+	count := docCount(mdir)
+	hdr := ui.Row(c.Key("db-files-hdr:"+sp.ID+"/"+mdir.Path)).Height(28).
+		Margin(2, 0, 0, indent).Padding(0, 8, 0, 10).Radius(8).Gap(6).
+		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
+		Role(ui.RoleButton).Label(i18n.T("收起数据文件")).Tooltip(i18n.T("收起数据文件")).
+		Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: &ui.Motion{Y: -6}, Exit: &ui.Motion{}})
+	if live && hdr.Hovered() {
+		hdr.Background(hoverFill(t))
+	}
+	hdr.Children(func() {
+		ui.Icon(c, iconChevronDown).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, i18n.T("数据文件")).FontSize(12).FontWeight(500).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+		if count > 0 {
+			ui.Text(c, fmt.Sprint(count)).FontSize(11).FontWeight(500).TextColor(t.TextMuted).NoWrap()
+		}
+	})
+	if live && hdr.Clicked() {
+		sp.SetExpanded(mdir.Path, false)
+		a.saveState()
+	}
+	a.folderBody(c, sp, mdir, depth+1, live, prev)
 }
 
 // folderContent is what a folder shows under its row: open, its rows; closed,
@@ -821,23 +875,40 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				// A closed folder tells how many documents it holds.
 				ui.Text(c, fmt.Sprint(docCount(n))).FontSize(11).FontWeight(500).TextColor(t.TextMuted)
 			}
-			if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
-				mdirOpen := sp.IsExpanded(mdir.Path)
-				if hovered || mdirOpen || a.holdsOpen(sp, mdir.Path) {
+			if !n.Dir && vault.IsDatabase(n.Path) {
+				viewsOpen := sp.IsExpanded(n.Path)
+				mdir := a.managedFolderFor(sp, n)
+				if mdir != nil && sp.IsPinned(mdir.Path) {
+					mdir = nil
+				}
+				mdirOpen := mdir != nil && sp.IsExpanded(mdir.Path)
+				dbOpen := viewsOpen || mdirOpen
+				if hovered || dbOpen || chosen || a.holdsOpen(sp, n.Path) {
 					glyph := iconChevronRight
-					tip := i18n.T("展开数据文件")
-					if mdirOpen {
+					tip := i18n.T("展开视图")
+					if dbOpen {
 						glyph = iconChevronDown
-						tip = i18n.T("收起数据文件")
+						if viewsOpen {
+							tip = i18n.T("收起视图")
+						} else {
+							tip = i18n.T("收起数据文件")
+						}
 					}
-					fb := ui.Box(c.Key("db-fold")).Size(20, 20).Radius(5).Shrink(0).Center().Cursor(ui.CursorPointer).
+					fb := ui.Box(c.Key("db-views-fold")).Size(20, 20).Radius(5).Shrink(0).Center().Cursor(ui.CursorPointer).
 						Focusable().Role(ui.RoleButton).Label(tip).Tooltip(tip)
 					if fb.Hovered() {
 						fb.Background(hoverFill(t))
 					}
 					fb.Children(func() { ui.Icon(c, glyph).FontSize(12).TextColor(t.TextMuted) })
 					if fb.Clicked() {
-						sp.SetExpanded(mdir.Path, !mdirOpen)
+						if dbOpen {
+							sp.SetExpanded(n.Path, false)
+							if mdir != nil {
+								sp.SetExpanded(mdir.Path, false)
+							}
+						} else {
+							sp.SetExpanded(n.Path, true)
+						}
 						a.saveState()
 						closed = true
 					}
@@ -1009,15 +1080,8 @@ func (a *App) nodeMenu(m *ui.Menu, sp *space.Space, n *vault.Node) {
 		if m.Item(i18n.T("在新窗口中打开")).Chosen() {
 			a.openInWindow(sp, n.Path)
 		}
-		if mdir := a.managedFolderFor(sp, n); mdir != nil && !sp.IsPinned(mdir.Path) {
-			label := i18n.T("展开数据文件")
-			if sp.IsExpanded(mdir.Path) {
-				label = i18n.T("收起数据文件")
-			}
-			if m.Item(label).Chosen() {
-				sp.SetExpanded(mdir.Path, !sp.IsExpanded(mdir.Path))
-				a.saveState()
-			}
+		if vault.IsDatabase(n.Path) {
+			a.databaseNodeMenu(m, sp, n)
 		}
 		if inPins(sp, n.Path) && a.isOpen(sp, n.Path) {
 			if m.Item(i18n.T("关闭并保持置顶")).Chosen() {
@@ -1281,11 +1345,12 @@ func (a *App) spaceBarGlyph(c *ui.Context, emoji, symbol, name string, on, hover
 	}
 }
 
-// newDocRow ends the tree with a dashed slot making a document at the root,
-// sliding down smoothly as new documents appear above it.
+// newDocRow ends the tree with a dashed slot opening the Cra-style creation
+// modal (Document, Database, Whiteboard, Folder, Templates), sliding down
+// smoothly as new items appear above it.
 func (a *App) newDocRow(c *ui.Context) {
 	t := c.Theme()
-	label, tip := i18n.T("新建文档"), i18n.T("新建文档 (⌘N)")
+	label, tip := i18n.T("新建"), i18n.T("新建文档、数据库或白板")
 	open := a.state.ActiveSpace().IsExternal()
 	if open {
 		label, tip = i18n.T("打开文件…"), i18n.T("只添加选中的文件，保留原位置")
@@ -1306,7 +1371,7 @@ func (a *App) newDocRow(c *ui.Context) {
 	if pulsing || a.listDragging {
 		row.Transition(ui.ElementTransition{Animation: &listAnim, Position: true})
 	}
-	lit := row.Animate("lit", b2f(row.Hovered() || pulsing), 180*time.Millisecond)
+	lit := row.Animate("lit", b2f(row.Hovered() || pulsing || a.newModal.open), 180*time.Millisecond)
 	fill, border := dashedSlotColors(t, lit)
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
 		fr := ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: max(0, r.W-1), H: max(0, r.H-5)}
@@ -1324,8 +1389,7 @@ func (a *App) newDocRow(c *ui.Context) {
 		if open {
 			a.chooseExternalFiles()
 		} else {
-			a.newDocPulse = c.Now()
-			a.newDoc("")
+			a.openNewModal("")
 		}
 	}
 }

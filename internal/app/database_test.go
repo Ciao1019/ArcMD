@@ -187,6 +187,9 @@ func TestDatabasePeekTwoWaySyncAndFullPage(t *testing.T) {
 	if !tt.HasText("页面属性") || !strings.Contains(a.dbPeek.doc.ed.Doc.PlainText(), "评审正文。") {
 		t.Fatalf("expected Side Peek property sheet & body, plain=%q texts=%v", a.dbPeek.doc.ed.Doc.PlainText(), tt.Texts())
 	}
+	if a.dbPeek.propsExpanded || tt.HasText("添加属性") {
+		t.Fatalf("expected Side Peek properties collapsed by default, expanded=%v texts=%v", a.dbPeek.propsExpanded, tt.Texts())
+	}
 
 	// Live sync Peek H1 -> Database Table.
 	h1 := a.dbPeek.doc.ed.Doc.Blocks[0]
@@ -233,6 +236,16 @@ func TestDatabasePeekTwoWaySyncAndFullPage(t *testing.T) {
 	}
 	if !tt.HasText("页面属性") {
 		t.Fatalf("expected collapsible PagePropertiesView on full-page database record, texts=%v", tt.Texts())
+	}
+	if tt.HasText("添加属性") {
+		t.Fatalf("expected full-page database properties collapsed by default, texts=%v", tt.Texts())
+	}
+	if err := tt.Click("页面属性"); err != nil {
+		t.Fatalf("expand full-page properties failed: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("添加属性") {
+		t.Fatalf("expected full-page properties expanded after click, texts=%v", tt.Texts())
 	}
 }
 
@@ -331,6 +344,15 @@ func TestDatabasePhase2ViewsCoverAndPersistence(t *testing.T) {
 		database.ViewProperty{PropertyID: "prop_score", Visible: true, Width: 90},
 	)
 	db.Views = append(db.Views,
+		database.ViewConfig{
+			ID:         "view_board",
+			Name:       "看板",
+			Type:       database.ViewBoard,
+			Group:      &database.GroupConfig{PropertyID: "prop_status", StatusBy: "option"},
+			OpenMode:   dbview.OpenSidePeek,
+			Properties: slices.Clone(vis),
+			Board:      &database.BoardViewConfig{CardSize: "medium", ColorColumn: true, ShowCount: true},
+		},
 		database.ViewConfig{
 			ID:         "view_list",
 			Name:       "列表",
@@ -847,17 +869,16 @@ func TestDatabaseSnapshot(t *testing.T) {
 				"prop_score": database.AggSum,
 			}
 			_ = store.UpdateView(vc)
-			if bv, bidx := db.ViewByID("view_board"); bidx >= 0 {
-				bvc := bv.Clone()
-				if bvc.Board == nil {
-					bvc.Board = &database.BoardViewConfig{}
-				}
-				bvc.Board.CoverSource = "cover"
-				bvc.Board.ColorColumn = true
-				bvc.Board.ShowCount = true
-				_ = store.UpdateView(bvc)
-			}
 			vis := slices.Clone(db.Views[0].Properties)
+			_ = store.AddView(database.ViewConfig{
+				ID:         "view_board",
+				Name:       "看板",
+				Type:       database.ViewBoard,
+				Group:      &database.GroupConfig{PropertyID: "prop_status", StatusBy: "option"},
+				OpenMode:   dbview.OpenSidePeek,
+				Properties: slices.Clone(vis),
+				Board:      &database.BoardViewConfig{CardSize: "medium", CoverSource: "cover", ColorColumn: true, ShowCount: true},
+			}, false)
 			_ = store.AddView(database.ViewConfig{
 				ID:         "view_list",
 				Name:       "列表",
@@ -1084,6 +1105,28 @@ func TestDatabaseSnapshot(t *testing.T) {
 		savePNG(t, filepath.Join(dir, "db-form.png"), tt)
 	})
 
+	t.Run("sidebar-record-peek", func(t *testing.T) {
+		a, tt, _ := buildShowcase(t, false)
+		rec := a.doc.dbView.Store.RecordByPath("产品路线图/database-engine.md")
+		a.openRecordPeek(a.doc, a.doc.dbView.Store, a.state.ActiveSpace(), rec, dbview.OpenFullPage)
+		settle(tt)
+		savePNG(t, filepath.Join(dir, "db-sidebar-record-peek.png"), tt)
+	})
+
+	t.Run("sidebar-files-expanded", func(t *testing.T) {
+		a, tt, _ := buildShowcase(t, false)
+		sp := a.state.ActiveSpace()
+		// Keep a compact 2-view list so the 数据文件 collapsible header and records fit in frame.
+		for _, v := range append([]database.ViewConfig(nil), a.doc.dbView.Store.Database().Views...) {
+			if v.ID != "view_table" && v.ID != "view_board" {
+				_ = a.doc.dbView.Store.DeleteView(v.ID)
+			}
+		}
+		sp.SetExpanded("产品路线图", true)
+		settle(tt)
+		savePNG(t, filepath.Join(dir, "db-sidebar-files-expanded.png"), tt)
+	})
+
 	setupPhase5Showcase := func(a *App, tt *ui.Tester) {
 		store := a.doc.dbView.Store
 		_ = store.AddProperty(database.Property{
@@ -1259,10 +1302,25 @@ func TestDatabasePhase6EmbeddedLinkedViewAndExport(t *testing.T) {
 		}
 	}
 
-	// Verify HTML export produces semantic table fallback rather than dropping the block.
-	htmlOut := editor.ExportHTMLPage(a.doc.ed.Committed(), editor.HTMLTheme{})
-	if !strings.Contains(htmlOut, `<figure class="arcmd-database">`) || !strings.Contains(htmlOut, "Alpha Core") {
-		t.Fatalf("expected HTML export table degradation for embedded database, got:\n%s", htmlOut)
+	// Verify Markdown and HTML export automatically refresh stale embedded database snapshots with all live records.
+	a.exportMarkdown()
+	exportedMD, err := os.ReadFile(filepath.Join(root(a), "Weekly Export.md"))
+	if err != nil {
+		t.Fatalf("expected Weekly Export.md exported: %v", err)
+	}
+	if !strings.Contains(string(exportedMD), "Alpha Core") || !strings.Contains(string(exportedMD), "Beta Polish") {
+		t.Fatalf("expected Markdown export to include all live records, got:\n%s", string(exportedMD))
+	}
+
+	a.exportHTML()
+	exportedHTML, err := os.ReadFile(filepath.Join(root(a), "Weekly.html"))
+	if err != nil {
+		t.Fatalf("expected Weekly.html exported: %v", err)
+	}
+	if !strings.Contains(string(exportedHTML), `<figure class="arcmd-database">`) ||
+		!strings.Contains(string(exportedHTML), "Alpha Core") ||
+		!strings.Contains(string(exportedHTML), "Beta Polish") {
+		t.Fatalf("expected HTML export to include all live records, got:\n%s", string(exportedHTML))
 	}
 
 	// Verify Vector PDF export renders without error and produces valid PDF output.
@@ -1442,5 +1500,244 @@ func TestDatabasePhase6CSVAndNotionImportExport(t *testing.T) {
 	}
 	if a.doc == nil || a.doc.rel != nres.Databases[0] {
 		t.Fatalf("expected app to open imported Notion database %q, got %+v", nres.Databases[0], a.doc)
+	}
+}
+
+func TestDatabaseSidebarTreeViewsAndGanttCreation(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.SetSize(1200, 760)
+	sp := a.state.ActiveSpace()
+
+	// Creating a new database defaults to 1 primary Table view and expands its view tree in the sidebar.
+	a.newDatabase("")
+	tt.Frame()
+	if a.doc == nil || !a.doc.isDatabase() {
+		t.Fatalf("expected new database opened, got %+v", a.doc)
+	}
+	dbRel := a.doc.rel
+	if !sp.IsExpanded(dbRel) {
+		t.Fatalf("expected new database %q expanded in sidebar view tree", dbRel)
+	}
+	if !tt.HasText("表格视图") || !tt.HasText("主视图") {
+		t.Fatalf("expected primary Table view row in sidebar tree, texts=%v", tt.Texts())
+	}
+
+	// Enabled view specs expose all 9 registered views.
+	specs := dbview.EnabledViewSpecs()
+	wantSpecs := []database.ViewType{
+		database.ViewTable,
+		database.ViewTimeline,
+		database.ViewBoard,
+		database.ViewCalendar,
+		database.ViewList,
+		database.ViewGallery,
+		database.ViewChart,
+		database.ViewFeed,
+		database.ViewForm,
+	}
+	if len(specs) != len(wantSpecs) {
+		t.Fatalf("unexpected EnabledViewSpecs len=%d: %+v", len(specs), specs)
+	}
+	for i, want := range wantSpecs {
+		if specs[i].Type != want {
+			t.Fatalf("EnabledViewSpecs[%d]=%v, want %v", i, specs[i].Type, want)
+		}
+	}
+
+	// Add a Gantt view and a Board view from the sidebar action and verify they appear under the database node and activate.
+	a.addDatabaseViewInSidebar(sp, dbRel, database.ViewTimeline)
+	tt.Frame()
+	if got := a.doc.dbView.ActiveView(); got == nil || got.Type != database.ViewTimeline {
+		t.Fatalf("expected active view to be Gantt (timeline), got %+v", got)
+	}
+	if !tt.HasText("甘特视图") {
+		t.Fatalf("expected 甘特视图 child item in sidebar tree, texts=%v", tt.Texts())
+	}
+
+	a.addDatabaseViewInSidebar(sp, dbRel, database.ViewBoard)
+	tt.Frame()
+	if got := a.doc.dbView.ActiveView(); got == nil || got.Type != database.ViewBoard {
+		t.Fatalf("expected active view to be Board, got %+v", got)
+	}
+	if !tt.HasText("看板") {
+		t.Fatalf("expected 看板 child item in sidebar tree, texts=%v", tt.Texts())
+	}
+
+	boardID := a.doc.dbView.ActiveViewID()
+	a.renameDatabaseViewInSidebar(sp, dbRel, boardID, "冲刺看板")
+	tt.Frame()
+	if !tt.HasText("冲刺看板") {
+		t.Fatalf("expected renamed view 冲刺看板 in sidebar tree, texts=%v", tt.Texts())
+	}
+
+	// Clicking the primary Table view in the sidebar switches back to Table view cleanly.
+	a.openDatabaseView(sp, dbRel, "view_table")
+	tt.Frame()
+	if got := a.doc.dbView.ActiveView(); got == nil || got.ID != "view_table" {
+		t.Fatalf("expected openDatabaseView to switch back to view_table, got %+v", got)
+	}
+
+	// Collapsing the database view tree hides all view tabs and "+ 新建视图" (no duplicate in-page view bar).
+	sp.SetExpanded(dbRel, false)
+	tt.Frame()
+	for _, hidden := range []string{"主视图", "甘特视图", "冲刺看板", "新建视图"} {
+		if tt.HasText(hidden) {
+			t.Fatalf("expected %q hidden once sidebar view tree is collapsed, texts=%v", hidden, tt.Texts())
+		}
+	}
+}
+
+func hasSidebarRow(a *App, rel string) bool {
+	for _, rf := range a.rows {
+		if rf.rel == rel {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDatabaseSidebarRecordOpenDoesNotExpandAndCollapseControls(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.SetSize(1200, 760)
+	a.state.Favorites = nil
+	sp := a.state.ActiveSpace()
+
+	// Seed a database inside a folder with multiple backing record files.
+	db := database.NewDefault("DayFlow", database.SourceConfig{Type: database.SourceFolder})
+	raw, err := database.EncodeDatabaseMarkdown(db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbRel := "数据库演示/DayFlow.db.md"
+	mdirRel := "数据库演示/DayFlow"
+	if err := vault.Write(sp.Root, dbRel, raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"alpha.md", "beta.md", "gamma.md"} {
+		if err := vault.Write(sp.Root, mdirRel+"/"+name, "# "+strings.TrimSuffix(name, ".md")+"\n\n正文。\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sp.SetExpanded("数据库演示", false)
+	sp.SetExpanded(mdirRel, false)
+	a.refreshTree()
+	a.open(dbRel)
+	tt.Frame()
+
+	if !sp.IsExpanded("数据库演示") || !sp.IsExpanded(dbRel) {
+		t.Fatalf("expected parent folder and view tree expanded, parent=%v db=%v", sp.IsExpanded("数据库演示"), sp.IsExpanded(dbRel))
+	}
+	if sp.IsExpanded(mdirRel) {
+		t.Fatalf("managed folder %q must stay collapsed on database open", mdirRel)
+	}
+	for _, recRel := range []string{mdirRel + "/alpha.md", mdirRel + "/beta.md", mdirRel + "/gamma.md"} {
+		if hasSidebarRow(a, recRel) {
+			t.Fatalf("did not expect sidebar row %q while viewing database", recRel)
+		}
+	}
+
+	// Opening one record full-page must NOT expand the folded database folder:
+	// only the active record peeks in the sidebar, and sibling records stay hidden.
+	store := a.doc.dbView.Store
+	recAlpha := store.RecordByPath(mdirRel + "/alpha.md")
+	if recAlpha == nil {
+		t.Fatalf("missing alpha record in store")
+	}
+	a.openRecordPeek(a.doc, store, sp, recAlpha, dbview.OpenFullPage)
+	tt.Frame()
+
+	if a.doc == nil || a.doc.rel != mdirRel+"/alpha.md" {
+		t.Fatalf("expected alpha opened full-page, got %+v", a.doc)
+	}
+	if sp.IsExpanded(mdirRel) {
+		t.Fatalf("opening a database record must NOT expand folded managed folder %q", mdirRel)
+	}
+	if !hasSidebarRow(a, mdirRel+"/alpha.md") {
+		t.Fatalf("expected active record alpha peeked in sidebar while open, rows=%+v", a.rows)
+	}
+	if hasSidebarRow(a, mdirRel+"/beta.md") || hasSidebarRow(a, mdirRel+"/gamma.md") {
+		t.Fatalf("sibling records must stay hidden when opening one record, rows=%+v", a.rows)
+	}
+
+	// Returning to a database view immediately clears the peeked record row.
+	a.openDatabaseView(sp, dbRel, "view_table")
+	tt.Frame()
+	if hasSidebarRow(a, mdirRel+"/alpha.md") || hasSidebarRow(a, mdirRel+"/beta.md") {
+		t.Fatalf("expected peeked record hidden after returning to database view, rows=%+v", a.rows)
+	}
+
+	// When data files are explicitly expanded (or already persisted expanded),
+	// a collapsible "数据文件" header lets the user fold them without collapsing views.
+	sp.SetExpanded(mdirRel, true)
+	settle(tt)
+	if !tt.HasText("数据文件") || !hasSidebarRow(a, mdirRel+"/beta.md") {
+		t.Fatalf("expected 数据文件 header and expanded records, hasHdr=%v rows=%+v", tt.HasText("数据文件"), a.rows)
+	}
+	if err := tt.Click("收起数据文件"); err != nil {
+		t.Fatalf("click 数据文件 collapse header: %v", err)
+	}
+	settle(tt)
+	if sp.IsExpanded(mdirRel) {
+		t.Fatalf("expected managed folder collapsed after clicking 数据文件 header")
+	}
+	if !sp.IsExpanded(dbRel) {
+		t.Fatalf("expected database views to remain expanded after collapsing only data files")
+	}
+	if hasSidebarRow(a, mdirRel+"/beta.md") {
+		t.Fatalf("expected data files hidden after collapsing 数据文件 header")
+	}
+
+	// Clicking the database row's collapse chevron collapses BOTH views and expanded data files.
+	sp.SetExpanded(mdirRel, true)
+	settle(tt)
+	if err := tt.Click("收起视图"); err != nil {
+		t.Fatalf("click database collapse chevron: %v", err)
+	}
+	settle(tt)
+	if sp.IsExpanded(dbRel) || sp.IsExpanded(mdirRel) {
+		t.Fatalf("expected database chevron to collapse both views (%v) and data folder (%v)", sp.IsExpanded(dbRel), sp.IsExpanded(mdirRel))
+	}
+	if tt.HasText("主视图") || hasSidebarRow(a, mdirRel+"/beta.md") {
+		t.Fatalf("expected views and data files hidden after collapsing database chevron")
+	}
+
+	// Re-expanding via the chevron expands views only, leaving raw data files folded.
+	hoverRow(t, a, tt, dbRel)
+	if err := tt.Click("展开视图"); err != nil {
+		t.Fatalf("click database expand chevron: %v", err)
+	}
+	settle(tt)
+	if !sp.IsExpanded(dbRel) || sp.IsExpanded(mdirRel) {
+		t.Fatalf("expected expand chevron to expand views only: views=%v mdir=%v", sp.IsExpanded(dbRel), sp.IsExpanded(mdirRel))
+	}
+
+	// If views are collapsed while data files are expanded, the database row chevron
+	// still offers to collapse the data files.
+	sp.SetExpanded(dbRel, false)
+	sp.SetExpanded(mdirRel, true)
+	settle(tt)
+	if err := tt.Click("收起数据文件"); err != nil {
+		t.Fatalf("click collapse data files when views collapsed: %v", err)
+	}
+	settle(tt)
+	if sp.IsExpanded(mdirRel) {
+		t.Fatalf("expected managed folder collapsed when views were already closed")
+	}
+
+	// Closing a pinned database with "-" ("关闭并保持置顶") collapses both views and data files.
+	a.togglePin(sp, dbRel)
+	sp.SetExpanded(dbRel, true)
+	sp.SetExpanded(mdirRel, true)
+	settle(tt)
+	hoverRow(t, a, tt, dbRel)
+	if err := tt.Click("关闭并保持置顶"); err != nil {
+		t.Fatalf("click close-and-keep-pinned on database: %v", err)
+	}
+	settle(tt)
+	if a.isOpen(sp, dbRel) {
+		t.Fatalf("expected pinned database closed after clicking minus")
+	}
+	if sp.IsExpanded(dbRel) || sp.IsExpanded(mdirRel) {
+		t.Fatalf("expected closing pinned database to collapse views (%v) and data folder (%v)", sp.IsExpanded(dbRel), sp.IsExpanded(mdirRel))
 	}
 }

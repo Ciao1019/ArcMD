@@ -307,3 +307,130 @@ func TestTimelineRenderZoomTableToggleAndBarDragResize(t *testing.T) {
 			state.ActiveView().Timeline.ShowTable, tt.Texts())
 	}
 }
+
+func TestDayflowCalendarModesSidebarAndDetailPopup(t *testing.T) {
+	st := buildTestStore(t)
+	db := st.Database()
+	planRec := st.RecordByPath("产品路线图/plan.md")
+	designRec := st.RecordByPath("产品路线图/design.md")
+	if _, err := st.SetCell(planRec.ID, "prop_date", database.DateRangeValue("2026-11-23T09:00", "2026-11-23T11:30", true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetCell(designRec.ID, "prop_date", database.DateRangeValue("2026-11-24", "2026-11-27", false)); err != nil {
+		t.Fatal(err)
+	}
+
+	calView := dbview.NewViewConfig(database.ViewCalendar, "日历", db)
+	if err := st.AddView(calView, true); err != nil {
+		t.Fatal(err)
+	}
+
+	state, tt, _, _, opened := makeTesterWithOptions(t, st, nil)
+	tt.Frame()
+
+	// 1. Default newly created Calendar enables DayFlow sidebar with categories and MiniCalendar.
+	if !tt.HasText("状态") || !tt.HasText("计划开发") || !tt.HasText("界面设计") {
+		t.Fatalf("expected DayFlow sidebar and events in Month view, texts=%v", tt.Texts())
+	}
+
+	// Uncheck "进行中" category checkbox to filter out 计划开发, then restore it.
+	catChk, ok := tt.AccessByRole(ui.RoleCheckBox, "进行中")
+	if !ok {
+		t.Fatalf("missing category checkbox 进行中, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(catChk.Bounds.X+catChk.Bounds.W/2, catChk.Bounds.Y+catChk.Bounds.H/2)
+	tt.Frame()
+	if tt.HasText("计划开发") {
+		t.Fatalf("expected 计划开发 hidden after unchecking category, texts=%v", tt.Texts())
+	}
+	tt.ClickAt(catChk.Bounds.X+catChk.Bounds.W/2, catChk.Bounds.Y+catChk.Bounds.H/2)
+	tt.Frame()
+	if !tt.HasText("计划开发") {
+		t.Fatalf("expected 计划开发 restored after re-checking category, texts=%v", tt.Texts())
+	}
+
+	// 2. Click MiniCalendar date "2026-11-28" and verify CalendarCursor jumps cleanly.
+	mini28, ok := tt.Access("mini-day:2026-11-28")
+	if !ok {
+		t.Fatalf("missing MiniCalendar day 2026-11-28, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(mini28.Bounds.X+mini28.Bounds.W/2, mini28.Bounds.Y+mini28.Bounds.H/2)
+	tt.Frame()
+	if got := state.CalendarCursor.Format("2006-01-02"); got != "2026-11-28" {
+		t.Fatalf("CalendarCursor = %s, want 2026-11-28", got)
+	}
+	if err := tt.Click("今天"); err != nil {
+		t.Fatalf("click 今天 failed: %v", err)
+	}
+	tt.Frame()
+
+	// 3. Switch across all 5 DayFlow modes: 日 -> 周 -> 年 (fixed-week & year-canvas) -> 日程 -> 月.
+	for _, tab := range []string{"日", "周", "年"} {
+		if err := tt.Click(tab); err != nil {
+			t.Fatalf("switch to %s failed: %v", tab, err)
+		}
+		tt.Frame()
+	}
+	if state.ActiveView().Calendar.Mode != "year" || !tt.HasText("按月对齐") || !tt.HasText("连续画布") {
+		t.Fatalf("expected year mode controls, mode=%q texts=%v", state.ActiveView().Calendar.Mode, tt.Texts())
+	}
+	if err := tt.Click("连续画布"); err != nil {
+		t.Fatalf("switch to year-canvas failed: %v", err)
+	}
+	tt.Frame()
+	if state.ActiveView().Calendar.YearMode != "year-canvas" {
+		t.Fatalf("YearMode = %q, want year-canvas", state.ActiveView().Calendar.YearMode)
+	}
+	if err := tt.Click("日程"); err != nil {
+		t.Fatalf("switch to agenda failed: %v", err)
+	}
+	tt.Frame()
+	if state.ActiveView().Calendar.Mode != "agenda" || !tt.HasText("计划开发") {
+		t.Fatalf("expected agenda mode with 计划开发, mode=%q texts=%v", state.ActiveView().Calendar.Mode, tt.Texts())
+	}
+	if err := tt.Click("月"); err != nil {
+		t.Fatalf("switch back to month failed: %v", err)
+	}
+	tt.Frame()
+
+	// 4. Single-click event opens DayFlow Detail Popover; edit date & open full record detail.
+	evChip, ok := tt.Access("计划开发")
+	if !ok {
+		t.Fatalf("missing 计划开发 event chip in Month view, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(evChip.Bounds.X+evChip.Bounds.W/2, evChip.Bounds.Y+evChip.Bounds.H/2)
+	tt.Frame()
+	if !state.CalendarDetailOpen || !tt.HasText("事件标题") || !tt.HasText("时间范围") || !tt.HasText("打开详情页") {
+		t.Fatalf("expected DayFlow detail popup open, open=%v texts=%v", state.CalendarDetailOpen, tt.Texts())
+	}
+
+	if err := tt.Click("开始时间"); err != nil {
+		t.Fatalf("open inline DateTime picker failed: %v", err)
+	}
+	tt.Frame()
+	if !state.CalendarDetailPickerOpen {
+		t.Fatal("expected CalendarDetailPickerOpen true")
+	}
+	pick25, ok := tt.Access("cdp-day:2026-11-25")
+	if !ok {
+		t.Fatalf("missing picker day cdp-day:2026-11-25, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(pick25.Bounds.X+pick25.Bounds.W/2, pick25.Bounds.Y+pick25.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("确定"); err != nil {
+		t.Fatalf("confirm inline picker failed: %v", err)
+	}
+	tt.Frame()
+	if got := st.Record(planRec.ID).Props["prop_date"].Date.Start; got != "2026-11-25T09:00" {
+		t.Fatalf("expected Start updated to 2026-11-25T09:00, got %q", got)
+	}
+
+	if err := tt.Click("打开详情页"); err != nil {
+		t.Fatalf("click 打开详情页 failed: %v", err)
+	}
+	tt.Frame()
+	if state.CalendarDetailOpen || len(*opened) != 1 || (*opened)[0] != "side:计划开发" {
+		t.Fatalf("expected detail popup closed and OnOpenRecord side:计划开发, open=%v opened=%v",
+			state.CalendarDetailOpen, *opened)
+	}
+}

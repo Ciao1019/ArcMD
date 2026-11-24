@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 )
 
 // ChartSeries holds the evaluated numeric values for one series across all chart categories.
@@ -69,7 +71,7 @@ func BuildChartData(db *Database, rows []*Record, cfg ChartViewConfig, now time.
 	yProp, hasYProp := propMap[cfg.YPropID]
 	usePropAgg := strings.EqualFold(cfg.YMode, "prop") && hasYProp
 	yAgg := cfg.YAgg
-	yLabel := "记录数"
+	yLabel := i18n.T("记录数")
 	if usePropAgg {
 		if yAgg == "" || yAgg == AggNone {
 			if yProp.Type == PropNumber {

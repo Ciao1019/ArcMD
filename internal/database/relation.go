@@ -14,13 +14,21 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/vault"
 )
 
+// SpaceDBViewInfo describes one selectable view inside a space database.
+type SpaceDBViewInfo struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Type ViewType `json:"type"`
+}
+
 // SpaceDBInfo describes an amphibious .db.md database discovered in a space.
 type SpaceDBInfo struct {
-	RelPath    string     `json:"relPath"`
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Icon       string     `json:"icon,omitempty"`
-	Properties []Property `json:"properties,omitempty"`
+	RelPath    string            `json:"relPath"`
+	ID         string            `json:"id"`
+	Title      string            `json:"title"`
+	Icon       string            `json:"icon,omitempty"`
+	Properties []Property        `json:"properties,omitempty"`
+	Views      []SpaceDBViewInfo `json:"views,omitempty"`
 }
 
 // RelationCandidate represents one pickable record inside a target database.
@@ -98,12 +106,21 @@ func ListSpaceDatabases(spaceRoot string) ([]SpaceDBInfo, error) {
 		if derr != nil || db == nil {
 			return nil
 		}
+		views := make([]SpaceDBViewInfo, 0, len(db.Views))
+		for _, v := range db.Views {
+			views = append(views, SpaceDBViewInfo{
+				ID:   v.ID,
+				Name: v.Name,
+				Type: v.Type,
+			})
+		}
 		out = append(out, SpaceDBInfo{
 			RelPath:    rel,
 			ID:         db.ID,
 			Title:      db.Title,
 			Icon:       db.Icon,
 			Properties: append([]Property(nil), db.Properties...),
+			Views:      views,
 		})
 		return nil
 	})

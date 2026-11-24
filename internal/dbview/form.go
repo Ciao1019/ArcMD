@@ -217,8 +217,8 @@ func renderFormFillCard(
 		submitText = i18n.T("提交")
 	}
 
-	ui.Column(c.Key("form-card")).Padding(24, 28).Radius(12).Background(pal.Paper).
-		Border(1, pal.Border).Shadow(0, 2, 8, 0, pal.ShadowEdge).Gap(16).Children(func() {
+	ui.Column(c.Key("form-card")).Padding(24, 28).Radius(14).Background(pal.Paper).
+		Border(1, pal.Border).Shadow(0, 2, 10, -2, pal.ShadowEdge).Gap(16).Children(func() {
 		// Form Title + Description.
 		ui.Column(c.Key("form-hdr")).Gap(6).Children(func() {
 			ui.Text(c, title).FontSize(20).FontWeight(700).TextColor(pal.Text).Wrap()
@@ -230,8 +230,15 @@ func renderFormFillCard(
 		// Submission Confirmation Banner.
 		if st.FormSubmittedTitle != "" {
 			okBg, okFg := TagColors(pal.Dark, "green")
-			ui.Row(c.Key("form-done-banner")).Padding(10, 12).Radius(8).Background(okBg).
-				Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Row(c.Key("form-done-banner")).Padding(10, 12).Radius(9).Background(okBg).
+				Gap(8).AlignItems(ui.Center).
+				Transition(ui.ElementTransition{
+					Animation:    &dbSpringSnappy,
+					Colors:       true,
+					ExitDuration: 120 * time.Millisecond,
+					Enter:        &ui.Motion{Y: -6, Scale: 0.98, Opacity: 0},
+					Exit:         &ui.Motion{Y: -4, Scale: 0.98, Opacity: 0},
+				}).Children(func() {
 				ui.Icon(c, iconCheck).FontSize(14).TextColor(okFg)
 				ui.Text(c, fmt.Sprintf(i18n.T("已提交「%s」"), st.FormSubmittedTitle)).
 					FontSize(13).FontWeight(500).TextColor(okFg).SingleLine().Grow(1).MinWidth(0)
@@ -602,6 +609,7 @@ func submitDatabaseForm(
 		}
 		return
 	}
+	st.Motion.TrackCreated(rec.ID)
 	if opts.OnAfterCreate != nil {
 		opts.OnAfterCreate(rec)
 	}

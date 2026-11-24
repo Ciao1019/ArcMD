@@ -20,7 +20,7 @@ func cellPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("cell-pop:"+rec.ID+":"+prop.ID), anchor, &st.EditPopoverOpen, func() {
+	styledPopover(c, "cell-pop:"+rec.ID+":"+prop.ID, anchor, &st.EditPopoverOpen, pal, func() {
 		switch prop.Type {
 		case database.PropSelect, database.PropMultiSelect, database.PropStatus:
 			optionCellPopover(c, st, rec, prop, opts, pal)

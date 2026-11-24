@@ -500,3 +500,147 @@ func TestFlushRecordTitleSync(t *testing.T) {
 		t.Fatalf("unexpected redone markdown:\n%s", redoneDisk)
 	}
 }
+
+func TestPrimaryViewProtectionAndMultiViewSyncScope(t *testing.T) {
+	db := NewDefault("研发排期", SourceConfig{Type: SourceInline})
+	if len(db.Views) != 1 || db.Views[0].Type != ViewTable || !db.IsPrimaryView(db.Views[0].ID) {
+		t.Fatalf("expected 1 protected primary table view by default, got %+v", db.Views)
+	}
+	primaryID := db.Views[0].ID
+
+	st := NewStore("", "schedule.db.md", db)
+	r1, err := st.CreateRecord("核心引擎", map[string]Value{
+		"prop_status": TextValue("进行中"),
+		"prop_date":   DateRangeValue("2026-11-20", "2026-11-26", false),
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := st.CreateRecord("收尾上线", map[string]Value{
+		"prop_status": TextValue("已完成"),
+		"prop_date":   DateRangeValue("2026-11-27", "2026-11-30", false),
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a derived Gantt view with its own filter and timeline settings.
+	gantt := ViewConfig{
+		ID:       "view_gantt",
+		Name:     "甘特视图",
+		Type:     ViewTimeline,
+		OpenMode: "side",
+		Filter: &FilterGroup{
+			Conjunction: "and",
+			Rules: []FilterRule{
+				{ID: "f1", PropertyID: "prop_status", Op: OpEquals, Value: TextValue("进行中")},
+			},
+		},
+		Timeline: &TimelineViewConfig{
+			StartPropID: "prop_date",
+			Zoom:        "week",
+			ShowTable:   true,
+			TableProps:  []string{"prop_status", "prop_date"},
+		},
+	}
+	if err := st.AddView(gantt, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Primary table view cannot be deleted even when derived views exist.
+	if err := st.DeleteView(primaryID); err == nil {
+		t.Fatal("expected DeleteView on primary table view to fail")
+	}
+	// Duplicating primary view clears Primary on the copy, so the copy can be deleted.
+	dup, err := st.DuplicateView(primaryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Primary || st.Database().IsPrimaryView(dup.ID) {
+		t.Fatalf("duplicated primary view should not be marked primary: %+v", dup)
+	}
+	if err := st.DeleteView(dup.ID); err != nil {
+		t.Fatalf("DeleteView on duplicated view failed: %v", err)
+	}
+
+	// 2. View config isolation: Gantt filter hides r2 in Gantt, while Primary Table still shows both.
+	gRes := st.Query("view_gantt", QueryOptions{})
+	tRes := st.Query(primaryID, QueryOptions{})
+	if gRes.TotalCount != 1 || gRes.Rows[0].ID != r1.ID {
+		t.Fatalf("Gantt view filter mismatch: count=%d rows=%+v", gRes.TotalCount, gRes.Rows)
+	}
+	if tRes.TotalCount != 2 {
+		t.Fatalf("Primary table view should remain unfiltered (2 rows), got %d", tRes.TotalCount)
+	}
+
+	// 3. Data-layer sync: editing r1's date (e.g. Gantt bar drag) syncs immediately to Table view.
+	if _, err := st.SetCell(r1.ID, "prop_date", DateRangeValue("2026-11-22", "2026-11-29", false)); err != nil {
+		t.Fatal(err)
+	}
+	tRes = st.Query(primaryID, QueryOptions{})
+	var gotDate DateValue
+	for _, row := range tRes.Rows {
+		if row.ID == r1.ID {
+			gotDate = row.Props["prop_date"].Date
+		}
+	}
+	if gotDate.Start != "2026-11-22" || gotDate.End != "2026-11-29" {
+		t.Fatalf("Gantt date edit did not sync to Primary Table view: %+v", gotDate)
+	}
+	_ = r2
+
+	// 4. Schema-layer sync: adding a property while on Primary Table shows it in Primary Table
+	//    without cluttering unrelated derived Gantt view's visible columns.
+	_ = st.SetActiveView(primaryID)
+	if err := st.AddProperty(Property{ID: "prop_note", Key: "note", Name: "备注", Type: PropText}); err != nil {
+		t.Fatal(err)
+	}
+	cur := st.Database()
+	pv, _ := cur.ViewByID(primaryID)
+	gv, _ := cur.ViewByID("view_gantt")
+	findVis := func(v *ViewConfig, pid string) (bool, bool) {
+		for _, vp := range v.Properties {
+			if vp.PropertyID == pid {
+				return vp.Visible, true
+			}
+		}
+		return false, false
+	}
+	if vis, ok := findVis(pv, "prop_note"); !ok || !vis {
+		t.Fatalf("expected prop_note visible in primary table view, ok=%v vis=%v", ok, vis)
+	}
+	if vis, ok := findVis(gv, "prop_note"); !ok || vis {
+		t.Fatalf("expected prop_note hidden in unrelated Gantt view, ok=%v vis=%v", ok, vis)
+	}
+
+	// 5. Property type change & deletion clean up Gantt bindings cleanly and undo losslessly.
+	dateProp, _ := cur.PropertyByID("prop_date")
+	textProp := dateProp.Clone()
+	textProp.Type = PropText
+	textProp.Date = nil
+	if _, err := st.UpdateProperty(textProp); err != nil {
+		t.Fatal(err)
+	}
+	gv, _ = st.Database().ViewByID("view_gantt")
+	if gv.Timeline.StartPropID != "" {
+		t.Fatalf("expected Gantt StartPropID cleared when date prop became text, got %q", gv.Timeline.StartPropID)
+	}
+	if _, ok := st.Undo(); !ok {
+		t.Fatal("expected Undo of property type change to succeed")
+	}
+	gv, _ = st.Database().ViewByID("view_gantt")
+	if gv.Timeline.StartPropID != "prop_date" {
+		t.Fatalf("expected Undo to restore Gantt StartPropID, got %q", gv.Timeline.StartPropID)
+	}
+
+	if _, err := st.DeleteProperty("prop_status"); err != nil {
+		t.Fatal(err)
+	}
+	gv, _ = st.Database().ViewByID("view_gantt")
+	if gv.Filter != nil {
+		t.Fatalf("expected Gantt filter referencing deleted prop_status to be pruned, got %+v", gv.Filter)
+	}
+	if slices.Contains(gv.Timeline.TableProps, "prop_status") {
+		t.Fatalf("expected prop_status removed from Gantt TableProps, got %v", gv.Timeline.TableProps)
+	}
+}

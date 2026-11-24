@@ -9,6 +9,8 @@ cmd/arcmd ──▶ internal/app ──▶ internal/space    spaces and spaces.j
                    │      ├──▶ internal/plugin   manifests, registry, install, Host contract
                    │      ├──▶ internal/document rich document model, codec and transactions
                    │      ├──▶ internal/editor   native layout, input and interchange
+                   │      ├──▶ internal/database amphibious .db.md schema, query, formula & sync engine
+                   │      ├──▶ internal/dbview   native 9-view database UI and spring motion engine
                    │      └──▶ internal/fuzzy    command bar ranking
                    ▼
             github.com/egoist/mygo (mygo, ui)
@@ -45,6 +47,7 @@ cannot show the compositor's decorations.
 | `pdfexport.go` | Cancellable, page-by-page PDF export and printing |
 | `document.go` | The open rich document and read-only export preview: dirty tracking, autosave, images, links |
 | `split.go`, `splitview.go`, `splitstore.go` | Document pane lifecycle, native split cards and dividers, saved layout |
+| `database.go`, `newmodal.go` | Database workspace host, side/center peek drawers, sidebar view tree, unified new-item modal |
 | `theme.go` | Design tokens: the space-tinted theme and chrome colors |
 
 ### Window

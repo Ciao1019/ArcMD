@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pinyin"
 )
 
@@ -1192,8 +1193,8 @@ func buildRecordGroups(
 				ensureBucket(opt.Name, opt.Name, opt.Color, TextValue(opt.Name), false, i)
 			}
 		case PropCheckbox:
-			ensureBucket("true", "已勾选", "green", BoolValue(true), false, 0)
-			ensureBucket("false", "未勾选", "gray", BoolValue(false), false, 1)
+			ensureBucket("true", i18n.T("已勾选"), "green", BoolValue(true), false, 0)
+			ensureBucket("false", i18n.T("未勾选"), "gray", BoolValue(false), false, 1)
 		}
 	}
 
@@ -1215,7 +1216,7 @@ func buildRecordGroups(
 		case PropStatus:
 			if strings.EqualFold(cfg.StatusBy, "group") {
 				if v.IsEmpty() {
-					b := ensureBucket("", "无状态", "default", EmptyValue(), true, math.MaxInt)
+					b := ensureBucket("", i18n.T("无状态"), "default", EmptyValue(), true, math.MaxInt)
 					b.rows = append(b.rows, r)
 				} else {
 					grp := statusGroupForValue(prop, v.Text)
@@ -1225,7 +1226,7 @@ func buildRecordGroups(
 				}
 			} else {
 				if v.IsEmpty() {
-					b := ensureBucket("", "无状态", "default", EmptyValue(), true, math.MaxInt)
+					b := ensureBucket("", i18n.T("无状态"), "default", EmptyValue(), true, math.MaxInt)
 					b.rows = append(b.rows, r)
 				} else {
 					name := v.Text
@@ -1245,7 +1246,7 @@ func buildRecordGroups(
 
 		case PropSelect:
 			if v.IsEmpty() {
-				b := ensureBucket("", "未选择", "default", EmptyValue(), true, math.MaxInt)
+				b := ensureBucket("", i18n.T("未选择"), "default", EmptyValue(), true, math.MaxInt)
 				b.rows = append(b.rows, r)
 			} else {
 				name := v.Text
@@ -1264,7 +1265,7 @@ func buildRecordGroups(
 
 		case PropMultiSelect, PropPerson, PropRelation, PropFiles:
 			if v.IsEmpty() || len(v.List) == 0 {
-				b := ensureBucket("", "空", "default", EmptyValue(), true, math.MaxInt)
+				b := ensureBucket("", i18n.T("空"), "default", EmptyValue(), true, math.MaxInt)
 				b.rows = append(b.rows, r)
 			} else {
 				for _, item := range v.List {
@@ -1284,10 +1285,10 @@ func buildRecordGroups(
 
 		case PropCheckbox:
 			if v.Kind == ValBool && v.Bool {
-				b := ensureBucket("true", "已勾选", "green", BoolValue(true), false, 0)
+				b := ensureBucket("true", i18n.T("已勾选"), "green", BoolValue(true), false, 0)
 				b.rows = append(b.rows, r)
 			} else {
-				b := ensureBucket("false", "未勾选", "gray", BoolValue(false), false, 1)
+				b := ensureBucket("false", i18n.T("未勾选"), "gray", BoolValue(false), false, 1)
 				b.rows = append(b.rows, r)
 			}
 
@@ -1298,20 +1299,20 @@ func buildRecordGroups(
 
 		case PropNumber:
 			if v.IsEmpty() {
-				b := ensureBucket("", "空", "default", EmptyValue(), true, math.MaxInt)
+				b := ensureBucket("", i18n.T("空"), "default", EmptyValue(), true, math.MaxInt)
 				b.rows = append(b.rows, r)
 			} else if n, ok := numericSortVal(v); ok {
 				key, label := numberGroupBucket(prop, n, cfg.NumberStep)
 				b := ensureBucket(key, label, "default", NumberValue(n), false, int(n))
 				b.rows = append(b.rows, r)
 			} else {
-				b := ensureBucket("", "空", "default", EmptyValue(), true, math.MaxInt)
+				b := ensureBucket("", i18n.T("空"), "default", EmptyValue(), true, math.MaxInt)
 				b.rows = append(b.rows, r)
 			}
 
 		default:
 			if v.IsEmpty() {
-				b := ensureBucket("", "空", "default", EmptyValue(), true, math.MaxInt)
+				b := ensureBucket("", i18n.T("空"), "default", EmptyValue(), true, math.MaxInt)
 				b.rows = append(b.rows, r)
 			} else {
 				s := FormatValue(prop, v)
@@ -1426,13 +1427,13 @@ func statusGroupOrder(g StatusGroup) int {
 func statusGroupLabel(g StatusGroup) string {
 	switch g {
 	case StatusTodo:
-		return "未开始"
+		return i18n.T("未开始")
 	case StatusInProgress:
-		return "进行中"
+		return i18n.T("进行中")
 	case StatusComplete:
-		return "已完成"
+		return i18n.T("已完成")
 	default:
-		return "无状态"
+		return i18n.T("无状态")
 	}
 }
 
@@ -1451,11 +1452,11 @@ func statusGroupColor(g StatusGroup) string {
 
 func dateGroupBucket(v Value, dateBy string, now time.Time, loc *time.Location) (key, label string, order int, empty bool) {
 	if v.IsEmpty() || v.Kind != ValDate {
-		return "", "无日期", math.MaxInt, true
+		return "", i18n.T("无日期"), math.MaxInt, true
 	}
 	t, _, ok := fastParseDate(v.Date.Start, loc)
 	if !ok {
-		return "", "无日期", math.MaxInt, true
+		return "", i18n.T("无日期"), math.MaxInt, true
 	}
 	switch strings.ToLower(strings.TrimSpace(dateBy)) {
 	case "year":
@@ -1480,15 +1481,15 @@ func dateGroupBucket(v Value, dateBy string, now time.Time, loc *time.Location) 
 		monthEnd := dayEnd(monthStart.AddDate(0, 1, -1))
 		switch {
 		case t.Before(todayStart):
-			return "past", "今天之前", 0, false
+			return "past", i18n.T("今天之前"), 0, false
 		case !t.After(todayEnd):
-			return "today", "今天", 1, false
+			return "today", i18n.T("今天"), 1, false
 		case !t.After(weekEnd):
-			return "this_week", "本周", 2, false
+			return "this_week", i18n.T("本周"), 2, false
 		case !t.After(monthEnd):
-			return "this_month", "本月", 3, false
+			return "this_month", i18n.T("本月"), 3, false
 		default:
-			return "later", "未来", 4, false
+			return "later", i18n.T("未来"), 4, false
 		}
 	default: // "day"
 		d := t.Format("2006-01-02")

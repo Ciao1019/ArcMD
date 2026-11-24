@@ -344,3 +344,178 @@ func TestNewRecordOpenPeekAndPageProperties(t *testing.T) {
 		t.Fatalf("expected collapsed=true hiding property rows, collapsed=%v texts=%v", collapsed, pt.Texts())
 	}
 }
+
+func TestBeuiTableSortSelectHandlesAndInsert(t *testing.T) {
+	st := buildTestStore(t)
+	state, tt, _, _, _ := makeTester(t, st)
+
+	findRole := func(role ui.Role, name string) (ui.AccessInfo, bool) {
+		for _, info := range tt.AccessAll() {
+			if info.Role == role && info.Name == name {
+				return info, true
+			}
+		}
+		return ui.AccessInfo{}, false
+	}
+
+	// 1. Meta row count & header sort cycling (none -> asc -> desc -> none).
+	if !tt.HasText("3 行") {
+		t.Fatalf("expected '3 行' in table meta strip, texts=%v", tt.Texts())
+	}
+	if err := tt.Click("负责人"); err != nil {
+		t.Fatalf("click 负责人 header sort (asc) failed: %v", err)
+	}
+	tt.Frame()
+	v := state.ActiveView()
+	if v == nil || len(v.Sorts) != 1 || v.Sorts[0].PropertyID != "prop_owner" || v.Sorts[0].Desc {
+		t.Fatalf("expected ascending sort on prop_owner, got %#v", v)
+	}
+	if err := tt.Click("负责人"); err != nil {
+		t.Fatalf("click 负责人 header sort (desc) failed: %v", err)
+	}
+	tt.Frame()
+	v = state.ActiveView()
+	if v == nil || len(v.Sorts) != 1 || !v.Sorts[0].Desc {
+		t.Fatalf("expected descending sort on prop_owner, got %#v", v)
+	}
+	if err := tt.Click("负责人"); err != nil {
+		t.Fatalf("click 负责人 header sort (clear) failed: %v", err)
+	}
+	tt.Frame()
+	if v := state.ActiveView(); v == nil || len(v.Sorts) != 0 {
+		t.Fatalf("expected sort cleared on 3rd click, got %#v", v)
+	}
+
+	// 2. Row checkbox & Select-All indeterminate/checked meta updates.
+	planRec := st.RecordByPath("产品路线图/plan.md")
+	if planRec == nil {
+		t.Fatal("missing plan.md")
+	}
+	cbPlan, ok := findRole(ui.RoleCheckBox, "计划开发")
+	if !ok {
+		t.Fatalf("missing row checkbox for 计划开发, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(cbPlan.Bounds.X+cbPlan.Bounds.W/2, cbPlan.Bounds.Y+cbPlan.Bounds.H/2)
+	tt.Frame()
+	if !state.SelectedIDs[planRec.ID] || !tt.HasText("已选 1 项") {
+		t.Fatalf("expected 1 row selected & '已选 1 项', selected=%v texts=%v", state.SelectedIDs, tt.Texts())
+	}
+
+	cbAll, ok := findRole(ui.RoleCheckBox, "全选")
+	if !ok {
+		t.Fatalf("missing 全选 checkbox, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(cbAll.Bounds.X+cbAll.Bounds.W/2, cbAll.Bounds.Y+cbAll.Bounds.H/2)
+	tt.Frame()
+	if len(state.SelectedIDs) != 3 || !tt.HasText("已选 3 项") {
+		t.Fatalf("expected all 3 rows selected, selected=%v texts=%v", state.SelectedIDs, tt.Texts())
+	}
+	cbAll, _ = findRole(ui.RoleCheckBox, "全选")
+	tt.ClickAt(cbAll.Bounds.X+cbAll.Bounds.W/2, cbAll.Bounds.Y+cbAll.Bounds.H/2)
+	tt.Frame()
+	if len(state.SelectedIDs) != 0 || tt.HasText("已选") {
+		t.Fatalf("expected selection cleared on second 全选 click, selected=%v texts=%v", state.SelectedIDs, tt.Texts())
+	}
+
+	// 3. Column handle hover pill: open 列选项 menu and insert column to the right.
+	hdrStatus, ok := findRole(ui.RoleButton, "状态")
+	if !ok {
+		t.Fatalf("missing 状态 header sort button, access=%v", tt.AccessAll())
+	}
+	tt.Move(hdrStatus.Bounds.X+hdrStatus.Bounds.W/2, hdrStatus.Bounds.Y+4)
+	tt.Advance(150 * time.Millisecond)
+	tt.Frame()
+
+	colHnd, ok := findRole(ui.RoleMenuButton, "列选项: 状态")
+	if !ok {
+		t.Fatalf("missing 列选项: 状态 handle, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(colHnd.Bounds.X+colHnd.Bounds.W/2, colHnd.Bounds.Y+colHnd.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("在右侧插入列"); err != nil {
+		t.Fatalf("click 在右侧插入列 failed: %v", err)
+	}
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("备注")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if !tt.HasText("备注") {
+		t.Fatalf("expected newly inserted column 备注, texts=%v", tt.Texts())
+	}
+	vProps := state.ActiveView().Properties
+	statusIdx, noteIdx := -1, -1
+	for i, vp := range vProps {
+		if vp.PropertyID == "prop_status" {
+			statusIdx = i
+		}
+		if p, idx := st.Database().PropertyByID(vp.PropertyID); idx >= 0 && p.Name == "备注" {
+			noteIdx = i
+		}
+	}
+	if statusIdx < 0 || noteIdx != statusIdx+1 {
+		t.Fatalf("expected 备注 right after 状态 (statusIdx=%d, noteIdx=%d), props=%+v", statusIdx, noteIdx, vProps)
+	}
+
+	// 4. Row handle hover pill: insert row below & delete row.
+	rowPlanBox, ok := tt.Find("计划开发")
+	if !ok {
+		t.Fatal("missing 计划开发 row")
+	}
+	tt.Move(rowPlanBox.X+10, rowPlanBox.Y+rowPlanBox.H/2)
+	tt.Advance(150 * time.Millisecond)
+	tt.Frame()
+
+	rowHnd, ok := findRole(ui.RoleMenuButton, "行选项: 计划开发")
+	if !ok {
+		t.Fatalf("missing 行选项: 计划开发 handle, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(rowHnd.Bounds.X+rowHnd.Bounds.W/2, rowHnd.Bounds.Y+rowHnd.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("在下方插入行"); err != nil {
+		t.Fatalf("click 在下方插入行 failed: %v", err)
+	}
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("新插行")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+
+	if len(st.Records()) != 4 || !tt.HasText("新插行") || !tt.HasText("4 行") {
+		t.Fatalf("expected inserted row 新插行 and '4 行', count=%d texts=%v", len(st.Records()), tt.Texts())
+	}
+	res := st.Query(state.ActiveViewID(), database.QueryOptions{Now: time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)})
+	planRowIdx, newRowIdx := -1, -1
+	for i, r := range res.Rows {
+		if r.Title == "计划开发" {
+			planRowIdx = i
+		} else if r.Title == "新插行" {
+			newRowIdx = i
+		}
+	}
+	if planRowIdx < 0 || newRowIdx != planRowIdx+1 {
+		t.Fatalf("expected 新插行 immediately below 计划开发 (plan=%d, new=%d)", planRowIdx, newRowIdx)
+	}
+
+	// Delete the newly inserted row via its row handle.
+	newRowBox, ok := tt.Find("新插行")
+	if !ok {
+		t.Fatal("missing 新插行 text")
+	}
+	tt.Move(newRowBox.X+10, newRowBox.Y+newRowBox.H/2)
+	tt.Advance(150 * time.Millisecond)
+	tt.Frame()
+	delHnd, ok := findRole(ui.RoleMenuButton, "行选项: 新插行")
+	if !ok {
+		t.Fatalf("missing 行选项: 新插行 handle, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(delHnd.Bounds.X+delHnd.Bounds.W/2, delHnd.Bounds.Y+delHnd.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("删除行"); err != nil {
+		t.Fatalf("click 删除行 failed: %v", err)
+	}
+	tt.Frame()
+	if len(st.Records()) != 3 || tt.HasText("新插行") {
+		t.Fatalf("expected 新插行 deleted, count=%d texts=%v", len(st.Records()), tt.Texts())
+	}
+}

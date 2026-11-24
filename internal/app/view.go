@@ -185,6 +185,7 @@ func (a *App) View(c *ui.Context) {
 	a.fileDropOverlayView(c)
 	a.previewView(c)
 	a.paletteView(c)
+	a.newModalView(c)
 	a.updateToast(c)
 	a.settingsView(c)
 	a.replaceView(c)

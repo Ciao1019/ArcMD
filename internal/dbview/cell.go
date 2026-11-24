@@ -48,20 +48,71 @@ func cellView(
 	opts Options,
 	pal Palette,
 ) cellOutcome {
+	return cellViewStyled(c, st, rec, prop, focused, wrap, leftAlign, 34, nil, opts, pal)
+}
+
+func tableCellView(
+	c *ui.Context,
+	st *State,
+	rec *database.Record,
+	prop database.Property,
+	focused bool,
+	wrap bool,
+	leftAlign bool,
+	minH float32,
+	be beTableColors,
+	opts Options,
+	pal Palette,
+) cellOutcome {
+	return cellViewStyled(c, st, rec, prop, focused, wrap, leftAlign, minH, &be, opts, pal)
+}
+
+func cellViewStyled(
+	c *ui.Context,
+	st *State,
+	rec *database.Record,
+	prop database.Property,
+	focused bool,
+	wrap bool,
+	leftAlign bool,
+	minH float32,
+	be *beTableColors,
+	opts Options,
+	pal Palette,
+) cellOutcome {
 	var out cellOutcome
 	if rec == nil {
 		return out
 	}
 
+	inTable := be != nil
 	editingInline := st.Editing && st.EditRecordID == rec.ID && st.EditPropID == prop.ID
 	popoverHere := st.EditPopoverOpen && st.ActivePopoverRecordID == rec.ID && st.ActivePopoverPropID == prop.ID
 
+	padY, padX := float32(5), float32(8)
+	fontSize := float32(13)
+	if inTable {
+		padY, padX = 6, 12
+		if prop.Type == database.PropDate || prop.Type == database.PropCreatedTime || prop.Type == database.PropEditedTime {
+			padX = 8
+		}
+		fontSize = 13.5
+	}
+
 	box := ui.Row(c.Key("c:"+rec.ID+":"+prop.ID)).
-		Grow(1).MinWidth(0).MinHeight(34).Padding(5, 8).Gap(6).AlignItems(ui.Center)
+		Grow(1).MinWidth(0).MinHeight(minH).Padding(padY, padX).Gap(6).AlignItems(ui.Center)
 
 	if focused && !editingInline {
+		ringCol := pal.Accent
+		rad := float32(4)
+		insets := float32(0.5)
+		if inTable {
+			ringCol = be.primary
+			rad = 6
+			insets = 1
+		}
 		box.DrawOver(func(p *ui.Painter, r ui.Rect) {
-			p.Stroke(rectInset(r, 0.5), pal.Accent, 4, 1.5)
+			p.Stroke(rectInset(r, insets), ringCol, rad, 1.5)
 		})
 	}
 
@@ -69,8 +120,14 @@ func cellView(
 
 	if editingInline && !opts.ReadOnly {
 		box.Children(func() {
-			in := ui.TextInput(c.Key("in"), &st.EditText).Grow(1).MinWidth(0).Height(26).Padding(2, 6).
-				TextColor(pal.Text).Background(pal.Paper).Radius(4).Border(1, pal.Accent).
+			inH, inPadX, inRad := float32(26), float32(6), float32(4)
+			inBg, inBorder := pal.Paper, pal.Accent
+			if inTable {
+				inH, inPadX, inRad = 32, 8, 6
+				inBg, inBorder = be.headerBg, be.primary
+			}
+			in := ui.TextInput(c.Key("in"), &st.EditText).Grow(1).MinWidth(0).Height(inH).Padding(2, inPadX).
+				TextColor(pal.Text).Background(inBg).Radius(inRad).Border(1, inBorder).
 				AutoFocus().Label(prop.Name)
 			if st.EditFocusPending {
 				in.Focus()
@@ -110,47 +167,68 @@ func cellView(
 		switch prop.Type {
 		case database.PropCheckbox:
 			checked := val.Kind == database.ValBool && val.Bool
-			cb := ui.CheckboxBase(c.Key("chk"), &checked).Size(18, 18).Radius(4).Center().
-				Disabled(readOnlyProp).Label(prop.Name)
-			if !readOnlyProp {
-				cb.Cursor(ui.CursorPointer)
-			}
-			cb.Draw(func(p *ui.Painter, r ui.Rect) {
-				if checked {
-					p.Fill(r, pal.Accent, 4)
-					p.Icon(iconCheck, rectInset(r, 3), ui.RGB(255, 255, 255))
-				} else {
-					p.Stroke(rectInset(r, 0.5), pal.BorderStrong, 4, 1.3)
+			var cb ui.Element
+			if inTable {
+				cb = renderBeuiCheckbox(c, "chk", &checked, false, 18, 5, readOnlyProp, prop.Name, *be)
+			} else {
+				cb = ui.CheckboxBase(c.Key("chk"), &checked).Size(18, 18).Radius(4).Center().
+					Disabled(readOnlyProp).Label(prop.Name)
+				if !readOnlyProp {
+					cb.Cursor(ui.CursorPointer)
 				}
-			})
+				cb.Draw(func(p *ui.Painter, r ui.Rect) {
+					if checked {
+						p.Fill(r, pal.Accent, 4)
+						p.Icon(iconCheck, rectInset(r, 3), ui.RGB(255, 255, 255))
+					} else {
+						p.Stroke(rectInset(r, 0.5), pal.BorderStrong, 4, 1.3)
+					}
+				})
+			}
 			if cb.Changed() && !readOnlyProp {
 				st.setCellAndNotify(rec.ID, prop.ID, database.BoolValue(checked), opts)
 			}
 
 		case database.PropNumber:
-			renderNumberCell(c, prop, val, leftAlign, pal)
+			renderNumberCellSized(c, prop, val, leftAlign, fontSize, pal)
 
 		case database.PropSelect:
 			if !val.IsEmpty() {
 				opt := findOption(prop, val.Text)
-				renderTagPill(c, val.Text, opt.Color, false, pal)
+				if inTable {
+					renderBeuiPill(c, val.Text, opt.Color, nil, pal)
+				} else {
+					renderTagPill(c, val.Text, opt.Color, false, pal)
+				}
 			}
 
 		case database.PropStatus:
 			if !val.IsEmpty() {
 				opt := findOption(prop, val.Text)
-				renderTagPill(c, val.Text, opt.Color, true, pal)
+				if inTable {
+					renderBeuiPill(c, val.Text, opt.Color, nil, pal)
+				} else {
+					renderTagPill(c, val.Text, opt.Color, true, pal)
+				}
 			}
 
 		case database.PropMultiSelect, database.PropPerson, database.PropFiles, database.PropRelation:
 			if len(val.List) > 0 {
-				renderTagListCell(c, prop, relationDisplayLabels(st, prop, val.List), wrap, pal)
+				renderTagListCellStyled(c, prop, relationDisplayLabels(st, prop, val.List), wrap, inTable, pal)
 			}
 
 		case database.PropDate, database.PropCreatedTime, database.PropEditedTime:
 			if !val.IsEmpty() {
 				text := database.FormatValue(prop, val)
-				el := ui.Text(c, text).FontSize(13).TextColor(pal.Text).MinWidth(0)
+				if inTable && prop.Type == database.PropDate && val.Kind == database.ValDate &&
+					len(val.Date.Start) >= 10 && len(val.Date.End) >= 10 && val.Date.Start[:4] == val.Date.End[:4] && !val.Date.IncludeTime {
+					text = val.Date.Start[:10] + " → " + val.Date.End[5:10]
+				}
+				dateSize := fontSize
+				if inTable {
+					dateSize = 12
+				}
+				el := ui.Text(c, text).FontSize(dateSize).TextColor(pal.TextMuted).MinWidth(0)
 				if !wrap {
 					el.SingleLine()
 				}
@@ -159,7 +237,7 @@ func cellView(
 		case database.PropURL:
 			if !val.IsEmpty() {
 				u := val.Text
-				el := ui.Text(c, u).FontSize(13).TextColor(pal.Accent).MinWidth(0).Grow(1)
+				el := ui.Text(c, u).FontSize(fontSize).TextColor(pal.Accent).MinWidth(0).Grow(1)
 				if !wrap {
 					el.SingleLine()
 				}
@@ -181,7 +259,12 @@ func cellView(
 
 		case database.PropUniqueID:
 			if !val.IsEmpty() {
-				ui.Box(c).Padding(2, 6).Radius(5).Background(pal.Surface).Children(func() {
+				rad := float32(5)
+				padX := float32(6)
+				if inTable {
+					rad, padX = 999, 8
+				}
+				ui.Box(c).Padding(2, padX).Radius(rad).Background(pal.Surface).Children(func() {
 					ui.Text(c, val.Text).FontSize(11.5).FontWeight(500).TextColor(pal.TextMuted).SingleLine()
 				})
 			}
@@ -190,12 +273,12 @@ func cellView(
 			if val.Kind == database.ValError {
 				ui.Text(c, val.Error).FontSize(12).TextColor(pal.Danger).SingleLine()
 			} else if val.Kind == database.ValStringList && len(val.List) > 0 {
-				renderTagListCell(c, prop, val.List, wrap, pal)
+				renderTagListCellStyled(c, prop, val.List, wrap, inTable, pal)
 			} else if val.Kind == database.ValNumber && prop.Number != nil && (prop.Number.ShowAs == "bar" || prop.Number.ShowAs == "ring") {
-				renderNumberCell(c, prop, val, leftAlign, pal)
+				renderNumberCellSized(c, prop, val, leftAlign, fontSize, pal)
 			} else if !val.IsEmpty() {
 				txt := database.FormatValue(prop, val)
-				el := ui.Text(c, txt).FontSize(13).TextColor(pal.TextMuted).MinWidth(0)
+				el := ui.Text(c, txt).FontSize(fontSize).TextColor(pal.TextMuted).MinWidth(0)
 				if !wrap {
 					el.SingleLine()
 				}
@@ -204,7 +287,10 @@ func cellView(
 		default: // PropText, PropEmail, PropPhone, PropTitle
 			if !val.IsEmpty() {
 				txt := database.FormatValue(prop, val)
-				el := ui.Text(c, txt).FontSize(13).TextColor(pal.Text).MinWidth(0)
+				el := ui.Text(c, txt).FontSize(fontSize).TextColor(pal.Text).MinWidth(0)
+				if inTable && prop.Type == database.PropTitle {
+					el.FontWeight(500)
+				}
 				if !wrap {
 					el.SingleLine()
 				}
@@ -236,6 +322,10 @@ func cellView(
 }
 
 func renderNumberCell(c *ui.Context, prop database.Property, val database.Value, leftAlign bool, pal Palette) {
+	renderNumberCellSized(c, prop, val, leftAlign, 13, pal)
+}
+
+func renderNumberCellSized(c *ui.Context, prop database.Property, val database.Value, leftAlign bool, fontSize float32, pal Palette) {
 	if val.IsEmpty() {
 		return
 	}
@@ -245,7 +335,7 @@ func renderNumberCell(c *ui.Context, prop database.Property, val database.Value,
 		if !leftAlign {
 			ui.Spacer(c)
 		}
-		ui.Text(c, txt).FontSize(13).TextColor(pal.Text).SingleLine()
+		ui.Text(c, txt).FontSize(fontSize).TextColor(pal.Text).SingleLine()
 		return
 	}
 
@@ -353,6 +443,10 @@ func renderStyledPill(c *ui.Context, name, colorName string, withDot bool, pillI
 }
 
 func renderTagListCell(c *ui.Context, prop database.Property, items []string, wrap bool, pal Palette) {
+	renderTagListCellStyled(c, prop, items, wrap, false, pal)
+}
+
+func renderTagListCellStyled(c *ui.Context, prop database.Property, items []string, wrap, beuiPill bool, pal Palette) {
 	maxShow := len(items)
 	if !wrap && maxShow > 3 {
 		maxShow = 3
@@ -374,10 +468,18 @@ func renderTagListCell(c *ui.Context, prop database.Property, items []string, wr
 			if prop.Type == database.PropMultiSelect {
 				color = findOption(prop, item).Color
 			}
-			renderStyledPill(c, item, color, false, pillIcon, pal)
+			if beuiPill {
+				renderBeuiPill(c, item, color, pillIcon, pal)
+			} else {
+				renderStyledPill(c, item, color, false, pillIcon, pal)
+			}
 		}
 		if len(items) > maxShow {
-			ui.Box(c).Padding(2, 6).Radius(5).Background(pal.Surface).Shrink(0).Children(func() {
+			rad := float32(5)
+			if beuiPill {
+				rad = 999
+			}
+			ui.Box(c).Padding(2, 7).Radius(rad).Background(pal.Surface).Shrink(0).Children(func() {
 				ui.Text(c, fmt.Sprintf("+%d", len(items)-maxShow)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 			})
 		}

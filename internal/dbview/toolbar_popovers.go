@@ -33,7 +33,7 @@ func filterPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-filter"), anchor, &st.FilterOpen, func() {
+	styledPopover(c, "pop-filter", anchor, &st.FilterOpen, pal, func() {
 		fg := view.Filter.Clone()
 		if fg == nil {
 			fg = &database.FilterGroup{Conjunction: "and"}
@@ -342,7 +342,7 @@ func sortPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-sort"), anchor, &st.SortOpen, func() {
+	styledPopover(c, "pop-sort", anchor, &st.SortOpen, pal, func() {
 		sorts := slices.Clone(view.Sorts)
 		ui.Column(c.Key("sort-box")).Width(320).Gap(8).Padding(6).Children(func() {
 			ui.Text(c, i18n.T("排序规则")).FontSize(13).FontWeight(600).TextColor(pal.Text)
@@ -443,7 +443,7 @@ func groupPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-group"), anchor, &st.GroupOpen, func() {
+	styledPopover(c, "pop-group", anchor, &st.GroupOpen, pal, func() {
 		grp := view.Group.Clone()
 		curName := i18n.T("不分组")
 		var curProp *database.Property
@@ -593,7 +593,7 @@ func propertiesPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-props"), anchor, &st.PropsOpen, func() {
+	styledPopover(c, "pop-props", anchor, &st.PropsOpen, pal, func() {
 		ordered := orderedViewProperties(db, &view)
 		ui.Column(c.Key("props-box")).Width(260).Gap(6).Padding(6).Children(func() {
 			ui.Text(c, i18n.T("显示属性")).FontSize(13).FontWeight(600).TextColor(pal.Text)
@@ -690,7 +690,7 @@ func addPropertyPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-add-prop"), anchor, &st.AddPropOpen, func() {
+	styledPopover(c, "pop-add-prop", anchor, &st.AddPropOpen, pal, func() {
 		create := func() {
 			name := strings.TrimSpace(st.NewPropName)
 			if name == "" {
@@ -792,67 +792,24 @@ func newViewPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-new-view"), anchor, &st.NewViewOpen, func() {
+	styledPopover(c, "pop-new-view", anchor, &st.NewViewOpen, pal, func() {
+		specs := EnabledViewSpecs()
+		if len(specs) == 0 {
+			return
+		}
+		validChoice := false
+		for _, sp := range specs {
+			if sp.Type == st.NewViewType {
+				validChoice = true
+				break
+			}
+		}
+		if !validChoice {
+			st.NewViewType = specs[0].Type
+		}
+
 		create := func() {
-			vt := st.NewViewType
-			if !database.ValidViewType(vt) {
-				vt = database.ViewTable
-			}
-			name := strings.TrimSpace(st.NewViewName)
-			if name == "" {
-				name = viewTypeLabel(vt)
-			}
-			var vps []database.ViewProperty
-			for _, p := range db.Properties {
-				vps = append(vps, database.ViewProperty{
-					PropertyID: p.ID,
-					Visible:    true,
-					Width:      p.Width,
-					Wrap:       p.Wrap,
-				})
-			}
-			vc := database.ViewConfig{
-				ID:         "view_" + database.NewID()[:8],
-				Name:       name,
-				Type:       vt,
-				OpenMode:   OpenSidePeek,
-				Properties: vps,
-			}
-			switch vt {
-			case database.ViewTable:
-				vc.Table = &database.TableViewConfig{FreezeFirst: true, ShowIcon: true}
-			case database.ViewBoard:
-				if gp := defaultBoardGroupProp(db); gp != nil {
-					vc.Group = &database.GroupConfig{PropertyID: gp.ID}
-					if gp.Type == database.PropStatus {
-						vc.Group.StatusBy = "option"
-					} else if gp.Type == database.PropDate || gp.Type == database.PropCreatedTime || gp.Type == database.PropEditedTime {
-						vc.Group.DateBy = "month"
-					}
-				}
-				vc.Board = &database.BoardViewConfig{
-					CardSize:    "medium",
-					CoverSource: "none",
-					ColorColumn: true,
-					ShowCount:   true,
-				}
-			case database.ViewGallery:
-				vc.Gallery = &database.GalleryViewConfig{
-					CardSize:    "medium",
-					CoverSource: "cover",
-					ShowIcon:    true,
-				}
-			case database.ViewCalendar:
-				ensureCalendarConfig(&vc, db)
-			case database.ViewTimeline:
-				ensureTimelineConfig(&vc, db)
-			case database.ViewChart:
-				ensureChartConfig(&vc, db)
-			case database.ViewFeed:
-				ensureFeedConfig(&vc)
-			case database.ViewForm:
-				ensureFormConfig(&vc, db)
-			}
+			vc := NewViewConfig(st.NewViewType, st.NewViewName, db)
 			if err := st.Store.AddView(vc, true); err != nil {
 				if opts.OnNotify != nil {
 					opts.OnNotify(err.Error())
@@ -866,7 +823,7 @@ func newViewPopover(
 			}
 		}
 
-		ui.Column(c.Key("new-view-box")).Width(280).Gap(8).Padding(6).Children(func() {
+		ui.Column(c.Key("new-view-box")).Width(336).Gap(8).Padding(6).Children(func() {
 			ui.Text(c, i18n.T("新建视图")).FontSize(13).FontWeight(600).TextColor(pal.Text)
 			in := ui.TextInput(c.Key("nv-name"), &st.NewViewName).
 				Placeholder(i18n.T("视图名称…")).Label(i18n.T("视图名称")).
@@ -876,17 +833,12 @@ func newViewPopover(
 				return
 			}
 
-			viewTypes := []database.ViewType{
-				database.ViewTable, database.ViewBoard, database.ViewTimeline,
-				database.ViewCalendar, database.ViewList, database.ViewGallery,
-				database.ViewChart, database.ViewFeed, database.ViewForm,
-			}
-			ui.Row(c).Wrap().Gap(4).Children(func() {
-				for _, vt := range viewTypes {
-					cand := vt
-					picked := st.NewViewType == cand
-					chip := ui.Row(c.Key("vt:"+string(cand))).Width(84).Height(30).Padding(0, 6).Radius(6).
-						Gap(5).AlignItems(ui.Center).Cursor(ui.CursorPointer)
+			ui.Row(c).Wrap().Gap(6).Children(func() {
+				for _, sp := range specs {
+					cand := sp
+					picked := st.NewViewType == cand.Type
+					chip := ui.Row(c.Key("vt:"+string(cand.Type))).Width(104).Height(32).Padding(0, 8).Radius(6).
+						Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 					if picked {
 						chip.Background(pal.AccentSoft).Border(1, pal.Accent)
 					} else {
@@ -897,11 +849,11 @@ func newViewPopover(
 						if picked {
 							ink = pal.Accent
 						}
-						ui.Icon(c, ViewIcon(cand)).FontSize(13).TextColor(ink)
-						ui.Text(c, viewTypeLabel(cand)).FontSize(12).TextColor(pal.Text).SingleLine()
+						ui.Icon(c, cand.Icon).FontSize(13.5).TextColor(ink)
+						ui.Text(c, cand.Label()).FontSize(12.5).TextColor(pal.Text).SingleLine()
 					})
 					if chip.Clicked() {
-						st.NewViewType = cand
+						st.NewViewType = cand.Type
 					}
 				}
 			})
@@ -999,9 +951,13 @@ func ensureCalendarConfig(v *database.ViewConfig, db *database.Database) *databa
 		if dp := defaultDateProp(db); dp != nil {
 			defID = dp.ID
 		}
+		showSidebar := true
 		v.Calendar = &database.CalendarViewConfig{
 			DatePropID:   defID,
+			ColorPropID:  defaultColorPropID(db),
 			Mode:         "month",
+			YearMode:     "fixed-week",
+			ShowSidebar:  &showSidebar,
 			ShowWeekends: true,
 			WeekStart:    1,
 		}
@@ -1013,6 +969,9 @@ func ensureCalendarConfig(v *database.ViewConfig, db *database.Database) *databa
 		}
 		if v.Calendar.Mode == "" {
 			v.Calendar.Mode = "month"
+		}
+		if v.Calendar.YearMode == "" {
+			v.Calendar.YearMode = "fixed-week"
 		}
 	}
 	return v.Calendar
@@ -1026,6 +985,7 @@ func ensureTimelineConfig(v *database.ViewConfig, db *database.Database) *databa
 		}
 		v.Timeline = &database.TimelineViewConfig{
 			StartPropID: defID,
+			ColorPropID: defaultColorPropID(db),
 			Zoom:        "month",
 			ShowTable:   true,
 		}
@@ -1132,7 +1092,7 @@ func layoutPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-layout"), anchor, &st.LayoutOpen, func() {
+	styledPopover(c, "pop-layout", anchor, &st.LayoutOpen, pal, func() {
 		ui.Column(c.Key("layout-box")).Width(292).Gap(10).Padding(6).Children(func() {
 			ui.Text(c, i18n.T("视图布局")).FontSize(13).FontWeight(600).TextColor(pal.Text)
 
@@ -1302,6 +1262,81 @@ func layoutPopover(
 					saveViewAndNotify(st, vc, opts)
 				})
 
+				// Explicit Field Bindings for Board slots.
+				cardPropsAll := visibleNonTitleProps(db, &view)
+				curAssignee := resolveBoardAssigneeProp(db, *bcfg)
+				assigneeName := i18n.T("关闭")
+				if curAssignee != nil {
+					assigneeName = curAssignee.Name
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("成员筛选字段")).FontSize(12.5).TextColor(pal.Text)
+					ab := ui.Button(c.Key("lay-bassignee"), assigneeName).Height(26).Padding(0, 8)
+					ab.PopoverMenuButton(func(m *ui.Menu) {
+						isNone := bcfg.AssigneePropID == database.PropBindNone || (curAssignee == nil && bcfg.AssigneePropID == "")
+						if m.Item(i18n.T("关闭")).Checked(isNone).Chosen() {
+							vc := view.Clone()
+							ensureBoardConfig(&vc).AssigneePropID = database.PropBindNone
+							st.BoardAssigneeFilter = ""
+							saveViewAndNotify(st, vc, opts)
+						}
+						if cands := assigneePropertiesOf(db); len(cands) > 0 {
+							m.Separator()
+							for _, p := range cands {
+								cand := p
+								if m.Item(cand.Name).Checked(curAssignee != nil && curAssignee.ID == cand.ID && bcfg.AssigneePropID != database.PropBindNone).Chosen() {
+									vc := view.Clone()
+									ensureBoardConfig(&vc).AssigneePropID = cand.ID
+									st.BoardAssigneeFilter = ""
+									saveViewAndNotify(st, vc, opts)
+								}
+							}
+						}
+					})
+				})
+
+				curPri := resolveBoardPriorityProp(db, *bcfg, cardPropsAll)
+				priName := i18n.T("关闭")
+				if curPri != nil {
+					priName = curPri.Name
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("优先级徽标")).FontSize(12.5).TextColor(pal.Text)
+					pb := ui.Button(c.Key("lay-bpri"), priName).Height(26).Padding(0, 8)
+					pb.PopoverMenuButton(func(m *ui.Menu) {
+						appendColorPropMenuItems(m, db, curPri, bcfg.PriorityPropID, i18n.T("关闭"), opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureBoardConfig(&vc).PriorityPropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, nil)
+					})
+				})
+
+				curBDate := resolveBoardDateProp(db, *bcfg, cardPropsAll)
+				bDateName := i18n.T("关闭")
+				if curBDate != nil {
+					bDateName = curBDate.Name
+				}
+				curBDateID := bcfg.DatePropID
+				if curBDateID == "" && curBDate != nil {
+					curBDateID = curBDate.ID
+				} else if curBDate == nil && curBDateID == "" {
+					curBDateID = database.PropBindNone
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("卡片日期字段")).FontSize(12.5).TextColor(pal.Text)
+					dbtn := ui.Button(c.Key("lay-bdate"), bDateName).Height(26).Padding(0, 8)
+					dbtn.PopoverMenuButton(func(m *ui.Menu) {
+						appendDatePropMenuItems(m, db, curBDateID, true, opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureBoardConfig(&vc).DatePropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultDateProperty(st, db, view, opts)
+						})
+					})
+				})
+
 			case database.ViewGallery:
 				gcfg := ensureGalleryConfig(&view)
 				cardSize := gcfg.CardSize
@@ -1352,38 +1387,56 @@ func layoutPopover(
 
 			case database.ViewCalendar:
 				ccfg := ensureCalendarConfig(&view, db)
-				dateProps := datePropertiesOf(db)
-				dpName := i18n.T("未指定日期属性")
-				for _, p := range dateProps {
-					if p.ID == ccfg.DatePropID {
-						dpName = p.Name
-						break
-					}
+				resolvedDate, _, _ := resolveDateBinding(db, ccfg.DatePropID)
+				curDateID := ccfg.DatePropID
+				if curDateID == "" {
+					curDateID = resolvedDate.ID
 				}
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 					ui.Text(c, i18n.T("日历日期属性")).FontSize(12.5).TextColor(pal.Text)
-					btn := ui.Button(c.Key("lay-cal-prop"), dpName).Height(26).Padding(0, 8)
+					btn := ui.Button(c.Key("lay-cal-prop"), resolvedDate.Name).Height(26).Padding(0, 8)
 					btn.PopoverMenuButton(func(m *ui.Menu) {
-						for _, p := range dateProps {
-							cand := p
-							if m.Item(cand.Name).Checked(cand.ID == ccfg.DatePropID).Chosen() {
-								vc := view.Clone()
-								ensureCalendarConfig(&vc, db).DatePropID = cand.ID
-								saveViewAndNotify(st, vc, opts)
-							}
-						}
+						appendDatePropMenuItems(m, db, curDateID, false, opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureCalendarConfig(&vc, db).DatePropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultDateProperty(st, db, view, opts)
+						})
+					})
+				})
+
+				resolvedColor := resolveColorProp(db, ccfg.ColorPropID)
+				colorName := i18n.T("不按分类着色")
+				if resolvedColor != nil {
+					colorName = resolvedColor.Name
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("分类着色")).FontSize(12.5).TextColor(pal.Text)
+					cbtn := ui.Button(c.Key("lay-cal-color"), colorName).Height(26).Padding(0, 8)
+					cbtn.PopoverMenuButton(func(m *ui.Menu) {
+						appendColorPropMenuItems(m, db, resolvedColor, ccfg.ColorPropID, i18n.T("不按分类着色"), opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureCalendarConfig(&vc, db).ColorPropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultStatusProperty(st, db, view, opts)
+						})
 					})
 				})
 
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 					ui.Text(c, i18n.T("日历模式")).FontSize(12.5).TextColor(pal.Text)
-					ui.Row(c.Key("lay-cal-mode")).Gap(3).Children(func() {
+					ui.Row(c.Key("lay-cal-mode")).Wrap().Gap(3).Children(func() {
 						for _, m := range []struct{ id, label string }{
-							{"month", i18n.T("月")},
+							{"day", i18n.T("日")},
 							{"week", i18n.T("周")},
+							{"month", i18n.T("月")},
+							{"year", i18n.T("年")},
+							{"agenda", i18n.T("日程")},
 						} {
 							cand := m
-							btn := ui.Button(c.Key(cand.id), cand.label).Height(24).Padding(0, 10)
+							btn := ui.Button(c.Key(cand.id), cand.label).Height(24).Padding(0, 8)
 							if ccfg.Mode == cand.id {
 								btn.Background(pal.AccentSoft).TextColor(pal.Accent)
 							}
@@ -1394,6 +1447,41 @@ func layoutPopover(
 							}
 						}
 					})
+				})
+
+				if ccfg.Mode == "year" {
+					yMode := ccfg.YearMode
+					if yMode == "" {
+						yMode = "fixed-week"
+					}
+					ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+						ui.Text(c, i18n.T("年视图布局")).FontSize(12.5).TextColor(pal.Text)
+						ui.Row(c.Key("lay-cal-ymode")).Gap(3).Children(func() {
+							for _, ym := range []struct{ id, label string }{
+								{"fixed-week", i18n.T("按月对齐")},
+								{"year-canvas", i18n.T("连续画布")},
+							} {
+								cand := ym
+								btn := ui.Button(c.Key(cand.id), cand.label).Height(24).Padding(0, 8)
+								if yMode == cand.id {
+									btn.Background(pal.AccentSoft).TextColor(pal.Accent)
+								}
+								if btn.Clicked() && yMode != cand.id {
+									vc := view.Clone()
+									ensureCalendarConfig(&vc, db).YearMode = cand.id
+									saveViewAndNotify(st, vc, opts)
+								}
+							}
+						})
+					})
+				}
+
+				showSidebar := ccfg.ShowSidebar != nil && *ccfg.ShowSidebar
+				renderLayoutSwitch(c, "lay-cal-sidebar", i18n.T("显示侧边栏"), &showSidebar, pal, func(v bool) {
+					vc := view.Clone()
+					val := v
+					ensureCalendarConfig(&vc, db).ShowSidebar = &val
+					saveViewAndNotify(st, vc, opts)
 				})
 
 				showWknd := ccfg.ShowWeekends
@@ -1430,28 +1518,47 @@ func layoutPopover(
 			case database.ViewTimeline:
 				tcfg := ensureTimelineConfig(&view, db)
 				dateProps := datePropertiesOf(db)
-				spName := i18n.T("未指定日期属性")
+				resolvedStart, _, _ := resolveDateBinding(db, tcfg.StartPropID)
+				curStartID := tcfg.StartPropID
+				if curStartID == "" {
+					curStartID = resolvedStart.ID
+				}
 				epName := i18n.T("使用同一日期范围")
 				for _, p := range dateProps {
-					if p.ID == tcfg.StartPropID {
-						spName = p.Name
-					}
 					if p.ID == tcfg.EndPropID && tcfg.EndPropID != "" {
 						epName = p.Name
 					}
 				}
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 					ui.Text(c, i18n.T("开始日期属性")).FontSize(12.5).TextColor(pal.Text)
-					btn := ui.Button(c.Key("lay-tl-start"), spName).Height(26).Padding(0, 8)
+					btn := ui.Button(c.Key("lay-tl-start"), resolvedStart.Name).Height(26).Padding(0, 8)
 					btn.PopoverMenuButton(func(m *ui.Menu) {
-						for _, p := range dateProps {
-							cand := p
-							if m.Item(cand.Name).Checked(cand.ID == tcfg.StartPropID).Chosen() {
-								vc := view.Clone()
-								ensureTimelineConfig(&vc, db).StartPropID = cand.ID
-								saveViewAndNotify(st, vc, opts)
-							}
-						}
+						appendDatePropMenuItems(m, db, curStartID, false, opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureTimelineConfig(&vc, db).StartPropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultDateProperty(st, db, view, opts)
+						})
+					})
+				})
+
+				resolvedTLColor := resolveColorProp(db, tcfg.ColorPropID)
+				tlColorName := i18n.T("不按属性着色")
+				if resolvedTLColor != nil {
+					tlColorName = resolvedTLColor.Name
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("条形配色")).FontSize(12.5).TextColor(pal.Text)
+					cbtn := ui.Button(c.Key("lay-tl-color"), tlColorName).Height(26).Padding(0, 8)
+					cbtn.PopoverMenuButton(func(m *ui.Menu) {
+						appendColorPropMenuItems(m, db, resolvedTLColor, tcfg.ColorPropID, i18n.T("不按属性着色"), opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureTimelineConfig(&vc, db).ColorPropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultStatusProperty(st, db, view, opts)
+						})
 					})
 				})
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
@@ -1740,6 +1847,50 @@ func layoutPopover(
 
 			case database.ViewFeed:
 				fcfg := ensureFeedConfig(&view)
+				feedStatus := resolveFeedStatusProp(db, *fcfg)
+				fsName := i18n.T("关闭")
+				if feedStatus != nil {
+					fsName = feedStatus.Name
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("状态徽标")).FontSize(12.5).TextColor(pal.Text)
+					sb := ui.Button(c.Key("lay-fd-status"), fsName).Height(26).Padding(0, 8)
+					sb.PopoverMenuButton(func(m *ui.Menu) {
+						appendColorPropMenuItems(m, db, feedStatus, fcfg.StatusPropID, i18n.T("关闭"), opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureFeedConfig(&vc).StatusPropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultStatusProperty(st, db, view, opts)
+						})
+					})
+				})
+
+				feedDate := resolveFeedDateProp(db, *fcfg)
+				fdName := i18n.T("关闭")
+				fdID := fcfg.DatePropID
+				if feedDate != nil {
+					fdName = feedDate.Name
+					if fdID == "" {
+						fdID = feedDate.ID
+					}
+				} else if fdID == "" {
+					fdID = database.PropBindNone
+				}
+				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+					ui.Text(c, i18n.T("时间徽标")).FontSize(12.5).TextColor(pal.Text)
+					dbtn := ui.Button(c.Key("lay-fd-date"), fdName).Height(26).Padding(0, 8)
+					dbtn.PopoverMenuButton(func(m *ui.Menu) {
+						appendDatePropMenuItems(m, db, fdID, true, opts.ReadOnly, func(propID string) {
+							vc := view.Clone()
+							ensureFeedConfig(&vc).DatePropID = propID
+							saveViewAndNotify(st, vc, opts)
+						}, func() {
+							addDefaultDateProperty(st, db, view, opts)
+						})
+					})
+				})
+
 				showEx := fcfg.ShowExcerpt
 				showIm := fcfg.ShowImage
 				compact := fcfg.Compact

@@ -296,6 +296,24 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 				return nil
 			}
 			dbs, _ := database.ListSpaceDatabases(d.space.Root)
+			for i := range dbs {
+				if res := a.residentDocument(d.space.ID, dbs[i].RelPath); res != nil && res.loadErr == nil && res.isDatabase() {
+					liveDB := res.dbView.Store.Database()
+					if liveDB != nil {
+						dbs[i].Title = liveDB.Title
+						dbs[i].Icon = liveDB.Icon
+						views := make([]database.SpaceDBViewInfo, 0, len(liveDB.Views))
+						for _, v := range liveDB.Views {
+							views = append(views, database.SpaceDBViewInfo{
+								ID:   v.ID,
+								Name: v.Name,
+								Type: v.Type,
+							})
+						}
+						dbs[i].Views = views
+					}
+				}
+			}
 			return dbs
 		},
 		CreateDatabase:   func(title string) (string, string, string, error) { return a.createEmbeddedDatabaseFor(d, title) },

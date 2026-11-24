@@ -41,6 +41,13 @@ const (
 	PropFormula     PropertyType = "formula"
 )
 
+// Explicit sentinel IDs for view field-slot bindings.
+const (
+	PropBindNone        = "__none__"
+	PropBindEditedTime  = "__edited_time__"
+	PropBindCreatedTime = "__created_time__"
+)
+
 var validPropertyTypes = map[PropertyType]bool{
 	PropTitle:       true,
 	PropText:        true,
@@ -382,30 +389,37 @@ type TableViewConfig struct {
 
 // BoardViewConfig configures Kanban board cards, columns, and swimlanes.
 type BoardViewConfig struct {
-	CardSize      string       `json:"cardSize,omitempty"`    // small, medium, large
-	CoverSource   string       `json:"coverSource,omitempty"` // none, cover, content, prop:<id>
-	FitImage      bool         `json:"fitImage,omitempty"`
-	SubGroup      *GroupConfig `json:"subGroup,omitempty"`
-	HideEmptyCols bool         `json:"hideEmptyCols,omitempty"`
-	ColorColumn   bool         `json:"colorColumn,omitempty"`
-	ShowCount     bool         `json:"showCount,omitempty"`
+	CardSize       string       `json:"cardSize,omitempty"`    // small, medium, large
+	CoverSource    string       `json:"coverSource,omitempty"` // none, cover, content, prop:<id>
+	FitImage       bool         `json:"fitImage,omitempty"`
+	SubGroup       *GroupConfig `json:"subGroup,omitempty"`
+	HideEmptyCols  bool         `json:"hideEmptyCols,omitempty"`
+	ColorColumn    bool         `json:"colorColumn,omitempty"`
+	ShowCount      bool         `json:"showCount,omitempty"`
+	AssigneePropID string       `json:"assigneePropID,omitempty"` // ""=auto, PropBindNone=disabled
+	PriorityPropID string       `json:"priorityPropID,omitempty"` // ""=auto, PropBindNone=disabled
+	DatePropID     string       `json:"datePropID,omitempty"`     // ""=auto, PropBindNone=disabled
 }
 
 // TimelineViewConfig configures Gantt/timeline scale, side table, and dependencies.
 type TimelineViewConfig struct {
 	StartPropID string   `json:"startPropID,omitempty"`
 	EndPropID   string   `json:"endPropID,omitempty"`
-	Zoom        string   `json:"zoom,omitempty"` // hour, day, week, biweek, month, quarter, year
+	ColorPropID string   `json:"colorPropID,omitempty"` // ""=auto, PropBindNone=disabled
+	Zoom        string   `json:"zoom,omitempty"`        // hour, day, week, biweek, month, quarter, year
 	ShowTable   bool     `json:"showTable,omitempty"`
 	TableProps  []string `json:"tableProps,omitempty"`
 	ShowArrows  bool     `json:"showArrows,omitempty"`
 	CascadeMode string   `json:"cascadeMode,omitempty"` // none, maintain, avoid_overlap
 }
 
-// CalendarViewConfig configures monthly/weekly calendar layout.
+// CalendarViewConfig configures Day/Week/Month/Year/Agenda calendar layout.
 type CalendarViewConfig struct {
 	DatePropID   string `json:"datePropID,omitempty"`
-	Mode         string `json:"mode,omitempty"` // month, week
+	ColorPropID  string `json:"colorPropID,omitempty"` // ""=auto, PropBindNone=disabled
+	Mode         string `json:"mode,omitempty"`        // day, week, month, year, agenda
+	YearMode     string `json:"yearMode,omitempty"`    // fixed-week, year-canvas
+	ShowSidebar  *bool  `json:"showSidebar,omitempty"` // nil = 兼容旧配置（默认收起）
 	ShowWeekends bool   `json:"showWeekends,omitempty"`
 	WeekStart    int    `json:"weekStart,omitempty"` // 0=Sunday, 1=Monday
 }
@@ -436,9 +450,11 @@ type ChartViewConfig struct {
 
 // FeedViewConfig configures feed stream cards.
 type FeedViewConfig struct {
-	ShowExcerpt bool `json:"showExcerpt,omitempty"`
-	ShowImage   bool `json:"showImage,omitempty"`
-	Compact     bool `json:"compact,omitempty"`
+	StatusPropID string `json:"statusPropID,omitempty"` // ""=auto, PropBindNone=disabled
+	DatePropID   string `json:"datePropID,omitempty"`   // ""=auto, PropBindNone=disabled
+	ShowExcerpt  bool   `json:"showExcerpt,omitempty"`
+	ShowImage    bool   `json:"showImage,omitempty"`
+	Compact      bool   `json:"compact,omitempty"`
 }
 
 // FormFieldConfig configures a single field in a Form view.
@@ -466,6 +482,7 @@ type ViewConfig struct {
 	ID          string              `json:"id"`
 	Name        string              `json:"name"`
 	Type        ViewType            `json:"type"`
+	Primary     bool                `json:"primary,omitempty"`
 	Icon        string              `json:"icon,omitempty"`
 	Filter      *FilterGroup        `json:"filter,omitempty"`
 	Sorts       []SortRule          `json:"sorts,omitempty"`
@@ -528,6 +545,10 @@ func (v ViewConfig) Clone() ViewConfig {
 	}
 	if v.Calendar != nil {
 		c := *v.Calendar
+		if v.Calendar.ShowSidebar != nil {
+			sb := *v.Calendar.ShowSidebar
+			c.ShowSidebar = &sb
+		}
 		out.Calendar = &c
 	}
 	if v.Gallery != nil {
@@ -676,7 +697,6 @@ func NewDefault(title string, source SourceConfig) *Database {
 	}
 
 	tableID := "view_table"
-	boardID := "view_board"
 	return &Database{
 		Version:    CurrentVersion,
 		ID:         NewID(),
@@ -686,8 +706,9 @@ func NewDefault(title string, source SourceConfig) *Database {
 		Views: []ViewConfig{
 			{
 				ID:         tableID,
-				Name:       "表格",
+				Name:       "表格视图",
 				Type:       ViewTable,
+				Primary:    true,
 				Properties: slices.Clone(vis),
 				OpenMode:   "side",
 				Table: &TableViewConfig{
@@ -696,19 +717,6 @@ func NewDefault(title string, source SourceConfig) *Database {
 					Aggregations: map[string]AggregationType{
 						pTitle.ID: AggCountAll,
 					},
-				},
-			},
-			{
-				ID:         boardID,
-				Name:       "看板",
-				Type:       ViewBoard,
-				Group:      &GroupConfig{PropertyID: pStatus.ID, StatusBy: "option"},
-				Properties: slices.Clone(vis),
-				OpenMode:   "side",
-				Board: &BoardViewConfig{
-					CardSize:    "medium",
-					ColorColumn: true,
-					ShowCount:   true,
 				},
 			},
 		},
@@ -858,6 +866,31 @@ func (d *Database) ViewByID(id string) (*ViewConfig, int) {
 		}
 	}
 	return nil, -1
+}
+
+// PrimaryViewID returns the ID of the database's primary view: the explicitly
+// marked Primary view if present, otherwise the first Table view (for backward
+// compatibility with older .db.md files), otherwise the first view.
+func (d *Database) PrimaryViewID() string {
+	if d == nil || len(d.Views) == 0 {
+		return ""
+	}
+	for _, v := range d.Views {
+		if v.Primary {
+			return v.ID
+		}
+	}
+	for _, v := range d.Views {
+		if v.Type == ViewTable {
+			return v.ID
+		}
+	}
+	return d.Views[0].ID
+}
+
+// IsPrimaryView reports whether viewID is the database's protected primary view.
+func (d *Database) IsPrimaryView(viewID string) bool {
+	return viewID != "" && d.PrimaryViewID() == viewID
 }
 
 // Clone returns a deep copy of d.

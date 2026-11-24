@@ -335,7 +335,8 @@ func (e *Editor) databaseControls(c *ui.Context, o Options) {
 				e.dbStates[id] = st
 				delete(e.dbSyncedView, syncKey)
 			}
-			if _, ok := e.dbSyncedView[syncKey]; !ok {
+			synced, ok := e.dbSyncedView[syncKey]
+			if !ok || (spec.ViewID != "" && synced != spec.ViewID) {
 				if spec.ViewID != "" && db != nil {
 					if _, idx := db.ViewByID(spec.ViewID); idx >= 0 {
 						st.SetActiveView(spec.ViewID)
@@ -349,6 +350,16 @@ func (e *Editor) databaseControls(c *ui.Context, o Options) {
 		if st != nil {
 			if avid := st.ActiveViewID(); avid != "" {
 				curViewID = avid
+			}
+		}
+
+		var boundView *database.ViewConfig
+		if db != nil {
+			if v, idx := db.ViewByID(curViewID); idx >= 0 {
+				boundView = v
+			} else if len(db.Views) > 0 {
+				boundView = &db.Views[0]
+				curViewID = boundView.ID
 			}
 		}
 
@@ -367,11 +378,46 @@ func (e *Editor) databaseControls(c *ui.Context, o Options) {
 			e.updateDatabaseBlockSpec(id, spec, nextSnap)
 		}
 
+		selectEmbeddedView := func(target, viewID string) {
+			if e.ReadOnly || target == "" {
+				return
+			}
+			nextSpec := spec
+			nextSpec.Target = target
+			nextSpec.ViewID = viewID
+			nextSnap := ""
+			if e.databaseSnapshot != nil {
+				nextSnap = strings.TrimSpace(e.databaseSnapshot(target, viewID))
+			} else if target == spec.Target && db != nil && store != nil {
+				nextSnap = database.RenderGFMSnapshot("", db, store.Query(viewID, database.QueryOptions{}))
+			}
+			if target == spec.Target && st != nil {
+				if viewID != "" {
+					st.SetActiveView(viewID)
+				}
+				if e.dbSyncedView == nil {
+					e.dbSyncedView = map[string]string{}
+				}
+				e.dbSyncedView[id+"\x00"+target] = st.ActiveViewID()
+				if nextSpec.ViewID == "" {
+					nextSpec.ViewID = st.ActiveViewID()
+				}
+			} else {
+				if e.dbStates != nil {
+					delete(e.dbStates, id)
+				}
+				if e.dbSyncedView != nil {
+					delete(e.dbSyncedView, id+"\x00"+spec.Target)
+				}
+			}
+			e.updateDatabaseBlockSpec(id, nextSpec, nextSnap)
+		}
+
 		card := ui.Column(c.Key("inline-db:"+id)).Absolute().Left(box.X).Top(box.Y).Size(box.W, box.H).
 			Radius(10).Background(t.Background).Border(1, t.Border).
 			Shadow(0, 2, 12, 0, e.page.MathShadow).Clip()
 		card.Children(func() {
-			// Compact card header.
+			// Compact card header bound to a single linked view.
 			hdr := ui.Row(c.Key("hdr")).Height(34).Padding(0, 8, 0, 12).Gap(6).AlignItems(ui.Center).
 				Background(t.Background.Mix(t.Text, 0.025)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border)
 			hdr.ContextMenu(func(m *ui.Menu) {
@@ -398,37 +444,69 @@ func (e *Editor) databaseControls(c *ui.Context, o Options) {
 			hdr.Children(func() {
 				ui.Icon(c, iconDatabase).FontSize(13.5).TextColor(t.Accent)
 				ui.Text(c, displayTitle).FontSize(12.5).FontWeight(600).TextColor(t.Text).SingleLine().MinWidth(0)
+				if boundView != nil {
+					ui.Text(c, "/").FontSize(11.5).TextColor(t.TextMuted).NoWrap()
+					ui.Icon(c, dbview.ViewIcon(boundView.Type)).FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, embeddedViewDisplayName(boundView.Name, boundView.Type)).FontSize(12.5).FontWeight(500).TextColor(t.Text).SingleLine().MinWidth(0)
+				}
 				ui.Box(c).Padding(2, 6).Radius(4).Background(t.Accent.Alpha(0.10)).Shrink(0).Children(func() {
 					ui.Text(c, i18n.T("关联视图")).FontSize(10.5).FontWeight(500).TextColor(t.Accent).SingleLine()
 				})
 				ui.Spacer(c)
 
-				if !e.ReadOnly && e.listDatabases != nil {
-					srcBtn := dbHeaderBtn(c, "src", nil, i18n.T("切换数据源"), "", t, e.page)
+				if !e.ReadOnly && (db != nil || e.listDatabases != nil) {
+					srcBtn := dbHeaderBtn(c, "src", nil, i18n.T("切换视图"), "", t, e.page)
 					srcBtn.PopoverMenuButton(func(m *ui.Menu) {
-						dbs := e.listDatabases()
-						if len(dbs) == 0 {
-							m.Item(i18n.T("空间中暂无其他数据库")).Disabled(true)
-							return
-						}
-						for _, cand := range dbs {
-							dbi := cand
-							label := dbi.Title
-							if dbi.RelPath != "" {
-								label = dbi.Title + " · " + dbi.RelPath
+						hasCurViews := db != nil && len(db.Views) > 0
+						if hasCurViews {
+							for _, v := range db.Views {
+								vc := v
+								if m.Item(embeddedViewDisplayName(vc.Name, vc.Type)).Checked(vc.ID == curViewID).Chosen() {
+									selectEmbeddedView(spec.Target, vc.ID)
+								}
 							}
-							if m.Item(label).Checked(dbi.RelPath == spec.Target).Chosen() {
-								nextSpec := spec
-								nextSpec.Target = dbi.RelPath
-								nextSpec.ViewID = ""
-								nextSnap := ""
-								if e.databaseSnapshot != nil {
-									nextSnap = e.databaseSnapshot(dbi.RelPath, "")
+						}
+						if e.listDatabases != nil {
+							dbs := e.listDatabases()
+							var otherDBs []database.SpaceDBInfo
+							for _, cand := range dbs {
+								if hasCurViews && cand.RelPath == spec.Target {
+									continue
 								}
-								if e.dbStates != nil {
-									delete(e.dbStates, id)
+								otherDBs = append(otherDBs, cand)
+							}
+							if len(otherDBs) > 0 {
+								renderDBItems := func(targetMenu *ui.Menu) {
+									for _, cand := range otherDBs {
+										dbi := cand
+										if len(dbi.Views) > 0 {
+											targetMenu.Submenu(dbi.Title, func(vm *ui.Menu) {
+												for _, v := range dbi.Views {
+													vv := v
+													if vm.Item(embeddedViewDisplayName(vv.Name, vv.Type)).Checked(dbi.RelPath == spec.Target && vv.ID == curViewID).Chosen() {
+														selectEmbeddedView(dbi.RelPath, vv.ID)
+													}
+												}
+											})
+										} else {
+											label := dbi.Title
+											if dbi.RelPath != "" {
+												label = dbi.Title + " · " + dbi.RelPath
+											}
+											if targetMenu.Item(label).Checked(dbi.RelPath == spec.Target).Chosen() {
+												selectEmbeddedView(dbi.RelPath, "")
+											}
+										}
+									}
 								}
-								e.updateDatabaseBlockSpec(id, nextSpec, nextSnap)
+								if hasCurViews {
+									m.Separator()
+									m.Submenu(i18n.T("其他数据库"), renderDBItems)
+								} else {
+									renderDBItems(m)
+								}
+							} else if !hasCurViews {
+								m.Item(i18n.T("空间中暂无其他数据库")).Disabled(true)
 							}
 						}
 					})
@@ -452,10 +530,11 @@ func (e *Editor) databaseControls(c *ui.Context, o Options) {
 				}
 			})
 
-			// Live embedded dbview body or recovery empty state.
+			// Live embedded dbview body (single linked view without multi-view tab bar) or recovery empty state.
 			if store != nil && st != nil {
 				embOpts := dbOpts
 				embOpts.Embedded = true
+				embOpts.HideViewTabs = true
 				if e.ReadOnly {
 					embOpts.ReadOnly = true
 				}
@@ -499,15 +578,17 @@ func (e *Editor) databaseControls(c *ui.Context, o Options) {
 								pickBtn.PopoverMenuButton(func(m *ui.Menu) {
 									for _, cand := range e.listDatabases() {
 										dbi := cand
-										if m.Item(dbi.Title + " · " + dbi.RelPath).Chosen() {
-											nextSpec := spec
-											nextSpec.Target = dbi.RelPath
-											nextSpec.ViewID = ""
-											nextSnap := ""
-											if e.databaseSnapshot != nil {
-												nextSnap = e.databaseSnapshot(dbi.RelPath, "")
-											}
-											e.updateDatabaseBlockSpec(id, nextSpec, nextSnap)
+										if len(dbi.Views) > 0 {
+											m.Submenu(dbi.Title, func(vm *ui.Menu) {
+												for _, v := range dbi.Views {
+													vv := v
+													if vm.Item(embeddedViewDisplayName(vv.Name, vv.Type)).Chosen() {
+														selectEmbeddedView(dbi.RelPath, vv.ID)
+													}
+												}
+											})
+										} else if m.Item(dbi.Title + " · " + dbi.RelPath).Chosen() {
+											selectEmbeddedView(dbi.RelPath, "")
 										}
 									}
 								})
@@ -586,6 +667,16 @@ func dbHeaderBtn(c *ui.Context, key string, icon *ui.SVG, label, tip string, t *
 	return btn
 }
 
+func embeddedViewDisplayName(name string, vt database.ViewType) string {
+	if s := strings.TrimSpace(name); s != "" {
+		return s
+	}
+	if spec, ok := dbview.ViewSpecFor(vt); ok {
+		return spec.Label()
+	}
+	return string(vt)
+}
+
 func (e *Editor) databasePickerControl(c *ui.Context, surface ui.Element, o Options) {
 	if !e.dbPickerOpen || e.ReadOnly {
 		return
@@ -595,8 +686,8 @@ func (e *Editor) databasePickerControl(c *ui.Context, surface ui.Element, o Opti
 	caret, _, _ := e.BoundsForRange(e.Selection().Range)
 	windowW, windowH := c.Size()
 	anchor := ui.Rect{X: bounds.X + caret.X, Y: bounds.Y + caret.Y, W: caret.W, H: caret.H}
-	const pickerW = float32(300)
-	x, y, maxH := placeMenu(anchor, pickerW, 280, 4, windowW, windowH)
+	const pickerW = float32(320)
+	x, y, maxH := placeMenu(anchor, pickerW, 320, 4, windowW, windowH)
 
 	var dbs []database.SpaceDBInfo
 	if e.listDatabases != nil {
@@ -614,7 +705,7 @@ func (e *Editor) databasePickerControl(c *ui.Context, surface ui.Element, o Opti
 			Padding(8).Gap(6)
 		e.popover(c, panel).Children(func() {
 			in := ui.TextInput(c.Key("db-pick-q"), &e.dbPickerQuery).
-				Placeholder(i18n.T("搜索要嵌入的数据库…")).Label(i18n.T("搜索要嵌入的数据库")).
+				Placeholder(i18n.T("搜索要关联的数据库或视图…")).Label(i18n.T("搜索要关联的数据库或视图")).
 				Height(30).Padding(4, 8).Radius(6).Background(t.Background).TextColor(t.Text).AutoFocus()
 			if in.Shortcut(0, ui.KeyEscape) {
 				e.dbPickerOpen = false
@@ -622,38 +713,91 @@ func (e *Editor) databasePickerControl(c *ui.Context, surface ui.Element, o Opti
 				return
 			}
 
+			type pickEntry struct {
+				dbi    database.SpaceDBInfo
+				viewID string
+			}
+			type pickGroup struct {
+				dbi   database.SpaceDBInfo
+				views []database.SpaceDBViewInfo
+			}
 			q := strings.ToLower(strings.TrimSpace(e.dbPickerQuery))
-			var filtered []database.SpaceDBInfo
+			var groups []pickGroup
+			var flatFirst *pickEntry
 			for _, cand := range dbs {
-				if q == "" || strings.Contains(strings.ToLower(cand.Title+" "+cand.RelPath), q) {
-					filtered = append(filtered, cand)
+				dbMatch := q == "" || strings.Contains(strings.ToLower(cand.Title+" "+cand.RelPath), q)
+				if len(cand.Views) > 0 {
+					var matched []database.SpaceDBViewInfo
+					for _, v := range cand.Views {
+						vn := embeddedViewDisplayName(v.Name, v.Type)
+						if dbMatch || strings.Contains(strings.ToLower(vn), q) {
+							matched = append(matched, v)
+						}
+					}
+					if len(matched) > 0 {
+						groups = append(groups, pickGroup{dbi: cand, views: matched})
+						if flatFirst == nil {
+							flatFirst = &pickEntry{dbi: cand, viewID: matched[0].ID}
+						}
+					}
+				} else if dbMatch {
+					groups = append(groups, pickGroup{dbi: cand})
+					if flatFirst == nil {
+						flatFirst = &pickEntry{dbi: cand}
+					}
 				}
 			}
 
-			insertDB := func(dbi database.SpaceDBInfo) {
+			insertTarget := func(relPath, viewID string) {
 				e.dbPickerOpen = false
 				e.dbPickerQuery = ""
 				snap := ""
 				if e.databaseSnapshot != nil {
-					snap = e.databaseSnapshot(dbi.RelPath, "")
+					snap = e.databaseSnapshot(relPath, viewID)
 				}
-				e.InsertDatabaseEmbed(dbi.RelPath, "", snap, dbDefaultInlineH)
+				e.InsertDatabaseEmbed(relPath, viewID, snap, dbDefaultInlineH)
 				e.RequestFocus = true
 			}
 
-			if in.Submitted() && len(filtered) > 0 {
-				insertDB(filtered[0])
+			if in.Submitted() && flatFirst != nil {
+				insertTarget(flatFirst.dbi.RelPath, flatFirst.viewID)
 				return
 			}
 
-			ui.Scroll(c.Key("db-pick-scroll")).MaxHeight(176).MinWidth(0).Children(func() {
+			ui.Scroll(c.Key("db-pick-scroll")).MaxHeight(216).MinWidth(0).Children(func() {
 				ui.Column(c).Gap(2).Children(func() {
-					if len(filtered) == 0 {
-						ui.Text(c, i18n.T("没有匹配的数据库")).FontSize(12.5).TextColor(t.TextMuted).Padding(6, 4)
+					if len(groups) == 0 {
+						ui.Text(c, i18n.T("没有匹配的视图")).FontSize(12.5).TextColor(t.TextMuted).Padding(6, 4)
 						return
 					}
-					for _, cand := range filtered {
-						dbi := cand
+					for _, grp := range groups {
+						dbi := grp.dbi
+						if len(grp.views) > 0 {
+							ui.Row(c.Key("pick-hdr:"+dbi.RelPath)).Height(24).Padding(2, 8, 0, 8).Gap(6).AlignItems(ui.Center).Children(func() {
+								ui.Icon(c, iconDatabase).FontSize(12).TextColor(t.Accent)
+								ui.Text(c, dbi.Title).FontSize(11.5).FontWeight(600).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+							})
+							for _, v := range grp.views {
+								vv := v
+								vName := embeddedViewDisplayName(vv.Name, vv.Type)
+								row := ui.Row(c.Key("pick:"+dbi.RelPath+"/"+vv.ID)).Height(28).Padding(0, 8, 0, 22).Radius(6).
+									Gap(7).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+									Role(ui.RoleOption).Label(dbi.Title + " / " + vName)
+								if row.Hovered() {
+									row.Background(e.page.Hover)
+								}
+								row.Children(func() {
+									ui.Icon(c, dbview.ViewIcon(vv.Type)).FontSize(13).TextColor(t.TextMuted)
+									ui.Text(c, vName).FontSize(12.5).TextColor(t.Text).SingleLine().Grow(1).MinWidth(0)
+								})
+								if row.Clicked() {
+									insertTarget(dbi.RelPath, vv.ID)
+									return
+								}
+							}
+							continue
+						}
+
 						row := ui.Row(c.Key("pick:"+dbi.RelPath)).Height(30).Padding(0, 8).Radius(6).
 							Gap(8).AlignItems(ui.Center).Cursor(ui.CursorPointer).
 							Role(ui.RoleOption).Label(dbi.Title)
@@ -666,7 +810,7 @@ func (e *Editor) databasePickerControl(c *ui.Context, surface ui.Element, o Opti
 							ui.Text(c, dbi.RelPath).FontSize(11).TextColor(t.TextMuted).SingleLine()
 						})
 						if row.Clicked() {
-							insertDB(dbi)
+							insertTarget(dbi.RelPath, "")
 							return
 						}
 					}

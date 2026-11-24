@@ -3,6 +3,7 @@ package dbview
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/database"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -25,6 +26,7 @@ func View(c *ui.Context, st *State, opts Options) {
 	if view == nil {
 		return
 	}
+	st.Motion.beginFrame(c)
 
 	root := ui.Column(c.Key("db-root")).Grow(1).MinWidth(0).MinHeight(0).
 		Background(pal.Paper).Focusable().Role(ui.RoleMain).Label(db.Title).Bind(&st.RootHandle)
@@ -68,61 +70,56 @@ func View(c *ui.Context, st *State, opts Options) {
 	})
 
 	root.Children(func() {
-		// 1. Database Header (title + record count).
+		// 1. Unified Database Header (title, count pill, search & primary create).
 		if !opts.Embedded {
-			renderDatabaseHeader(c, st, db, res, opts, pal)
+			renderDatabaseHeader(c, st, db, *view, res, opts, pal)
 		}
 
-		// 2. View Tabs + Toolbar Row.
+		// 2. Sleek Utility Ribbon (embedded view tabs + filter/sort/group/props/layout).
 		renderViewToolbar(c, st, db, *view, opts, pal)
 
-		// 3. Bulk Selection Action Bar.
+		// 3. Animated Bulk Selection Action Bar.
 		if len(st.SelectedIDs) > 0 && !opts.ReadOnly {
 			renderBulkActionBar(c, st, db, res, opts, pal)
 		}
 
-		ui.Box(c).Height(1).Background(pal.Border)
+		ui.Box(c).Height(1).Background(pal.Border.Alpha(0.75))
 
-		// 4. Active View Body.
-		switch view.Type {
-		case database.ViewTable:
-			tableView(c, st, *view, db, res, opts, pal)
-		case database.ViewBoard:
-			boardView(c, st, *view, db, res, opts, pal)
-		case database.ViewList:
-			listView(c, st, *view, db, res, opts, pal)
-		case database.ViewGallery:
-			galleryView(c, st, *view, db, res, opts, pal)
-		case database.ViewCalendar:
-			calendarView(c, st, *view, db, res, opts, pal)
-		case database.ViewTimeline:
-			timelineView(c, st, *view, db, res, opts, pal)
-		case database.ViewChart:
-			chartView(c, st, *view, db, res, opts, pal)
-		case database.ViewFeed:
-			feedView(c, st, *view, db, res, opts, pal)
-		case database.ViewForm:
-			formView(c, st, *view, db, res, opts, pal)
-		default:
-			renderPlannedViewPlaceholder(c, st, *view, db, pal)
-		}
+		// 4. Active View Body with soft cross-fade glide on view switch.
+		stage := ui.Column(c.Key("view-stage:" + view.ID)).Grow(1).MinWidth(0).MinHeight(0).
+			Transition(ui.ElementTransition{
+				Duration: 150 * time.Millisecond,
+				Ease:     dbEaseOut,
+				Enter:    &ui.Motion{Y: 5, Opacity: 0.78},
+			})
+		stage.Children(func() {
+			if spec, ok := ViewSpecFor(view.Type); ok && spec.Render != nil {
+				spec.Render(c, st, *view, db, res, opts, pal)
+			} else {
+				renderPlannedViewPlaceholder(c, st, *view, db, pal)
+			}
+		})
 	})
+
+	// Paint lifted floating drag previews and smooth spring drop settles on top.
+	st.Motion.finishFrame(c, pal)
 }
 
-func renderDatabaseHeader(c *ui.Context, st *State, db *database.Database, res *database.QueryResult, opts Options, pal Palette) {
-	ui.Row(c.Key("db-header")).Padding(18, 22, 10, 22).Gap(10).AlignItems(ui.Center).Children(func() {
+func renderDatabaseHeader(c *ui.Context, st *State, db *database.Database, view database.ViewConfig, res *database.QueryResult, opts Options, pal Palette) {
+	ui.Row(c.Key("db-header")).Padding(14, 22, 6, 22).Gap(10).AlignItems(ui.Center).Children(func() {
 		if db.Icon != "" {
 			ui.Text(c, db.Icon).FontSize(22).NoWrap()
 		} else {
-			ui.Box(c).Size(28, 28).Radius(7).Background(pal.AccentSoft).Center().Children(func() {
-				ui.Icon(c, iconViewTable).FontSize(16).TextColor(pal.Accent)
+			ui.Box(c).Size(30, 30).Radius(8).Background(pal.AccentSoft).
+				Border(1, pal.Accent.Alpha(0.18)).Center().Shrink(0).Children(func() {
+				ui.Icon(c, ViewIcon(view.Type)).FontSize(15).TextColor(pal.Accent)
 			})
 		}
 
 		if st.EditingTitle && !opts.ReadOnly {
 			in := ui.TextInput(c.Key("db-title-in"), &st.TitleDraft).
-				FontSize(20).FontWeight(700).TextColor(pal.Text).
-				Grow(1).MinWidth(120).Height(34).Padding(2, 8).Radius(6).
+				FontSize(19).FontWeight(700).TextColor(pal.Text).
+				Grow(1).MinWidth(120).Height(34).Padding(2, 8).Radius(7).
 				Background(pal.Surface).Border(1, pal.Accent).AutoFocus().Label(i18n.T("数据库名称"))
 			if st.TitleFocusPending {
 				in.Focus()
@@ -138,13 +135,14 @@ func renderDatabaseHeader(c *ui.Context, st *State, db *database.Database, res *
 				}
 			}
 		} else {
-			titleEl := ui.Row(c.Key("db-title")).Padding(2, 6).Radius(6).Cursor(ui.CursorPointer).
-				AlignItems(ui.Center).Gap(8)
+			titleEl := ui.Row(c.Key("db-title")).Padding(2, 6).Radius(7).Cursor(ui.CursorPointer).
+				AlignItems(ui.Center).Gap(8).Shrink(1).MinWidth(0).
+				Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 			if !opts.ReadOnly && titleEl.Hovered() {
 				titleEl.Background(pal.RowHover)
 			}
 			titleEl.Children(func() {
-				ui.Text(c, db.Title).FontSize(20).FontWeight(700).TextColor(pal.Text).SingleLine()
+				ui.Text(c, db.Title).FontSize(19).FontWeight(700).TextColor(pal.Text).SingleLine()
 			})
 			if titleEl.Clicked() && !opts.ReadOnly {
 				st.EditingTitle = true
@@ -153,138 +151,247 @@ func renderDatabaseHeader(c *ui.Context, st *State, db *database.Database, res *
 			}
 		}
 
-		ui.Box(c).Padding(2, 8).Radius(10).Background(pal.Surface).Children(func() {
-			ui.Text(c, fmt.Sprintf(i18n.T("共 %d 条"), res.TotalCount)).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+		ui.Box(c).Height(22).Padding(0, 8).Radius(999).Background(pal.Surface).
+			Border(1, pal.Border.Alpha(0.75)).Center().Shrink(0).Children(func() {
+			ui.Text(c, fmt.Sprintf(i18n.T("共 %d 条"), res.TotalCount)).FontSize(11.5).FontWeight(500).TextColor(pal.TextMuted).NoWrap()
 		})
 		ui.Spacer(c)
+
+		renderHeaderRightActions(c, st, db, view, opts, pal)
+	})
+}
+
+func renderHeaderRightActions(c *ui.Context, st *State, db *database.Database, view database.ViewConfig, opts Options, pal Palette) {
+	ui.Row(c.Key("db-right-acts")).Gap(6).AlignItems(ui.Center).Shrink(0).Children(func() {
+		if st.SearchOpen {
+			wrap := ui.Box(c.Key("db-search-wrap")).
+				Transition(ui.ElementTransition{
+					Duration:     180 * time.Millisecond,
+					Ease:         dbEaseOut,
+					ExitDuration: 120 * time.Millisecond,
+					Enter:        &ui.Motion{X: 10, Collapse: true, Opacity: 0},
+					Exit:         &ui.Motion{X: 8, Collapse: true, Opacity: 0},
+				})
+			wrap.Children(func() {
+				sf := ui.SearchField(c.Key("db-search"), &st.SearchQuery).
+					Placeholder(i18n.T("搜索记录…")).Label(i18n.T("搜索记录")).Width(172).Height(28)
+				if st.searchFocusPending {
+					sf.Focus()
+					st.searchFocusPending = false
+				}
+				if sf.Shortcut(0, ui.KeyEscape) {
+					st.SearchQuery = ""
+					st.SearchOpen = false
+				}
+			})
+		}
+		srBtn := toolbarIconBtn(c, "tb-search", iconSearch, i18n.T("搜索"), false, st.SearchOpen || st.SearchQuery != "", pal)
+		if srBtn.Clicked() {
+			st.SearchOpen = !st.SearchOpen
+			if st.SearchOpen {
+				st.searchFocusPending = true
+			} else {
+				st.SearchQuery = ""
+			}
+		}
+
+		if !opts.ReadOnly {
+			renderUnifiedNewButton(c, st, db, view, opts, pal)
+		}
+	})
+}
+
+func renderUnifiedNewButton(c *ui.Context, st *State, db *database.Database, view database.ViewConfig, opts Options, pal Palette) {
+	split := ui.Row(c.Key("db-new-split")).Height(29).Radius(8).AlignItems(ui.Center).Shrink(0).
+		Background(pal.Accent).Shadow(0, 1, 3, 0, pal.Accent.Alpha(0.28)).Clip()
+	split.Children(func() {
+		newBtn := ui.Row(c.Key("db-new-rec")).Height(29).Padding(0, 11).Gap(4).AlignItems(ui.Center).
+			Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label("+ " + i18n.T("新建")).
+			Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
+		if newBtn.Hovered() {
+			newBtn.Background(ui.RGBA(255, 255, 255, 0.12))
+		}
+		applyPressSpring(newBtn, false)
+		newBtn.Children(func() {
+			ui.Text(c, "+ "+i18n.T("新建")).FontSize(12.5).FontWeight(500).TextColor(ui.RGB(255, 255, 255)).NoWrap()
+		})
+		if newBtn.Clicked() {
+			createRecordWithDefaults(st, db, "", database.EmptyValue(), opts)
+		}
+
+		ui.Box(c).Width(1).Height(15).Background(ui.RGBA(255, 255, 255, 0.24)).Shrink(0)
+
+		tplBtn := ui.Box(c.Key("db-tpl-menu")).Size(25, 29).Center().
+			Cursor(ui.CursorPointer).Focusable().
+			Role(ui.RoleButton).Label(i18n.T("模板菜单")).Tooltip(i18n.T("记录模板")).
+			Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
+		if tplBtn.Hovered() || st.TemplatesOpen {
+			tplBtn.Background(ui.RGBA(255, 255, 255, 0.16))
+		}
+		applyPressSpring(tplBtn, false)
+		tplBtn.Children(func() {
+			ui.Icon(c, iconChevronDown).FontSize(12).TextColor(ui.RGB(255, 255, 255))
+		})
+		if tplBtn.Clicked() {
+			open := !st.TemplatesOpen
+			st.CloseToolbarPopovers()
+			st.TemplatesOpen = open
+			st.EditingTemplateID = ""
+		}
+		if st.TemplatesOpen {
+			templatesPopover(c, tplBtn, st, db, view, opts, pal)
+		}
 	})
 }
 
 func renderViewToolbar(c *ui.Context, st *State, db *database.Database, view database.ViewConfig, opts Options, pal Palette) {
-	ui.Row(c.Key("db-toolbar")).Padding(4, 18, 8, 18).Gap(8).AlignItems(ui.Center).Children(func() {
-		// Left: View Tabs.
-		tabsScroll := ui.ScrollHorizontal(c.Key("view-tabs")).TrackScroll(&st.TabScroll).Grow(1).MinWidth(0).AlignItems(ui.Center)
-		tabsScroll.Children(func() {
-			ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-				for _, v := range db.Views {
-					vc := v
-					active := vc.ID == view.ID
-					renaming := st.RenameViewID == vc.ID
+	padTop := float32(2)
+	if opts.Embedded {
+		padTop = 6
+	}
+	ui.Row(c.Key("db-toolbar")).Wrap().Padding(padTop, 22, 8, 22).Gap(8).AlignItems(ui.Center).Children(func() {
+		// Left: View Tabs (hidden in full-page workspace where views live in the left sidebar tree).
+		if !opts.HideViewTabs {
+			tabsScroll := ui.ScrollHorizontal(c.Key("view-tabs")).TrackScroll(&st.TabScroll).Grow(1).MinWidth(160).AlignItems(ui.Center)
+			tabsScroll.Children(func() {
+				ui.Row(c).Gap(3).AlignItems(ui.Center).Children(func() {
+					for _, v := range db.Views {
+						vc := v
+						active := vc.ID == view.ID
+						renaming := st.RenameViewID == vc.ID
 
-					if renaming {
-						in := ui.TextInput(c.Key("vren:"+vc.ID), &st.RenameViewText).
-							Width(120).Height(28).Padding(2, 8).Radius(6).
-							Background(pal.Surface).Border(1, pal.Accent).TextColor(pal.Text).AutoFocus().Label(i18n.T("视图名称"))
-						if st.RenameViewPending {
-							in.Focus()
-							st.RenameViewPending = false
-						}
-						if in.Shortcut(0, ui.KeyEscape) {
-							st.RenameViewID = ""
-						} else if in.Submitted() || (!in.Focused() && !st.RenameViewPending) {
-							next := strings.TrimSpace(st.RenameViewText)
-							st.RenameViewID = ""
-							if next != "" && next != vc.Name {
-								updated := vc.Clone()
-								updated.Name = next
-								saveViewAndNotify(st, updated, opts)
+						if renaming {
+							in := ui.TextInput(c.Key("vren:"+vc.ID), &st.RenameViewText).
+								Width(120).Height(28).Padding(2, 8).Radius(6).
+								Background(pal.Surface).Border(1, pal.Accent).TextColor(pal.Text).AutoFocus().Label(i18n.T("视图名称"))
+							if st.RenameViewPending {
+								in.Focus()
+								st.RenameViewPending = false
 							}
+							if in.Shortcut(0, ui.KeyEscape) {
+								st.RenameViewID = ""
+							} else if in.Submitted() || (!in.Focused() && !st.RenameViewPending) {
+								next := strings.TrimSpace(st.RenameViewText)
+								st.RenameViewID = ""
+								if next != "" && next != vc.Name {
+									updated := vc.Clone()
+									updated.Name = next
+									saveViewAndNotify(st, updated, opts)
+								}
+							}
+							continue
 						}
-						continue
-					}
 
-					tab := ui.Row(c.Key("vtab:"+vc.ID)).Height(30).Padding(0, 10).Radius(7).Gap(6).
-						AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
-						Role(ui.RoleTab).Selected(active).Label(vc.Name)
-					switch {
-					case active:
-						tab.Background(pal.AccentSoft)
-					case tab.Hovered():
-						tab.Background(pal.RowHover)
-					}
-					tab.Children(func() {
-						ink := pal.TextMuted
-						if active {
-							ink = pal.Accent
+						tab := ui.Row(c.Key("vtab:"+vc.ID)).Height(29).Padding(0, 10).Radius(8).Gap(6).
+							AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
+							Role(ui.RoleTab).Selected(active).Label(vc.Name).
+							Background(ui.Transparent).
+							Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
+						if !active && tab.Hovered() {
+							tab.Background(pal.RowHover)
 						}
-						ui.Icon(c, ViewIcon(vc.Type)).FontSize(13).TextColor(ink)
-						lbl := ui.Text(c, vc.Name).FontSize(13).SingleLine()
-						if active {
-							lbl.FontWeight(600).TextColor(pal.Accent)
-						} else {
-							lbl.TextColor(pal.TextMuted)
-						}
-					})
-					if tab.Clicked() {
-						st.SetActiveView(vc.ID)
-						if opts.OnChanged != nil {
-							opts.OnChanged(nil)
-						}
-					}
-					tab.ContextMenu(func(m *ui.Menu) {
-						if !opts.ReadOnly {
-							if m.Item(i18n.T("重命名视图…")).Chosen() {
-								st.RenameViewID = vc.ID
-								st.RenameViewText = vc.Name
-								st.RenameViewPending = true
+						applyPressSpring(tab, false)
+						tab.Children(func() {
+							if active {
+								ui.Box(c.Key("vtab-pill")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(8).
+									Background(pal.AccentSoft).Border(1, pal.Accent.Alpha(0.18)).
+									IgnoreInput(true).ZIndex(0).
+									Transition(ui.ElementTransition{
+										Animation: &dbSpringSnappy,
+										Match:     viewTabPillMatch{},
+									})
 							}
-							if m.Item(i18n.T("复制视图")).Chosen() {
-								if _, err := st.Store.DuplicateView(vc.ID); err == nil && opts.OnChanged != nil {
-									opts.OnChanged(nil)
-								}
+							ink := pal.TextMuted
+							if active {
+								ink = pal.Accent
 							}
-							m.Submenu(i18n.T("默认打开方式"), func(sub *ui.Menu) {
-								curMode := vc.OpenMode
-								if curMode == "" {
-									curMode = OpenSidePeek
+							ui.Icon(c, ViewIcon(vc.Type)).FontSize(13).TextColor(ink).ZIndex(1)
+							lbl := ui.Text(c, vc.Name).FontSize(12.5).SingleLine().ZIndex(1)
+							if active {
+								lbl.FontWeight(600).TextColor(pal.Accent)
+							} else {
+								lbl.TextColor(pal.TextMuted)
+							}
+						})
+						if tab.Clicked() {
+							st.SetActiveView(vc.ID)
+							if !st.LocalView && opts.OnChanged != nil {
+								opts.OnChanged(nil)
+							}
+						}
+						isPrimary := db.IsPrimaryView(vc.ID)
+						tab.ContextMenu(func(m *ui.Menu) {
+							if !opts.ReadOnly {
+								if m.Item(i18n.T("重命名视图…")).Chosen() {
+									st.RenameViewID = vc.ID
+									st.RenameViewText = vc.Name
+									st.RenameViewPending = true
 								}
-								for _, om := range []struct{ id, label string }{
-									{OpenSidePeek, i18n.T("侧边预览")},
-									{OpenCenterPeek, i18n.T("居中弹窗")},
-									{OpenFullPage, i18n.T("整页打开")},
-								} {
-									mode := om
-									if sub.Item(mode.label).Checked(curMode == mode.id).Chosen() {
-										updated := vc.Clone()
-										updated.OpenMode = mode.id
-										saveViewAndNotify(st, updated, opts)
-									}
-								}
-							})
-							if len(db.Views) > 1 {
-								m.Separator()
-								if m.Item(i18n.T("删除视图")).Chosen() {
-									if err := st.Store.DeleteView(vc.ID); err == nil && opts.OnChanged != nil {
+								if m.Item(i18n.T("复制视图")).Chosen() {
+									if _, err := st.Store.DuplicateView(vc.ID); err == nil && opts.OnChanged != nil {
 										opts.OnChanged(nil)
 									}
 								}
+								m.Submenu(i18n.T("默认打开方式"), func(sub *ui.Menu) {
+									curMode := vc.OpenMode
+									if curMode == "" {
+										curMode = OpenSidePeek
+									}
+									for _, om := range []struct{ id, label string }{
+										{OpenSidePeek, i18n.T("侧边预览")},
+										{OpenCenterPeek, i18n.T("居中弹窗")},
+										{OpenFullPage, i18n.T("整页打开")},
+									} {
+										mode := om
+										if sub.Item(mode.label).Checked(curMode == mode.id).Chosen() {
+											updated := vc.Clone()
+											updated.OpenMode = mode.id
+											saveViewAndNotify(st, updated, opts)
+										}
+									}
+								})
+								if len(db.Views) > 1 && !isPrimary {
+									m.Separator()
+									if m.Item(i18n.T("删除视图")).Chosen() {
+										if err := st.Store.DeleteView(vc.ID); err == nil && opts.OnChanged != nil {
+											opts.OnChanged(nil)
+										}
+									}
+								}
 							}
+						})
+					}
+
+					if !opts.ReadOnly {
+						addViewBtn := ui.Box(c.Key("add-view-btn")).Size(28, 28).Radius(7).Center().
+							Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(i18n.T("新建视图")).Tooltip(i18n.T("新建视图"))
+						if addViewBtn.Hovered() || st.NewViewOpen {
+							addViewBtn.Background(pal.RowHover)
 						}
-					})
-				}
-
-				if !opts.ReadOnly {
-					addViewBtn := ui.Box(c.Key("add-view-btn")).Size(28, 28).Radius(7).Center().
-						Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(i18n.T("新建视图")).Tooltip(i18n.T("新建视图"))
-					if addViewBtn.Hovered() || st.NewViewOpen {
-						addViewBtn.Background(pal.RowHover)
+						addViewBtn.Children(func() { ui.Icon(c, iconPlus).FontSize(14).TextColor(pal.TextMuted) })
+						if addViewBtn.Clicked() {
+							open := !st.NewViewOpen
+							st.CloseToolbarPopovers()
+							st.NewViewOpen = open
+							st.NewViewName = ""
+							st.NewViewType = database.ViewTimeline
+						}
+						if st.NewViewOpen {
+							newViewPopover(c, addViewBtn, st, db, opts, pal)
+						}
 					}
-					addViewBtn.Children(func() { ui.Icon(c, iconPlus).FontSize(14).TextColor(pal.TextMuted) })
-					if addViewBtn.Clicked() {
-						open := !st.NewViewOpen
-						st.CloseToolbarPopovers()
-						st.NewViewOpen = open
-						st.NewViewName = ""
-					}
-					if st.NewViewOpen {
-						newViewPopover(c, addViewBtn, st, db, opts, pal)
-					}
-				}
+				})
 			})
-		})
+		}
 
-		// Right: Undo/Redo, Filter, Sort, Group, Properties, Search, New Record.
-		ui.Row(c.Key("tb-actions")).Gap(4).AlignItems(ui.Center).Shrink(0).Children(func() {
+		// Toolbar Actions: Undo/Redo, Filter, Sort, Group, Properties, Layout, Search, New Record.
+		actionsRow := ui.Row(c.Key("tb-actions")).Gap(4).AlignItems(ui.Center)
+		if opts.HideViewTabs {
+			actionsRow.Wrap().Grow(1).MinWidth(0)
+		} else {
+			actionsRow.Shrink(0)
+		}
+		actionsRow.Children(func() {
 			if !opts.ReadOnly {
 				undoBtn := toolbarIconBtn(c, "undo", iconUndo, i18n.T("撤销"), !st.Store.History().CanUndo(), false, pal)
 				if undoBtn.Clicked() {
@@ -298,6 +405,7 @@ func renderViewToolbar(c *ui.Context, st *State, db *database.Database, view dat
 						opts.OnChanged(paths)
 					}
 				}
+				ui.Box(c).Width(1).Height(14).Margin(0, 4).Background(pal.Border).Shrink(0)
 			}
 
 			filterCount := 0
@@ -386,51 +494,11 @@ func renderViewToolbar(c *ui.Context, st *State, db *database.Database, view dat
 				layoutPopover(c, lBtn, st, view, db, opts, pal)
 			}
 
-			if st.SearchOpen {
-				sf := ui.SearchField(c.Key("db-search"), &st.SearchQuery).
-					Placeholder(i18n.T("搜索记录…")).Label(i18n.T("搜索记录")).Width(176).Height(28)
-				if st.searchFocusPending {
-					sf.Focus()
-					st.searchFocusPending = false
+			if opts.Embedded {
+				if opts.HideViewTabs {
+					ui.Spacer(c)
 				}
-				if sf.Shortcut(0, ui.KeyEscape) {
-					st.SearchQuery = ""
-					st.SearchOpen = false
-				}
-			}
-			srBtn := toolbarIconBtn(c, "tb-search", iconSearch, i18n.T("搜索"), false, st.SearchOpen || st.SearchQuery != "", pal)
-			if srBtn.Clicked() {
-				st.SearchOpen = !st.SearchOpen
-				if st.SearchOpen {
-					st.searchFocusPending = true
-				} else {
-					st.SearchQuery = ""
-				}
-			}
-
-			if !opts.ReadOnly {
-				ui.Row(c.Key("db-new-split")).Gap(2).AlignItems(ui.Center).Children(func() {
-					newBtn := ui.PrimaryButton(c.Key("db-new-rec"), "+ "+i18n.T("新建")).Height(28).Padding(0, 10)
-					if newBtn.Clicked() {
-						createRecordWithDefaults(st, db, "", database.EmptyValue(), opts)
-					}
-					tplBtn := ui.ButtonBase(c.Key("db-tpl-menu")).Size(24, 28).Radius(6).Center().
-						Background(pal.Accent.Alpha(0.14)).Cursor(ui.CursorPointer).Focusable().
-						Role(ui.RoleButton).Label(i18n.T("模板菜单")).Tooltip(i18n.T("记录模板"))
-					if tplBtn.Hovered() || st.TemplatesOpen {
-						tplBtn.Background(pal.AccentSoft)
-					}
-					tplBtn.Children(func() { ui.Icon(c, iconChevronDown).FontSize(12).TextColor(pal.Accent) })
-					if tplBtn.Clicked() {
-						open := !st.TemplatesOpen
-						st.CloseToolbarPopovers()
-						st.TemplatesOpen = open
-						st.EditingTemplateID = ""
-					}
-					if st.TemplatesOpen {
-						templatesPopover(c, tplBtn, st, db, view, opts, pal)
-					}
-				})
+				renderHeaderRightActions(c, st, db, view, opts, pal)
 			}
 		})
 	})
@@ -441,8 +509,16 @@ func renderBulkActionBar(c *ui.Context, st *State, db *database.Database, res *d
 	if len(selected) == 0 {
 		return
 	}
-	ui.Row(c.Key("bulk-bar")).Margin(0, 18, 6, 18).Padding(6, 12).Radius(8).
-		Background(pal.AccentSoft).Border(1, pal.Accent.Alpha(0.3)).Gap(10).AlignItems(ui.Center).Children(func() {
+	bar := ui.Row(c.Key("bulk-bar")).Margin(0, 22, 8, 22).Padding(6, 12).Radius(10).
+		Background(pal.AccentSoft).Border(1, pal.Accent.Alpha(0.24)).Gap(10).AlignItems(ui.Center).
+		Transition(ui.ElementTransition{
+			Animation:    &dbSpringSnappy,
+			Colors:       true,
+			ExitDuration: 120 * time.Millisecond,
+			Enter:        &ui.Motion{Y: -6, Scale: 0.98, Opacity: 0.75},
+			Exit:         &ui.Motion{Y: -4, Scale: 0.98, Opacity: 0},
+		})
+	bar.Children(func() {
 		ui.Text(c, fmt.Sprintf(i18n.T("已选择 %d 项"), len(selected))).FontSize(12.5).FontWeight(600).TextColor(pal.Accent)
 
 		// Offer quick batch status/select edit if available.
@@ -516,43 +592,52 @@ func renderPlannedViewPlaceholder(c *ui.Context, st *State, view database.ViewCo
 }
 
 func toolbarPillBtn(c *ui.Context, key string, icon *ui.SVG, label string, active bool, pal Palette) ui.Element {
-	btn := ui.Row(c.Key(key)).Height(28).Padding(0, 9).Radius(7).Gap(5).
+	btn := ui.Row(c.Key(key)).Height(27).Padding(0, 9).Radius(7).Gap(5).Shrink(0).
 		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
-		Role(ui.RoleButton).Label(label)
+		Role(ui.RoleButton).Label(label).
+		Border(1, ui.Transparent).
+		Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 	switch {
 	case active:
-		btn.Background(pal.AccentSoft)
+		btn.Background(pal.AccentSoft).Border(1, pal.Accent.Alpha(0.20))
 	case btn.Hovered():
 		btn.Background(pal.RowHover)
 	}
+	applyPressSpring(btn, false)
 	ink := pal.TextMuted
 	if active {
 		ink = pal.Accent
+	} else if btn.Hovered() {
+		ink = pal.Text
 	}
 	btn.Children(func() {
 		ui.Icon(c, icon).FontSize(13).TextColor(ink)
-		ui.Text(c, label).FontSize(12.5).TextColor(ink).SingleLine()
+		ui.Text(c, label).FontSize(12.5).TextColor(ink).NoWrap()
 	})
 	return btn
 }
 
 func toolbarIconBtn(c *ui.Context, key string, icon *ui.SVG, label string, disabled, active bool, pal Palette) ui.Element {
-	btn := ui.Box(c.Key(key)).Size(28, 28).Radius(7).Center().
-		Focusable().Role(ui.RoleButton).Label(label).Tooltip(label).Disabled(disabled)
+	btn := ui.Box(c.Key(key)).Size(27, 27).Radius(7).Center().
+		Focusable().Role(ui.RoleButton).Label(label).Tooltip(label).Disabled(disabled).
+		Border(1, ui.Transparent).
+		Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 	ink := pal.TextMuted
 	switch {
 	case disabled:
-		ink = pal.TextMuted.Alpha(0.35)
+		ink = pal.TextMuted.Alpha(0.32)
 	case active:
-		btn.Cursor(ui.CursorPointer).Background(pal.AccentSoft)
+		btn.Cursor(ui.CursorPointer).Background(pal.AccentSoft).Border(1, pal.Accent.Alpha(0.20))
 		ink = pal.Accent
 	default:
 		btn.Cursor(ui.CursorPointer)
 		if btn.Hovered() {
 			btn.Background(pal.RowHover)
+			ink = pal.Text
 		}
 	}
-	btn.Children(func() { ui.Icon(c, icon).FontSize(14).TextColor(ink) })
+	applyPressSpring(btn, disabled)
+	btn.Children(func() { ui.Icon(c, icon).FontSize(13.5).TextColor(ink) })
 	return btn
 }
 
@@ -575,6 +660,7 @@ func createRecordWithInitial(st *State, db *database.Database, initial map[strin
 		}
 		return
 	}
+	st.Motion.TrackCreated(rec.ID)
 	if opts.OnAfterCreate != nil {
 		opts.OnAfterCreate(rec)
 	}

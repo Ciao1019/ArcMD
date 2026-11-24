@@ -3,6 +3,7 @@ package dbview
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/database"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -34,18 +35,20 @@ func galleryView(
 	scroller := ui.Scroll(c.Key("gallery-scroll")).TrackScroll(&st.GalleryScroll).Grow(1).MinWidth(0).MinHeight(0)
 	padX := float32(22)
 	gap := float32(14)
-	availW := scroller.LayoutBounds().W - 2*padX
+	measuredW := scroller.LayoutBounds().W
+	availW := measuredW - 2*padX
 	if availW <= 120 {
 		availW = 860
 	}
 	cols := max(1, int((availW+gap)/(minCardW+gap)))
 	cardW := (availW - float32(cols-1)*gap) / float32(cols)
 	props := visibleNonTitleProps(db, &view)
+	animatePos := measuredW > 120
 
 	scroller.Children(func() {
 		ui.Column(c.Key("gallery-body")).Padding(14, padX, 24, padX).Gap(16).Children(func() {
 			if len(res.Groups) == 0 {
-				renderGalleryGrid(c, st, &view, db, res, res.Rows, cols, cardW, coverH, gap, gcfg, props, "", database.EmptyValue(), opts, pal)
+				renderGalleryGrid(c, st, &view, db, res, res.Rows, cols, cardW, coverH, gap, animatePos, gcfg, props, "", database.EmptyValue(), opts, pal)
 				return
 			}
 			for i := range res.Groups {
@@ -57,7 +60,7 @@ func galleryView(
 						if view.Group != nil {
 							gPropID = view.Group.PropertyID
 						}
-						renderGalleryGrid(c, st, &view, db, res, g.Rows, cols, cardW, coverH, gap, gcfg, props, gPropID, g.Value, opts, pal)
+						renderGalleryGrid(c, st, &view, db, res, g.Rows, cols, cardW, coverH, gap, animatePos, gcfg, props, gPropID, g.Value, opts, pal)
 					}
 				})
 			}
@@ -85,17 +88,14 @@ func renderGalleryGroupHeader(
 	opts Options,
 	pal Palette,
 ) {
-	hdr := ui.Row(c.Key("ggh:"+g.Key)).Height(32).Padding(0, 6).Radius(6).Gap(8).
-		AlignItems(ui.Center).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(g.Label)
+	hdr := ui.Row(c.Key("ggh:"+g.Key)).Height(32).Padding(0, 8).Radius(8).Gap(8).
+		AlignItems(ui.Center).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(g.Label).
+		Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 	if hdr.Hovered() {
 		hdr.Background(pal.RowHover)
 	}
 	hdr.Children(func() {
-		chev := iconChevronDown
-		if g.Collapsed {
-			chev = iconChevronRight
-		}
-		ui.Icon(c, chev).FontSize(13).TextColor(pal.TextMuted)
+		renderAnimatedChevron(c, "ggh-chev:"+g.Key, g.Collapsed, 13, pal.TextMuted)
 		if g.Color != "" && g.Color != "default" {
 			isStatus := false
 			if view.Group != nil {
@@ -125,6 +125,7 @@ func renderGalleryGrid(
 	rows []*database.Record,
 	cols int,
 	cardW, coverH, gap float32,
+	animatePos bool,
 	gcfg database.GalleryViewConfig,
 	props []database.Property,
 	groupPropID string,
@@ -157,13 +158,17 @@ func renderGalleryGrid(
 			for i := start; i < end; i++ {
 				ent := entries[i]
 				if ent.isAdd {
-					renderGalleryAddCard(c, st, db, cardW, minCardH, groupPropID, groupVal, opts, pal)
+					renderGalleryAddCard(c, st, db, minCardH, groupPropID, groupVal, opts, pal)
 					continue
 				}
-				renderGalleryCard(c, st, view, db, res, ent.rec, cardW, coverH, gcfg, props, opts, pal)
+				renderGalleryCard(c, st, view, db, res, ent.rec, coverH, animatePos, gcfg, props, opts, pal)
+			}
+			for pad := end - start; pad < cols; pad++ {
+				ui.Box(c).Grow(1).MinWidth(0)
 			}
 		})
 	}
+	_ = cardW
 }
 
 func renderGalleryCard(
@@ -173,7 +178,8 @@ func renderGalleryCard(
 	db *database.Database,
 	res *database.QueryResult,
 	rec *database.Record,
-	cardW, coverH float32,
+	coverH float32,
+	animatePos bool,
 	gcfg database.GalleryViewConfig,
 	props []database.Property,
 	opts Options,
@@ -184,21 +190,53 @@ func renderGalleryCard(
 	if tinted {
 		cardBg = tintBg
 	}
-	card := ui.Column(c.Key("gcard:"+rec.ID)).Width(cardW).Shrink(0).Radius(10).
+	card := ui.Column(c.Key("gcard:"+rec.ID)).Grow(1).MinWidth(0).Radius(12).
 		Background(cardBg).Border(1, pal.Border).Shadow(0, 1, 4, 0, pal.ShadowEdge).
 		Cursor(ui.CursorPointer).Clip().Focusable().Role(ui.RoleListItem).Label(rec.Title)
+
+	cardDragging := false
+	cardSettling := st.Motion.isSettling(dragKindCard, rec.ID)
+	if !opts.ReadOnly && len(view.Sorts) == 0 {
+		card.Drag(rowDrag{recordID: rec.ID})
+		cardDragging = st.Motion.trackDrag(c, card, dragKindCard, rec.ID, rec.Title, "", pal.Accent, false)
+	}
+	if cardDragging {
+		card.Opacity(0.28)
+		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			paintDashedGhost(p, r, 12, pal.Accent)
+		})
+	} else if cardSettling {
+		card.Opacity(0.16)
+	} else {
+		card.Transition(ui.ElementTransition{
+			Animation:    &dbSpringCard,
+			Position:     animatePos,
+			Colors:       true,
+			Shadows:      true,
+			ExitDuration: 150 * time.Millisecond,
+			Enter:        &ui.Motion{Y: -8, Scale: 0.96, Opacity: 0.78},
+			Exit:         &ui.Motion{Scale: 0.94, Opacity: 0},
+		})
+	}
 	if tinted {
 		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
 			p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 3, H: r.H}, tintAccent, 0)
 		})
 	}
-
-	if card.Hovered() {
-		card.Border(1, pal.BorderStrong).Shadow(0, 4, 14, 0, pal.ShadowEdge)
+	pulse := st.Motion.pulseAlpha(c, rec.ID)
+	if pulse > 0.01 {
+		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			paintCreationPulse(p, r, 12, pulse, pal.Accent)
+		})
 	}
 
+	hovered := card.Hovered() && !cardDragging
+	if hovered {
+		card.Border(1, pal.BorderStrong).Shadow(0, 8, 20, -4, pal.ShadowEdge)
+	}
+	applyCardHoverLift(card, hovered, cardDragging)
+
 	if !opts.ReadOnly && len(view.Sorts) == 0 {
-		card.Drag(rowDrag{recordID: rec.ID})
 		if d, ok := ui.Drop[rowDrag](card); ok && d.recordID != rec.ID {
 			reorderRecordRow(st, view, res, d.recordID, rec.ID, opts)
 		}
@@ -227,25 +265,27 @@ func renderGalleryAddCard(
 	c *ui.Context,
 	st *State,
 	db *database.Database,
-	cardW, minH float32,
+	minH float32,
 	groupPropID string,
 	groupVal database.Value,
 	opts Options,
 	pal Palette,
 ) {
 	box := ui.Column(c.Key("gadd:" + groupPropID + ":" + groupVal.PlainString())).
-		Width(cardW).MinHeight(minH).Shrink(0).Radius(10).Center().Gap(6).
-		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("新建页面"))
+		Grow(1).MinWidth(0).MinHeight(minH).Radius(12).Center().Gap(6).
+		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("新建页面")).
+		Transition(ui.ElementTransition{Animation: &dbSpringCard, Position: true, Colors: true})
 	hovered := box.Hovered()
 	if hovered {
 		box.Background(pal.RowHover)
 	}
+	applyPressSpring(box, false)
 	box.Draw(func(p *ui.Painter, r ui.Rect) {
 		col := pal.BorderStrong
 		if hovered {
 			col = pal.Accent.Alpha(0.6)
 		}
-		p.StrokeDashed(rectInset(r, 0.5), col, 10, 1.2)
+		p.StrokeDashed(rectInset(r, 0.5), col, 12, 1.2)
 	})
 	box.Children(func() {
 		ui.Icon(c, iconPlus).FontSize(18).TextColor(pal.TextMuted)

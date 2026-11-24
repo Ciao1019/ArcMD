@@ -3,6 +3,7 @@ package dbview
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/database"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -27,6 +28,8 @@ func listView(
 	props := visibleNonTitleProps(db, &view)
 
 	ui.Column(c.Key("list-area")).Grow(1).MinWidth(0).MinHeight(0).Padding(8, 22, 14, 22).Children(func() {
+		st.ListScroll.KeepOffset = true
+		st.ListScroll.MoveAnimation = &dbSpringList
 		list := ui.List(c.Key("list-rows"), &st.ListScroll, len(items)).
 			Grow(1).MinHeight(0).ItemKey(func(i int) any { return items[i].key })
 		list.Rows(func(row ui.ListRow) {
@@ -63,9 +66,10 @@ func renderListGroupHeader(
 	if g == nil {
 		return
 	}
-	hdr := ui.Row(c.Key("lgh:"+g.Key)).Height(36).Padding(4, 8, 2, 8).Radius(6).
+	hdr := ui.Row(c.Key("lgh:"+g.Key)).Height(36).Padding(4, 8, 2, 8).Radius(8).
 		Gap(8).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-		Role(ui.RoleButton).Label(g.Label)
+		Role(ui.RoleButton).Label(g.Label).
+		Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 	if hdr.Hovered() {
 		hdr.Background(pal.RowHover)
 	}
@@ -84,11 +88,7 @@ func renderListGroupHeader(
 		}
 	}
 	hdr.Children(func() {
-		chev := iconChevronDown
-		if g.Collapsed {
-			chev = iconChevronRight
-		}
-		ui.Icon(c, chev).FontSize(13).TextColor(pal.TextMuted)
+		renderAnimatedChevron(c, "lgh-chev:"+g.Key, g.Collapsed, 13, pal.TextMuted)
 		if g.Color != "" && g.Color != "default" {
 			isStatus := false
 			if view.Group != nil {
@@ -122,15 +122,22 @@ func renderListAddRow(
 	if opts.ReadOnly {
 		return
 	}
-	row := ui.Row(c.Key("ladd:"+groupProp+":"+groupVal.PlainString())).Height(34).Padding(0, 10).Radius(6).
+	row := ui.Row(c.Key("ladd:"+groupProp+":"+groupVal.PlainString())).Height(36).Padding(0, 10).Radius(8).
 		Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-		Role(ui.RoleButton).Label(i18n.T("新建页面"))
-	if row.Hovered() {
+		Role(ui.RoleButton).Label(i18n.T("新建页面")).
+		Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
+	addHovered := row.Hovered()
+	if addHovered {
 		row.Background(pal.RowHover)
 	}
+	applyPressSpring(row, false)
+	ink := pal.TextMuted
+	if addHovered {
+		ink = pal.Accent
+	}
 	row.Children(func() {
-		ui.Icon(c, iconPlus).FontSize(13).TextColor(pal.TextMuted)
-		ui.Text(c, i18n.T("新建页面")).FontSize(12.5).TextColor(pal.TextMuted).SingleLine()
+		ui.Icon(c, iconPlus).FontSize(13).TextColor(ink)
+		ui.Text(c, i18n.T("新建页面")).FontSize(12.5).FontWeight(500).TextColor(ink).SingleLine()
 	})
 	if row.Clicked() {
 		var initial map[string]database.Value
@@ -164,9 +171,18 @@ func renderListRecordRow(
 	if rec == nil {
 		return
 	}
-	row := ui.Row(c.Key("lrec:"+groupKey+":"+rec.ID)).Height(38).Padding(0, 10).Radius(7).Gap(10).
-		AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Border.Alpha(0.55)).
+	row := ui.Row(c.Key("lrec:"+groupKey+":"+rec.ID)).Height(40).Padding(0, 10).Radius(9).Gap(10).
+		AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Border.Alpha(0.5)).
 		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleListItem).Label(rec.Title)
+
+	rowDragging := st.Motion.isDragging(dragKindRow, rec.ID)
+	rowSettling := st.Motion.isSettling(dragKindRow, rec.ID)
+	if rowDragging {
+		row.Opacity(0.28)
+	} else if rowSettling {
+		row.Opacity(0.18)
+		st.Motion.trackDrag(c, row, dragKindRow, rec.ID, rec.Title, groupKey, pal.Accent, false)
+	}
 
 	tintBg, tintAccent, tinted := tintedRowBackground(pal, res, rec.ID)
 	if tinted {
@@ -175,8 +191,24 @@ func renderListRecordRow(
 			p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 3, H: r.H}, tintAccent, 0)
 		})
 	}
+	pulse := st.Motion.pulseAlpha(c, rec.ID)
+	if pulse > 0.01 {
+		row.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			paintCreationPulse(p, r, 9, pulse, pal.Accent)
+		})
+	}
+	if st.Motion.IsRecentlyCreated(rec.ID, c.Now()) {
+		row.Transition(ui.ElementTransition{
+			Duration: 200 * time.Millisecond,
+			Ease:     dbEaseOut,
+			Colors:   !tinted,
+			Enter:    &ui.Motion{Y: -6, Opacity: 0},
+		})
+	} else if !tinted {
+		row.Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
+	}
 
-	hovered := row.Hovered()
+	hovered := row.Hovered() && !rowDragging
 	if hovered {
 		if tinted {
 			row.Background(tintBg.Mix(pal.Text, 0.03))
@@ -201,7 +233,7 @@ func renderListRecordRow(
 		}
 		if d, over := ui.DragOver[listRowDrag](row); over && d.recordID != rec.ID {
 			row.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				p.Line(r.X+4, r.Y, r.X+r.W-4, r.Y, 2, pal.Accent)
+				paintDropRail(p, r, pal.Accent, false)
 			})
 		}
 	}
@@ -213,8 +245,14 @@ func renderListRecordRow(
 		if !opts.ReadOnly && len(view.Sorts) == 0 {
 			grip := ui.Box(c.Key("lgrip")).Size(14, 22).Center().Cursor(ui.CursorGrab)
 			grip.Drag(listRowDrag{recordID: rec.ID, fromGroupKey: groupKey})
-			if hovered {
-				grip.Children(func() { ui.Icon(c, iconGrip).FontSize(12).TextColor(pal.TextMuted) })
+			st.Motion.trackDrag(c, grip, dragKindRow, rec.ID, rec.Title, groupKey, pal.Accent, false)
+			gTarget := float32(0)
+			if hovered || rowDragging {
+				gTarget = 1
+			}
+			gVis := grip.AnimateTo("vis", gTarget, ui.Animation{Duration: 120 * time.Millisecond, Ease: dbEaseOut, NonMotion: true})
+			if gVis > 0.02 {
+				grip.Children(func() { ui.Icon(c, iconGrip).FontSize(12).TextColor(pal.TextMuted.Alpha(gVis)) })
 			}
 		}
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/database"
 	"github.com/Ciao1019/ArcMD/internal/dbview"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -79,6 +80,9 @@ func dragBetween(tt *ui.Tester, x0, y0, x1, y1 float32) {
 
 func TestBoardRenderDragCrossColumnAndUndo(t *testing.T) {
 	st := buildTestStore(t)
+	if err := st.AddView(dbview.NewViewConfig(database.ViewBoard, "看板", st.Database()), false); err != nil {
+		t.Fatal(err)
+	}
 	state, tt, changed, _, _ := makeTesterWithOptions(t, st, nil)
 
 	if err := tt.Click("看板"); err != nil {
@@ -126,6 +130,9 @@ func TestBoardRenderDragCrossColumnAndUndo(t *testing.T) {
 
 func TestBoardColumnCreateCollapseAddGroupAndSwimlanes(t *testing.T) {
 	st := buildTestStore(t)
+	if err := st.AddView(dbview.NewViewConfig(database.ViewBoard, "看板", st.Database()), false); err != nil {
+		t.Fatal(err)
+	}
 	state, tt, _, created, _ := makeTesterWithOptions(t, st, nil)
 
 	if err := tt.Click("看板"); err != nil {
@@ -381,5 +388,105 @@ func TestGalleryViewRenderSizesCoverAndLayoutPopover(t *testing.T) {
 	tt.Frame()
 	if len(*opened) != 1 || (*opened)[0] != "center:质量验收" {
 		t.Fatalf("expected OnOpenRecord center:质量验收, got %v", *opened)
+	}
+}
+
+func TestDayflowBoardAssigneeFilterPriorityAndKeyboardMove(t *testing.T) {
+	root := t.TempDir()
+	db := database.NewDefault("研发看板", database.SourceConfig{Type: database.SourceFolder})
+	db.Properties = append(db.Properties,
+		database.Property{
+			ID: "prop_priority", Key: "priority", Name: "优先级", Type: database.PropSelect,
+			Options: []database.SelectOption{
+				{ID: "p0", Name: "P0 紧急", Color: "red"},
+				{ID: "p1", Name: "P1 高", Color: "orange"},
+			},
+		},
+		database.Property{ID: "prop_assignee", Key: "assignee", Name: "负责人", Type: database.PropPerson},
+	)
+	for i := range db.Views {
+		db.Views[i].Properties = append(db.Views[i].Properties,
+			database.ViewProperty{PropertyID: "prop_priority", Visible: true},
+			database.ViewProperty{PropertyID: "prop_assignee", Visible: true},
+		)
+	}
+	db.Views = append(db.Views, dbview.NewViewConfig(database.ViewBoard, "看板", db))
+	rawDB, err := database.EncodeDatabaseMarkdown(db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(root, "研发看板.db.md", rawDB); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(root, "研发看板/a.md", "---\nstatus: 未开始\npriority: P0 紧急\nassignee:\n  - Alice\ndate: 2026-11-23\n---\n\n# 接口鉴权\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.Write(root, "研发看板/b.md", "---\nstatus: 进行中\npriority: P1 高\nassignee:\n  - Bob\ndate: 2026-11-28\n---\n\n# 性能优化\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := database.Open(root, "研发看板.db.md", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, tt, _, _, _ := makeTesterWithOptions(t, st, nil)
+	if err := tt.Click("看板"); err != nil {
+		t.Fatalf("switch to Board failed: %v", err)
+	}
+	tt.Frame()
+
+	// 1. Overlapping assignee filter avatars & Clear filter.
+	aliceBtn, ok := tt.Access("筛选成员: Alice")
+	if !ok {
+		t.Fatalf("missing assignee filter Alice, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(aliceBtn.Bounds.X+aliceBtn.Bounds.W/2, aliceBtn.Bounds.Y+aliceBtn.Bounds.H/2)
+	tt.Frame()
+	if !tt.HasText("接口鉴权") || tt.HasText("性能优化") {
+		t.Fatalf("expected only Alice's card visible when filtered, texts=%v", tt.Texts())
+	}
+	if err := tt.Click("清除筛选"); err != nil {
+		t.Fatalf("clear filter failed: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("性能优化") {
+		t.Fatalf("expected 性能优化 restored after clearing filter, texts=%v", tt.Texts())
+	}
+
+	// 2. Focus card 接口鉴权 (status=未开始) and Alt+Right moves to next column (进行中), then Cmd+Z undoes.
+	recA := st.RecordByPath("研发看板/a.md")
+	state.BoardFocusedCardID = recA.ID
+	state.BoardFocusPending = true
+	tt.Frame()
+	tt.Key(ui.Alt, ui.KeyRight)
+	tt.Frame()
+	if got := st.Record(recA.ID).Props["prop_status"].Text; got != "进行中" {
+		t.Fatalf("expected Alt+Right move card to 进行中, got %q", got)
+	}
+	state.RequestFocus = true
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Frame()
+	if got := st.Record(recA.ID).Props["prop_status"].Text; got != "未开始" {
+		t.Fatalf("expected Cmd+Z to undo keyboard card move, got %q", got)
+	}
+
+	// 3. Column menu -> Rename column.
+	menuBtn, ok := tt.Access("列菜单: 进行中")
+	if !ok {
+		t.Fatalf("missing 列菜单: 进行中, access=%v", tt.AccessAll())
+	}
+	tt.ClickAt(menuBtn.Bounds.X+menuBtn.Bounds.W/2, menuBtn.Bounds.Y+menuBtn.Bounds.H/2)
+	tt.Frame()
+	if err := tt.ChooseMenuItem("重命名列"); err != nil {
+		t.Fatalf("choose 重命名列 failed: %v", err)
+	}
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("研发中")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if got := st.RecordByPath("研发看板/b.md").Props["prop_status"].Text; got != "研发中" {
+		t.Fatalf("expected column rename to update record status to 研发中, got %q", got)
 	}
 }

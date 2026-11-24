@@ -95,12 +95,20 @@ func (r *Record) ValueFor(prop Property) Value {
 		}
 		return EmptyValue()
 	case PropCreatedTime:
-		if !r.CreatedAt.IsZero() {
-			return DateRangeValue(r.CreatedAt.UTC().Format(time.RFC3339), "", true)
+		ts := r.CreatedAt
+		if ts.IsZero() {
+			ts = r.ModTime
+		}
+		if !ts.IsZero() {
+			return DateRangeValue(ts.UTC().Format(time.RFC3339), "", true)
 		}
 	case PropEditedTime:
-		if !r.UpdatedAt.IsZero() {
-			return DateRangeValue(r.UpdatedAt.UTC().Format(time.RFC3339), "", true)
+		ts := r.UpdatedAt
+		if ts.IsZero() {
+			ts = r.ModTime
+		}
+		if !ts.IsZero() {
+			return DateRangeValue(ts.UTC().Format(time.RFC3339), "", true)
 		}
 	case PropRollup, PropFormula:
 		if r.Computed != nil {

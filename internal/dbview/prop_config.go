@@ -18,7 +18,7 @@ func propertyConfigPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-prop-cfg:"+prop.ID), anchor, &st.EditPropOpen, func() {
+	styledPopover(c, "pop-prop-cfg:"+prop.ID, anchor, &st.EditPropOpen, pal, func() {
 		saveProp := func(updated database.Property) {
 			affected, err := st.Store.UpdateProperty(updated)
 			if err != nil {
@@ -325,7 +325,7 @@ func renderFormulaConfigSection(
 		ui.TextArea(c.Key("cfg-fm-expr"), &st.EditFormulaExpr).
 			MinHeight(82).Padding(8, 10).Radius(7).
 			Background(pal.Surface).Border(1, pal.Border).TextColor(pal.Text).
-			Placeholder(`if(prop("权重") >= 80, "高优", "常规")`).Label(i18n.T("公式表达式"))
+			Placeholder(i18n.T(`if(prop("权重") >= 80, "高优", "常规")`)).Label(i18n.T("公式表达式"))
 
 		// Property quick-insert chips.
 		ui.Row(c.Key("cfg-fm-chips")).Wrap().Gap(4).Children(func() {
@@ -340,9 +340,9 @@ func renderFormulaConfigSection(
 				}
 			}
 			for _, snip := range []struct{ label, insert string }{
-				{"if()", `if(条件, "是", "否")`},
-				{"dateBetween()", `dateBetween(prop("日期"), today(), "days")`},
-				{"round()", `round(值, 2)`},
+				{"if()", i18n.T(`if(条件, "是", "否")`)},
+				{"dateBetween()", i18n.T(`dateBetween(prop("日期"), today(), "days")`)},
+				{"round()", i18n.T(`round(值, 2)`)},
 			} {
 				sc := snip
 				if ui.Button(c.Key("fms:"+sc.label), sc.label).Height(22).Padding(0, 7).Clicked() {

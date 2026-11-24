@@ -20,7 +20,7 @@ func colorRulesPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-colors"), anchor, &st.ColorRulesOpen, func() {
+	styledPopover(c, "pop-colors", anchor, &st.ColorRulesOpen, pal, func() {
 		saveColors := func(next []database.ColorRule) {
 			vc := view.Clone()
 			vc.Colors = next

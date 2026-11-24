@@ -19,7 +19,7 @@ func templatesPopover(
 	opts Options,
 	pal Palette,
 ) {
-	ui.Popover(c.Key("pop-templates"), anchor, &st.TemplatesOpen, func() {
+	styledPopover(c, "pop-templates", anchor, &st.TemplatesOpen, pal, func() {
 		openEditor := func(tpl database.Template) {
 			st.EditingTemplateID = tpl.ID
 			st.TplNameDraft = tpl.Name
@@ -191,6 +191,7 @@ func templatesPopover(
 										opts.OnNotify(err.Error())
 									}
 								} else {
+									st.Motion.TrackCreated(rec.ID)
 									st.TemplatesOpen = false
 									if opts.OnAfterCreate != nil {
 										opts.OnAfterCreate(rec)
