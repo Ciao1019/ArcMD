@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/bookdoc"
+	"github.com/Ciao1019/ArcMD/internal/database"
+	"github.com/Ciao1019/ArcMD/internal/dbview"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/pdf"
@@ -38,7 +40,7 @@ func (a *App) printDoc()  { a.startPDF(true) }
 
 func (a *App) startPDF(printing bool) {
 	d := a.doc
-	if d == nil || d.loadErr != nil || d.isPDF() || d.isBook() || a.pdfExport != nil {
+	if d == nil || d.loadErr != nil || d.isPDF() || d.isBook() || d.isDatabase() || a.pdfExport != nil {
 		return
 	}
 	if d.isWhiteboard() {
@@ -138,6 +140,10 @@ func (a *App) pdfExportView(c *ui.Context) {
 			LoadWhiteboard: func(url string) (*whiteboard.Scene, uint64, error) { return a.loadWhiteboardFor(job.source, url) },
 			LoadPDF:        func(url string) (*pdfdoc.Document, uint64, error) { return a.loadPDFFor(job.source, url) },
 			LoadBook:       func(url string) (*bookdoc.Document, uint64, error) { return a.loadBookFor(job.source, url) },
+			LoadDatabase: func(target string) (*database.Store, dbview.Options, uint64, error) {
+				return a.loadDatabaseFor(job.source, target)
+			},
+			DatabaseSnapshot: func(target, viewID string) string { return a.databaseSnapshotFor(job.source, target, viewID) },
 		}
 		ui.Render(func(c *ui.Context) { job.tops = job.ed.Paginate(job.opts, paperHeight-2*paperMargin) }, 1, 1, 1)
 		job.writer.ReservePages(len(job.tops))

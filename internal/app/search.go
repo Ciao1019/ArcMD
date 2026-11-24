@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/bookdoc"
+	"github.com/Ciao1019/ArcMD/internal/database"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
@@ -77,6 +78,9 @@ func extractText(name, content string) (search.Extracted, error) {
 		}
 		return search.Extracted{Text: scene.PlainText()}, nil
 	}
+	if vault.IsDatabase(name) {
+		return extractDatabaseSearchText(name, content), nil
+	}
 	if strings.EqualFold(path.Ext(name), ".arcmd") {
 		doc, err := model.Decode(content)
 		if err != nil {
@@ -85,7 +89,59 @@ func extractText(name, content string) (search.Extracted, error) {
 		return search.Extracted{Text: doc.PlainText(), Icon: doc.Icon}, nil
 	}
 	text, icon := editor.ExtractMarkdownText(content)
+	if fm, _, hasFM, _ := database.SplitFrontmatter(content); hasFM && fm != nil && !fm.IsEmpty() {
+		if fmText := extractFrontmatterSearchText(fm); fmText != "" {
+			if text != "" {
+				text += "\n" + fmText
+			} else {
+				text = fmText
+			}
+		}
+	}
 	return search.Extracted{Text: text, Icon: icon}, nil
+}
+
+func extractFrontmatterSearchText(fm *database.FrontmatterDoc) string {
+	if fm == nil || fm.IsEmpty() {
+		return ""
+	}
+	var out []string
+	skipKey := false
+	for _, rawLine := range strings.Split(fm.Format(), "\n") {
+		trimmed := strings.TrimSpace(rawLine)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if len(rawLine) > 0 && rawLine[0] != ' ' && rawLine[0] != '\t' {
+			if k, v, ok := strings.Cut(trimmed, ":"); ok {
+				key := strings.TrimSpace(k)
+				switch key {
+				case "icon", "cover", "coverY", "goal":
+					skipKey = true
+					continue
+				default:
+					skipKey = false
+				}
+				val := strings.Trim(strings.TrimSpace(v), `"'`)
+				if val != "" && val != "[]" && val != "null" && val != "~" {
+					out = append(out, val)
+				}
+				continue
+			}
+		}
+		if skipKey {
+			continue
+		}
+		item := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		item = strings.Trim(item, `"'`)
+		if strings.HasPrefix(item, "[[") && strings.HasSuffix(item, "]]") && len(item) > 4 {
+			item = item[2 : len(item)-2]
+		}
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 func (a *App) searchCachePath() string {
@@ -188,6 +244,13 @@ func (d *document) plainText() string {
 		}
 		return d.plain
 	}
+	if d.isDatabase() {
+		if rev := d.dbView.Store.Revision(); !d.plainKnown || rev != d.plainRev {
+			d.plain = databasePlainText(d.dbView.Store)
+			d.plainRev, d.plainKnown = rev, true
+		}
+		return d.plain
+	}
 	if rev := d.ed.Revision(); !d.plainKnown || rev != d.plainRev {
 		d.plain, d.plainRev, d.plainKnown = d.ed.Text(), rev, true
 	}
@@ -226,6 +289,17 @@ func (a *App) openAtText(id, rel, query string) {
 
 func (a *App) openAtTextTerm(id, rel, query, term string) {
 	if !a.openAnywhere(id, rel) || a.doc.loadErr != nil {
+		return
+	}
+	if a.doc.isDatabase() {
+		needle := strings.TrimSpace(term)
+		if needle == "" {
+			needle = strings.TrimSpace(query)
+		}
+		if needle != "" {
+			a.doc.dbView.SearchQuery = needle
+			a.doc.dbView.SearchOpen = true
+		}
 		return
 	}
 	if a.doc.isPDF() {
@@ -337,7 +411,7 @@ func (a *App) liveIndex() *search.Index {
 			continue
 		}
 		docs = append(docs, d)
-		stamp := liveStamp{d.ed.Revision(), place{d.space.ID, d.rel}}
+		stamp := liveStamp{docSearchRevision(d), place{d.space.ID, d.rel}}
 		if previous, ok := s.liveDocs[d]; !ok || previous != stamp {
 			unchanged = false
 		}
@@ -348,9 +422,132 @@ func (a *App) liveIndex() *search.Index {
 	s.liveDocs = make(map[*document]liveStamp, len(docs))
 	live := make([]search.Live, 0, len(docs))
 	for _, d := range docs {
-		s.liveDocs[d] = liveStamp{d.ed.Revision(), place{d.space.ID, d.rel}}
+		s.liveDocs[d] = liveStamp{docSearchRevision(d), place{d.space.ID, d.rel}}
 		live = append(live, search.Live{Space: d.space.ID, Path: d.rel, Text: d.plainText()})
 	}
 	s.overlay, s.liveBase, s.overlayReady = s.index.WithLive(live), s.index, true
 	return s.overlay
+}
+
+func docSearchRevision(d *document) uint64 {
+	if d == nil {
+		return 0
+	}
+	if d.isDatabase() {
+		return d.dbView.Store.Revision()
+	}
+	if d.isWhiteboard() {
+		return d.board.Revision()
+	}
+	return d.ed.Revision()
+}
+
+func extractDatabaseSearchText(name, content string) search.Extracted {
+	db, err := database.DecodeDatabaseMarkdown(content)
+	if err != nil {
+		return search.Extracted{Text: vault.Title(name)}
+	}
+	var lines []string
+	if strings.TrimSpace(db.Title) != "" {
+		lines = append(lines, db.Title)
+	} else {
+		lines = append(lines, vault.Title(name))
+	}
+	if desc := strings.TrimSpace(db.Description); desc != "" {
+		lines = append(lines, desc)
+	}
+	for _, p := range db.Properties {
+		if strings.TrimSpace(p.Name) != "" {
+			lines = append(lines, p.Name)
+		}
+		for _, opt := range p.Options {
+			if strings.TrimSpace(opt.Name) != "" {
+				lines = append(lines, opt.Name)
+			}
+		}
+	}
+	for _, v := range db.Views {
+		if strings.TrimSpace(v.Name) != "" {
+			lines = append(lines, v.Name)
+		}
+	}
+	for _, r := range db.InlineRows {
+		if r == nil {
+			continue
+		}
+		if r.Title != "" {
+			lines = append(lines, r.Title)
+		}
+		for _, p := range db.Properties {
+			if p.Type == database.PropTitle {
+				continue
+			}
+			if s := database.FormatValue(p, r.ValueFor(p)); s != "" {
+				lines = append(lines, s)
+			}
+		}
+		if r.Body != "" {
+			lines = append(lines, r.Body)
+		}
+	}
+	const snapStart = "<!-- arcmd-db:snapshot:start -->"
+	const snapEnd = "<!-- arcmd-db:snapshot:end -->"
+	if sIdx := strings.Index(content, snapStart); sIdx >= 0 {
+		rest := content[sIdx+len(snapStart):]
+		if eIdx := strings.Index(rest, snapEnd); eIdx >= 0 {
+			rest = rest[:eIdx]
+		}
+		if txt := strings.TrimSpace(rest); txt != "" {
+			lines = append(lines, txt)
+		}
+	}
+	return search.Extracted{Text: strings.Join(lines, "\n"), Icon: db.Icon}
+}
+
+func databasePlainText(store *database.Store) string {
+	if store == nil {
+		return ""
+	}
+	db := store.Database()
+	if db == nil {
+		return ""
+	}
+	var lines []string
+	if strings.TrimSpace(db.Title) != "" {
+		lines = append(lines, db.Title)
+	}
+	if desc := strings.TrimSpace(db.Description); desc != "" {
+		lines = append(lines, desc)
+	}
+	for _, p := range db.Properties {
+		if p.Name != "" {
+			lines = append(lines, p.Name)
+		}
+	}
+	for _, v := range db.Views {
+		if v.Name != "" {
+			lines = append(lines, v.Name)
+		}
+	}
+	for _, rec := range store.Records() {
+		if rec == nil {
+			continue
+		}
+		var parts []string
+		if rec.Title != "" {
+			parts = append(parts, rec.Title)
+		}
+		for _, p := range db.Properties {
+			if p.Type == database.PropTitle {
+				continue
+			}
+			if s := database.FormatValue(p, rec.ValueFor(p)); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) > 0 {
+			lines = append(lines, strings.Join(parts, " "))
+		}
+	}
+	return strings.Join(lines, "\n")
 }

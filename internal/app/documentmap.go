@@ -32,7 +32,7 @@ func (a *App) toggleDocumentMap(d *document) {
 }
 
 func (a *App) toggleActiveDocumentMap() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.source {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() || a.doc.source {
 		return
 	}
 	if a.focus {
@@ -80,6 +80,13 @@ func (a *App) documentMapWorkspace(c *ui.Context, d *document, width float32) {
 		}
 	}
 	if d.mindMap == nil {
+		if store, _, _, _ := a.owningDatabaseFor(d); store != nil {
+			ui.Column(c.Key(d.viewKey() + ":propswrap")).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
+				a.pagePropertiesHeader(c, d)
+				editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, width, false, d))
+			})
+			return
+		}
 		editor.View(c.Key(d.viewKey()), d.ed, a.editorOptionsFor(c, width, false, d))
 		return
 	}
@@ -104,6 +111,7 @@ func (a *App) documentMapWorkspace(c *ui.Context, d *document, width float32) {
 		wsH := ws.LayoutBounds().H
 		ws.Children(func() {
 			ui.Column(c.Key("document-body")).HeightPercent((1 - d.mapVFraction) * 100).MinWidth(0).MinHeight(0).Clip().Children(func() {
+				a.pagePropertiesHeader(c, d)
 				editor.View(c.Key(d.viewKey()), d.ed, opts)
 			})
 			divider := ui.Box(c.Key("map-divider")).Height(7).WidthPercent(100).Center().Focusable().Role(ui.RoleSplitter).
@@ -153,6 +161,7 @@ func (a *App) documentMapWorkspace(c *ui.Context, d *document, width float32) {
 	d.mindMap.SetActions(a.mindMapActions(d, opts, colors, a.prefs.MindMapBothSides))
 	ui.Row(c.Key("document-workspace")).Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		ui.Column(c.Key("document-body")).Grow(1).MinWidth(0).MinHeight(0).Clip().Children(func() {
+			a.pagePropertiesHeader(c, d)
 			editor.View(c.Key(d.viewKey()), d.ed, opts)
 		})
 		divider := ui.Box(c.Key("map-divider")).Width(7).HeightPercent(100).Center().Focusable().Role(ui.RoleSplitter).

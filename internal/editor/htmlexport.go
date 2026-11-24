@@ -168,6 +168,10 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 				out.WriteString("<details" + open + "><summary>" + body + "</summary>" + blocks(inner) + "</details>")
 				continue
 			case "raw":
+				if spec, snapMD, ok := ParseDatabaseEmbed(b.Text()); ok {
+					out.WriteString(exportDatabaseHTML(spec, snapMD))
+					continue
+				}
 				if isHTMLCommentBlock(b.Text()) {
 					continue
 				}

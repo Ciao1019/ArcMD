@@ -30,6 +30,149 @@ func splitDropColors(t *ui.Theme) (ui.Color, ui.Color) {
 	return t.Accent.Alpha(0.18), t.Accent.Alpha(0.7)
 }
 
+// quickModalPalette holds the Lumno / Petrichor QuickAsk floating bar tokens
+// (large 26px radius, soft layered elevation, pastel blue active row #E4EDFA,
+// quickModalPalette holds the frosted-glass color tokens for the Spotlight /
+// QuickAsk-style floating creation bar (translucent frosted glass over
+// backdrop blur, luminous rim, soft active pill, inline tags, and <kbd> footer).
+type quickModalPalette struct {
+	backdrop     ui.Color
+	surfaceTop   ui.Color
+	surfaceBot   ui.Color
+	sheenTop     ui.Color
+	sheenBot     ui.Color
+	rimTop       ui.Color
+	rimMid       ui.Color
+	rimBot       ui.Color
+	outerBorder  ui.Color
+	shadow       ui.Color
+	text         ui.Color
+	muted        ui.Color
+	subtle       ui.Color
+	line         ui.Color
+	rowActive    ui.Color
+	iconActiveBg ui.Color
+	accent       ui.Color
+	chipBg       ui.Color
+	chipMarkBg   ui.Color
+	chipMarkInk  ui.Color
+	tagBg        ui.Color
+	tagText      ui.Color
+	tagBlueBg    ui.Color
+	tagBlueText  ui.Color
+	tagAmberBg   ui.Color
+	tagAmberText ui.Color
+	actionBg     ui.Color
+	actionText   ui.Color
+	kbdBg        ui.Color
+	kbdBorder    ui.Color
+	kbdShadow    ui.Color
+}
+
+func quickModalColors(dark bool) quickModalPalette {
+	if dark {
+		return quickModalPalette{
+			backdrop:     black.Alpha(0.28),
+			surfaceTop:   ui.RGBA(34, 36, 42, 0.78),
+			surfaceBot:   ui.RGBA(24, 26, 31, 0.72),
+			sheenTop:     white.Alpha(0.10),
+			sheenBot:     white.Alpha(0.02),
+			rimTop:       white.Alpha(0.24),
+			rimMid:       white.Alpha(0.08),
+			rimBot:       white.Alpha(0.14),
+			outerBorder:  white.Alpha(0.14),
+			shadow:       black.Alpha(0.52),
+			text:         ui.Hex("#F3F4F6"),
+			muted:        ui.Hex("#9CA3AF"),
+			subtle:       ui.Hex("#B4B9C3"),
+			line:         white.Alpha(0.10),
+			rowActive:    ui.RGBA(110, 160, 245, 0.22),
+			iconActiveBg: white.Alpha(0.12),
+			accent:       ui.Hex("#7AA7FF"),
+			chipBg:       ui.Hex("#7AA7FF").Alpha(0.16),
+			chipMarkBg:   ui.Hex("#7AA7FF").Alpha(0.22),
+			chipMarkInk:  ui.Hex("#DBEAFE"),
+			tagBg:        white.Alpha(0.08),
+			tagText:      ui.Hex("#B4B9C3"),
+			tagBlueBg:    ui.Hex("#7AA7FF").Alpha(0.18),
+			tagBlueText:  ui.Hex("#93C5FD"),
+			tagAmberBg:   ui.RGBA(217, 119, 6, 0.20),
+			tagAmberText: ui.Hex("#FBBF24"),
+			actionBg:     ui.Hex("#7AA7FF").Alpha(0.22),
+			actionText:   ui.Hex("#F3F4F6"),
+			kbdBg:        white.Alpha(0.09),
+			kbdBorder:    white.Alpha(0.14),
+			kbdShadow:    black.Alpha(0.32),
+		}
+	}
+	return quickModalPalette{
+		backdrop:     ui.RGBA(15, 23, 42, 0.06),
+		surfaceTop:   white.Alpha(0.76),
+		surfaceBot:   white.Alpha(0.66),
+		sheenTop:     white.Alpha(0.42),
+		sheenBot:     white.Alpha(0.12),
+		rimTop:       white.Alpha(0.95),
+		rimMid:       black.Alpha(0.09),
+		rimBot:       white.Alpha(0.72),
+		outerBorder:  black.Alpha(0.10),
+		shadow:       ui.RGBA(15, 23, 42, 0.18),
+		text:         ui.Hex("#111827"),
+		muted:        ui.Hex("#6B7280"),
+		subtle:       ui.Hex("#4B5563"),
+		line:         black.Alpha(0.08),
+		rowActive:    ui.RGBA(37, 99, 235, 0.12),
+		iconActiveBg: white.Alpha(0.86),
+		accent:       ui.Hex("#2563EB"),
+		chipBg:       ui.Hex("#2563EB").Alpha(0.10),
+		chipMarkBg:   ui.Hex("#2563EB").Alpha(0.14),
+		chipMarkInk:  ui.Hex("#1D4ED8"),
+		tagBg:        black.Alpha(0.055),
+		tagText:      ui.Hex("#4B5563"),
+		tagBlueBg:    ui.RGBA(37, 99, 235, 0.11),
+		tagBlueText:  ui.Hex("#1D4ED8"),
+		tagAmberBg:   ui.RGBA(217, 119, 6, 0.13),
+		tagAmberText: ui.Hex("#B45309"),
+		actionBg:     ui.Hex("#2563EB").Alpha(0.14),
+		actionText:   ui.Hex("#111827"),
+		kbdBg:        white.Alpha(0.62),
+		kbdBorder:    black.Alpha(0.11),
+		kbdShadow:    ui.RGBA(15, 23, 42, 0.08),
+	}
+}
+
+func quickModalRimGradient(pal quickModalPalette) ui.LinearGradient {
+	return ui.LinearGradient{
+		Angle: 145,
+		Stops: []ui.GradientStop{
+			{Color: pal.rimTop, At: 0},
+			{Color: pal.rimMid, At: 0.48},
+			{Color: pal.rimBot, At: 1},
+		},
+	}
+}
+
+func paintQuickModalGlass(p *ui.Painter, r ui.Rect, radius float32, pal quickModalPalette) {
+	// Frosted translucent base over the uiglass.Blur backdrop.
+	p.FillGradient(r, ui.LinearGradient{
+		Angle: 165,
+		Stops: []ui.GradientStop{
+			{Color: pal.surfaceTop, At: 0},
+			{Color: pal.surfaceBot, At: 1},
+		},
+	}, radius)
+	// Diagonal specular glass sheen.
+	p.FillGradient(r, ui.LinearGradient{
+		Angle: 135,
+		Stops: []ui.GradientStop{
+			{Color: pal.sheenTop, At: 0},
+			{Color: ui.Transparent, At: 0.48},
+			{Color: pal.sheenBot, At: 1},
+		},
+	}, radius)
+	// Hairline outer definition stroke so the glass silhouette separates cleanly.
+	p.Stroke(r, pal.outerBorder, radius, 1)
+}
+
 // spaceEditorSurface is a softly tinted glass surface. The theme controls
 // stay on a light surface even while previewing a dark space; icon pickers
 // follow the surrounding chrome's appearance.

@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Ciao1019/ArcMD/internal/dbview"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fsutil"
@@ -48,6 +49,10 @@ type document struct {
 	board            *editor.Board
 	boardReadOnly    bool
 	boardBaseline    [32]byte
+	dbView           *dbview.State
+	dbBaseline       [32]byte
+	dbSavedRev       uint64
+	dbDirtySnapshot  bool
 	pdf              *editor.PDFViewer
 	pdfModNano       int64
 	pdfSize          int64
@@ -125,6 +130,9 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 	if vault.IsBook(rel) {
 		return openBookDocument(sp, rel, text)
 	}
+	if vault.IsDatabase(rel) {
+		return openDatabaseDocument(sp, rel, text)
+	}
 	d := &document{space: sp, rel: rel, diskText: text, source: preferSource}
 	if vault.IsWhiteboard(rel) {
 		scene, err := whiteboard.Decode(text)
@@ -166,6 +174,10 @@ func (d *document) text() string {
 		s, _ := encodeWhiteboardFile(d.rel, d.board.SceneSnapshot())
 		return s
 	}
+	if d.isDatabase() {
+		s, _ := d.dbView.Store.EncodeMarkdown(time.Now())
+		return s
+	}
 	return editor.ExportMarkdown(d.ed.Committed())
 }
 
@@ -191,6 +203,14 @@ func (d *document) dirty() bool {
 			d.dirtyNow = d.board.Scene.Digest() != d.boardBaseline
 			d.dirtyRev, d.dirtyKnown = rev, true
 			d.dirtyVersion = d.board.Version()
+		}
+		return d.dirtyNow
+	}
+	if d.isDatabase() {
+		if rev := d.dbView.Store.Revision(); !d.dirtyKnown || rev != d.dirtyRev || d.dbDirtySnapshot {
+			d.dirtyNow = d.databaseDirty()
+			d.dirtyRev, d.dirtyKnown = rev, true
+			d.dirtyVersion = d.dbView.Version()
 		}
 		return d.dirtyNow
 	}
@@ -409,6 +429,7 @@ type asyncSaveResult struct {
 	unchanged        bool
 	arcmd            bool
 	board            bool
+	db               bool
 	historyRecorded  bool
 	missing          bool
 	conflict         bool
@@ -434,6 +455,9 @@ func (d *document) changed() bool {
 	if d.isWhiteboard() {
 		return d.board.Scene.Digest() != d.boardBaseline
 	}
+	if d.isDatabase() {
+		return d.databaseDirty()
+	}
 	if d.baselinePending && len(d.baselineOrigRuns) == 0 {
 		return false
 	}
@@ -443,7 +467,7 @@ func (d *document) changed() bool {
 }
 
 func (d *document) toggleMode() {
-	if d.isWhiteboard() || d.isPDF() || d.isBook() {
+	if d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() {
 		return
 	}
 	d.ed.UnmarkText()
@@ -571,6 +595,15 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 	switch {
 	case res.unchanged:
 		d.saveErr = nil
+		if res.db {
+			if d.isDatabase() && d.dbView.Version() == res.version && d.dbView.Store.Revision() == res.revision {
+				d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.dbView.Store.Revision(), true, false
+				d.dirtyVersion = d.dbView.Version()
+			} else {
+				d.dirtyKnown = false
+			}
+			return
+		}
 		if res.board {
 			if d.isWhiteboard() && d.board.Version() == res.version && d.board.Revision() == res.revision {
 				d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.board.Revision(), true, false
@@ -601,6 +634,23 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 		d.saveErr = res.err
 		d.failedVersion = res.version
 	default:
+		if res.db {
+			d.diskText, d.dbBaseline, d.saveErr = res.text, res.baseline, nil
+			if res.historyRecorded {
+				d.historyStarted = true
+			}
+			d.conflict, d.missing, d.diskNow = false, false, ""
+			if d.isDatabase() && d.dbView.Version() == res.version && d.dbView.Store.Revision() == res.revision {
+				d.dbSavedRev = res.revision
+				d.dbDirtySnapshot = false
+				d.dirtyRev, d.dirtyKnown, d.dirtyNow = res.revision, true, false
+				d.dirtyVersion = res.version
+			} else {
+				d.dirtyKnown = false
+			}
+			d.justSaved = true
+			return
+		}
 		if res.board {
 			d.diskText, d.boardBaseline, d.saveErr = res.text, res.baseline, nil
 			if res.historyRecorded {
@@ -686,6 +736,9 @@ func (d *document) write(force bool) error {
 	}
 	if d.isWhiteboard() {
 		return d.writeWhiteboard(force)
+	}
+	if d.isDatabase() {
+		return d.writeDatabase(force)
 	}
 	var baseline [32]byte
 	if dirty, known := d.pendingDirtyState(); known {
@@ -814,6 +867,9 @@ func (d *document) viewKey() string {
 	if d.isWhiteboard() {
 		return fmt.Sprintf("board:%p", d.board)
 	}
+	if d.isDatabase() {
+		return fmt.Sprintf("db:%p", d.dbView)
+	}
 	return fmt.Sprintf("editor:%p", d.ed)
 }
 
@@ -827,6 +883,9 @@ func (d *document) autosaveWith(c *ui.Context, post func(func())) {
 	ver := d.ed.Version()
 	if d.isWhiteboard() {
 		ver = d.board.Version()
+	}
+	if d.isDatabase() {
+		ver = d.dbView.Version()
 	}
 	if ver != d.version {
 		d.version, d.edited = ver, c.Now()
@@ -853,6 +912,10 @@ func (d *document) startAsyncAutosave(post func(func())) {
 	}
 	if d.isWhiteboard() {
 		d.startAsyncWhiteboardAutosave(post)
+		return
+	}
+	if d.isDatabase() {
+		d.startAsyncDatabaseAutosave(post)
 		return
 	}
 	committed := d.ed.Committed()
@@ -997,6 +1060,88 @@ func (d *document) startAsyncWhiteboardAutosave(post func(func())) {
 			text:     outText,
 			baseline: preBaseline,
 			board:    true,
+			version:  ver,
+			revision: rev,
+		}
+		if prepErr != nil {
+			res.err = prepErr
+			ch <- res
+			post(func() { d.pollAsyncSave() })
+			return
+		}
+		disk, err := readFile(&spClone, rel)
+		switch {
+		case isMissingDocFile(&spClone, rel, err):
+			res.missing = true
+		case err != nil:
+			res.err = err
+		case disk != expectedDisk:
+			res.conflict, res.diskNow = true, disk
+		default:
+			var initialAt time.Time
+			if needInitialHistory {
+				initialAt = time.Now().Add(-time.Second)
+				if info, stErr := os.Stat(fullPath); stErr == nil && info.ModTime().Before(initialAt) {
+					initialAt = info.ModTime()
+				}
+			}
+			if wErr := writeFile(&spClone, rel, outText); wErr != nil {
+				res.err = wErr
+			} else if !historyOff {
+				if needInitialHistory {
+					_ = history.Record(spClone.Root, rel, expectedDisk, initialAt, true)
+				}
+				_ = history.Record(spClone.Root, rel, outText, time.Now(), false)
+				res.historyRecorded = true
+			}
+		}
+		ch <- res
+		post(func() { d.pollAsyncSave() })
+	}()
+}
+
+func (d *document) startAsyncDatabaseAutosave(post func(func())) {
+	store := d.dbView.Store
+	prevBaseline := d.dbBaseline
+	dirty := d.databaseDirty()
+
+	spClone := *d.space
+	if d.space.ExternalFiles != nil {
+		spClone.ExternalFiles = make(map[string]string, len(d.space.ExternalFiles))
+		for k, v := range d.space.ExternalFiles {
+			spClone.ExternalFiles[k] = v
+		}
+	}
+	rel := d.rel
+	expectedDisk := d.diskText
+	historyOff := d.historyOff
+	needInitialHistory := !d.historyOff && !d.historyStarted && expectedDisk != ""
+	fullPath := d.fullPath()
+	ver := d.version
+	rev := store.Revision()
+	ch := make(chan asyncSaveResult, 1)
+	d.saving = true
+	d.saveDone = ch
+
+	go func() {
+		dbSnap := store.Database()
+		preBaseline := dbSnap.Digest()
+		if !dirty && preBaseline == prevBaseline {
+			ch <- asyncSaveResult{
+				unchanged: true,
+				db:        true,
+				baseline:  preBaseline,
+				version:   ver,
+				revision:  rev,
+			}
+			post(func() { d.pollAsyncSave() })
+			return
+		}
+		outText, prepErr := store.EncodeMarkdown(time.Now())
+		res := asyncSaveResult{
+			text:     outText,
+			baseline: preBaseline,
+			db:       true,
 			version:  ver,
 			revision: rev,
 		}

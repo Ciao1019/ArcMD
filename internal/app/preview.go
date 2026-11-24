@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/database"
+	"github.com/Ciao1019/ArcMD/internal/dbview"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
@@ -390,7 +392,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	p := &a.preview
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
 		key := "open/" + sp.ID + "/" + rel
-		if a.doc.isPDF() || a.doc.isBook() {
+		if a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() {
 			return a.doc
 		}
 		if a.doc.isWhiteboard() {
@@ -442,6 +444,18 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	text, err := readFile(sp, rel)
 	if err != nil {
 		return nil
+	}
+	if vault.IsDatabase(rel) {
+		db, loadErr := database.DecodeDatabaseMarkdown(text)
+		var d *document
+		if loadErr != nil {
+			d = &document{space: sp, rel: rel, loadErr: loadErr}
+		} else {
+			store := database.NewStore("", rel, db)
+			d = &document{space: sp, rel: rel, dbView: dbview.NewState(store)}
+		}
+		a.putThumb(key, thumb{d, info.ModTime()})
+		return d
 	}
 	if vault.IsWhiteboard(rel) {
 		scene, loadErr := whiteboard.Decode(text)
@@ -642,6 +656,8 @@ func (a *App) pickPreview(c *ui.Context, rel string) {
 			a.doc.book.RequestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
+		} else if a.doc.isDatabase() {
+			a.doc.dbView.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -672,6 +688,38 @@ func (a *App) docPreview(c *ui.Context) {
 			if d.board != nil && d.board.Scene != nil {
 				editor.PaintSceneFit(pt, r, d.board.Scene, pg.Whiteboard, dt, 10)
 			}
+		})
+	} else if d.isDatabase() {
+		paper.Children(func() {
+			db := d.dbView.Store.Database()
+			res := d.dbView.Store.Query(db.ActiveView, database.QueryOptions{})
+			ui.Column(c.Key("db-preview")).Grow(1).Padding(12).Gap(8).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconDatabase).FontSize(15).TextColor(dt.Accent)
+					ui.Text(c, db.Title).FontSize(13).FontWeight(600).TextColor(dt.Text).SingleLine().Grow(1).MinWidth(0)
+				})
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Padding(2, 6).Radius(4).Background(dt.Text.Alpha(0.06)).Children(func() {
+						ui.Text(c, fmt.Sprintf(i18n.T("%d 个视图"), len(db.Views))).FontSize(10.5).TextColor(dt.TextMuted)
+					})
+					ui.Box(c).Padding(2, 6).Radius(4).Background(dt.Text.Alpha(0.06)).Children(func() {
+						ui.Text(c, fmt.Sprintf(i18n.T("%d 条记录"), res.TotalCount)).FontSize(10.5).TextColor(dt.TextMuted)
+					})
+				})
+				ui.Box(c).Height(1).WidthPercent(100).Background(dt.Border)
+				maxRows := min(4, len(res.Rows))
+				for i := 0; i < maxRows; i++ {
+					rec := res.Rows[i]
+					rowTitle := rec.Title
+					if rowTitle == "" {
+						rowTitle = vault.Title(rec.Path)
+					}
+					ui.Row(c.Key(fmt.Sprintf("p-row-%d", i))).Height(18).AlignItems(ui.Center).Gap(6).Children(func() {
+						ui.Box(c).Size(5, 5).Radius(2.5).Background(dt.Accent.Alpha(0.65))
+						ui.Text(c, rowTitle).FontSize(11).TextColor(dt.Text).SingleLine().Grow(1).MinWidth(0)
+					})
+				}
+			})
 		})
 	} else if d.isPDF() {
 		paper.Background(dt.Background.Mix(dt.Text, 0.04))

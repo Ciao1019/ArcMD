@@ -256,6 +256,10 @@ func (a *App) actions() []action {
 	if !active.IsExternal() {
 		cmd(i18n.T("新建文档"), a.keyLabel("new-doc"), func() { a.newDoc(dir) })
 		cmd(i18n.T("新建白板"), a.keyLabel("new-board"), func() { a.newWhiteboard(dir) })
+		cmd(i18n.T("新建数据库"), a.keyLabel("new-database"), func() { a.newDatabase(dir) })
+		cmd(i18n.T("从 CSV 导入数据库…"), "", func() { a.pickAndImportCSV(nil) })
+		cmd(i18n.T("从 Notion 导出导入 (ZIP)…"), "", a.pickAndImportNotionZIP)
+		cmd(i18n.T("从 Notion 导出导入 (文件夹)…"), "", a.pickAndImportNotionFolder)
 		cmd(i18n.T("新建文件夹"), a.keyLabel("new-folder"), func() { a.newFolder(dir) })
 		if a.canPasteInto(active, dir) {
 			cmd(i18n.T("粘贴到当前文件夹"), "", func() { a.pasteInto(active, dir, "") })
@@ -298,7 +302,7 @@ func (a *App) actions() []action {
 		}
 		cmd(outline, a.keyLabel("outline"), a.toggleOutline)
 	}
-	if a.doc != nil && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() && a.doc.loadErr == nil && !a.doc.source {
+	if a.doc != nil && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() && !a.doc.isDatabase() && a.doc.loadErr == nil && !a.doc.source {
 		outline := i18n.T("展开目录")
 		if a.outlineOpen() {
 			outline = i18n.T("收起目录")
@@ -433,7 +437,7 @@ func (a *App) actions() []action {
 		}
 		switch {
 		case a.doc.conflict:
-			if !a.doc.isWhiteboard() {
+			if !a.doc.isWhiteboard() && !a.doc.isDatabase() {
 				cmd(i18n.T("三栏合并当前冲突…"), "", func() { a.openMergeForDiskConflict(a.doc) })
 			}
 			cmd(i18n.T("保留我的修改"), "", a.keepMine)
@@ -486,6 +490,29 @@ func (a *App) actions() []action {
 				cmd(i18n.T("撤销"), "⌘Z", func() { a.doc.board.Undo() })
 				cmd(i18n.T("重做"), "⇧⌘Z", func() { a.doc.board.Redo() })
 			}
+		} else if a.doc.isDatabase() {
+			dbDoc := a.doc
+			cmd(i18n.T("导出 CSV 文件"), "", func() { _, _ = a.exportDatabaseCSV(dbDoc) })
+			if !sp.IsExternal() {
+				cmd(i18n.T("向当前数据库导入 CSV…"), "", func() { a.pickAndImportCSV(dbDoc) })
+				cmd(i18n.T("新建记录"), "", func() {
+					if rec, err := dbDoc.dbView.Store.CreateRecord(i18n.T("无标题"), nil, ""); err == nil && rec != nil {
+						dbDoc.dbDirtySnapshot = true
+						a.refreshTree()
+						a.refreshSearch()
+					}
+				})
+				cmd(i18n.T("撤销"), "⌘Z", func() {
+					if paths, ok := dbDoc.dbView.Store.Undo(); ok {
+						a.syncDatabaseEditsToDocs(sp, dbDoc, dbDoc.dbView.Store, paths)
+					}
+				})
+				cmd(i18n.T("重做"), "⇧⌘Z", func() {
+					if paths, ok := dbDoc.dbView.Store.Redo(); ok {
+						a.syncDatabaseEditsToDocs(sp, dbDoc, dbDoc.dbView.Store, paths)
+					}
+				})
+			}
 		} else {
 			mode := i18n.T("预览 Markdown 导出")
 			if a.doc.source {
@@ -495,8 +522,10 @@ func (a *App) actions() []action {
 		}
 		if !a.doc.isPDF() && !a.doc.isBook() {
 			cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
-			cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
-			cmd(i18n.T("打印…"), "", a.printDoc)
+			if !a.doc.isDatabase() {
+				cmd(i18n.T("导出 PDF"), a.keyLabel("export-pdf"), a.exportPDF)
+				cmd(i18n.T("打印…"), "", a.printDoc)
+			}
 		}
 		cmd(i18n.T("重命名文档"), "", func() { a.renameIn(sp, rel) })
 		cmd(i18n.T("复制当前文档"), "", func() { a.copyEntries(sp, []string{rel}) })
@@ -519,10 +548,10 @@ func (a *App) actions() []action {
 				cmd(fmt.Sprintf(i18n.T("页面宽度：%s"), i18n.T(opt.label)), key, func() { a.setPageWidth(page) })
 			}
 		}
-		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() {
+		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() && !a.doc.isDatabase() {
 			a.editorActions(cmd)
 		}
-		if !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() {
+		if !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() && !a.doc.isDatabase() {
 			cmd(i18n.T("导出 Markdown 文件"), "", a.exportMarkdown)
 			cmd(i18n.T("将当前文档存为模板"), "", a.saveAsTemplate)
 			cmd(i18n.T("导出 HTML 网页"), "", a.exportHTML)
@@ -543,7 +572,7 @@ func (a *App) actions() []action {
 					continue
 				}
 			case "selection":
-				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.ed == nil {
+				if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() || a.doc.ed == nil {
 					continue
 				}
 				s, e := a.doc.ed.Positions()

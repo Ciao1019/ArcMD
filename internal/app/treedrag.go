@@ -152,7 +152,7 @@ func pinnedNodes(sp *space.Space, nodes []*vault.Node) []*vault.Node {
 // hidden reports whether rel has no row of its own in the list's folders:
 // a favorite or a pin of the space shows elsewhere.
 func (a *App) hidden(sp *space.Space, n *vault.Node) bool {
-	return sp.IsPinned(n.Path) || !n.Dir && (a.state.IsFavorite(sp.ID, n.Path) || a.grouped(sp, n.Path))
+	return sp.IsPinned(n.Path) || a.isFoldedDBFolder(sp, n) || !n.Dir && (a.state.IsFavorite(sp.ID, n.Path) || a.grouped(sp, n.Path))
 }
 
 // pinnedSection reports whether rel shows in the active space's pinned
@@ -445,7 +445,13 @@ func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop
 // favorites shows as empty.
 func (a *App) showsAny(sp *space.Space, nodes []*vault.Node) bool {
 	for _, n := range nodes {
-		if n.Dir || !a.state.IsFavorite(sp.ID, n.Path) && !a.grouped(sp, n.Path) {
+		if n.Dir {
+			if !sp.IsPinned(n.Path) && !a.isFoldedDBFolder(sp, n) {
+				return true
+			}
+			continue
+		}
+		if !a.state.IsFavorite(sp.ID, n.Path) && !a.grouped(sp, n.Path) {
 			return true
 		}
 	}

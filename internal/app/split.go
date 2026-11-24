@@ -339,6 +339,9 @@ func (a *App) residentDocuments() []*document {
 		}
 	}
 	add(a.doc)
+	if a.dbPeek.open && a.dbPeek.doc != nil {
+		add(a.dbPeek.doc)
+	}
 	for _, s := range a.sessions {
 		add(s.doc)
 		if s.split != nil {
@@ -417,6 +420,12 @@ func (a *App) withDocument(d *document, fn func()) {
 		if w.doc == d {
 			w.doc = replacement
 		}
+	}
+	if a.dbPeek.doc == d {
+		a.dbPeek.doc = replacement
+	}
+	if a.dbPeek.dbDoc == d {
+		a.dbPeek.dbDoc = replacement
 	}
 	if selected != d {
 		a.doc = selected

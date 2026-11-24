@@ -34,7 +34,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.2.8"
+const Version = "0.3.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -171,7 +171,8 @@ type App struct {
 	copied       []place
 	recentCopies []*place
 
-	palette palette
+	palette  palette
+	newModal newModalState
 	// qa is the panel of questions about the space (qa.go).
 	qa qaState
 	// pager is the strip of spaces the sidebar pages along (spaceswitch.go),
@@ -299,6 +300,13 @@ type App struct {
 	cachedEditorBindings map[string]editor.Combo
 	cachedReserved       []editor.Combo
 	cachedBookmarkKey    string
+
+	dbPeek            dbPeekState
+	pageDBCache       map[string]*pageDBEntry
+	embedDBs          map[string]*embedDBEntry
+	dbViewListCache   map[string]*sidebarDBMeta
+	dbViewRename      sidebarDBViewRename
+	pagePropsExpanded map[string]bool
 }
 
 // trashItem moves the file or folder at p to the system's trash.
@@ -820,6 +828,7 @@ func (a *App) session(id string) *spaceSession {
 // refreshTree reads the active space's folder again.
 func (a *App) refreshTree() {
 	a.treeFor = ""
+	a.invalidatePageDBCache("")
 	a.syncTree()
 }
 
@@ -990,6 +999,10 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 				replacement.book.GoToChapter(resident.book.CurrentChapter, true)
 				replacement.book.SidebarOpen = resident.book.SidebarOpen
 				replacement.book.ShowSource = resident.book.ShowSource
+			} else if resident.isDatabase() && replacement.isDatabase() {
+				if v := resident.dbView.Store.Database().ActiveView; v != "" {
+					replacement.dbView.SetActiveView(v)
+				}
 			} else {
 				replacement.ed.Scroll = resident.ed.Scroll
 			}
@@ -1004,6 +1017,24 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	} else {
 		preferSource := cached != nil && cached.rel == rel && cached.source
 		a.doc = openDocument(sp, rel, text, preferSource)
+	}
+	if a.doc.isDatabase() {
+		if (prev == nil || prev.space != sp || prev.rel != rel) && !sp.IsExternal() {
+			sp.SetExpanded(rel, true)
+		}
+		a.refreshOpenDatabases(sp.ID)
+	}
+	if a.dbPeek.open && a.dbPeek.dbDoc != nil && a.dbPeek.dbDoc != a.doc {
+		stillOpen := false
+		for _, r := range a.residentDocuments() {
+			if r == a.dbPeek.dbDoc {
+				stillOpen = true
+				break
+			}
+		}
+		if !stillOpen {
+			a.closeRecordPeek()
+		}
 	}
 	var prevSessionDoc *document
 	if activeSp != nil && a.documentContext == 0 {
@@ -1020,6 +1051,8 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 			a.doc.book.RequestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
+		} else if a.doc.isDatabase() {
+			a.doc.dbView.RequestFocus = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -1041,11 +1074,25 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	return true
 }
 
-// reveal opens the folders holding rel in the sidebar.
+// reveal opens the folders holding rel in the sidebar. Folded database
+// backing folders stay collapsed unless already opened explicitly, so opening
+// a single database record peeks only that document instead of dumping every
+// record file into the sidebar.
 func (a *App) reveal(rel string) {
 	sp := a.state.ActiveSpace()
-	changed := false
+	if sp == nil {
+		return
+	}
+	var dirs []string
 	for dir := path.Dir(rel); dir != "." && dir != "/"; dir = path.Dir(dir) {
+		dirs = append(dirs, dir)
+	}
+	changed := false
+	for i := len(dirs) - 1; i >= 0; i-- {
+		dir := dirs[i]
+		if a.isFoldedDBDir(sp, dir) && !sp.IsExpanded(dir) {
+			break
+		}
 		if !sp.IsExpanded(dir) {
 			sp.SetExpanded(dir, true)
 			changed = true
@@ -1229,7 +1276,7 @@ func isUntitled(name string) bool {
 // by hand keeps its name. A title taken by another file is numbered.
 func (a *App) followTitle() {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
 	if _, composing := d.ed.MarkedRange(); composing {
@@ -1386,7 +1433,7 @@ func (a *App) finishRename(openDuplicated bool) {
 	}
 	if openPending && sp == a.state.ActiveSpace() && vault.IsDocument(to) {
 		a.open(to)
-		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() {
+		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() && !d.isDatabase() {
 			d.ensureBodyParagraph()
 			leaves := d.ed.Doc.Leaves()
 			pos := 0
@@ -1435,6 +1482,7 @@ func (a *App) moved(sp *space.Space, from, to string) {
 	a.followCopied(sp.ID, from, sp.ID, to)
 	a.followOpen(sp.ID, from, sp.ID, to)
 	a.followSplitPaths(sp.ID, from, sp.ID, to)
+	a.followDatabaseRecordMove(sp, from, to)
 	a.saveState()
 	a.refreshTree()
 }
@@ -1679,7 +1727,7 @@ func writeNative(root, rel, markdown string) error {
 }
 
 func (a *App) exportMarkdown() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() {
 		return
 	}
 	a.doc.ed.UnmarkText()
@@ -1688,7 +1736,7 @@ func (a *App) exportMarkdown() {
 		a.notify("导出失败。%v", err)
 		return
 	}
-	rel, err := vault.CreateFile(root, path.Dir(name), a.doc.title()+" Export", ".md", a.doc.text())
+	rel, err := vault.CreateFile(root, path.Dir(name), a.doc.title()+" Export", ".md", editor.ExportMarkdown(a.documentForExport(a.doc)))
 	if err != nil {
 		a.notify("导出失败。%v", err)
 		return

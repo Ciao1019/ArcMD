@@ -144,11 +144,11 @@ func htmlLang() string {
 // when the name is taken, never replacing a file.
 func (a *App) exportHTML() {
 	d := a.doc
-	if d == nil || d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() {
+	if d == nil || d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() {
 		return
 	}
 	d.ed.UnmarkText()
-	doc := d.ed.Committed()
+	doc := a.documentForExport(d)
 	page := htmlPage(docName(d.title()), editor.ExportHTMLPage(doc, editor.HTMLTheme{
 		Light: editor.HTMLStyle{Theme: documentTheme(false), Page: pageStyle(false)},
 		Dark:  editor.HTMLStyle{Theme: documentTheme(true), Page: pageStyle(true)},

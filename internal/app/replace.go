@@ -138,7 +138,7 @@ func (a *App) replaceEverywhere() {
 			continue
 		}
 		if d := resident[place{h.Space, h.Path}]; d != nil {
-			if d.isPDF() || d.isBook() {
+			if d.isPDF() || d.isBook() || d.isDatabase() {
 				skipped++
 				continue
 			}
@@ -170,6 +170,9 @@ func (a *App) replaceEverywhere() {
 		}
 		d := openDocument(sp, h.Path, before, false)
 		if d.loadErr != nil {
+			continue
+		}
+		if d.isDatabase() {
 			continue
 		}
 		var ok bool

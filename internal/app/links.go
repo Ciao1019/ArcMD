@@ -284,7 +284,7 @@ func (a *App) settledFooter(c *ui.Context, d *document) *pageFooterCache {
 func (a *App) liveTyping(c *ui.Context) time.Duration {
 	var wait time.Duration
 	for _, d := range a.residentDocuments() {
-		if d.loadErr != nil || d.isWhiteboard() || d.ed.ByteLen() < footerLong {
+		if d.loadErr != nil || d.isWhiteboard() || d.isDatabase() || d.ed.ByteLen() < footerLong {
 			continue
 		}
 		rev := d.ed.Revision()
@@ -323,7 +323,7 @@ func (a *App) pageFooter(c *ui.Context) {
 }
 
 func (a *App) pageFooterFor(c *ui.Context, d *document) {
-	if d == nil || d.isWhiteboard() {
+	if d == nil || d.isWhiteboard() || d.isDatabase() {
 		return
 	}
 	t := c.Theme()
@@ -409,7 +409,7 @@ func (a *App) pageFooterFor(c *ui.Context, d *document) {
 func (a *App) iconTitle(spaceID, rel string) string {
 	title := vault.Title(rel)
 	icon := ""
-	if d := a.residentDocument(spaceID, rel); d != nil && d.loadErr == nil && !d.isWhiteboard() {
+	if d := a.residentDocument(spaceID, rel); d != nil && d.loadErr == nil && !d.isWhiteboard() && !d.isDatabase() {
 		icon = d.ed.Doc.Icon
 	} else {
 		icon = a.search.index.Icon(spaceID, rel)
@@ -435,7 +435,7 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 	resident := map[place]bool{}
 	for _, d := range a.residentDocuments() {
 		resident[place{d.space.ID, d.rel}] = true
-		if allowed[d.space.ID] && d.loadErr == nil && wiki.LinksTo(d.plainText(), from) {
+		if allowed[d.space.ID] && d.loadErr == nil && !d.isDatabase() && wiki.LinksTo(d.plainText(), from) {
 			if d.isWhiteboard() {
 				if !d.boardReadOnly && d.board.RewriteWikiLinks(from, to) {
 					changed++
@@ -470,7 +470,7 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 		}
 	}
 	for _, file := range files {
-		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) || vault.IsBook(file.rel) {
+		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) || vault.IsBook(file.rel) || vault.IsDatabase(file.rel) {
 			continue
 		}
 		sp := a.state.Get(file.space)
@@ -550,7 +550,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 			continue
 		}
 		resident[d.rel] = true
-		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.ed.ReadOnly {
+		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() || d.ed.ReadOnly {
 			continue
 		}
 		urls := map[string]string{}
@@ -571,7 +571,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 		return
 	}
 	for _, info := range docs {
-		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) || vault.IsBook(info.Path) {
+		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) || vault.IsBook(info.Path) || vault.IsDatabase(info.Path) {
 			continue
 		}
 		text, rErr := readFile(sp, info.Path)
@@ -616,6 +616,8 @@ func (a *App) previewWikiFor(source *document, name string) editor.WikiPreview {
 		}
 		if d.isWhiteboard() {
 			plain = d.board.Scene.PlainText()
+		} else if d.isDatabase() {
+			plain = d.plainText()
 		} else {
 			plain = d.ed.Committed().PlainText()
 		}

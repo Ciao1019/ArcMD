@@ -31,7 +31,7 @@ func pageWidthLabel(page string) string {
 }
 
 func (a *App) canAdjustPageWidth(d *document) bool {
-	if d == nil || d.loadErr != nil || d.source || d.isWhiteboard() || d.isPDF() {
+	if d == nil || d.loadErr != nil || d.source || d.isWhiteboard() || d.isPDF() || d.isDatabase() {
 		return false
 	}
 	if d.isBook() {

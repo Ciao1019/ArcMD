@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Ciao1019/ArcMD/internal/dbview"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/trashbin"
@@ -329,9 +330,10 @@ func (a *App) inDraggedGroup(spID, rel string) bool {
 // is active that should block sidebar file shortcuts (Cmd+C / Cmd+V / Cmd+⌫).
 // Passive hover previews do not block focused sidebar shortcuts.
 func (a *App) modalBlocksSidebarKeys() bool {
-	return a.palette.open || a.settingsOpen || a.replace.open || a.tagRename.open ||
+	return a.palette.open || a.newModal.open || a.settingsOpen || a.replace.open || a.tagRename.open ||
 		a.versions.open || a.updates.window || a.updates.communityOpen || a.pdfExport != nil || a.pluginModalOpen() ||
 		a.unsaved.open || a.library.open || a.spaceForm.open || a.renaming != "" || a.tour.open ||
+		(a.dbPeek.open && a.dbPeek.mode == dbview.OpenCenterPeek) ||
 		a.carrying != nil || a.carried != nil
 }
 

@@ -11,7 +11,7 @@ func TestEnglishInterface(t *testing.T) {
 	a, tt := newTestApp(t)
 	t.Cleanup(func() { i18n.SetLanguage("zh-Hans") })
 	tt.Frame()
-	if !tt.HasText("新建文档") {
+	if !tt.HasText("新建") {
 		t.Fatal("Chinese by default")
 	}
 	a.openSettings(tabAppearance)
@@ -21,7 +21,7 @@ func TestEnglishInterface(t *testing.T) {
 	}
 	a.settingsOpen = false
 	tt.Frame()
-	if !i18n.English() || !tt.HasText("New Document") || tt.HasText("新建文档") {
+	if !i18n.English() || !tt.HasText("New") || tt.HasText("新建") {
 		t.Fatal("the interface shows English", tt.Texts())
 	}
 	saved, _ := (prefs.Store{Path: a.prefStore.Path}).Load()

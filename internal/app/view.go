@@ -28,6 +28,7 @@ func (a *App) Content() *ui.Content { return ui.View(a.View) }
 // View builds the window from the state, every frame.
 func (a *App) View(c *ui.Context) {
 	a.now, a.reduceMotion = c.Now(), c.Preferences().ReduceMotion
+	a.applyPendingDatabasePeekMode()
 	winW, _ := c.Size()
 	if winW > 0 {
 		a.narrowTick(winW)
@@ -95,6 +96,9 @@ func (a *App) View(c *ui.Context) {
 			d.justSaved = false
 			if d.space != nil {
 				a.onDocumentSaved(d.space.ID)
+				if !d.isDatabase() {
+					a.refreshOpenDatabases(d.space.ID)
+				}
 			}
 		}
 	}
@@ -181,6 +185,7 @@ func (a *App) View(c *ui.Context) {
 	a.fileDropOverlayView(c)
 	a.previewView(c)
 	a.paletteView(c)
+	a.newModalView(c)
 	a.updateToast(c)
 	a.settingsView(c)
 	a.replaceView(c)
@@ -195,6 +200,7 @@ func (a *App) View(c *ui.Context) {
 	a.gitChangesView(c)
 	a.mergeView(c)
 	a.unsavedPromptView(c)
+	a.databasePeekModal(c)
 	a.tourView(c)
 	if a.captureSplits() {
 		a.saveState()
@@ -225,6 +231,8 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.newDoc(a.currentDir())
 	case a.pressed(c, "new-board"):
 		a.newWhiteboard(a.currentDir())
+	case a.pressed(c, "new-database"):
+		a.newDatabase(a.currentDir())
 	case a.pressed(c, "new-folder"):
 		a.newFolder(a.currentDir())
 	case a.pressed(c, "daily"):
@@ -500,6 +508,8 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 			editor.PDFView(c.Key(d.viewKey()), d.pdf, a.pdfOptionsFor(c, d))
 		} else if d.isBook() {
 			editor.BookView(c.Key(d.viewKey()), d.book, a.bookOptionsFor(c, d))
+		} else if d.isDatabase() {
+			a.databaseWorkspace(c, d, cardWidth)
 		} else {
 			a.documentMapWorkspace(c, d, cardWidth)
 		}

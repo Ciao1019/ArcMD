@@ -470,6 +470,11 @@ func (e *Editor) exportVectorRows(
 			continue
 		}
 
+		if r.dbEmbed {
+			ExportDatabaseEmbedToVectorPage(vp, r.dbPrintTitle, r.dbPrintRows, pg, t, px(r.dbRect.X), py(r.dbRect.Y), pw(r.dbRect.W), ph(r.dbRect.H), sc)
+			continue
+		}
+
 		if r.layout == nil {
 			continue
 		}
@@ -484,7 +489,7 @@ func i18nErrorText(_ *ui.TextLayout, msg string) string { return msg }
 func (e *Editor) isCommentRawID(id string) bool {
 	if idx, ok := e.rowIDs[id]; ok {
 		if b := e.indexedRow(idx).leaf.Block; b != nil && b.Kind == "raw" {
-			return isHTMLCommentBlock(b.Text())
+			return !isDatabaseBlock(b) && isHTMLCommentBlock(b.Text())
 		}
 	}
 	return false

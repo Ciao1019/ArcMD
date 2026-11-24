@@ -329,7 +329,7 @@ func (a *App) currentDocumentText(sp *space.Space, rel string) (string, bool) {
 // findConflictForDoc returns a Cloud Sync conflict or orphan "(冲突副本 ...)"
 // match for the given document if one exists.
 func (a *App) findConflictForDoc(d *document) (persistedConflict, bool) {
-	if d == nil || d.space == nil || d.space.IsExternal() || d.isWhiteboard() || d.isPDF() || d.isBook() {
+	if d == nil || d.space == nil || d.space.IsExternal() || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() {
 		return persistedConflict{}, false
 	}
 	for _, it := range a.loadPersistedConflicts() {
@@ -399,7 +399,7 @@ func (a *App) refreshGitChanges() {
 
 	// 1. Open editor external-disk conflicts (watch.go d.conflict).
 	for _, d := range a.residentDocuments() {
-		if d.space == nil || !d.conflict || d.isWhiteboard() {
+		if d.space == nil || !d.conflict || d.isWhiteboard() || d.isDatabase() {
 			continue
 		}
 		key := "disk-conflict:" + d.space.ID + ":" + d.rel
@@ -745,9 +745,14 @@ func (a *App) commitThreeWayMerge() {
 	if ms.diskConflictDoc != nil {
 		d := ms.diskConflictDoc
 		a.activateDocument(d)
-		if !d.isWhiteboard() && d.ed != nil {
+		if !d.isWhiteboard() && !d.isDatabase() && d.ed != nil {
 			doc := editor.ImportMarkdown(mergedText)
 			d.ed.Engine.ReplaceDocument(doc)
+		} else if d.isDatabase() {
+			reloaded := openDatabaseDocument(d.space, d.rel, mergedText)
+			d.dbView = reloaded.dbView
+			d.loadErr = reloaded.loadErr
+			d.dbDirtySnapshot = true
 		}
 		if err := d.write(true); err != nil {
 			a.notify("保存合并结果失败。%v", err)
@@ -779,9 +784,17 @@ func (a *App) commitThreeWayMerge() {
 
 	if openTarget != nil && openTarget.loadErr == nil && !openTarget.isWhiteboard() && openTarget.ed != nil {
 		a.withDocument(openTarget, func() {
-			doc := editor.ImportMarkdown(mergedText)
-			openTarget.ed.Engine.ReplaceDocument(doc)
-			_ = openTarget.write(true)
+			if openTarget.isDatabase() {
+				reloaded := openDatabaseDocument(sp, ms.rel, mergedText)
+				openTarget.dbView = reloaded.dbView
+				openTarget.loadErr = reloaded.loadErr
+				openTarget.dbDirtySnapshot = true
+				_ = openTarget.write(true)
+			} else {
+				doc := editor.ImportMarkdown(mergedText)
+				openTarget.ed.Engine.ReplaceDocument(doc)
+				_ = openTarget.write(true)
+			}
 		})
 	} else {
 		if err := vault.Write(sp.Root, ms.rel, mergedText); err != nil {

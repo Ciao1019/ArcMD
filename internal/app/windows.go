@@ -210,9 +210,15 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 			editor.BookView(c.Key(d.viewKey()), d.book, a.bookOptionsFor(c, d))
 			return
 		}
+		if d.isDatabase() {
+			width, _ := c.Size()
+			a.databaseWorkspace(c, d, width)
+			return
+		}
 		width, _ := c.Size()
 		a.documentMapWorkspace(c, d, width)
 	})
+	a.databasePeekModal(c)
 	if a.unsaved.open && len(a.unsaved.docs) == 1 && a.unsaved.docs[0] == d {
 		a.unsavedPromptView(c)
 	}

@@ -1,6 +1,6 @@
 # Dependencies and attribution
 
-Prism uses `github.com/egoist/mygo` v0.7.4 for native windows, UI primitives,
+Prism uses `github.com/egoist/mygo` v0.10.0 for native windows, UI primitives,
 text shaping and system input transport. Its module cache stays untouched.
 The Markdown editor is implemented in `internal/editor` and has no vendored
 editor component or TeX engine.
@@ -90,3 +90,5 @@ MIT notice is in `kokonutui/LICENSE`.
 [Kokonut UI source](https://github.com/kokonut-labs/kokonutui)
 
 The native document map adapts the MIT-licensed [mygo-native-ui mindmap](https://github.com/xingkaixin/mygo-native-ui/tree/main/ui/mindmap). See [license and provenance](mygo-native-ui/README.md).
+
+The native database views (`internal/dbview/table_beui.go`, `internal/dbview/board_dayflow.go`, `internal/dbview/calendar_dayflow_*.go`) draw visual and interaction design inspiration from beUI Motion Table and DayFlow Calendar/Kanban layouts, implemented from scratch in pure Go with MyGo Native UI primitives and no bundled JavaScript or third-party assets.

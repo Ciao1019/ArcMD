@@ -362,6 +362,7 @@ func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text strin
 		}
 	}
 
+	blocks = importDatabaseViews(blocks, spanStart, spanEnd)
 	blocks = importColumns(blocks, spanStart, spanEnd, explicitLeft)
 	blocks = importDetails(blocks, spanStart, spanEnd)
 	blocks = importAlignedWrappers(blocks, spanStart, spanEnd, explicitLeft)
@@ -832,7 +833,10 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 	if trimmed == "" {
 		return nil, false
 	}
-	// Structural multi-block wrappers are handled by importColumns / importDetails / importAlignedWrappers.
+	// Structural multi-block wrappers are handled by importDatabaseViews / importColumns / importDetails / importAlignedWrappers.
+	if isDatabaseOpenComment(trimmed) || isDatabaseCloseComment(trimmed) || isDatabaseEmbedText(trimmed) {
+		return nil, false
+	}
 	if detailsOpen.MatchString(trimmed) || detailsClose.MatchString(trimmed) ||
 		columnsOpenRe.MatchString(trimmed) || columnOpenRe.MatchString(trimmed) || divCloseRe.MatchString(trimmed) ||
 		centerCloseRe.MatchString(trimmed) {
@@ -2370,6 +2374,9 @@ var (
 )
 
 func isHTMLCommentBlock(s string) bool {
+	if isDatabaseEmbedText(s) {
+		return false
+	}
 	rest := strings.TrimSpace(s)
 	if rest == "" {
 		return false
@@ -2750,6 +2757,51 @@ func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool,
 		cur = append(cur, b)
 	}
 	return nil, 0, false
+}
+
+// importDatabaseViews collapses balanced amphibious database embed fences
+// ("<!-- arcmd-db:view ... -->" ... "<!-- /arcmd-db:view -->") into a single
+// raw block while preserving its original source span.
+func importDatabaseViews(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int) []*document.Block {
+	var out []*document.Block
+	for i := 0; i < len(blocks); {
+		b := blocks[i]
+		if b != nil && b.Kind == "raw" {
+			if spec, ok := parseDatabaseOpenComment(b.Text()); ok {
+				closeIdx := -1
+				for k := i + 1; k < len(blocks); k++ {
+					bk := blocks[k]
+					if bk != nil && bk.Kind == "raw" {
+						if isDatabaseOpenComment(bk.Text()) {
+							break
+						}
+						if isDatabaseCloseComment(bk.Text()) {
+							closeIdx = k
+							break
+						}
+					}
+				}
+				if closeIdx >= 0 {
+					snapMD := ""
+					if closeIdx > i+1 {
+						snapMD = strings.TrimSpace(renderMarkdownBlockList(blocks[i+1 : closeIdx]))
+					}
+					merged := document.NewBlock("raw", FormatDatabaseEmbed(spec, snapMD))
+					merged.Indent = b.Indent
+					if spanStart != nil {
+						spanStart[merged] = spanStart[b]
+						spanEnd[merged] = spanEnd[blocks[closeIdx]]
+					}
+					out = append(out, merged)
+					i = closeIdx + 1
+					continue
+				}
+			}
+		}
+		out = append(out, b)
+		i++
+	}
+	return out
 }
 
 // importDetails turns HTML disclosures, kept as raw blocks, into toggles:

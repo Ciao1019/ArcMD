@@ -57,7 +57,7 @@ func isWhiteboardEmbed(b *document.Block) bool {
 }
 
 func isAtomicVisualBlock(b *document.Block) bool {
-	return isWhiteboardEmbed(b) || isWhiteboardBlock(b) || isPDFEmbed(b) || isBookEmbed(b)
+	return isWhiteboardEmbed(b) || isWhiteboardBlock(b) || isPDFEmbed(b) || isBookEmbed(b) || isDatabaseBlock(b)
 }
 
 func (e *Editor) deleteAtomicBlock(id string, backward bool) {

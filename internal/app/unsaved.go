@@ -41,6 +41,10 @@ func (a *App) discardEdits(d *document) {
 	if d.isWhiteboard() && clean.isWhiteboard() {
 		clean.board.PreserveViewport(d.board)
 		clean.boardReadOnly = d.boardReadOnly
+	} else if d.isDatabase() && clean.isDatabase() {
+		if v := d.dbView.Store.Database().ActiveView; v != "" {
+			clean.dbView.SetActiveView(v)
+		}
 	} else {
 		clean.ed.Scroll = d.ed.Scroll
 	}

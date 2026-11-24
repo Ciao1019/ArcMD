@@ -23,10 +23,11 @@ import (
 // Extensions are the file extensions the vault lists, lowercase.
 var Extensions = []string{".md", ".markdown", ".mdx"}
 
-// Compound, raw whiteboard, PDF, HTML, and EPUB extensions.
+// Compound, raw whiteboard, database, PDF, HTML, and EPUB extensions.
 const (
 	ExtWhiteboard    = ".excalidraw.svg"
 	ExtWhiteboardRaw = ".excalidraw"
+	ExtDatabase      = ".db.md"
 	ExtPDF           = ".pdf"
 	ExtHTML          = ".html"
 	ExtHTM           = ".htm"
@@ -34,18 +35,27 @@ const (
 )
 
 // FileExt returns the document extension of name, recognizing compound
-// ".excalidraw.svg" files before falling back to path.Ext.
+// ".excalidraw.svg" and ".db.md" files before falling back to path.Ext.
 func FileExt(name string) string {
 	base := path.Base(filepath.ToSlash(name))
 	if len(base) > len(ExtWhiteboard) && strings.EqualFold(base[len(base)-len(ExtWhiteboard):], ExtWhiteboard) {
 		return base[len(base)-len(ExtWhiteboard):]
 	}
+	if len(base) > len(ExtDatabase) && strings.EqualFold(base[len(base)-len(ExtDatabase):], ExtDatabase) {
+		return base[len(base)-len(ExtDatabase):]
+	}
 	return path.Ext(base)
 }
 
-// IsDocument includes native rich documents, Markdown sources, whiteboards, PDFs, HTML, and EPUBs.
+// IsDocument includes native rich documents, Markdown sources, databases, whiteboards, PDFs, HTML, and EPUBs.
 func IsDocument(name string) bool {
-	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsWhiteboard(name) || IsPDF(name) || IsBook(name)
+	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsDatabase(name) || IsWhiteboard(name) || IsPDF(name) || IsBook(name)
+}
+
+// IsDatabase reports whether name is an amphibious database document (.db.md).
+func IsDatabase(name string) bool {
+	base := path.Base(filepath.ToSlash(name))
+	return len(base) > len(ExtDatabase) && strings.EqualFold(FileExt(base), ExtDatabase)
 }
 
 // IsPDF reports whether name is a PDF document.
@@ -88,9 +98,14 @@ func IsWhiteboardSVG(name string) bool {
 	return len(base) > len(ExtWhiteboard) && strings.EqualFold(FileExt(base), ExtWhiteboard)
 }
 
-// IsMarkdown reports whether name has one of Extensions.
+// IsMarkdown reports whether name has one of Extensions, excluding compound
+// database documents (.db.md).
 func IsMarkdown(name string) bool {
-	return slices.Contains(Extensions, strings.ToLower(path.Ext(name)))
+	base := path.Base(filepath.ToSlash(name))
+	if len(base) >= len(ExtDatabase) && strings.EqualFold(base[len(base)-len(ExtDatabase):], ExtDatabase) {
+		return false
+	}
+	return slices.Contains(Extensions, strings.ToLower(path.Ext(base)))
 }
 
 // Doc is a Markdown file of the vault.
@@ -260,7 +275,7 @@ func List(root string) ([]Doc, error) {
 
 // CreateFile atomically chooses an unused document name and writes its content.
 func CreateFile(root, dir, title, extension, text string) (string, error) {
-	if extension != ".arcmd" && extension != ".md" && extension != ExtWhiteboardRaw && extension != ExtWhiteboard {
+	if extension != ".arcmd" && extension != ".md" && extension != ExtWhiteboardRaw && extension != ExtWhiteboard && extension != ExtDatabase {
 		return "", errors.New("vault: unsupported document extension")
 	}
 	title = sanitize(title)

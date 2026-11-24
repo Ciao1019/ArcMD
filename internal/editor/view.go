@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/bookdoc"
+	"github.com/Ciao1019/ArcMD/internal/database"
+	"github.com/Ciao1019/ArcMD/internal/dbview"
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/mermaid"
@@ -263,6 +265,18 @@ type Editor struct {
 	htmlWebView                 func(bookURL, slot string, scrollToContainer bool) HTMLWebView
 	attachHTML                  func()
 	attachEPUB                  func()
+	dbHeights                   map[string]float32
+	dbDragID                    string
+	dbDragStartH                float32
+	dbStates                    map[string]*dbview.State
+	dbSyncedView                map[string]string
+	dbPickerOpen                bool
+	dbPickerQuery               string
+	loadDatabase                func(string) (*database.Store, dbview.Options, uint64, error)
+	openDatabase                func(string, string, bool)
+	listDatabases               func() []database.SpaceDBInfo
+	createDatabase              func(string) (string, string, string, error)
+	databaseSnapshot            func(string, string) string
 	laidFindKey                 string
 	bindings                    map[string]Combo
 	openWiki, openTag           func(string)
@@ -372,12 +386,16 @@ type row struct {
 	boardErr     string
 	boardError   *ui.TextLayout
 
-	pdfDoc      *pdfdoc.Document
-	pdfRect     ui.Rect
-	pdfBrowsing bool
-	pdfEmbed    bool
-	pdfErr      string
-	pdfError    *ui.TextLayout
+	pdfDoc       *pdfdoc.Document
+	pdfRect      ui.Rect
+	pdfBrowsing  bool
+	pdfEmbed     bool
+	pdfErr       string
+	pdfError     *ui.TextLayout
+	dbEmbed      bool
+	dbRect       ui.Rect
+	dbPrintTitle string
+	dbPrintRows  [][]string
 
 	bookDoc      *bookdoc.Document
 	bookRect     ui.Rect
@@ -431,6 +449,7 @@ type decoration struct {
 	bookBrowsing   bool
 	bookEmbed      bool
 	bookURL        string
+	dbEmbed        bool
 	yApplied       float64
 }
 
@@ -722,6 +741,12 @@ type Options struct {
 	DisableFind        bool
 	HideReadOnlyNotice bool
 	CompactMargins     bool
+	// Database Linked View embed integration callbacks.
+	LoadDatabase     func(target string) (*database.Store, dbview.Options, uint64, error)
+	OpenDatabase     func(target, viewID string, split bool)
+	ListDatabases    func() []database.SpaceDBInfo
+	CreateDatabase   func(title string) (targetRel, viewID, snapshotMD string, err error)
+	DatabaseSnapshot func(target, viewID string) string
 }
 
 func New(markdown string) *Editor { return FromOwnedDocument(ImportMarkdown(markdown)) }
@@ -852,6 +877,11 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.htmlWebView = o.HTMLWebView
 	e.attachHTML = o.AttachHTML
 	e.attachEPUB = o.AttachEPUB
+	e.loadDatabase = o.LoadDatabase
+	e.openDatabase = o.OpenDatabase
+	e.listDatabases = o.ListDatabases
+	e.createDatabase = o.CreateDatabase
+	e.databaseSnapshot = o.DatabaseSnapshot
 	e.header.pickCover = o.PickCover
 	e.bookmarks.marks, e.bookmarks.toggle, e.bookmarks.label, e.bookmarks.key = o.Bookmarks, o.ToggleBookmark, o.LabelBookmark, o.BookmarkKey
 	e.reserved = o.Reserved
@@ -1033,6 +1063,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				e.boardControls(c, o)
 				e.pdfControls(c, o)
 				e.bookControls(c, o)
+				e.databaseControls(c, o)
 				e.bookmarkMarks(c)
 				if o.Footer != nil {
 					footer := ui.Column(c.Key("page-footer")).Absolute().Left(e.padding).Top(e.footerTop()).Width(e.bodyWidth())
@@ -1054,6 +1085,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.wikiMenu(c, surface)
 		e.completeMenu(c, surface)
 		e.headerPopups(c, surface)
+		e.databasePickerControl(c, surface, o)
 	}
 	e.imagePreview(c)
 	e.mermaidPreview(c)
@@ -1468,7 +1500,7 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 		cached, ok := e.cache[b.ID]
 		sameShape := ok && cached.key == key && slices.Equal(cached.runs, b.Runs)
 		active := virtualize && (b.ID == caretID || b.ID == anchorID || b.ID == revealID || b.ID == e.dragID || b.ID == e.mathEditing || b.ID == e.mermaidEditing || strings.HasPrefix(e.inlineEditing, b.ID+":"))
-		deferShape := virtualize && !active && leaf.Owner == b.ID && canDeferKind(b.Kind) && !(b.Kind == "code" && e.codeMaxHeight > 0)
+		deferShape := virtualize && !active && leaf.Owner == b.ID && canDeferKind(b.Kind) && !(b.Kind == "code" && e.codeMaxHeight > 0) && !isDatabaseBlock(b)
 
 		var laid *textLayout
 		var h float32
@@ -1527,6 +1559,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 						d.kind, d.label, d.id, d.mermaidHidden = "mermaid", b.Language, b.ID, true
 					} else if b.Kind == "code" {
 						d.label, d.id = b.Language, b.ID
+					} else if isDatabaseBlock(b) {
+						d.kind, d.id, d.dbEmbed = "database", b.ID, true
 					} else if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
 						d.label = i18n.T("HTML 注释")
 					}
@@ -1553,6 +1587,8 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			total = e.layoutPDFEmbed(&row, o, gap)
 		} else if isBookEmbed(b) {
 			total = e.layoutBookEmbed(&row, o, gap)
+		} else if isDatabaseBlock(b) {
+			total = e.layoutDatabaseBlock(&row, o, gap)
 		} else if b.Kind == "image" {
 			total = e.layoutImage(&row, o)
 		}
@@ -1600,6 +1636,9 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 				d.mermaidHidden, d.mermaidWellOff = row.mermaidHidden, mermaidWellOff
 			} else if b.Kind == "code" {
 				d.label, d.id = b.Language, b.ID
+			} else if isDatabaseBlock(b) {
+				d.kind, d.id, d.dbEmbed = "database", b.ID, true
+				d.rect = row.dbRect
 			} else if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
 				d.label = i18n.T("HTML 注释")
 			}
@@ -1633,6 +1672,9 @@ func (e *Editor) indexedRow(i int) *row {
 			}
 			if r.pdfRect.W > 0 {
 				r.pdfRect.Y += dy
+			}
+			if r.dbRect.W > 0 {
+				r.dbRect.Y += dy
 			}
 			r.yApplied = off
 		}
@@ -1687,6 +1729,10 @@ func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange
 		rect := ui.Rect{X: row.boardRect.X, Y: row.boardRect.Y, W: 2, H: 20}
 		return rect, ui.TextInputRange{Start: row.leaf.Start, End: row.leaf.Start}, true
 	}
+	if row.dbEmbed {
+		rect := ui.Rect{X: row.dbRect.X, Y: row.dbRect.Y, W: 2, H: 20}
+		return rect, ui.TextInputRange{Start: row.leaf.Start, End: row.leaf.Start}, true
+	}
 	rect := row.layout.Caret(local)
 	rect.X += row.x
 	rect.Y += row.y
@@ -1704,7 +1750,7 @@ func (e *Editor) IndexForPoint(point ui.Point) (int, bool) {
 		return 0, false
 	}
 	best := e.ensureRow(e.rowSpace.nearest(point))
-	if (best.picture != nil && !e.captionVisible(best.leaf.Block)) || best.mermaidHidden || isWhiteboardBlock(best.leaf.Block) || best.boardEmbed {
+	if (best.picture != nil && !e.captionVisible(best.leaf.Block)) || best.mermaidHidden || isWhiteboardBlock(best.leaf.Block) || best.boardEmbed || best.dbEmbed {
 		return best.leaf.Start, true
 	}
 	px := point.X - best.x
@@ -1910,7 +1956,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 					} else if r.mermaidHidden && r.mermaid != nil {
 						mw, mh := r.mermaid.W*r.mermaidScale, r.mermaid.H*r.mermaidScale
 						p.Fill(ui.Rect{X: bounds.X + r.rect.X + dx + (r.rect.W-mw)/2 - 3, Y: bounds.Y + r.rect.Y + dy + r.mermaidTop - 2, W: mw + 6, H: mh + 4}, t.Selection, 4)
-					} else if !isWhiteboardBlock(r.leaf.Block) && !r.boardEmbed && !r.pdfEmbed && !r.bookEmbed {
+					} else if !isWhiteboardBlock(r.leaf.Block) && !r.boardEmbed && !r.pdfEmbed && !r.bookEmbed && !r.dbEmbed {
 						local := ui.TextInputRange{Start: max(0, selection.Start-r.leaf.Start), End: min(r.leaf.End, selection.End) - r.leaf.Start}
 						for _, rect := range r.layout.SelectionRects(local) {
 							rect.X += bounds.X + r.x + dx - scrollX - 1.5
@@ -1933,6 +1979,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 					return
 				}
 				if e.paintBookRow(p, bounds, r, t) {
+					return
+				}
+				if e.paintDatabaseRow(p, bounds, r, t) {
 					return
 				}
 				e.paintAnnotations(p, shiftedBounds, r, true)
