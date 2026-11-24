@@ -215,11 +215,15 @@ CGO_ENABLED=0 GOOS=windows go build ./...
 ARCMD_SNAPSHOT=/tmp/arcmd-shots CGO_ENABLED=0 go test -run Snapshot ./internal/app
 ```
 
-<div align="center">
+## Star History
 
-如果 ArcMD 对你有帮助，欢迎在右上角点亮一颗 **⭐ Star**！
-
-<a href="https://github.com/Ciao1019/ArcMD/stargazers"><img src="docs/images/readme/star.gif" width="600" alt="点击 GitHub 上的 Star 按钮为 ArcMD 点亮星标"></a>
+<a href="https://www.star-history.com/?repos=ciao1019%2Farcmd&type=timeline&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ciao1019/arcmd&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ciao1019/arcmd&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ciao1019/arcmd&type=date&legend=top-left" />
+ </picture>
+</a>
 
 
 ## 致谢
