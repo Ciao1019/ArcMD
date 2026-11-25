@@ -177,7 +177,7 @@ func apiError(res *http.Response) error {
 		}
 	}
 	if len(msg) > 500 {
-		msg = msg[:500] + "…"
+		msg = truncateUTF8(msg, 500) + "…"
 	}
 	return &APIError{Status: res.StatusCode, Message: msg}
 }
@@ -192,6 +192,9 @@ func readChatStream(ctx context.Context, r io.Reader, onDelta func(Delta)) (Resp
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return Response{}, err
+		}
 		line := sc.Text()
 		data, ok := strings.CutPrefix(line, "data:")
 		if !ok {
@@ -227,6 +230,8 @@ func readChatStream(ctx context.Context, r io.Reader, onDelta func(Delta)) (Resp
 				i := len(calls)
 				if tc.Index != nil {
 					i = *tc.Index
+				} else if tc.ID == "" && tc.Function.Name == "" && len(calls) > 0 {
+					i = len(calls) - 1
 				}
 				call := calls[i]
 				if call == nil {

@@ -923,9 +923,16 @@ func (v *PDFViewer) paintPages(p *ui.Painter, bounds ui.Rect, viewH float32, t *
 	paperFill := ui.RGB(255, 255, 255)
 	paperBorder := ui.RGBA(0, 0, 0, 0.08)
 	shadowCol := ui.RGBA(0, 0, 0, 0.11)
-	matchFill := ui.RGBA(250, 204, 21, 0.30)
-	activeFill := ui.RGBA(249, 115, 22, 0.26)
-	activeStroke := ui.RGBA(234, 88, 12, 0.85)
+	matchFill := pg.FindMatch.Alpha(0.32)
+	if pg.FindMatch.A == 0 {
+		matchFill = ui.RGBA(250, 204, 21, 0.30)
+	}
+	activeFill := pg.FindCurrent.Alpha(0.28)
+	activeStroke := pg.FindCurrent.Alpha(0.85)
+	if pg.FindCurrent.A == 0 {
+		activeFill = ui.RGBA(249, 115, 22, 0.26)
+		activeStroke = ui.RGBA(234, 88, 12, 0.85)
+	}
 
 	for _, sl := range v.slots {
 		if sl.rect.Y+sl.rect.H < visTop || sl.rect.Y > visBot {
@@ -997,7 +1004,6 @@ func (v *PDFViewer) paintPages(p *ui.Painter, bounds ui.Rect, viewH float32, t *
 		}
 	}
 	_ = t
-	_ = pg
 }
 
 func (v *PDFViewer) handleViewportInput(ev ui.InputEvent, viewH float32, opts PDFOptions) bool {

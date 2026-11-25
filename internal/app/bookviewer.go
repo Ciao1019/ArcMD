@@ -36,7 +36,14 @@ func (d *document) isBook() bool {
 }
 
 func (d *document) syncMovedPath() {
-	if !d.isBook() || d.book.Doc == nil || d.space == nil || d.rel == "" {
+	if d == nil || d.space == nil || d.rel == "" {
+		return
+	}
+	if d.isPDF() {
+		d.reopenPDF()
+		return
+	}
+	if !d.isBook() || d.book.Doc == nil {
 		return
 	}
 	if full, err := resolveFile(d.space, d.rel); err == nil {

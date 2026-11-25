@@ -25,8 +25,10 @@ func main() {
 	if home := os.Getenv("ARCMD_HOME"); home != "" {
 		cfg = app.Config{ConfigDir: filepath.Join(home, "config"), DocumentsDir: filepath.Join(home, "spaces")}
 	}
-	if len(os.Args) > 1 && os.Args[1] == "ask" {
-		os.Exit(ask(os.Args[2:], cfg, os.Stdout, os.Stderr))
+	if len(os.Args) > 1 {
+		if code, handled := dispatchCLI(os.Args[1:], cfg, os.Stdin, os.Stdout, os.Stderr); handled {
+			os.Exit(code)
+		}
 	}
 	a, err := app.New(cfg)
 	if err != nil {

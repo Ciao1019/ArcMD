@@ -163,12 +163,13 @@ func (a *App) updatedCard(c *ui.Context, bl bannerLook, entering bool) {
 	} else {
 		card.AnimatePose(ui.Pose{}, ui.Animation{Spring: ui.SpringOptions{Mass: 1, Stiffness: 220, Damping: 16}})
 	}
+	cardHovered := card.Hovered()
 	title := i18n.T("ArcMD 已更新！")
 	since := u.shownSince
 	still := a.reduceMotion
 	card.Children(func() {
 		ui.Text(c, title).Absolute().Left(12).Top(9.5).FontSize(14).FontWeight(500).TextColor(bl.title).SingleLine().
-			DrawOver(func(p *ui.Painter, r ui.Rect) { paintSparkles(p, r, bl.accent, since, still) })
+			DrawOver(func(p *ui.Painter, r ui.Rect) { paintSparkles(p, r, bl.accent, since, still, cardHovered) })
 		closeX := ui.Box(c.Key("dismiss")).Absolute().Right(10).Top(12).Size(14, 14).Center().
 			Role(ui.RoleButton).Label(i18n.T("关闭")).Tooltip(i18n.T("关闭")).Cursor(ui.CursorPointer)
 		closeX.Children(func() { ui.Icon(c, iconX).FontSize(12).TextColor(bl.tertiary) })
@@ -234,15 +235,18 @@ var sparkles = []struct {
 	{0.24, 0.1, 1.6, 250 * time.Millisecond},
 }
 
+const sparkleIntro = 3200 * time.Millisecond
+
 // paintSparkles draws the four-point stars that twinkle in turn around the
 // title r (Arc's SparklesView): each pulses in scale and opacity on its own
 // delay, 1.6 s a pulse. The big one's center sits 6.4 past the title.
-func paintSparkles(p *ui.Painter, r ui.Rect, color ui.Color, since time.Time, still bool) {
+func paintSparkles(p *ui.Painter, r ui.Rect, color ui.Color, since time.Time, still, hovered bool) {
 	box := ui.Rect{X: r.X - 8, Y: r.Y + r.H/2 - 18, W: r.W + 8 + 6.4 + 4, H: 36}
 	now := p.Now()
+	animating := !still && (hovered || now.Sub(since) < sparkleIntro)
 	for _, s := range sparkles {
 		k := float32(1)
-		if !still {
+		if animating {
 			t := now.Sub(since) - s.delay
 			if t > 0 {
 				f := float64(t%(1600*time.Millisecond)) / float64(1600*time.Millisecond)
@@ -257,7 +261,7 @@ func paintSparkles(p *ui.Painter, r ui.Rect, color ui.Color, since time.Time, st
 		cx, cy := box.X+box.W*s.x-s.size/2, box.Y+box.H*s.y
 		star(p, cx, cy, size, color.Alpha(alpha*float32(color.A)/255))
 	}
-	if !still {
+	if animating {
 		p.AnimationFrame()
 	}
 }

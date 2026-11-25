@@ -23,7 +23,7 @@ func (a *App) openSystemFile(file string) bool {
 	}
 	info, err := os.Stat(full)
 	if err != nil || !info.Mode().IsRegular() || !vault.IsDocument(full) {
-		a.notify("请选择 ArcMD 或 Markdown 文档：%s", filepath.Base(full))
+		a.notify("不支持打开此文件类型：%s", filepath.Base(full))
 		return false
 	}
 	if !a.flush() {

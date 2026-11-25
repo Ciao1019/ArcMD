@@ -36,6 +36,9 @@ type pluginState struct {
 	startInstance func(p *plugin.Installed) (plugin.Instance, error)
 	cachedConfigs map[string]map[string]any
 	httpClient    *http.Client
+	defaultClient *http.Client
+	runCtx        context.Context
+	runCancel     context.CancelFunc
 	sync          bool
 
 	query       string
@@ -95,13 +98,20 @@ type pluginSheetState struct {
 }
 
 func (a *App) initPlugins() {
+	if a.pluginsUI.runCancel != nil {
+		a.pluginsUI.runCancel()
+	}
+	a.pluginsUI.runCtx, a.pluginsUI.runCancel = context.WithCancel(context.Background())
+	if a.pluginsUI.defaultClient == nil {
+		a.pluginsUI.defaultClient = &http.Client{Timeout: 90 * time.Second}
+	}
 	dataDir := filepath.Join(a.cfg.ConfigDir, "plugins-data")
 	a.pluginsUI.cfg = &plugin.ConfigStore{Dir: dataDir}
 	a.pluginsUI.instances = map[string]plugin.Instance{}
 	a.pluginsUI.cachedConfigs = map[string]map[string]any{}
 	a.pluginsUI.status = map[string]*pluginRunState{}
 	a.pluginsUI.enabledBufs = map[string]*bool{}
-	host, err := plugin.NewWASMHost(context.Background(), plugin.HostConfig{
+	host, err := plugin.NewWASMHost(a.pluginsUI.runCtx, plugin.HostConfig{
 		DataDir: dataDir,
 		Config:  a.pluginsUI.cfg,
 		Secrets: a.qa.secrets,
@@ -109,7 +119,10 @@ func (a *App) initPlugins() {
 			if a.pluginsUI.httpClient != nil {
 				return a.pluginsUI.httpClient
 			}
-			return http.DefaultClient
+			if a.pluginsUI.defaultClient == nil {
+				a.pluginsUI.defaultClient = &http.Client{Timeout: 90 * time.Second}
+			}
+			return a.pluginsUI.defaultClient
 		},
 	})
 	if err != nil {
@@ -120,6 +133,11 @@ func (a *App) initPlugins() {
 }
 
 func (a *App) closePlugins() {
+	if a.pluginsUI.runCancel != nil {
+		a.pluginsUI.runCancel()
+		a.pluginsUI.runCancel = nil
+		a.pluginsUI.runCtx = nil
+	}
 	for id, inst := range a.pluginsUI.instances {
 		_ = inst.Close()
 		delete(a.pluginsUI.instances, id)
@@ -1450,7 +1468,12 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 		if sp.IsExternal() || sp.Root == "" {
 			continue
 		}
-		snapshots = append(snapshots, plugin.SpaceSnapshot{ID: sp.ID, Name: sp.Name, Root: sp.Root})
+		snapshots = append(snapshots, plugin.SpaceSnapshot{
+			ID:             sp.ID,
+			Name:           sp.Name,
+			Root:           sp.Root,
+			AttachmentsDir: sp.AttachmentsDir,
+		})
 	}
 	dirty := map[plugin.SpaceFileKey]bool{}
 	for _, d := range a.residentDocuments() {
@@ -1509,6 +1532,9 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 			}
 		}
 		touched := spaceSvc.Touched()
+		if len(touched) > 0 || p.Manifest.ID == cloudSyncPluginID {
+			a.invalidateConflictsCache()
+		}
 		if len(touched) > 0 {
 			touchedSpaces := map[string]bool{}
 			touchedPaths := map[plugin.SpaceFileKey]bool{}
@@ -1539,14 +1565,22 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 		}
 	}
 
-	ctx := plugin.WithSpaceService(context.Background(), spaceSvc)
+	parentCtx := a.pluginsUI.runCtx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	baseCtx := plugin.WithSpaceService(parentCtx, spaceSvc)
 	post := a.asyncPost()
 	if a.pluginsUI.sync || post == nil {
+		ctx, cancel := context.WithTimeout(baseCtx, 2*time.Minute)
 		resp, err := inst.Invoke(ctx, req)
+		cancel()
 		finish(resp, err)
 		return
 	}
 	go func() {
+		ctx, cancel := context.WithTimeout(baseCtx, 2*time.Minute)
+		defer cancel()
 		resp, err := inst.Invoke(ctx, req)
 		post(func() { finish(resp, err) })
 	}()

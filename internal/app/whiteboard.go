@@ -460,7 +460,7 @@ func (a *App) exportWhiteboardSVG(d *document) {
 		dir = ""
 	}
 	for i := 1; i < 1000; i++ {
-		name := d.title()
+		name := sanitizeName(d.title())
 		if i > 1 {
 			name = fmt.Sprintf("%s %d", name, i)
 		}
@@ -583,24 +583,29 @@ func (a *App) exportWhiteboardPDF(d *document, printing bool) {
 		a.notify("导出 PDF 失败。%v", locErr)
 		return
 	}
+	pdfData, readErr := os.ReadFile(file.Name())
+	_ = os.Remove(file.Name())
+	if readErr != nil {
+		a.notify("导出 PDF 失败。%v", readErr)
+		return
+	}
+	stem := sanitizeName(d.title())
 	for i := 1; i < 1000; i++ {
-		name := d.title()
+		name := stem
 		if i > 1 {
-			name = fmt.Sprintf("%s %d", name, i)
+			name = fmt.Sprintf("%s %d", stem, i)
 		}
 		rel := path.Join(outDir, name+".pdf")
 		full, rErr := vault.Resolve(root, rel)
 		if rErr != nil {
-			_ = os.Remove(file.Name())
 			a.notify("导出 PDF 失败。%v", rErr)
 			return
 		}
-		if _, stErr := os.Stat(full); stErr == nil {
+		if _, stErr := os.Lstat(full); stErr == nil {
 			continue
 		}
-		if mvErr := os.Rename(file.Name(), full); mvErr != nil {
-			_ = os.Remove(file.Name())
-			a.notify("导出 PDF 失败。%v", mvErr)
+		if wErr := fsutil.WriteFileAtomic(full, pdfData, 0o644); wErr != nil {
+			a.notify("导出 PDF 失败。%v", wErr)
 			return
 		}
 		a.notify("已导出 %s", rel)
@@ -610,7 +615,6 @@ func (a *App) exportWhiteboardPDF(d *document, printing bool) {
 		}
 		return
 	}
-	_ = os.Remove(file.Name())
 }
 
 type whiteboardLibState struct {

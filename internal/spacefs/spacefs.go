@@ -394,11 +394,16 @@ func hasDoc(docs []Doc, p string) bool {
 // ErrNotDocument is a path that is not one of the space's documents.
 var ErrNotDocument = errors.New("not a document of this space")
 
+func cleanRel(rel string) string {
+	rel = strings.ReplaceAll(strings.TrimSpace(rel), `\`, "/")
+	return strings.TrimPrefix(path.Clean("/"+rel), "/")
+}
+
 // Page reads the document at rel (slash-separated, relative to the
 // space), its unsaved text when it is open with edits. Paths that leave the
 // space, or are not documents, are refused.
 func (f *FS) Page(rel string) (*Page, error) {
-	rel = strings.TrimPrefix(path.Clean("/"+strings.TrimSpace(rel)), "/")
+	rel = cleanRel(rel)
 	if rel == "" || !vault.IsDocument(rel) || hidden(rel) {
 		return nil, fmt.Errorf("%s: %w", rel, ErrNotDocument)
 	}

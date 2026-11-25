@@ -64,7 +64,7 @@ func IsLocal(base string) bool {
 		return false
 	}
 	host := u.Hostname()
-	if host == "localhost" {
+	if strings.EqualFold(host, "localhost") {
 		return true
 	}
 	ip := net.ParseIP(host)

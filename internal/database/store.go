@@ -108,6 +108,14 @@ func (s *Store) Database() *Database {
 	return s.db.Clone()
 }
 
+// SchemaSnapshot returns a lightweight deep copy of the Database schema, views,
+// and templates without cloning InlineRows.
+func (s *Store) SchemaSnapshot() *Database {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db.CloneSchema()
+}
+
 // Revision returns a monotonically increasing counter bumped on any state change.
 func (s *Store) Revision() uint64 {
 	s.mu.RLock()
@@ -1582,6 +1590,48 @@ func (s *Store) SetTitle(title string) error {
 	return nil
 }
 
+// SpliceManualOrder builds a complete ordered slice of non-empty record IDs
+// starting from existingOrder followed by any unseen allRecords IDs, removes
+// movedID, and inserts movedID immediately before beforeID or after afterID
+// (falling back to appending at the end).
+func SpliceManualOrder(existingOrder []string, allRecords []*Record, movedID, beforeID, afterID string) []string {
+	if movedID == "" {
+		return nil
+	}
+	capHint := len(existingOrder) + len(allRecords) + 1
+	seen := make(map[string]bool, capHint)
+	ids := make([]string, 0, capHint)
+	for _, id := range existingOrder {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if id != movedID {
+			ids = append(ids, id)
+		}
+	}
+	for _, r := range allRecords {
+		if r == nil || r.ID == "" || seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		if r.ID != movedID {
+			ids = append(ids, r.ID)
+		}
+	}
+	if beforeID != "" && beforeID != movedID {
+		if idx := slices.Index(ids, beforeID); idx >= 0 {
+			return slices.Insert(ids, idx, movedID)
+		}
+	}
+	if afterID != "" && afterID != movedID {
+		if idx := slices.Index(ids, afterID); idx >= 0 {
+			return slices.Insert(ids, idx+1, movedID)
+		}
+	}
+	return append(ids, movedID)
+}
+
 // SetManualOrder updates the manual row order of viewID.
 func (s *Store) SetManualOrder(viewID string, order []string) error {
 	s.mu.Lock()
@@ -1594,10 +1644,79 @@ func (s *Store) SetManualOrder(viewID string, order []string) error {
 	if idx < 0 {
 		return fmt.Errorf("database: view %q not found", viewID)
 	}
-	nextDB := s.db.Clone()
+	nextDB := s.db.CloneSchema()
 	nextDB.Views[idx].ManualOrder = slices.Clone(order)
 	s.commitViewsLocked("manual order", nextDB.Views, nextDB.ActiveView)
 	return nil
+}
+
+// SetCellsAndManualOrder atomically applies cell edits and an optional manual
+// order update for viewID as a single undoable history step.
+func (s *Store) SetCellsAndManualOrder(edits []CellEdit, viewID string, order []string) ([]string, error) {
+	if len(edits) == 0 {
+		if viewID == "" || len(order) == 0 {
+			return nil, nil
+		}
+		return nil, s.SetManualOrder(viewID, order)
+	}
+	if viewID == "" || len(order) == 0 {
+		return s.SetCellsBatch(edits)
+	}
+
+	s.mu.Lock()
+	prevSeq := s.history.seq
+	s.mu.Unlock()
+
+	affected, err := s.SetCellsBatch(edits)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return affected, nil
+	}
+	_, idx := s.db.ViewByID(viewID)
+	if idx < 0 {
+		return affected, nil
+	}
+	oldOrder := slices.Clone(s.db.Views[idx].ManualOrder)
+	newOrder := slices.Clone(order)
+	if slices.Equal(oldOrder, newOrder) {
+		return affected, nil
+	}
+	if s.history.seq > prevSeq && s.history.pos > 0 {
+		s.db.Views[idx].ManualOrder = slices.Clone(newOrder)
+		cellStep := s.history.entries[s.history.pos-1]
+		s.history.entries[s.history.pos-1] = historyStep{
+			label: cellStep.label,
+			undo: func(st *Store) []string {
+				if st.db != nil {
+					if _, vi := st.db.ViewByID(viewID); vi >= 0 {
+						st.db.Views[vi].ManualOrder = slices.Clone(oldOrder)
+					}
+				}
+				return cellStep.undo(st)
+			},
+			redo: func(st *Store) []string {
+				paths := cellStep.redo(st)
+				if st.db != nil {
+					if _, vi := st.db.ViewByID(viewID); vi >= 0 {
+						st.db.Views[vi].ManualOrder = slices.Clone(newOrder)
+					}
+				}
+				return paths
+			},
+		}
+	} else {
+		nextDB := s.db.CloneSchema()
+		nextDB.Views[idx].ManualOrder = slices.Clone(newOrder)
+		s.commitViewsLocked("manual order", nextDB.Views, nextDB.ActiveView)
+		return affected, nil
+	}
+	s.bumpRevisionLocked()
+	return affected, nil
 }
 
 func (s *Store) commitViewsLocked(label string, nextViews []ViewConfig, nextActive string) {

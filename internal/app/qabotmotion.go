@@ -1,6 +1,9 @@
 package app
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // Native port of bot-avatars' engine.ts (Jakub Antalik, MIT), pinned in
 // third_party/bot-avatars. The simulation is independent of its renderer:
@@ -111,6 +114,12 @@ func (w *botWander) set(amp, lo, hi, rate float64) {
 	w.amp, w.holdMin, w.holdMax, w.rate, w.next = amp, lo, hi, rate, 0
 }
 func (w *botWander) aim(v float64) { w.target, w.next = v, math.Inf(1) }
+func (w *botWander) settled(eps float64) bool {
+	if math.Abs(w.target-w.value) > eps {
+		return false
+	}
+	return !w.spring || math.Abs(w.vel) <= eps
+}
 func (w *botWander) update(t, dt float64, rand func() float64) {
 	if t >= w.next {
 		w.target = (rand()*2 - 1) * w.amp
@@ -509,4 +518,72 @@ func (m *botMotion) update(dt float64) {
 	p.LookY = baseLookY + lookYAdd
 	p.Whirl = whirl
 	p.WhirlAngle = whirlAngle
+}
+
+func (m *botMotion) activeMotion() bool {
+	if m.tr < 1 || m.blink.active() || m.dart.active() || m.flip.active() || m.laughEv.active() || m.nod.active() {
+		return true
+	}
+	if m.hopGain > .02 && (m.state == botWorking || m.hopPhase > 0) {
+		return true
+	}
+	if m.ptrTargetS > .002 || m.ptrS > .002 || math.Abs(m.ptrX-m.ptrTargetX) > .005 || math.Abs(m.ptrY-m.ptrTargetY) > .005 {
+		return true
+	}
+	if !m.yawW.settled(.004) || !m.pitchW.settled(.004) || !m.rollW.settled(.004) || !m.lookXW.settled(.02) || !m.lookYW.settled(.02) {
+		return true
+	}
+	quiet := 1 - .75*m.ptrS
+	yawTarget := m.yawW.value*quiet + 22*botDeg*m.ptrX*m.ptrS
+	if math.Abs(yawTarget-m.baseYaw) > .004 || math.Abs(m.gazeLead) > .01 || math.Abs(m.jelly) > .003 || math.Abs(m.jellyV) > .005 || m.pose.Laugh > .01 {
+		return true
+	}
+	return false
+}
+
+func (m *botMotion) advanceIdle(elapsed float64) float64 {
+	if elapsed <= .05 || m.activeMotion() {
+		return elapsed
+	}
+	skip := elapsed - .05
+	m.t += skip
+	ws := m.pose.W[2]
+	m.breathPhase += skip / (3.6 + 1.2*ws)
+	return .05
+}
+
+func (m *botMotion) nextWakeDelay() time.Duration {
+	nextAt := math.Inf(1)
+	consider := func(at float64) {
+		if !math.IsInf(at, 0) && !math.IsNaN(at) && at < nextAt {
+			nextAt = at
+		}
+	}
+	consider(m.lookXW.next)
+	consider(m.lookYW.next)
+	consider(m.yawW.next)
+	consider(m.pitchW.next)
+	consider(m.rollW.next)
+	if m.pose.W[0]+m.pose.W[1] > .5 {
+		consider(m.blinkAt)
+		consider(m.dartAt)
+	}
+	switch m.state {
+	case botIdle:
+		consider(m.gazeAt)
+		consider(m.flipAt)
+	case botWorking:
+		consider(m.laughAt)
+	case botSleeping:
+		consider(m.nodAt)
+	}
+	if math.IsInf(nextAt, 1) {
+		return 500 * time.Millisecond
+	}
+	sec := nextAt - m.t
+	if sec <= 0 {
+		return 16 * time.Millisecond
+	}
+	sec = botClamp(sec, .05, 2.0)
+	return time.Duration(sec * float64(time.Second))
 }

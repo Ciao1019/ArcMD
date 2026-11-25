@@ -47,10 +47,15 @@ func qaGhostAvatar(c *ui.Context, s *qaBotState) ui.Element {
 			}
 			s.motion.setPointer(dx/max(1, d), dy/max(1, d), strength)
 			if !s.last.IsZero() {
-				s.motion.update(max(0, now.Sub(s.last).Seconds()))
+				dt := s.motion.advanceIdle(max(0, now.Sub(s.last).Seconds()))
+				s.motion.update(dt)
 			}
 			pose = s.motion.pose
-			p.AnimationFrame()
+			if s.motion.activeMotion() {
+				p.AnimationFrame()
+			} else {
+				p.After(s.motion.nextWakeDelay())
+			}
 		}
 		s.last = now
 		s.painter.draw(p, r, pose)

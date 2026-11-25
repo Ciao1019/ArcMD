@@ -307,7 +307,7 @@ func addDefaultDateProperty(st *State, db *database.Database, view database.View
 	case database.ViewFeed:
 		ensureFeedConfig(&vc).DatePropID = p.ID
 	}
-	makeViewPropVisible(&vc, st.Store.Database(), p.ID)
+	makeViewPropVisible(&vc, st.Store.SchemaSnapshot(), p.ID)
 	saveViewAndNotify(st, vc, opts)
 }
 
@@ -344,7 +344,7 @@ func addDefaultStatusProperty(st *State, db *database.Database, view database.Vi
 	case database.ViewFeed:
 		ensureFeedConfig(&vc).StatusPropID = p.ID
 	}
-	makeViewPropVisible(&vc, st.Store.Database(), p.ID)
+	makeViewPropVisible(&vc, st.Store.SchemaSnapshot(), p.ID)
 	saveViewAndNotify(st, vc, opts)
 }
 

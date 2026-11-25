@@ -2,7 +2,6 @@ package dbview
 
 import (
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/database"
@@ -14,69 +13,6 @@ var (
 	beuiEaseOut     = ui.CubicBezier(0.16, 1, 0.3, 1)
 	beuiSpringPress = ui.Animation{Spring: ui.SpringOptions{Stiffness: 500, Damping: 30, Mass: 0.6}}
 )
-
-type beTableColors struct {
-	cardBg              ui.Color
-	headerBg            ui.Color
-	footerBg            ui.Color
-	border              ui.Color
-	rowBorder           ui.Color
-	rowHover            ui.Color
-	rowSelected         ui.Color
-	primary             ui.Color
-	primaryFg           ui.Color
-	checkboxBorder      ui.Color
-	checkboxBorderHover ui.Color
-	grip                ui.Color
-	chevronMuted        ui.Color
-	resizeHover         ui.Color
-	metaInk             ui.Color
-}
-
-func beTablePalette(pal Palette) beTableColors {
-	primary := pal.Accent
-	if primary.A == 0 {
-		primary = ui.RGB(59, 130, 246)
-	}
-	if pal.Dark {
-		card := pal.Paper.Mix(ui.RGB(255, 255, 255), 0.018)
-		return beTableColors{
-			cardBg:              card,
-			headerBg:            pal.Paper.Mix(ui.RGB(255, 255, 255), 0.042),
-			footerBg:            pal.Paper.Mix(ui.RGB(255, 255, 255), 0.030),
-			border:              ui.RGBA(255, 255, 255, 0.08),
-			rowBorder:           ui.RGBA(255, 255, 255, 0.05),
-			rowHover:            card.Mix(ui.RGB(255, 255, 255), 0.042),
-			rowSelected:         card.Mix(primary, 0.14),
-			primary:             primary,
-			primaryFg:           ui.RGB(255, 255, 255),
-			checkboxBorder:      ui.RGBA(161, 161, 170, 0.36),
-			checkboxBorderHover: ui.Hex("#A1A1AA"),
-			grip:                ui.RGBA(161, 161, 170, 0.45),
-			chevronMuted:        ui.RGBA(161, 161, 170, 0.42),
-			resizeHover:         primary.Alpha(0.42),
-			metaInk:             pal.TextMuted,
-		}
-	}
-	card := pal.Paper
-	return beTableColors{
-		cardBg:              card,
-		headerBg:            card.Mix(ui.RGB(15, 23, 42), 0.026),
-		footerBg:            card.Mix(ui.RGB(15, 23, 42), 0.018),
-		border:              ui.RGBA(15, 23, 42, 0.075),
-		rowBorder:           ui.RGBA(15, 23, 42, 0.05),
-		rowHover:            card.Mix(ui.RGB(15, 23, 42), 0.028),
-		rowSelected:         card.Mix(primary, 0.08),
-		primary:             primary,
-		primaryFg:           ui.RGB(255, 255, 255),
-		checkboxBorder:      ui.RGBA(100, 116, 139, 0.36),
-		checkboxBorderHover: ui.Hex("#64748B"),
-		grip:                ui.RGBA(100, 116, 139, 0.48),
-		chevronMuted:        ui.RGBA(100, 116, 139, 0.42),
-		resizeHover:         primary.Alpha(0.38),
-		metaInk:             pal.TextMuted,
-	}
-}
 
 // renderBeuiCheckbox paints the animated rounded-md checkbox modeled after beUI Checkbox.
 func renderBeuiCheckbox(
@@ -161,67 +97,8 @@ func renderBeuiCheckbox(
 	return cb
 }
 
-type bePillPair struct {
-	lightBg, lightFg ui.Color
-	darkBg, darkFg   ui.Color
-}
-
-var bePillColorMap = map[string]bePillPair{
-	"default": {
-		lightBg: ui.RGBA(113, 113, 122, 0.11), lightFg: ui.Hex("#3F3F46"),
-		darkBg: ui.RGBA(161, 161, 170, 0.14), darkFg: ui.Hex("#D4D4D8"),
-	},
-	"gray": {
-		lightBg: ui.RGBA(113, 113, 122, 0.12), lightFg: ui.Hex("#52525B"),
-		darkBg: ui.RGBA(161, 161, 170, 0.16), darkFg: ui.Hex("#D4D4D8"),
-	},
-	"brown": {
-		lightBg: ui.RGBA(180, 83, 9, 0.11), lightFg: ui.Hex("#92400E"),
-		darkBg: ui.RGBA(217, 119, 6, 0.18), darkFg: ui.Hex("#FCD34D"),
-	},
-	"orange": {
-		lightBg: ui.RGBA(245, 158, 11, 0.14), lightFg: ui.Hex("#B45309"),
-		darkBg: ui.RGBA(245, 158, 11, 0.14), darkFg: ui.Hex("#FBBF24"),
-	},
-	"yellow": {
-		lightBg: ui.RGBA(234, 179, 8, 0.15), lightFg: ui.Hex("#A16207"),
-		darkBg: ui.RGBA(250, 204, 21, 0.15), darkFg: ui.Hex("#FDE047"),
-	},
-	"green": {
-		lightBg: ui.RGBA(16, 185, 129, 0.12), lightFg: ui.Hex("#059669"),
-		darkBg: ui.RGBA(16, 185, 129, 0.14), darkFg: ui.Hex("#34D399"),
-	},
-	"blue": {
-		lightBg: ui.RGBA(59, 130, 246, 0.12), lightFg: ui.Hex("#2563EB"),
-		darkBg: ui.RGBA(59, 130, 246, 0.16), darkFg: ui.Hex("#60A5FA"),
-	},
-	"purple": {
-		lightBg: ui.RGBA(139, 92, 246, 0.12), lightFg: ui.Hex("#7C3AED"),
-		darkBg: ui.RGBA(139, 92, 246, 0.18), darkFg: ui.Hex("#C4B5FD"),
-	},
-	"pink": {
-		lightBg: ui.RGBA(236, 72, 153, 0.12), lightFg: ui.Hex("#DB2777"),
-		darkBg: ui.RGBA(236, 72, 153, 0.16), darkFg: ui.Hex("#F472B6"),
-	},
-	"red": {
-		lightBg: ui.RGBA(244, 63, 94, 0.12), lightFg: ui.Hex("#E11D48"),
-		darkBg: ui.RGBA(244, 63, 94, 0.14), darkFg: ui.Hex("#FB7185"),
-	},
-}
-
 func renderBeuiPill(c *ui.Context, name, colorName string, pillIcon *ui.SVG, pal Palette) {
-	key := strings.ToLower(strings.TrimSpace(colorName))
-	if key == "" {
-		key = "default"
-	}
-	pair, ok := bePillColorMap[key]
-	if !ok {
-		pair = bePillColorMap["default"]
-	}
-	bg, fg := pair.lightBg, pair.lightFg
-	if pal.Dark {
-		bg, fg = pair.darkBg, pair.darkFg
-	}
+	bg, fg := bePillColors(pal.Dark, colorName)
 	pill := ui.Row(c).Padding(2.5, 9).Radius(999).Background(bg).Gap(4).AlignItems(ui.Center).Shrink(0)
 	pill.Children(func() {
 		if pillIcon != nil {
@@ -279,8 +156,8 @@ func insertColumnRelative(st *State, view *database.ViewConfig, db *database.Dat
 		}
 		return
 	}
-	latestDB := st.Store.Database()
-	freshView := st.ActiveView()
+	latestDB := st.Store.SchemaSnapshot()
+	freshView := st.activeViewFrom(latestDB)
 	if freshView == nil {
 		freshView = view
 	}
@@ -341,25 +218,13 @@ func insertRecordRelative(
 	st.Motion.TrackCreated(rec.ID)
 
 	if view != nil && len(view.Sorts) == 0 && res != nil && anchorRec != nil {
-		ids := make([]string, 0, len(res.Rows)+1)
-		inserted := false
-		for _, r := range res.Rows {
-			if r == nil || r.ID == rec.ID {
-				continue
-			}
-			if r.ID == anchorRec.ID && delta < 0 {
-				ids = append(ids, rec.ID)
-				inserted = true
-			}
-			ids = append(ids, r.ID)
-			if r.ID == anchorRec.ID && delta > 0 {
-				ids = append(ids, rec.ID)
-				inserted = true
-			}
+		var beforeID, afterID string
+		if delta < 0 {
+			beforeID = anchorRec.ID
+		} else if delta > 0 {
+			afterID = anchorRec.ID
 		}
-		if !inserted {
-			ids = append(ids, rec.ID)
-		}
+		ids := database.SpliceManualOrder(view.ManualOrder, st.Store.Records(), rec.ID, beforeID, afterID)
 		_ = st.Store.SetManualOrder(view.ID, ids)
 	}
 

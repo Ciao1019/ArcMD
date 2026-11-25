@@ -332,7 +332,7 @@ func (a *App) resolveDrop(rel string, px, py float32, rows []rowFrame) *listDrop
 			if dist < 0 {
 				dist = -dist
 			}
-			if !r.slotSelf && dist <= rowHeight+6 {
+			if !r.slotSelf && dist <= a.sidebarRowHeight()+6 {
 				hit = r
 				break
 			}
@@ -798,11 +798,12 @@ func (a *App) dragOverlayView(c *ui.Context) {
 func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder, dir, openFolder, holdsOpen, dim bool, rel, title string, count int, label bool) {
 	t := c.Theme()
 	look := dragCardColors(t, a.look)
-	gap := float32(10)
+	rh, rad, insetY := a.sidebarRowHeight(), a.sidebarRowRadius(), a.sidebarRowInsetY()
+	gap := float32(9)
 	if dir {
-		gap = 11
+		gap = 10
 	}
-	card := ui.Row(c.Key("drag-card")).Absolute().Left(x).Top(y).Size(max(48, w), rowHeight).
+	card := ui.Row(c.Key("drag-card")).Absolute().Left(x).Top(y).Size(max(48, w), rh).
 		PaddingStart(10).PaddingEnd(8).Gap(gap).AlignItems(ui.Center).IgnoreInput(true).Background(ui.Transparent)
 	if intoFolder {
 		card.Opacity(0.68)
@@ -812,7 +813,7 @@ func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder,
 	}
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		grow := 1.5 * lift
-		fr := ui.Rect{X: r.X - grow, Y: r.Y + 2 - grow*0.6, W: r.W + 2*grow, H: r.H - 4 + 1.2*grow}
+		fr := ui.Rect{X: r.X - grow, Y: r.Y + insetY - grow*0.6, W: r.W + 2*grow, H: r.H - 2*insetY + 1.2*grow}
 		if count > 1 && lift > 0.01 {
 			layers := min(count-1, 2)
 			for layer := layers; layer >= 1; layer-- {
@@ -823,28 +824,28 @@ func (a *App) floatingDragCard(c *ui.Context, x, y, w, lift float32, intoFolder,
 					W: max(32, fr.W-6*lf),
 					H: fr.H,
 				}
-				p.Shadow(sr, 10, 0, 1+3*lift, 2+8*lift, 0, scaleAlpha(look.shadow, 0.45*lift))
-				p.Fill(sr, scaleAlpha(look.fill, 0.92), 10)
-				p.Stroke(sr, scaleAlpha(look.rim, 0.85*lift), 10, 1)
+				p.Shadow(sr, rad, 0, 1+3*lift, 2+8*lift, 0, scaleAlpha(look.shadow, 0.45*lift))
+				p.Fill(sr, scaleAlpha(look.fill, 0.92), rad)
+				p.Stroke(sr, scaleAlpha(look.rim, 0.85*lift), rad, 1)
 			}
 		}
-		p.Shadow(fr, 10, 0, 1+5*lift, 3+15*lift, 0, scaleAlpha(look.shadow, 0.2+0.8*lift))
-		p.Fill(fr, look.fill, 10)
+		p.Shadow(fr, rad, 0, 1+5*lift, 3+15*lift, 0, scaleAlpha(look.shadow, 0.2+0.8*lift))
+		p.Fill(fr, look.fill, rad)
 		if lift > 0.01 {
-			p.Stroke(fr, scaleAlpha(look.rim, lift), 10, 1)
+			p.Stroke(fr, scaleAlpha(look.rim, lift), rad, 1)
 		}
 	})
 	card.Children(func() {
 		if dir {
 			folderGlyph(c, a.look, openFolder, holdsOpen)
-		} else if icon := fileIcon(c, rel, title, 16); dim {
+		} else if icon := fileIcon(c, rel, title, a.sidebarRowIconSize()); dim {
 			icon.Opacity(closedIconAlpha)
 		}
 		ink := t.Text
 		if dim {
 			ink = closedInk(t)
 		}
-		name := ui.Text(c, docName(title)).FontSize(14).TextColor(ink).SingleLine().Shrink(1).MinWidth(0)
+		name := ui.Text(c, docName(title)).FontSize(a.sidebarRowFontSize()).TextColor(ink).SingleLine().Shrink(1).MinWidth(0)
 		if dir {
 			name.FontWeight(500)
 		}

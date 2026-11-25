@@ -12,6 +12,7 @@ import (
 )
 
 type boardCardDrag struct {
+	state        *State
 	recordID     string
 	fromGroupKey string
 	fromSubKey   string
@@ -102,7 +103,25 @@ func boardView(
 		boardRes = &cp
 	}
 
-	ui.Column(c.Key("board-root")).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
+	overlayCtx := &boardOverlayContext{
+		view:      view,
+		db:        db,
+		res:       boardRes,
+		bcfg:      bcfg,
+		covH:      covH,
+		cardProps: cardProps,
+		opts:      opts,
+		pal:       pal,
+	}
+	st.BoardDrag.beginBoardFrame(c, st, view, overlayCtx)
+
+	boardRoot := ui.Column(c.Key("board-root")).Grow(1).MinWidth(0).MinHeight(0)
+	if !opts.ReadOnly {
+		if d, ok := ui.Drop[boardCardDrag](boardRoot); ok {
+			st.BoardDrag.handleBoardDrop(c, st, &view, db, boardRes, d, "", database.EmptyValue(), "", database.EmptyValue(), false, opts)
+		}
+	}
+	boardRoot.Children(func() {
 		renderBoardSubToolbar(c, st, &view, db, bcfg, groupProp, personProp, assignees, opts, pal)
 		if !hasGroup {
 			action := ""
@@ -121,6 +140,7 @@ func boardView(
 
 		renderBoardColumns(c, st, view, db, boardRes, groupProp, bcfg, colW, covH, cardProps, personProp, opts, pal)
 	})
+	st.BoardDrag.finishBoardFrame(c, st)
 }
 
 func boardDimensions(cardSize string) (colW, covH float32) {
@@ -193,11 +213,19 @@ func renderCollapsedBoardColumn(
 	applyPressSpring(col, false)
 
 	if !opts.ReadOnly {
-		if d, ok := ui.Drop[boardCardDrag](col); ok && d.fromGroupKey != g.Key {
-			applyBoardCardDrop(st, view, db, res, d, g.Key, g.Value, "", database.EmptyValue(), "", opts)
+		colAccent := columnAccentColor(g.Color, pal)
+		st.BoardDrag.curBuckets = append(st.BoardDrag.curBuckets, boardBucketFrame{
+			groupKey:  g.Key,
+			groupVal:  g.Value,
+			collapsed: true,
+			r:         col.Bounds(),
+			accent:    colAccent,
+		})
+		if d, ok := ui.Drop[boardCardDrag](col); ok {
+			st.BoardDrag.handleBoardDrop(c, st, view, db, res, d, g.Key, g.Value, "", database.EmptyValue(), true, opts)
 		}
-		if d, over := ui.DragOver[boardCardDrag](col); over && d.fromGroupKey != g.Key {
-			col.Border(1.5, columnAccentColor(g.Color, pal)).Background(pal.AccentSoft)
+		if slot := st.BoardDrag.slot; slot.active && slot.collapsed && slot.groupKey == g.Key && slot.subKey == "" {
+			col.Border(1.5, colAccent).Background(pal.AccentSoft)
 		}
 	}
 
@@ -245,10 +273,23 @@ func renderExpandedBoardColumn(
 	colHovered := col.Hovered()
 
 	if !opts.ReadOnly {
-		if d, ok := ui.Drop[boardCardDrag](col); ok {
-			applyBoardCardDrop(st, view, db, res, d, g.Key, g.Value, "", database.EmptyValue(), "", opts)
+		restingCount := 0
+		for _, r := range rows {
+			if r != nil && !st.BoardDrag.grab.matchesCard(r.ID, g.Key, "") {
+				restingCount++
+			}
 		}
-		if d, over := ui.DragOver[boardCardDrag](col); over && d.fromGroupKey != g.Key {
+		st.BoardDrag.curBuckets = append(st.BoardDrag.curBuckets, boardBucketFrame{
+			groupKey: g.Key,
+			groupVal: g.Value,
+			r:        col.Bounds(),
+			accent:   colAccent,
+			count:    restingCount,
+		})
+		if d, ok := ui.Drop[boardCardDrag](col); ok {
+			st.BoardDrag.handleBoardDrop(c, st, view, db, res, d, g.Key, g.Value, "", database.EmptyValue(), false, opts)
+		}
+		if slot := st.BoardDrag.slot; slot.active && !slot.collapsed && slot.groupKey == g.Key && slot.subKey == "" && st.BoardDrag.grab.active && st.BoardDrag.grab.fromGroupKey != g.Key {
 			col.Border(1.5, colAccent.Alpha(0.75)).Background(bg.Mix(colAccent, 0.08))
 		}
 		if cd, ok := ui.Drop[boardColDrag](col); ok && cd.key != g.Key {
@@ -376,17 +417,33 @@ func renderExpandedBoardColumn(
 		// Cards Scroll Body.
 		ui.Scroll(c.Key("bcol-sc:" + g.Key)).Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c.Key("bcards:"+g.Key)).Padding(2, 8, 10, 8).Gap(8).Children(func() {
+				slot := st.BoardDrag.slot
+				slotHere := !opts.ReadOnly && slot.active && !slot.collapsed && slot.groupKey == g.Key && slot.subKey == ""
+				restIdx := 0
 				for _, r := range rows {
 					if r == nil {
 						continue
 					}
-					renderBoardCard(c, st, view, db, res, r, g.Key, "", bcfg, covH, cardProps, g.Key, g.Value, "", database.EmptyValue(), colAccent, opts, pal)
+					isDraggedRec := st.BoardDrag.grab.matchesCard(r.ID, g.Key, "")
+					if !isDraggedRec && slotHere && !st.BoardDrag.emitted && slot.index <= restIdx {
+						st.BoardDrag.renderDragSlot(c, colAccent, g.Key, "", slot.index, slot.self)
+					}
+					dragging, justStarted := renderBoardCard(c, st, view, db, res, r, g.Key, "", restIdx, bcfg, covH, cardProps, colAccent, opts, pal)
+					if justStarted && !st.BoardDrag.emitted {
+						st.BoardDrag.renderDragSlot(c, colAccent, g.Key, "", restIdx, true)
+					}
+					if !dragging {
+						restIdx++
+					}
+				}
+				if slotHere && !st.BoardDrag.emitted {
+					st.BoardDrag.renderDragSlot(c, colAccent, g.Key, "", slot.index, slot.self)
 				}
 
 				if !opts.ReadOnly {
 					footAdd := ui.Row(c.Key("bfoot-add:"+g.Key)).Height(32).Padding(0, 9).Radius(8).Gap(6).
 						AlignItems(ui.Center).Cursor(ui.CursorPointer).Role(ui.RoleButton).Label(i18n.T("新建") + ": " + g.Label).
-						Transition(ui.ElementTransition{Animation: &dbSpringCard, Position: true, Colors: true})
+						Transition(ui.ElementTransition{Animation: &boardListAnim, Position: true, Colors: true})
 					if footAdd.Hovered() {
 						footAdd.Background(colAccent.Alpha(0.12))
 					}
@@ -413,17 +470,14 @@ func renderBoardCard(
 	rec *database.Record,
 	fromGroupKey string,
 	fromSubKey string,
+	restIndex int,
 	bcfg database.BoardViewConfig,
 	covH float32,
 	cardProps []database.Property,
-	toGroupKey string,
-	toGroupVal database.Value,
-	toSubKey string,
-	toSubVal database.Value,
 	colAccent ui.Color,
 	opts Options,
 	pal Palette,
-) {
+) (dragging bool, justStarted bool) {
 	borderCol := pal.Border.Alpha(0.85)
 	cardBg := pal.Paper
 	tintBg, tintAccent, tinted := tintedRowBackground(pal, res, rec.ID)
@@ -431,44 +485,107 @@ func renderBoardCard(
 		cardBg = tintBg
 	}
 	isFocused := st.BoardFocusedCardID == rec.ID
-	card := ui.Column(c.Key("bcard:"+fromGroupKey+":"+fromSubKey+":"+rec.ID)).
-		Radius(11).Background(cardBg).Border(1, borderCol).
-		Shadow(0, 1, 3, 0, pal.ShadowEdge).Cursor(ui.CursorPointer).Clip().
-		Focusable().Role(ui.RoleListItem).Label(rec.Title)
+	card := ui.Column(c.Key("bcard:" + fromGroupKey + ":" + fromSubKey + ":" + rec.ID))
 
-	cardDragging := false
-	cardSettling := st.Motion.isSettling(dragKindCard, rec.ID)
 	if !opts.ReadOnly {
 		card.Drag(boardCardDrag{
+			state:        st,
 			recordID:     rec.ID,
 			fromGroupKey: fromGroupKey,
 			fromSubKey:   fromSubKey,
 		})
-		cardDragging = st.Motion.trackDrag(c, card, dragKindCard, rec.ID, rec.Title, toGroupKey, colAccent, true)
 	}
 
-	if cardDragging {
-		card.Opacity(0.28)
-		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
-			paintDashedGhost(p, r, 11, colAccent)
+	if !opts.ReadOnly && card.Dragging() {
+		justStarted = st.BoardDrag.startOrUpdateGrab(c, st, rec, card, fromGroupKey, fromSubKey, restIndex, colAccent)
+		// Keep the source node alive with zero layout footprint so MyGo's drag
+		// stays active while our floating card overlay owns all visuals (no ghost overlap).
+		card.Absolute().Size(0, 0).Background(ui.Transparent).Transition(ui.ElementTransition{Colors: true})
+		return true, justStarted
+	}
+
+	// On the exact release frame (before QueryResult refreshes on the next frame),
+	// keep the dragged card collapsed in its source column so it never flashes back.
+	if st.BoardDrag.grab.matchesCard(rec.ID, fromGroupKey, fromSubKey) {
+		card.Absolute().Size(0, 0).Background(ui.Transparent).Transition(ui.ElementTransition{Colors: true})
+		return true, false
+	}
+
+	settling := st.BoardDrag.settle.matchesCard(rec.ID, fromGroupKey, fromSubKey)
+	var settleK float32
+	if settling {
+		elapsed := c.Now().Sub(st.BoardDrag.settle.started)
+		if c.Preferences().ReduceMotion || elapsed >= boardDragSettleDur {
+			st.BoardDrag.settle = boardDragSettle{}
+			st.Motion.settle = dbDragSettle{}
+			st.Motion.suppressOverlay = false
+			settling = false
+		} else {
+			settleK = boardListEase(clampF32(float32(elapsed)/float32(boardDragSettleDur), 0, 1))
+			tr := card.LayoutBounds()
+			if tr.W <= 0 || tr.H <= 0 {
+				tr = card.Bounds()
+			}
+			if tr.W > 0 && tr.H > 0 {
+				st.BoardDrag.settle.toRect = tr
+				st.BoardDrag.settle.hasTarget = true
+			}
+		}
+	}
+
+	if settling {
+		slotFade := 1 - settleK
+		fillCol, dashCol := boardSlotColors(colAccent, slotFade, pal.Dark)
+		card.Radius(11).Background(ui.Transparent).Transition(ui.ElementTransition{Colors: true})
+		card.Draw(func(p *ui.Painter, r ui.Rect) {
+			fr := rectInset(r, 0.5)
+			if fillCol.A > 0 {
+				p.Fill(fr, fillCol, 11)
+			}
+			if dashCol.A > 0 {
+				p.StrokeDashed(fr, dashCol, 11, 1.25)
+			}
 		})
-	} else if cardSettling {
-		card.Opacity(0.16)
+		// Preserve exact card height invisibly while the floating card glides in.
+		roOpts := opts
+		roOpts.ReadOnly = true
+		card.Children(func() {
+			ui.Column(c.Key("bcard-settle-hold")).Opacity(0).IgnoreInput(true).Children(func() {
+				renderBoardCardContent(c, st, db, rec, bcfg, covH, cardProps, roOpts, pal)
+			})
+		})
+		st.BoardDrag.curCards = append(st.BoardDrag.curCards, boardCardFrame{
+			recordID: rec.ID,
+			groupKey: fromGroupKey,
+			subKey:   fromSubKey,
+			index:    restIndex,
+			r:        card.Bounds(),
+			target:   card.LayoutBounds(),
+		})
+		return false, false
 	}
 
-	if !cardDragging && !cardSettling {
-		card.Transition(ui.ElementTransition{
-			Animation:    &dbSpringCard,
+	card.Radius(11).Background(cardBg).Border(1, borderCol).
+		Shadow(0, 1, 3, 0, pal.ShadowEdge).Cursor(ui.CursorPointer).Clip().
+		Focusable().Role(ui.RoleListItem).Label(rec.Title).
+		Transition(ui.ElementTransition{
+			Animation:    &boardListAnim,
 			Position:     true,
 			Colors:       true,
 			Shadows:      true,
-			Match:        boardCardMatch{id: rec.ID},
-			Fly:          true,
 			ExitDuration: 150 * time.Millisecond,
-			Enter:        &ui.Motion{Y: -8, Scale: 0.96, Opacity: 0.78},
-			Exit:         &ui.Motion{Scale: 0.94, Opacity: 0},
+			Enter:        &ui.Motion{Y: -6, Scale: 0.97, Opacity: 0.78},
+			Exit:         &ui.Motion{Scale: 0.95, Opacity: 0},
 		})
-	}
+
+	st.BoardDrag.curCards = append(st.BoardDrag.curCards, boardCardFrame{
+		recordID: rec.ID,
+		groupKey: fromGroupKey,
+		subKey:   fromSubKey,
+		index:    restIndex,
+		r:        card.Bounds(),
+		target:   card.LayoutBounds(),
+	})
 
 	if tinted {
 		card.DrawOver(func(p *ui.Painter, r ui.Rect) {
@@ -489,27 +606,18 @@ func renderBoardCard(
 			st.BoardFocusPending = false
 		}
 	}
-	cardHovered := card.Hovered() && !cardDragging
+	cardHovered := card.Hovered() && !st.BoardDrag.grab.active
 	if cardHovered {
 		card.Shadow(0, 6, 16, -3, pal.ShadowEdge)
 		if !isFocused {
 			card.Border(1, pal.BorderStrong)
 		}
 	}
-	applyCardHoverLift(card, cardHovered, cardDragging)
+	applyCardHoverLift(card, cardHovered, false)
 	if card.Focused() {
 		st.BoardFocusedCardID = rec.ID
 	}
 	if !opts.ReadOnly {
-		if d, ok := ui.Drop[boardCardDrag](card); ok && d.recordID != rec.ID {
-			applyBoardCardDrop(st, view, db, res, d, toGroupKey, toGroupVal, toSubKey, toSubVal, rec.ID, opts)
-		}
-		if d, over := ui.DragOver[boardCardDrag](card); over && d.recordID != rec.ID {
-			card.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				paintDropRail(p, r, colAccent, false)
-			})
-		}
-
 		// DayFlow keyboard card move: Alt+Left/Right between columns, Alt+Up/Down within column.
 		if card.Focused() || isFocused {
 			switch {
@@ -529,38 +637,54 @@ func renderBoardCard(
 
 	var consumedTitle, consumedProps, consumedDF bool
 	card.Children(func() {
-		renderCardPreview(c, db, rec, bcfg.CoverSource, bcfg.FitImage, covH, false, opts, pal)
-		ui.Column(c.Key("bcard-body")).Padding(10, 11).Gap(6).MinWidth(0).Children(func() {
-			priProp, dateProp, personProp, extraProps := splitDayflowBoardProps(db, bcfg, cardProps)
-
-			// Title + DayFlow 3-bar Priority Signal Indicator in Head Row.
-			if priProp != nil && !rec.ValueFor(*priProp).IsEmpty() {
-				ui.Row(c.Key("bcard-head")).Gap(6).AlignItems(ui.Start).MinWidth(0).Children(func() {
-					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-						consumedTitle = renderCardTitleRow(c, st, db, rec, true, true, opts, pal)
-					})
-					if renderDayflowPriorityBadge(c, st, rec, *priProp, opts, pal) {
-						consumedDF = true
-					}
-				})
-			} else {
-				consumedTitle = renderCardTitleRow(c, st, db, rec, true, true, opts, pal)
-			}
-
-			if len(extraProps) > 0 {
-				consumedProps = renderCardProperties(c, st, rec, extraProps, false, opts, pal)
-			}
-
-			if renderDayflowCardFooter(c, st, db, rec, dateProp, personProp, opts, pal) {
-				consumedDF = true
-			}
-		})
+		consumedTitle, consumedProps, consumedDF = renderBoardCardContent(c, st, db, rec, bcfg, covH, cardProps, opts, pal)
 	})
 
 	if card.Clicked() && !consumedTitle && !consumedProps && !consumedDF && opts.OnOpenRecord != nil {
 		st.BoardFocusedCardID = rec.ID
 		opts.OnOpenRecord(rec, resolveCardOpenMode(*view))
 	}
+	return false, false
+}
+
+func renderBoardCardContent(
+	c *ui.Context,
+	st *State,
+	db *database.Database,
+	rec *database.Record,
+	bcfg database.BoardViewConfig,
+	covH float32,
+	cardProps []database.Property,
+	opts Options,
+	pal Palette,
+) (consumedTitle, consumedProps, consumedDF bool) {
+	renderCardPreview(c, db, rec, bcfg.CoverSource, bcfg.FitImage, covH, false, opts, pal)
+	ui.Column(c.Key("bcard-body")).Padding(10, 11).Gap(6).MinWidth(0).Children(func() {
+		priProp, dateProp, personProp, extraProps := splitDayflowBoardProps(db, bcfg, cardProps)
+
+		// Title + DayFlow 3-bar Priority Signal Indicator in Head Row.
+		if priProp != nil && !rec.ValueFor(*priProp).IsEmpty() {
+			ui.Row(c.Key("bcard-head")).Gap(6).AlignItems(ui.Start).MinWidth(0).Children(func() {
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					consumedTitle = renderCardTitleRow(c, st, db, rec, true, true, opts, pal)
+				})
+				if renderDayflowPriorityBadge(c, st, rec, *priProp, opts, pal) {
+					consumedDF = true
+				}
+			})
+		} else {
+			consumedTitle = renderCardTitleRow(c, st, db, rec, true, true, opts, pal)
+		}
+
+		if len(extraProps) > 0 {
+			consumedProps = renderCardProperties(c, st, rec, extraProps, false, opts, pal)
+		}
+
+		if renderDayflowCardFooter(c, st, db, rec, dateProp, personProp, opts, pal) {
+			consumedDF = true
+		}
+	})
+	return consumedTitle, consumedProps, consumedDF
 }
 
 func renderBoardSwimlanes(
@@ -676,33 +800,73 @@ func renderBoardSwimlanes(
 										cell := ui.Box(c.Key("bsw-c:"+g.Key)).Width(42).MinHeight(64).Radius(9).
 											Background(bg).Border(1, ui.Transparent)
 										if !opts.ReadOnly {
+											st.BoardDrag.curBuckets = append(st.BoardDrag.curBuckets, boardBucketFrame{
+												groupKey:  g.Key,
+												groupVal:  g.Value,
+												subKey:    ln.key,
+												subVal:    ln.val,
+												collapsed: true,
+												r:         cell.Bounds(),
+												accent:    colAccent,
+											})
 											if d, ok := ui.Drop[boardCardDrag](cell); ok {
-												applyBoardCardDrop(st, &view, db, res, d, g.Key, g.Value, ln.key, ln.val, "", opts)
+												st.BoardDrag.handleBoardDrop(c, st, &view, db, res, d, g.Key, g.Value, ln.key, ln.val, true, opts)
 											}
-											if d, over := ui.DragOver[boardCardDrag](cell); over && (d.fromGroupKey != g.Key || d.fromSubKey != ln.key) {
+											if slot := st.BoardDrag.slot; slot.active && slot.collapsed && slot.groupKey == g.Key && slot.subKey == ln.key {
 												cell.Border(1.5, colAccent).Background(pal.AccentSoft)
 											}
 										}
 										continue
 									}
 
+									cellRows := filterRowsByAssignee(ln.cells[g.Key], personProp, st.BoardAssigneeFilter)
 									cell := ui.Column(c.Key("bsw-cell:"+g.Key)).Width(colW).MinHeight(72).Radius(10).
 										Background(bg).Border(1, ui.Transparent).Padding(8).Gap(7)
 									if !opts.ReadOnly {
-										if d, ok := ui.Drop[boardCardDrag](cell); ok {
-											applyBoardCardDrop(st, &view, db, res, d, g.Key, g.Value, ln.key, ln.val, "", opts)
+										restingCount := 0
+										for _, r := range cellRows {
+											if r != nil && !st.BoardDrag.grab.matchesCard(r.ID, g.Key, ln.key) {
+												restingCount++
+											}
 										}
-										if d, over := ui.DragOver[boardCardDrag](cell); over && (d.fromGroupKey != g.Key || d.fromSubKey != ln.key) {
+										st.BoardDrag.curBuckets = append(st.BoardDrag.curBuckets, boardBucketFrame{
+											groupKey: g.Key,
+											groupVal: g.Value,
+											subKey:   ln.key,
+											subVal:   ln.val,
+											r:        cell.Bounds(),
+											accent:   colAccent,
+											count:    restingCount,
+										})
+										if d, ok := ui.Drop[boardCardDrag](cell); ok {
+											st.BoardDrag.handleBoardDrop(c, st, &view, db, res, d, g.Key, g.Value, ln.key, ln.val, false, opts)
+										}
+										if slot := st.BoardDrag.slot; slot.active && !slot.collapsed && slot.groupKey == g.Key && slot.subKey == ln.key && st.BoardDrag.grab.active && (st.BoardDrag.grab.fromGroupKey != g.Key || st.BoardDrag.grab.fromSubKey != ln.key) {
 											cell.Border(1.5, colAccent)
 										}
 									}
 									cell.Children(func() {
-										cellRows := filterRowsByAssignee(ln.cells[g.Key], personProp, st.BoardAssigneeFilter)
+										slot := st.BoardDrag.slot
+										slotHere := !opts.ReadOnly && slot.active && !slot.collapsed && slot.groupKey == g.Key && slot.subKey == ln.key
+										restIdx := 0
 										for _, r := range cellRows {
 											if r == nil {
 												continue
 											}
-											renderBoardCard(c, st, &view, db, res, r, g.Key, ln.key, bcfg, covH, cardProps, g.Key, g.Value, ln.key, ln.val, colAccent, opts, pal)
+											isDraggedRec := st.BoardDrag.grab.matchesCard(r.ID, g.Key, ln.key)
+											if !isDraggedRec && slotHere && !st.BoardDrag.emitted && slot.index <= restIdx {
+												st.BoardDrag.renderDragSlot(c, colAccent, g.Key, ln.key, slot.index, slot.self)
+											}
+											dragging, justStarted := renderBoardCard(c, st, &view, db, res, r, g.Key, ln.key, restIdx, bcfg, covH, cardProps, colAccent, opts, pal)
+											if justStarted && !st.BoardDrag.emitted {
+												st.BoardDrag.renderDragSlot(c, colAccent, g.Key, ln.key, restIdx, true)
+											}
+											if !dragging {
+												restIdx++
+											}
+										}
+										if slotHere && !st.BoardDrag.emitted {
+											st.BoardDrag.renderDragSlot(c, colAccent, g.Key, ln.key, slot.index, slot.self)
 										}
 										if !opts.ReadOnly {
 											addCell := ui.Row(c.Key("bsw-add:"+g.Key+":"+ln.key)).Height(28).Padding(0, 8).Radius(6).
@@ -992,6 +1156,9 @@ func applyBoardCardDrop(
 	opts Options,
 ) {
 	if st == nil || st.Store == nil || view == nil || db == nil || opts.ReadOnly {
+		return
+	}
+	if drag.state != nil && drag.state != st {
 		return
 	}
 	rec := st.Store.Record(drag.recordID)

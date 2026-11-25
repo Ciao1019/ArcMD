@@ -238,7 +238,16 @@ func (a *App) favoriteTile(c *ui.Context, i int, f space.Favorite, g favoriteGri
 	if hidden || dragging {
 		tile.Opacity(0) // the copy under the pointer stands for it
 	}
-	tile.Children(func() { fileIcon(c, f.Path, title, favoriteIcon) })
+	tile.Children(func() {
+		if leadingEmoji(title) != "" {
+			fileIcon(c, f.Path, title, favoriteIcon)
+			return
+		}
+		ui.Column(c).Center().Gap(2).PaddingX(5).MaxWidth(g.tileW).Children(func() {
+			fileIcon(c, f.Path, title, 16)
+			ui.Text(c, docName(title)).FontSize(10).TextColor(t.Text.Alpha(0.76)).SingleLine().MaxWidth(max(12, g.tileW-10))
+		})
+	})
 	if sp != nil && a.renameSpace == sp.ID && a.renaming == f.Path {
 		a.renameUnder(c, tile)
 	}

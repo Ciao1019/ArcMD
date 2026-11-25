@@ -355,6 +355,52 @@ func (v *BookViewer) StepChapter(delta int) {
 	}
 }
 
+func (v *BookViewer) activeChapterEditor() *Editor {
+	if v == nil || v.Doc == nil || v.Doc.ChapterCount() == 0 || v.ShowSource {
+		return nil
+	}
+	ch := min(max(v.CurrentChapter, 0), v.Doc.ChapterCount()-1)
+	if ent := v.chapterCache[ch]; ent != nil {
+		return ent.ed
+	}
+	return nil
+}
+
+func (v *BookViewer) scrollChapter(delta float32) {
+	ed := v.activeChapterEditor()
+	if ed == nil {
+		return
+	}
+	ed.scrollGlide = scrollGlideState{}
+	ed.outlineState.jump = outlineJump{}
+	ed.Scroll.Y = min(ed.outlineState.scrollMax, max(0, ed.Scroll.Y+delta))
+}
+
+func (v *BookViewer) pageChapter(dir int) {
+	ed := v.activeChapterEditor()
+	if ed == nil {
+		if v.IsEPUB() && v.ChapterCount() > 1 {
+			v.StepChapter(dir)
+		}
+		return
+	}
+	if v.IsEPUB() && v.ChapterCount() > 1 {
+		if dir > 0 && ed.Scroll.Y >= ed.outlineState.scrollMax-1 && v.CurrentChapter < v.ChapterCount()-1 {
+			v.StepChapter(1)
+			return
+		}
+		if dir < 0 && ed.Scroll.Y <= 1 && v.CurrentChapter > 0 {
+			v.StepChapter(-1)
+			return
+		}
+	}
+	step := max(ed.viewport-40, ed.viewport/2)
+	if step <= 0 {
+		step = 360
+	}
+	v.scrollChapter(float32(dir) * step)
+}
+
 // RevealBlockIndex jumps to 0-based chapter ch and reveals top-level block blockIdx.
 func (v *BookViewer) RevealBlockIndex(ch int, blockIdx int) {
 	if v == nil || v.Doc == nil || v.Doc.ChapterCount() == 0 {
@@ -823,12 +869,28 @@ func BookView(c *ui.Context, v *BookViewer, opts BookOptions) ui.Element {
 		} else if root.Shortcut(0, ui.KeyEscape) {
 			v.closeFind()
 		}
-	} else if v.IsEPUB() && v.ChapterCount() > 1 {
-		if root.Shortcut(ui.Alt, ui.KeyLeft) || root.Shortcut(0, ui.KeyBracketLeft) {
-			v.StepChapter(-1)
+	} else {
+		if v.IsEPUB() && v.ChapterCount() > 1 {
+			if root.Shortcut(0, ui.KeyLeft) || root.Shortcut(ui.Alt, ui.KeyLeft) || root.Shortcut(0, ui.KeyBracketLeft) {
+				v.StepChapter(-1)
+			}
+			if root.Shortcut(0, ui.KeyRight) || root.Shortcut(ui.Alt, ui.KeyRight) || root.Shortcut(0, ui.KeyBracketRight) {
+				v.StepChapter(1)
+			}
 		}
-		if root.Shortcut(ui.Alt, ui.KeyRight) || root.Shortcut(0, ui.KeyBracketRight) {
-			v.StepChapter(1)
+		if !useNativeWebView && !v.ShowSource {
+			if root.Shortcut(0, ui.KeyUp) {
+				v.scrollChapter(-72)
+			}
+			if root.Shortcut(0, ui.KeyDown) {
+				v.scrollChapter(72)
+			}
+			if root.Shortcut(0, ui.KeyPageUp) {
+				v.pageChapter(-1)
+			}
+			if root.Shortcut(0, ui.KeyPageDown) {
+				v.pageChapter(1)
+			}
 		}
 	}
 
@@ -919,6 +981,23 @@ func BookView(c *ui.Context, v *BookViewer, opts BookOptions) ui.Element {
 					zoom = 0
 					onZoom = nil
 				}
+				var reserved []Combo
+				if !v.FindOpen && !v.ShowSource {
+					reserved = append(reserved,
+						Combo{0, ui.KeyUp},
+						Combo{0, ui.KeyDown},
+						Combo{0, ui.KeyPageUp},
+						Combo{0, ui.KeyPageDown},
+					)
+					if v.IsEPUB() && v.ChapterCount() > 1 {
+						reserved = append(reserved,
+							Combo{0, ui.KeyLeft},
+							Combo{0, ui.KeyRight},
+							Combo{ui.Alt, ui.KeyLeft},
+							Combo{ui.Alt, ui.KeyRight},
+						)
+					}
+				}
 				View(c.Key(edKey), ed, Options{
 					Width:              availW,
 					Theme:              t,
@@ -935,6 +1014,7 @@ func BookView(c *ui.Context, v *BookViewer, opts BookOptions) ui.Element {
 					DirectLinks:        true,
 					DisableFind:        true,
 					HideReadOnlyNotice: true,
+					Reserved:           reserved,
 					LoadImage: func(src string) ImageResource {
 						return v.loadBookImage(ch, src, opts.LoadExternalImage)
 					},
@@ -1269,13 +1349,13 @@ func (v *BookViewer) floatingIslandView(c *ui.Context, t *ui.Theme, pg Page, wb 
 			}
 
 			if v.IsEPUB() && cnt > 1 {
-				prev := pdfIconBtn(c, "book-btn-prev", iconChevronLeft, i18n.T("上一章"), v.CurrentChapter <= 0, pg, t)
+				prev := pdfIconBtn(c, "book-btn-prev", iconChevronLeft, i18n.T("上一章 (←)"), v.CurrentChapter <= 0, pg, t)
 				if prev.Clicked() {
 					v.StepChapter(-1)
 				}
 				ui.Text(c, fmt.Sprintf(i18n.T("第 %d / %d 章"), v.CurrentChapter+1, cnt)).
 					FontSize(12).FontWeight(550).TextColor(t.Text).PaddingX(6).NoWrap()
-				next := pdfIconBtn(c, "book-btn-next", iconChevronRight, i18n.T("下一章"), v.CurrentChapter >= cnt-1, pg, t)
+				next := pdfIconBtn(c, "book-btn-next", iconChevronRight, i18n.T("下一章 (→)"), v.CurrentChapter >= cnt-1, pg, t)
 				if next.Clicked() {
 					v.StepChapter(1)
 				}

@@ -510,7 +510,6 @@ func TestRemoteImageLazyFetchAndCache(t *testing.T) {
 
 	a, tt := newTestApp(t)
 	updates := make(chan func(), 16)
-	a.search.async = true
 	a.runAsync = func(fn func()) { updates <- fn }
 	a.pluginsUI.httpClient = srv.Client()
 	t.Cleanup(func() {
@@ -527,18 +526,24 @@ func TestRemoteImageLazyFetchAndCache(t *testing.T) {
 	a.open("Synced.md")
 	tt.Frame()
 
+	a.search.async = true
 	res1 := a.imageResourceFor(a.doc, remoteURL)
 	if !res1.Loading {
 		t.Fatalf("expected Loading=true on first remote image request, got %#v", res1)
 	}
 
 	// Wait for the background download callback and apply it on main thread.
-	fn := <-updates
-	fn()
+	cachePath := a.remoteImageCachePath(remoteURL)
+	for {
+		fn := <-updates
+		fn()
+		if _, err := os.Stat(cachePath); err == nil {
+			break
+		}
+	}
 	tt.Frame()
 
 	// Cache file lives strictly under ConfigDir/cache/remote-images, not inside Space.
-	cachePath := a.remoteImageCachePath(remoteURL)
 	if _, err := os.Stat(cachePath); err != nil {
 		t.Fatalf("expected cached remote image at %q: %v", cachePath, err)
 	}

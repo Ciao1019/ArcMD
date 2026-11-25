@@ -53,9 +53,12 @@ type Prefs struct {
 	// the system.
 	Language string `json:"language,omitempty"`
 	// Font is the body text's typeface, one of Fonts ("" the system's);
-	// Page the text column's width, one of Pages ("" the standard 820).
-	Font string `json:"font,omitempty"`
-	Page string `json:"page,omitempty"`
+	// Page the text column's width, one of Pages ("" the standard 820);
+	// SidebarDensity the sidebar file tree row density, one of SidebarDensities
+	// ("" the standard 32 DIP row height).
+	Font           string `json:"font,omitempty"`
+	Page           string `json:"page,omitempty"`
+	SidebarDensity string `json:"sidebarDensity,omitempty"`
 	// Typewriter keeps the line being written in the middle of the page.
 	Typewriter bool `json:"typewriter,omitempty"`
 	// DrawAnnotations lets the hand-drawn marks in view draw themselves,
@@ -202,11 +205,13 @@ func (p *Prefs) Zoom() float32 {
 	return NormalizePageZoom(p.PageZoom)
 }
 
-// Fonts are the typefaces body text may be set in, and Pages the widths
-// of the text column, by the names prefs.json keeps them under.
+// Fonts are the typefaces body text may be set in, Pages the widths
+// of the text column, and SidebarDensities the sidebar row densities,
+// by the names prefs.json keeps them under.
 var (
-	Fonts = []string{"", "serif", "kai", "mono"}
-	Pages = []string{"narrow", "", "wide", "full"}
+	Fonts            = []string{"", "serif", "kai", "mono"}
+	Pages            = []string{"narrow", "", "wide", "full"}
+	SidebarDensities = []string{"compact", "", "comfortable"}
 )
 
 // fontFamilies are the family lists of Fonts: the first a system has sets
@@ -235,6 +240,22 @@ func (p *Prefs) Column() float32 {
 // FullWidth reports whether the reader chose to span the full editor viewport.
 func (p *Prefs) FullWidth() bool { return p.Page == "full" }
 
+// SidebarRowHeight returns the sidebar file tree row height in DIPs:
+// 28 compact, 32 standard (default), 40 comfortable.
+func (p *Prefs) SidebarRowHeight() float32 {
+	if p == nil {
+		return 32
+	}
+	switch p.SidebarDensity {
+	case "compact":
+		return 28
+	case "comfortable":
+		return 40
+	default:
+		return 32
+	}
+}
+
 func (p *Prefs) normalize() {
 	if p.AI.Protocol != "responses" && p.AI.Protocol != "chat-completions" {
 		p.AI.Protocol = ""
@@ -247,6 +268,9 @@ func (p *Prefs) normalize() {
 	}
 	if p.Page != "narrow" && p.Page != "wide" && p.Page != "full" {
 		p.Page = ""
+	}
+	if p.SidebarDensity != "compact" && p.SidebarDensity != "comfortable" {
+		p.SidebarDensity = ""
 	}
 	if !(p.FontSize >= 12 && p.FontSize <= 28) {
 		p.FontSize = 0

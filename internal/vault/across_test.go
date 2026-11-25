@@ -51,6 +51,18 @@ func TestMoveTo(t *testing.T) {
 	if _, _, err := MoveTo(b, "Notes.arcmd", a, "Nowhere"); err == nil {
 		t.Error("moved into a folder that does not exist")
 	}
+	if _, _, err := MoveTo(b, "Inbox", b, "Inbox"); err == nil {
+		t.Error("moved a folder into itself")
+	}
+	if _, _, err := MoveTo(b, "Inbox", b, "Inbox/Trip"); err == nil {
+		t.Error("moved a folder into its subfolder")
+	}
+	aliasB := filepath.Join(t.TempDir(), "alias-b")
+	if err := os.Symlink(b, aliasB); err == nil {
+		if _, _, err := MoveTo(b, "Inbox", aliasB, "Inbox/Trip"); err == nil {
+			t.Error("moved a folder into itself via symlinked root alias")
+		}
+	}
 }
 
 func TestCopyTree(t *testing.T) {

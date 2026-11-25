@@ -1,29 +1,13 @@
-// Package pdf streams vector and raster pages with Unicode text, clickable
-// link annotations, and outline bookmarks into PDF files without UI/CGO deps.
+// Package pdf streams vector pages with Unicode text, clickable link
+// annotations, and outline bookmarks into PDF files without UI/CGO deps.
 package pdf
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"image"
-	"image/jpeg"
 	"io"
 	"strings"
 )
-
-// Text is an invisible selectable glyph or cluster, in points from the page's
-// top-left corner. The raster layer remains the source of visual fidelity.
-type Text struct {
-	Value               string
-	X, Y, Width, Height float64
-}
-
-type Page struct {
-	Image         image.Image
-	Width, Height float64
-	Text          []Text
-}
 
 const (
 	A4Width  = 595.28
@@ -31,7 +15,7 @@ const (
 )
 
 // Writer holds offsets, vector font subsets, and outline bookmarks cleanly.
-// A caller may discard each page immediately after AddPage/FinishVectorPage.
+// A caller may discard each page immediately after FinishVectorPage.
 type Writer struct {
 	out           io.Writer
 	offset        int64
@@ -40,16 +24,6 @@ type Writer struct {
 	pages         []int
 	reservedPages []int
 	lastHeight    float64
-
-	// Legacy raster+Text0 state initialized lazily on AddPage so object IDs
-	// remain identical to earlier versions when only AddPage is used.
-	legacyInit bool
-	legacyFont int
-	legacyCID  int
-	legacyDesc int
-	legacyCMap int
-	glyphs     map[string]int
-	alphabet   []string
 
 	fm       *fontManager
 	outlines []OutlineItem
@@ -64,7 +38,6 @@ func NewWriter(out io.Writer, title string) *Writer {
 		out:     out,
 		offsets: make([]int64, 16),
 		nextID:  4, // 1=Catalog, 2=Pages, 3=Info
-		glyphs:  map[string]int{},
 		fm:      newFontManager(),
 		alphaGS: map[uint16]int{},
 	}
@@ -95,20 +68,6 @@ func (w *Writer) pageObjID(idx int) int {
 		w.reservedPages = append(w.reservedPages, w.allocID())
 	}
 	return w.reservedPages[idx]
-}
-
-func (w *Writer) ensureLegacyFonts() {
-	if w.legacyInit {
-		return
-	}
-	w.legacyInit = true
-	w.legacyFont = w.allocID()
-	w.legacyCID = w.allocID()
-	w.legacyDesc = w.allocID()
-	w.legacyCMap = w.allocID()
-	w.object(w.legacyFont, fmt.Sprintf("<< /Type /Font /Subtype /Type0 /BaseFont /ArcMDText /Encoding /Identity-H /DescendantFonts [%d 0 R] /ToUnicode %d 0 R >>", w.legacyCID, w.legacyCMap), nil)
-	w.object(w.legacyCID, fmt.Sprintf("<< /Type /Font /Subtype /CIDFontType2 /BaseFont /ArcMDText /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor %d 0 R /DW 1000 /CIDToGIDMap /Identity >>", w.legacyDesc), nil)
-	w.object(w.legacyDesc, "<< /Type /FontDescriptor /FontName /ArcMDText /Flags 4 /FontBBox [0 -200 1000 800] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 800 /StemV 80 >>", nil)
 }
 
 // RegisterFontData registers an embedded TTF/OTF byte slice (such as KaTeX fonts)
@@ -158,49 +117,6 @@ func (w *Writer) object(id int, body string, stream []byte) {
 	w.write([]byte("\nendobj\n"))
 }
 
-func (w *Writer) AddPage(p Page) error {
-	if w.closed {
-		return errors.New("pdf: writer is closed")
-	}
-	if w.err != nil {
-		return w.err
-	}
-	if p.Image == nil || p.Width <= 0 || p.Height <= 0 {
-		return errors.New("pdf: invalid page")
-	}
-	w.ensureLegacyFonts()
-	var img bytes.Buffer
-	if err := jpeg.Encode(&img, p.Image, &jpeg.Options{Quality: 90}); err != nil {
-		return err
-	}
-	page := w.pageObjID(len(w.pages))
-	content, picture := w.allocID(), w.allocID()
-	w.pages = append(w.pages, page)
-	w.lastHeight = p.Height
-	w.object(page, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 %d 0 R >> /XObject << /Im %d 0 R >> >> /Contents %d 0 R >>", p.Width, p.Height, w.legacyFont, picture, content), nil)
-	var draw strings.Builder
-	fmt.Fprintf(&draw, "q %.4f 0 0 %.4f 0 0 cm /Im Do Q\n", p.Width, p.Height)
-	for _, text := range p.Text {
-		if text.Value == "" || text.Width <= 0 || text.Height <= 0 {
-			continue
-		}
-		glyph := w.glyphs[text.Value]
-		if glyph == 0 {
-			if len(w.alphabet) >= 65535 {
-				return errors.New("pdf: too many distinct text clusters")
-			}
-			w.alphabet = append(w.alphabet, text.Value)
-			glyph = len(w.alphabet)
-			w.glyphs[text.Value] = glyph
-		}
-		fmt.Fprintf(&draw, "BT /F1 %.4f Tf 3 Tr %.4f Tz 1 0 0 1 %.4f %.4f Tm <%04X> Tj ET\n", text.Height, 100*text.Width/text.Height, text.X, p.Height-text.Y-.8*text.Height, glyph)
-	}
-	w.object(content, fmt.Sprintf("<< /Length %d >>", draw.Len()), []byte(draw.String()))
-	b := p.Image.Bounds()
-	w.object(picture, fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>", b.Dx(), b.Dy(), img.Len()), img.Bytes())
-	return w.err
-}
-
 func (w *Writer) Close() error {
 	if w.closed {
 		return errors.New("pdf: writer is closed")
@@ -220,21 +136,6 @@ func (w *Writer) Close() error {
 	}
 
 	w.writeFontObjects()
-
-	if w.legacyInit {
-		var cmap strings.Builder
-		cmap.WriteString("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /ArcMDUnicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n")
-		for start := 0; start < len(w.alphabet); start += 100 {
-			end := min(start+100, len(w.alphabet))
-			fmt.Fprintf(&cmap, "%d beginbfchar\n", end-start)
-			for i := start; i < end; i++ {
-				fmt.Fprintf(&cmap, "<%04X> <%s\n", i+1, strings.TrimPrefix(textString(w.alphabet[i]), "<FEFF"))
-			}
-			cmap.WriteString("endbfchar\n")
-		}
-		cmap.WriteString("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n")
-		w.object(w.legacyCMap, fmt.Sprintf("<< /Length %d >>", cmap.Len()), []byte(cmap.String()))
-	}
 
 	var kids strings.Builder
 	for _, id := range w.pages {
@@ -265,16 +166,6 @@ func (w *Writer) Close() error {
 	}
 	w.write(fmt.Appendf(nil, "trailer\n<< /Size %d /Root 1 0 R /Info 3 0 R >>\nstartxref\n%d\n%%%%EOF\n", maxID+1, xref))
 	return w.err
-}
-
-func Write(out io.Writer, title string, pages []Page) error {
-	w := NewWriter(out, title)
-	for _, p := range pages {
-		if err := w.AddPage(p); err != nil {
-			return err
-		}
-	}
-	return w.Close()
 }
 
 func textString(s string) string {

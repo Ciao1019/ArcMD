@@ -2,6 +2,7 @@ package fsutil
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -107,5 +108,56 @@ func TestWriteFileAtomicPreservesHardLinks(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("unexpected directory entries: %v, %v", entries, err)
+	}
+}
+
+func TestCreateFileAtomicLinkFallbackAndErrExist(t *testing.T) {
+	origLink := linkFile
+	t.Cleanup(func() { linkFile = origLink })
+
+	// 1. When linkFile returns fs.ErrExist, CreateFileAtomic must NOT fall back.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "exists.md")
+	linkFile = func(oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: fs.ErrExist}
+	}
+	if err := CreateFileAtomic(target, []byte("should not write"), 0o644); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("expected fs.ErrExist rejection, got %v", err)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("fallback ran despite fs.ErrExist: stat err = %v", err)
+	}
+
+	// 2. Simulated ENOTSUP (exFAT/FAT32/SMB/WebDAV) falls back to O_EXCL safely.
+	linkFile = func(oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: errors.New("operation not supported")}
+	}
+	name := filepath.Join(dir, "exfat.arcmd")
+	var wg sync.WaitGroup
+	results := make(chan error, 12)
+	for range 12 {
+		wg.Go(func() { results <- CreateFileAtomic(name, []byte("exfat exclusive body"), 0o644) })
+	}
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, fs.ErrExist) {
+			t.Fatalf("unexpected error under ENOTSUP fallback: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected 1 exclusive creation under ENOTSUP fallback, got %d", successes)
+	}
+	got, err := os.ReadFile(name)
+	if err != nil || string(got) != "exfat exclusive body" {
+		t.Fatalf("read %q, err %v", got, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("temporary files leaked: %v, %v", entries, err)
 	}
 }

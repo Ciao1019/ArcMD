@@ -20,9 +20,10 @@ import (
 
 // SpaceSnapshot captures one syncable Space's identity and root folder for an invocation.
 type SpaceSnapshot struct {
-	ID   string
-	Name string
-	Root string
+	ID             string
+	Name           string
+	Root           string
+	AttachmentsDir string
 }
 
 // TrashFunc moves a file at rel inside space root to ArcMD's trashbin and system trash.
@@ -41,6 +42,13 @@ func (e *SpaceError) Unwrap() error { return e.Err }
 // for cloud sync (documents, subfolders, assets/*, and .arcmd/templates/*),
 // excluding .arcmd/history/*, .git/*, node_modules/*, and hidden dotfiles.
 func IsSyncPath(rel string) bool {
+	return IsSyncPathIn(rel, "")
+}
+
+// IsSyncPathIn reports whether rel is eligible for cloud sync, additionally
+// permitting files inside attachmentsDir (a clean slash-separated relative folder)
+// just like "assets".
+func IsSyncPathIn(rel, attachmentsDir string) bool {
 	if rel == "" || strings.Contains(rel, `\`) || path.IsAbs(rel) || filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" {
 		return false
 	}
@@ -60,6 +68,7 @@ func IsSyncPath(rel string) bool {
 	if strings.HasPrefix(base, ".") {
 		return false
 	}
+	attParts := cleanAttachmentsParts(attachmentsDir)
 	if parts[0] == ".arcmd" {
 		if len(parts) < 3 || parts[1] != "templates" {
 			return false
@@ -69,7 +78,8 @@ func IsSyncPath(rel string) bool {
 				return false
 			}
 		}
-		if slices.Contains(parts[2:len(parts)-1], "assets") {
+		dirParts := parts[2 : len(parts)-1]
+		if slices.Contains(dirParts, "assets") || containsDirSeq(dirParts, attParts) {
 			return true
 		}
 		return vault.IsDocument(base) || isSyncAttachment(base)
@@ -79,10 +89,42 @@ func IsSyncPath(rel string) bool {
 			return false
 		}
 	}
-	if slices.Contains(parts[:len(parts)-1], "assets") {
+	dirParts := parts[:len(parts)-1]
+	if slices.Contains(dirParts, "assets") || containsDirSeq(dirParts, attParts) {
 		return true
 	}
 	return vault.IsDocument(base) || isSyncAttachment(base)
+}
+
+func cleanAttachmentsParts(dir string) []string {
+	dir = strings.TrimSpace(strings.ReplaceAll(dir, `\`, "/"))
+	dir = strings.Trim(dir, "/")
+	if dir == "" || dir == "." {
+		return nil
+	}
+	clean := path.Clean(dir)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) || filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" {
+		return nil
+	}
+	segs := strings.Split(clean, "/")
+	for _, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." || seg == "node_modules" || strings.HasPrefix(seg, ".") {
+			return nil
+		}
+	}
+	return segs
+}
+
+func containsDirSeq(dirParts, attParts []string) bool {
+	if len(attParts) == 0 || len(dirParts) < len(attParts) {
+		return false
+	}
+	for i := 0; i <= len(dirParts)-len(attParts); i++ {
+		if slices.Equal(dirParts[i:i+len(attParts)], attParts) {
+			return true
+		}
+	}
+	return false
 }
 
 func isSyncAttachment(name string) bool {
@@ -96,13 +138,14 @@ func isSyncAttachment(name string) bool {
 // FolderSpaces implements SpaceService directly against a snapshotted set of
 // Space folders with optimistic concurrency and trash-safe deletes.
 type FolderSpaces struct {
-	mu      sync.Mutex
-	spaces  map[string]SpaceSnapshot
-	order   []SpaceInfo
-	dirty   map[SpaceFileKey]bool
-	trash   TrashFunc
-	now     func() time.Time
-	touched map[SpaceFileKey]bool
+	AttachmentsDir string
+	mu             sync.Mutex
+	spaces         map[string]SpaceSnapshot
+	order          []SpaceInfo
+	dirty          map[SpaceFileKey]bool
+	trash          TrashFunc
+	now            func() time.Time
+	touched        map[SpaceFileKey]bool
 }
 
 // NewFolderSpaces constructs a SpaceService over spaces, dirty open-document paths,
@@ -142,6 +185,14 @@ func (f *FolderSpaces) space(id string) (SpaceSnapshot, error) {
 		return SpaceSnapshot{}, &SpaceError{Code: CodeNotFound, Err: fmt.Errorf("unknown space %q", id)}
 	}
 	return sp, nil
+}
+
+func (f *FolderSpaces) allowed(sp SpaceSnapshot, rel string) bool {
+	att := sp.AttachmentsDir
+	if att == "" {
+		att = f.AttachmentsDir
+	}
+	return IsSyncPathIn(rel, att)
 }
 
 func (f *FolderSpaces) markTouched(spaceID, rel string) {
@@ -209,7 +260,7 @@ func (f *FolderSpaces) ListFiles(spaceID string) ([]SpaceFileEntry, error) {
 			}
 			return nil
 		}
-		if !IsSyncPath(rel) {
+		if !f.allowed(sp, rel) {
 			return nil
 		}
 		info, err := d.Info()
@@ -239,7 +290,7 @@ func (f *FolderSpaces) ReadFile(spaceID, rel string) ([]byte, SpaceFileMeta, err
 	if err != nil {
 		return nil, SpaceFileMeta{}, err
 	}
-	if !IsSyncPath(rel) {
+	if !f.allowed(sp, rel) {
 		return nil, SpaceFileMeta{}, &SpaceError{Code: CodeInvalidArgument, Err: fmt.Errorf("path %q cannot be synced", rel)}
 	}
 	full, err := vault.Resolve(sp.Root, rel)
@@ -276,7 +327,7 @@ func (f *FolderSpaces) WriteFile(spaceID, rel string, data []byte, expectedSHA25
 	if err != nil {
 		return SpaceFileMeta{}, err
 	}
-	if !IsSyncPath(rel) {
+	if !f.allowed(sp, rel) {
 		return SpaceFileMeta{}, &SpaceError{Code: CodeInvalidArgument, Err: fmt.Errorf("path %q cannot be synced", rel)}
 	}
 	if f.dirty[SpaceFileKey{SpaceID: spaceID, Path: rel}] {
@@ -330,7 +381,7 @@ func (f *FolderSpaces) WriteConflict(spaceID, rel string, data []byte) (SpaceFil
 	if err != nil {
 		return SpaceFileMeta{}, err
 	}
-	if !IsSyncPath(rel) {
+	if !f.allowed(sp, rel) {
 		return SpaceFileMeta{}, &SpaceError{Code: CodeInvalidArgument, Err: fmt.Errorf("path %q cannot be synced", rel)}
 	}
 	dir := path.Dir(rel)
@@ -383,7 +434,7 @@ func (f *FolderSpaces) DeleteFile(spaceID, rel, expectedSHA256 string) error {
 	if err != nil {
 		return err
 	}
-	if !IsSyncPath(rel) {
+	if !f.allowed(sp, rel) {
 		return &SpaceError{Code: CodeInvalidArgument, Err: fmt.Errorf("path %q cannot be synced", rel)}
 	}
 	if f.dirty[SpaceFileKey{SpaceID: spaceID, Path: rel}] {

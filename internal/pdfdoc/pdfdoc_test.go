@@ -26,30 +26,22 @@ func buildSamplePDF(t *testing.T) []byte {
 	draw.Draw(p0, p0.Bounds(), &image.Uniform{C: color.RGBA{255, 255, 255, 255}}, image.Point{}, draw.Src)
 	draw.Draw(p0, image.Rect(0, 0, 200, 40), &image.Uniform{C: color.RGBA{220, 35, 35, 255}}, image.Point{}, draw.Src)
 	draw.Draw(p0, image.Rect(0, 240, 200, 280), &image.Uniform{C: color.RGBA{25, 70, 220, 255}}, image.Point{}, draw.Src)
-	if err := w.AddPage(pdf.Page{
-		Image:  p0,
-		Width:  pdf.A4Width,
-		Height: pdf.A4Height,
-		Text: []pdf.Text{
-			{Value: "架构总览 Architecture", X: 60, Y: 90, Width: 220, Height: 18},
-			{Value: "平滑滚动与分页预览", X: 60, Y: 130, Width: 180, Height: 14},
-		},
-	}); err != nil {
-		t.Fatalf("AddPage 0: %v", err)
+	vp0 := w.NewVectorPage(pdf.A4Width, pdf.A4Height)
+	vp0.DrawImage(p0, 0, 0, pdf.A4Width, pdf.A4Height, 0)
+	vp0.DrawText("架构总览 Architecture", 60, 90, 220, 18, pdf.TextStyle{Family: pdf.FontSans}, [4]uint8{20, 20, 20, 255})
+	vp0.DrawText("平滑滚动与分页预览", 60, 130, 180, 14, pdf.TextStyle{Family: pdf.FontSans}, [4]uint8{20, 20, 20, 255})
+	if err := w.FinishVectorPage(vp0); err != nil {
+		t.Fatalf("FinishVectorPage 0: %v", err)
 	}
 
 	// Page 1: Wide slide 800x450.
 	p1 := image.NewRGBA(image.Rect(0, 0, 320, 180))
 	draw.Draw(p1, p1.Bounds(), &image.Uniform{C: color.RGBA{245, 250, 245, 255}}, image.Point{}, draw.Src)
-	if err := w.AddPage(pdf.Page{
-		Image:  p1,
-		Width:  800,
-		Height: 450,
-		Text: []pdf.Text{
-			{Value: "性能基准 Benchmark", X: 80, Y: 100, Width: 200, Height: 18},
-		},
-	}); err != nil {
-		t.Fatalf("AddPage 1: %v", err)
+	vp1 := w.NewVectorPage(800, 450)
+	vp1.DrawImage(p1, 0, 0, 800, 450, 0)
+	vp1.DrawText("性能基准 Benchmark", 80, 100, 200, 18, pdf.TextStyle{Family: pdf.FontSans}, [4]uint8{20, 20, 20, 255})
+	if err := w.FinishVectorPage(vp1); err != nil {
+		t.Fatalf("FinishVectorPage 1: %v", err)
 	}
 
 	w.SetOutlines([]pdf.OutlineItem{

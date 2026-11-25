@@ -103,6 +103,8 @@ func size(p string) int64 {
 	return total
 }
 
+var copyStream = io.Copy
+
 // copyAll copies a file, or a folder with what it holds, leaving out
 // symbolic links.
 func copyAll(src, dst string) error {
@@ -116,6 +118,9 @@ func copyAll(src, dst string) error {
 		case d.Type()&fs.ModeSymlink != 0:
 			return nil
 		case d.IsDir():
+			if p == src {
+				return os.Mkdir(target, 0o755)
+			}
 			return os.MkdirAll(target, 0o755)
 		}
 		in, err := os.Open(p)
@@ -127,11 +132,16 @@ func copyAll(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, in); err != nil {
-			out.Close()
+		if _, err := copyStream(out, in); err != nil {
+			_ = out.Close()
+			_ = os.Remove(target)
 			return err
 		}
-		return out.Close()
+		if err := out.Close(); err != nil {
+			_ = os.Remove(target)
+			return err
+		}
+		return nil
 	})
 }
 
@@ -220,6 +230,7 @@ func (b Bin) Restore(it Item, root string) (string, error) {
 			if errors.Is(err, fs.ErrExist) {
 				continue
 			}
+			_ = os.RemoveAll(target)
 			return "", err
 		}
 		os.RemoveAll(dir)

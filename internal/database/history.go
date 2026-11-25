@@ -13,6 +13,7 @@ type historyStep struct {
 type History struct {
 	entries []historyStep
 	pos     int
+	seq     uint64
 }
 
 // CanUndo reports whether there is a step to undo.
@@ -44,6 +45,7 @@ func (h *History) push(step historyStep) {
 		h.entries = h.entries[:maxHistoryEntries]
 	}
 	h.pos = len(h.entries)
+	h.seq++
 }
 
 func (h *History) undo(s *Store) ([]string, bool) {

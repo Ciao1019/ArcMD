@@ -38,7 +38,8 @@ func sortedKeys[V any](m map[string]V) []string {
 // one, case-insensitively. A pattern without a "/" matches a file's name
 // anywhere, as "*周报*".
 func globRegexp(pattern string) (*regexp.Regexp, bool, error) {
-	pattern = strings.TrimPrefix(strings.TrimSpace(pattern), "/")
+	pattern = strings.ReplaceAll(strings.TrimSpace(pattern), `\`, "/")
+	pattern = strings.TrimPrefix(pattern, "/")
 	base := !strings.Contains(pattern, "/")
 	var b strings.Builder
 	b.WriteString("(?i)^")
@@ -69,7 +70,8 @@ func globRegexp(pattern string) (*regexp.Regexp, bool, error) {
 // within reports whether the document at p is in scope: a glob, a folder
 // ("工作" or "工作/"), or "" for every document.
 func within(scope string, p string) (bool, error) {
-	scope = strings.TrimSpace(scope)
+	scope = strings.ReplaceAll(strings.TrimSpace(scope), `\`, "/")
+	p = strings.ReplaceAll(p, `\`, "/")
 	if scope == "" || scope == "." || scope == "/" {
 		return true, nil
 	}
@@ -328,6 +330,7 @@ func clip(line string, re *regexp.Regexp) string {
 // for its start or end), numbered, as "  12→text". It reads at most
 // MaxReadLines lines and MaxReadChars characters, and says where to go on.
 func (f *FS) Read(rel string, start, end int) (string, error) {
+	rel = cleanRel(rel)
 	p, err := f.Page(rel)
 	if err != nil {
 		return "", err
@@ -350,9 +353,24 @@ func (f *FS) Read(rel string, start, end int) (string, error) {
 	var b strings.Builder
 	chars := 0
 	last := start - 1
+	more := false
 	for i := start; i <= end; i++ {
 		line := p.Lines[i-1]
-		if chars > 0 && chars+len(line) > MaxReadChars {
+		rem := max(0, MaxReadChars-chars)
+		if len(line) > rem {
+			if chars > 0 && (len(line) <= MaxReadChars || rem < 256) {
+				more = true
+				break
+			}
+			cut := rem
+			for cut > 0 && !utf8.RuneStart(line[cut]) {
+				cut--
+			}
+			line = line[:cut] + "… [truncated]"
+			chars += cut
+			fmt.Fprintf(&b, "%6d→%s\n", i, line)
+			last = i
+			more = true
 			break
 		}
 		chars += len(line)
@@ -361,7 +379,7 @@ func (f *FS) Read(rel string, start, end int) (string, error) {
 	}
 	if last < n {
 		fmt.Fprintf(&b, "(lines %d-%d of %d; read on with start_line=%d)\n", start, last, n, last+1)
-	} else if start > 1 {
+	} else if start > 1 && !more {
 		fmt.Fprintf(&b, "(lines %d-%d of %d, the end)\n", start, last, n)
 	}
 	return b.String(), nil
@@ -369,6 +387,7 @@ func (f *FS) Read(rel string, start, end int) (string, error) {
 
 // Outline lists a document's headings with their lines, outside code.
 func (f *FS) Outline(rel string) (string, error) {
+	rel = cleanRel(rel)
 	p, err := f.Page(rel)
 	if err != nil {
 		return "", err
@@ -410,6 +429,7 @@ func (f *FS) Outline(rel string) (string, error) {
 // Links are a document's [[links]] (with the documents they open), the
 // documents linking to it, and its #tags.
 func (f *FS) Links(rel string) (string, error) {
+	rel = cleanRel(rel)
 	p, err := f.Page(rel)
 	if err != nil {
 		return "", err

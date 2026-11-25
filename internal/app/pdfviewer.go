@@ -67,6 +67,126 @@ func openPDFDocument(sp *space.Space, rel, diskStamp string) *document {
 	return d
 }
 
+func (d *document) reopenPDF() {
+	if !d.isPDF() || d.space == nil || d.rel == "" {
+		return
+	}
+	oldPage := d.pdf.CurrentPage
+	oldSidebar := d.pdf.SidebarOpen
+	d.pdf.Close()
+	full, err := resolveFile(d.space, d.rel)
+	if err != nil {
+		d.loadErr = err
+		d.pdf = editor.NewPDFViewer(nil, err)
+		d.pdf.SidebarOpen = oldSidebar
+		return
+	}
+	if info, stErr := os.Stat(full); stErr == nil {
+		d.pdfModNano = info.ModTime().UnixNano()
+		d.pdfSize = info.Size()
+		d.diskText = fmt.Sprintf("pdf:%d:%d", d.pdfModNano, d.pdfSize)
+	}
+	pdfDoc, openErr := pdfdoc.Open(full)
+	d.pdf = editor.NewPDFViewer(pdfDoc, openErr)
+	d.pdf.SidebarOpen = oldSidebar
+	if openErr == nil && oldPage > 0 {
+		d.pdf.GoToPage(oldPage, true)
+	}
+}
+
+func sameOrChildOSPath(candidate, target string) bool {
+	if candidate == "" || target == "" {
+		return false
+	}
+	if r, err := filepath.Rel(target, candidate); err == nil && (r == "." || filepath.IsLocal(r)) {
+		return true
+	}
+	cEval, err1 := filepath.EvalSymlinks(candidate)
+	tEval, err2 := filepath.EvalSymlinks(target)
+	if err1 == nil && err2 == nil {
+		if r, err := filepath.Rel(tEval, cEval); err == nil && (r == "." || filepath.IsLocal(r)) {
+			return true
+		}
+	}
+	return false
+}
+
+// releasePDFHandles closes cached, previewed, and resident PDF handles matching
+// rel (or inside folder rel; "" matches the whole Space) before rename, move,
+// or trash so Windows never fails with ERROR_SHARING_VIOLATION.
+func (a *App) releasePDFHandles(sp *space.Space, rel string) {
+	if sp == nil {
+		return
+	}
+	var targetFull string
+	if rel != "" {
+		targetFull, _ = resolveFile(sp, rel)
+	}
+	for k, entry := range a.pdfCache {
+		match := false
+		if rel == "" {
+			if sp.IsExternal() {
+				for _, extFull := range sp.ExternalFiles {
+					if sameOrChildOSPath(k, extFull) {
+						match = true
+						break
+					}
+				}
+			} else if sp.Root != "" {
+				match = sameOrChildOSPath(k, sp.Root)
+			}
+		} else if targetFull != "" {
+			match = sameOrChildOSPath(k, targetFull)
+		}
+		if match {
+			if entry.doc != nil {
+				entry.doc.Close()
+			}
+			delete(a.pdfCache, k)
+			if idx := slices.Index(a.pdfOrder, k); idx >= 0 {
+				a.pdfOrder = slices.Delete(a.pdfOrder, idx, idx+1)
+			}
+		}
+	}
+	if p := &a.preview; len(p.thumbs) > 0 {
+		for k, th := range p.thumbs {
+			trimmed := strings.TrimPrefix(k, "open/")
+			entrySpaceID, entryRel, ok := strings.Cut(trimmed, "/")
+			if !ok || entrySpaceID != sp.ID {
+				continue
+			}
+			if rel == "" || within(entryRel, rel) {
+				if th.doc != nil {
+					th.doc.close()
+				}
+				delete(p.thumbs, k)
+				if idx := slices.Index(p.thumbOrder, k); idx >= 0 {
+					p.thumbOrder = slices.Delete(p.thumbOrder, idx, idx+1)
+				}
+			}
+		}
+		if p.shown != nil && p.shown.space == sp && (rel == "" || within(p.shown.rel, rel)) {
+			p.shown, p.closing = nil, false
+		}
+	}
+	for _, d := range a.residentDocuments() {
+		if d != nil && d.space != nil && d.space.ID == sp.ID && (rel == "" || within(d.rel, rel)) && d.isPDF() {
+			d.pdf.Close()
+		}
+	}
+}
+
+func (a *App) reopenResidentPDFs(sp *space.Space, rel string) {
+	if sp == nil {
+		return
+	}
+	for _, d := range a.residentDocuments() {
+		if d != nil && d.space != nil && d.space.ID == sp.ID && (rel == "" || within(d.rel, rel)) && d.isPDF() {
+			d.reopenPDF()
+		}
+	}
+}
+
 func (a *App) putCachedPDF(key string, entry cachedPDFDoc) {
 	if a.pdfCache == nil {
 		a.pdfCache = make(map[string]cachedPDFDoc, maxCachedPDFDocs)

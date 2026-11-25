@@ -38,7 +38,6 @@ const (
 type viewTabPillMatch struct{}
 type calModePillMatch struct{}
 type chartKindPillMatch struct{}
-type boardCardMatch struct{ id string }
 
 type dbDragKind uint8
 
@@ -87,11 +86,12 @@ type dbDragSettle struct {
 // dbMotionState holds transient 120fps motion state for one database workspace:
 // lifted floating drag previews, drop settle glides, and creation pulses.
 type dbMotionState struct {
-	now          time.Time
-	reduceMotion bool
-	drag         dbDragPreview
-	settle       dbDragSettle
-	created      map[string]time.Time
+	now             time.Time
+	reduceMotion    bool
+	suppressOverlay bool
+	drag            dbDragPreview
+	settle          dbDragSettle
+	created         map[string]time.Time
 }
 
 // TrackCreated records a newly created record ID so views animate its entry
@@ -158,6 +158,7 @@ func (m *dbMotionState) beginFrame(c *ui.Context) {
 	if m == nil {
 		return
 	}
+	m.suppressOverlay = false
 	m.now = c.Now()
 	m.reduceMotion = c.Preferences().ReduceMotion
 	m.drag.seenThisFrame = false
@@ -300,6 +301,10 @@ func (m *dbMotionState) finishFrame(c *ui.Context, pal Palette) {
 		return
 	}
 
+	if m.suppressOverlay {
+		return
+	}
+
 	switch {
 	case m.drag.active:
 		g := &m.drag
@@ -365,20 +370,12 @@ func renderFloatingDragOverlay(
 	if title == "" {
 		title = "…"
 	}
-	fill := pal.PopoverBg
-	if !pal.Dark {
-		fill = ui.RGB(255, 255, 255).Alpha(0.96)
-	} else {
-		fill = pal.PopoverBg.Alpha(0.96)
-	}
+	fill := pal.PopoverBg.Alpha(0.96)
 	rim := pal.BorderStrong
 	if hasAccent {
 		rim = accent.Alpha(0.45)
 	}
-	shadowCol := ui.RGBA(0, 0, 0, 0.16)
-	if pal.Dark {
-		shadowCol = ui.RGBA(0, 0, 0, 0.52)
-	}
+	shadowCol := pal.PopoverShadow
 
 	switch kind {
 	case dragKindCol, dragKindGroup:

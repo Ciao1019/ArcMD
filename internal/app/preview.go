@@ -94,6 +94,7 @@ type preview struct {
 	restingSince time.Time
 	// shown is the preview open, or fading out until closingAt.
 	shown     *previewTarget
+	shownMod  time.Time
 	frames    int
 	closing   bool
 	closingAt time.Time
@@ -124,6 +125,7 @@ type preview struct {
 type thumb struct {
 	doc     *document
 	changed time.Time
+	rev     uint64
 }
 
 // hoverRow tells the preview the pointer is over a row this frame.
@@ -260,10 +262,12 @@ func (a *App) folderItems(sp *space.Space, rel string) []previewItem {
 				walk(k.Children)
 				continue
 			}
-			it := previewItem{rel: k.Path, title: k.Title()}
-			if p, err := resolveFile(sp, k.Path); err == nil {
-				if info, err := os.Stat(p); err == nil {
-					it.changed = info.ModTime()
+			it := previewItem{rel: k.Path, title: k.Title(), changed: k.Modified}
+			if it.changed.IsZero() {
+				if p, err := resolveFile(sp, k.Path); err == nil {
+					if info, err := os.Stat(p); err == nil {
+						it.changed = info.ModTime()
+					}
 				}
 			}
 			out = append(out, it)
@@ -388,35 +392,85 @@ func truncateMarkdownForPreview(text string) string {
 	return text
 }
 
+func (a *App) treeModTime(sp *space.Space, rel string) (time.Time, bool) {
+	if sp == nil || sp.IsExternal() {
+		return time.Time{}, false
+	}
+	if sp == a.state.ActiveSpace() && len(a.tree) > 0 {
+		if n := vault.Find(a.tree, rel); n != nil && !n.Modified.IsZero() {
+			return n.Modified, true
+		}
+	} else if pt, ok := a.pageTrees[sp.ID]; ok {
+		if n := vault.Find(pt.nodes, rel); n != nil && !n.Modified.IsZero() {
+			return n.Modified, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func (a *App) fileModTime(sp *space.Space, rel string) time.Time {
+	if mod, ok := a.treeModTime(sp, rel); ok {
+		return mod
+	}
+	if full, err := resolveFile(sp, rel); err == nil {
+		if info, err := os.Stat(full); err == nil {
+			return info.ModTime()
+		}
+	}
+	return time.Time{}
+}
+
 func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	p := &a.preview
+	alreadyShown := p.shown != nil && !p.closing && p.shown.kind == previewDoc && p.shown.space == sp && p.shown.rel == rel
 	if a.doc != nil && a.doc.space == sp && a.doc.rel == rel {
 		key := "open/" + sp.ID + "/" + rel
+		mod := p.shownMod
+		if !alreadyShown || mod.IsZero() {
+			mod = a.fileModTime(sp, rel)
+			p.shownMod = mod
+		}
 		if a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() {
 			return a.doc
 		}
 		if a.doc.isWhiteboard() {
-			rev := time.Unix(0, int64(a.doc.board.Revision()))
-			if th, ok := p.thumbs[key]; ok && th.changed.Equal(rev) {
+			rev := a.doc.board.Revision()
+			if th, ok := p.thumbs[key]; ok && th.rev == rev {
 				a.touchThumb(key)
+				if !th.changed.IsZero() {
+					p.shownMod = th.changed
+				}
 				return th.doc
 			}
 			d := &document{space: sp, rel: rel, board: editor.NewBoard(a.doc.board.SceneSnapshot()), loadErr: a.doc.loadErr}
-			a.putThumb(key, thumb{d, rev})
+			a.putThumb(key, thumb{doc: d, changed: mod, rev: rev})
 			return d
 		}
 		// The open one, as edited, in an editor of its own: one editor
 		// takes one place in a frame. Only the top blocks can fit in the
 		// 150 DIP thumbnail card, so long documents skip cloning the rest.
-		rev := time.Unix(0, int64(a.doc.ed.Revision()))
-		if th, ok := p.thumbs[key]; ok && th.changed.Equal(rev) {
+		rev := a.doc.ed.Revision()
+		if th, ok := p.thumbs[key]; ok && th.rev == rev {
 			a.touchThumb(key)
+			if !th.changed.IsZero() {
+				p.shownMod = th.changed
+			}
 			return th.doc
 		}
 		cloned := clonePreviewPrefix(a.doc.ed.Committed())
 		d := &document{space: sp, rel: rel, ed: editor.FromOwnedDocument(cloned)}
-		a.putThumb(key, thumb{d, rev})
+		a.putThumb(key, thumb{doc: d, changed: mod, rev: rev})
 		return d
+	}
+	key := sp.ID + "/" + rel
+	if alreadyShown {
+		if th, ok := p.thumbs[key]; ok {
+			if mod, hasTree := a.treeModTime(sp, rel); !hasTree || th.changed.Equal(mod) {
+				a.touchThumb(key)
+				p.shownMod = th.changed
+				return th.doc
+			}
+		}
 	}
 	full, err := resolveFile(sp, rel)
 	if err != nil {
@@ -426,19 +480,19 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	if err != nil {
 		return nil
 	}
-	key := sp.ID + "/" + rel
+	p.shownMod = info.ModTime()
 	if th, ok := p.thumbs[key]; ok && th.changed.Equal(info.ModTime()) {
 		a.touchThumb(key)
 		return th.doc
 	}
 	if vault.IsPDF(rel) {
 		d := openPDFDocument(sp, rel, "")
-		a.putThumb(key, thumb{d, info.ModTime()})
+		a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
 		return d
 	}
 	if vault.IsBook(rel) {
 		d := openBookDocument(sp, rel, "")
-		a.putThumb(key, thumb{d, info.ModTime()})
+		a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
 		return d
 	}
 	text, err := readFile(sp, rel)
@@ -454,13 +508,13 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 			store := database.NewStore("", rel, db)
 			d = &document{space: sp, rel: rel, dbView: dbview.NewState(store)}
 		}
-		a.putThumb(key, thumb{d, info.ModTime()})
+		a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
 		return d
 	}
 	if vault.IsWhiteboard(rel) {
 		scene, loadErr := whiteboard.Decode(text)
 		d := &document{space: sp, rel: rel, board: editor.NewBoard(scene), loadErr: loadErr}
-		a.putThumb(key, thumb{d, info.ModTime()})
+		a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
 		return d
 	}
 	var doc *model.Document
@@ -477,7 +531,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 		doc.Blocks = doc.Blocks[:previewMaxBlocks]
 	}
 	d := &document{space: sp, rel: rel, ed: editor.FromOwnedDocument(doc), loadErr: loadErr}
-	a.putThumb(key, thumb{d, info.ModTime()})
+	a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
 	return d
 }
 
@@ -598,7 +652,7 @@ func (a *App) folderPreview(c *ui.Context) {
 		return
 	}
 	list := ui.Scroll(c.Key("preview-rows")).Grow(1).MinHeight(0).PaddingY(previewListInset)
-	now := time.Now()
+	now := c.Now()
 	list.Children(func() {
 		for i, it := range shown {
 			row := ui.Row(c.Key("item:" + it.rel)).Height(previewRowPitch).Shrink(0).PaddingX(previewSideInset).
@@ -801,10 +855,14 @@ func (a *App) docPreview(c *ui.Context) {
 			if dir := parentDir(t.rel); dir != "" {
 				where += " / " + dir
 			}
-			if full, err := resolveFile(t.space, t.rel); err == nil {
-				if info, err := os.Stat(full); err == nil {
-					where += i18n.T(" · 修改于") + ago(info.ModTime(), time.Now())
-				}
+			changed := p.shownMod
+			if th, ok := p.thumbs[t.space.ID+"/"+t.rel]; ok && !th.changed.IsZero() {
+				changed = th.changed
+			} else if th, ok := p.thumbs["open/"+t.space.ID+"/"+t.rel]; ok && !th.changed.IsZero() {
+				changed = th.changed
+			}
+			if !changed.IsZero() {
+				where += i18n.T(" · 修改于") + ago(changed, c.Now())
 			}
 			ui.Text(c, where).FontSize(11).TextColor(p.col.muted).SingleLine()
 		})

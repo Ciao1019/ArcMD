@@ -83,6 +83,9 @@ func InspectArchive(b []byte) (*Manifest, string, error) {
 		if f.FileInfo().IsDir() {
 			continue
 		}
+		if f.UncompressedSize64 > uint64(MaxPackageSize) {
+			return nil, "", fmt.Errorf("plugin: the package unpacks to more than %d bytes", MaxPackageSize)
+		}
 		total += int64(f.UncompressedSize64)
 		if total > MaxPackageSize {
 			return nil, "", fmt.Errorf("plugin: the package unpacks to more than %d bytes", MaxPackageSize)
@@ -156,6 +159,7 @@ func (m *Manager) installZip(b []byte, l Listing) (*Installed, error) {
 	}
 	defer os.RemoveAll(staging)
 	var total int64
+	remaining := int64(MaxPackageSize)
 	for _, f := range zr.File {
 		name := path.Clean(f.Name)
 		if strings.Contains(f.Name, `\`) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") || (name == "." && !f.FileInfo().IsDir()) {
@@ -171,12 +175,15 @@ func (m *Manager) installZip(b []byte, l Listing) (*Installed, error) {
 			}
 			continue
 		}
+		if f.UncompressedSize64 > uint64(MaxPackageSize) {
+			return nil, fmt.Errorf("plugin: %s: the package unpacks to more than %d bytes", l.ID, MaxPackageSize)
+		}
 		total += int64(f.UncompressedSize64)
 		if total > MaxPackageSize {
 			return nil, fmt.Errorf("plugin: %s: the package unpacks to more than %d bytes", l.ID, MaxPackageSize)
 		}
-		if err := unpack(f, dst); err != nil {
-			return nil, err
+		if err := unpack(f, dst, &remaining); err != nil {
+			return nil, fmt.Errorf("plugin: %s: %w", l.ID, err)
 		}
 	}
 	mb, err := os.ReadFile(filepath.Join(staging, ManifestFile))
@@ -210,7 +217,7 @@ func (m *Manager) installZip(b []byte, l Listing) (*Installed, error) {
 	return &Installed{Manifest: man, Dir: dir, Enabled: enabled}, nil
 }
 
-func unpack(f *zip.File, dst string) error {
+func unpack(f *zip.File, dst string, remaining *int64) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -227,11 +234,23 @@ func unpack(f *zip.File, dst string) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(w, io.LimitReader(r, MaxPackageSize))
-	if cerr := w.Close(); err == nil {
-		err = cerr
+	written, err := io.Copy(w, io.LimitReader(r, *remaining+1))
+	if written > *remaining {
+		_ = w.Close()
+		_ = os.Remove(dst)
+		return fmt.Errorf("the package unpacks to more than %d bytes", MaxPackageSize)
 	}
-	return err
+	if err != nil {
+		_ = w.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := w.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	*remaining -= written
+	return nil
 }
 
 func secureURL(u *url.URL) error {

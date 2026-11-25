@@ -3,11 +3,9 @@ package vault
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 )
 
@@ -27,21 +25,12 @@ func MoveTo(from, rel, to, dir string) (dest string, copied bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	if dir != "" {
-		full, err := Resolve(to, dir)
-		if err != nil {
-			return "", false, err
-		}
-		if st, err := os.Stat(full); err != nil || !st.IsDir() {
-			return "", false, fmt.Errorf("vault: %s is not a folder", dir)
-		}
+	dstParent, err := resolveTargetDir(to, dir)
+	if err != nil {
+		return "", false, err
 	}
-	if same, _ := filepath.Abs(from); same != "" {
-		if other, _ := filepath.Abs(to); filepath.Clean(other) == filepath.Clean(same) {
-			if dir == rel || strings.HasPrefix(dir+"/", rel+"/") {
-				return "", false, errors.New("vault: a folder can't move into itself")
-			}
-		}
+	if fi.IsDir() && sameOrInsideDir(src, dstParent) {
+		return "", false, errors.New("vault: a folder can't move into itself")
 	}
 	dest, dst, err := freeName(to, dir, path.Base(rel), fi.IsDir())
 	if err != nil {
@@ -99,38 +88,5 @@ func crossDevice(err error) bool {
 // copyTree copies the file or folder src to dst, which does not exist.
 // Symbolic links are skipped rather than followed out of the vault.
 func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, p)
-		if err != nil {
-			return err
-		}
-		out := filepath.Join(dst, rel)
-		switch {
-		case d.Type()&fs.ModeSymlink != 0:
-			return nil
-		case d.IsDir():
-			return os.MkdirAll(out, 0o755)
-		}
-		return copyFile(p, out)
-	})
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return walkCopy(src, dst, false)
 }

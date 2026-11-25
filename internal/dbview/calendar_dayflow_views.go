@@ -647,15 +647,15 @@ func renderDayOrWeekTimeGrid(
 
 	root := ui.Column(c.Key("cal-tg-root")).Grow(1).MinWidth(0).MinHeight(0)
 	totalW := root.LayoutBounds().W
+	scrollKey := view.ID + ":" + map[bool]string{true: "day", false: "week"}[isDayMode]
+	st.requestCalMeasureOnce(c, scrollKey, totalW)
 	if totalW <= 0 {
-		c.AnimationFrame()
 		totalW = 860
 	}
 	colsAreaW := max(float32(220), totalW-dfTimeGutterW)
 	dayW := (colsAreaW - float32(numCols-1)) / float32(numCols)
 
 	// Scroll to 07:30 on first visit to Week or Day mode.
-	scrollKey := view.ID + ":" + map[bool]string{true: "day", false: "week"}[isDayMode]
 	if st.CalendarTimeScrolledKey != scrollKey {
 		st.CalendarTimeScrolledKey = scrollKey
 		st.CalendarTimeScroll.Y = 7.5 * dfHourHeight
@@ -1056,8 +1056,8 @@ func renderYearFixedWeekView(
 
 	yrRoot := ui.Column(c.Key("cal-yr-fixed")).Grow(1).MinWidth(0).MinHeight(0)
 	areaW := yrRoot.LayoutBounds().W
+	st.requestCalMeasureOnce(c, view.ID+":year-fixed", areaW)
 	if areaW <= 0 {
-		c.AnimationFrame()
 		areaW = 920
 	}
 	gridW := max(float32(370), areaW-monthLabelW)
@@ -1233,8 +1233,8 @@ func renderYearCanvasView(
 
 	scroll := ui.Scroll(c.Key("cal-yr-cscroll")).TrackScroll(&st.CalendarYearScroll).Grow(1).MinWidth(0).MinHeight(0)
 	areaW := scroll.LayoutBounds().W
+	st.requestCalMeasureOnce(c, view.ID+":year-canvas", areaW)
 	if areaW <= 0 {
-		c.AnimationFrame()
 		areaW = 920
 	}
 	colW := areaW / float32(colsPerRow)

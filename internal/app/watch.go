@@ -130,6 +130,7 @@ func (a *App) externalChanged(sp *space.Space, rel, full string, events []mygo.F
 	if sp.ExternalFiles[rel] != full {
 		return // a stopped watch may still have a queued callback
 	}
+	a.invalidateConflictsCache()
 	for _, e := range events {
 		if e.Op == mygo.FileRename && e.OldPath == filepath.Base(full) && vault.IsDocument(e.Path) {
 			if next, err := vault.Resolve(filepath.Dir(full), e.Path); err == nil {
@@ -160,6 +161,7 @@ func (a *App) filesChanged(id string, events []mygo.FileEvent) {
 		return
 	}
 	a.invalidateResolvedImages()
+	a.invalidateConflictsCache()
 	// Where files moved to, and whether attachments may have moved into the
 	// space's folder — both read before a.moved follows the renames below,
 	// which also updates the space's attachment folder.

@@ -244,9 +244,28 @@ func (a *App) finishPDF(job *pdfExport) {
 		return
 	}
 	a.notify("已导出 %s（%d 页）", rel, len(job.tops))
-	if a.win != nil {
-		if file, err := resolveFile(job.source.space, rel); err == nil {
-			mygo.Shell.ShowItemInFolder(file)
+	if full, rErr := resolveFile(job.source.space, rel); rErr == nil {
+		if sp := a.state.ActiveSpace(); sp != nil && !sp.IsExternal() && sp.Root != "" {
+			if job.source.space.ID == sp.ID || isInsideDir(sp.Root, full) {
+				a.refreshTree()
+			}
+		}
+		if a.win != nil {
+			mygo.Shell.ShowItemInFolder(full)
 		}
 	}
+}
+
+func isInsideDir(root, full string) bool {
+	if r, err := filepath.Rel(root, full); err == nil && filepath.IsLocal(r) {
+		return true
+	}
+	rRoot, err1 := filepath.EvalSymlinks(root)
+	rFull, err2 := filepath.EvalSymlinks(full)
+	if err1 == nil && err2 == nil {
+		if r, err := filepath.Rel(rRoot, rFull); err == nil && filepath.IsLocal(r) {
+			return true
+		}
+	}
+	return false
 }

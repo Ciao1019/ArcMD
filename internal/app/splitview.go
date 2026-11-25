@@ -152,11 +152,6 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 			if iconButton(c, "forward", iconForward, fmt.Sprintf(i18n.T("分屏 %d 前进"), index+1), i18n.T("前进"), pane.at+1 >= len(pane.history)).Size(26, 26).Clicked() {
 				run(func() { a.goHistory(1) })
 			}
-			if full && width >= 380 {
-				if iconButton(c, "reload", iconReload, fmt.Sprintf(i18n.T("分屏 %d 重新载入"), index+1), i18n.T("重新载入"), false).Size(26, 26).Clicked() {
-					run(a.reload)
-				}
-			}
 		}
 		address := ui.Row(c.Key("pane-address")).Grow(1).MinWidth(0).Height(28).PaddingX(6).Gap(6).Radius(6).AlignItems(ui.Center).
 			Focusable().Role(ui.RoleButton).Label(fmt.Sprintf(i18n.T("分屏 %d 文档路径"), index+1)).Cursor(ui.CursorPointer)
@@ -469,7 +464,7 @@ func (a *App) splitSidebarRow(c *ui.Context, sp *space.Space) {
 	if s == nil || len(s.panes) < 2 {
 		return
 	}
-	row := ui.Row(c.Key("split-row")).Height(rowHeight).Padding(4).Gap(4).Radius(10).Margin(2, 0, 4, 0)
+	row := ui.Row(c.Key("split-row")).Height(a.sidebarRowHeight()).Padding(4).Gap(4).Radius(a.sidebarRowRadius()).Margin(2, 0, 4, 0)
 	if a.split == s {
 		row.Background(glass(c.Theme()))
 	} else if row.Hovered() {

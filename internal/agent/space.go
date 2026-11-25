@@ -221,7 +221,7 @@ type Citation struct {
 	From, To   int
 }
 
-var citationRe = regexp.MustCompile(`\[([^\[\]\n#]+?)#L(\d+)(?:\s*[-–]\s*L?(\d+))?\]`)
+var citationRe = regexp.MustCompile(`\[([^\[\]\n]+?)#L(\d+)(?:\s*[-–]\s*L?(\d+))?\]`)
 
 // Citations finds the citations in an answer, in order.
 func Citations(text string) []Citation {

@@ -2,9 +2,7 @@ package editor
 
 import (
 	"bytes"
-	"image"
 	"image/color"
-	"image/draw"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,19 +31,12 @@ func buildTestPDF(t testing.TB) (string, *pdfdoc.Document) {
 	}
 
 	for _, pg := range pages {
-		img := image.NewRGBA(image.Rect(0, 0, 240, 180))
-		draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{255, 255, 255, 255}}, image.Point{}, draw.Src)
-		draw.Draw(img, image.Rect(0, 0, 240, 36), &image.Uniform{C: pg.band}, image.Point{}, draw.Src)
-		if err := w.AddPage(pdf.Page{
-			Image:  img,
-			Width:  pg.w,
-			Height: pg.h,
-			Text: []pdf.Text{
-				{Value: pg.title, X: 56, Y: 88, Width: 260, Height: 18},
-				{Value: pg.body, X: 56, Y: 124, Width: 260, Height: 14},
-			},
-		}); err != nil {
-			t.Fatalf("AddPage: %v", err)
+		vp := w.NewVectorPage(pg.w, pg.h)
+		vp.FillRect(0, 0, pg.w, 36, 0, [4]uint8{pg.band.R, pg.band.G, pg.band.B, pg.band.A})
+		vp.DrawText(pg.title, 56, 88, 260, 18, pdf.TextStyle{Family: pdf.FontSans, Bold: true}, [4]uint8{20, 20, 20, 255})
+		vp.DrawText(pg.body, 56, 124, 260, 14, pdf.TextStyle{Family: pdf.FontSans}, [4]uint8{40, 40, 40, 255})
+		if err := w.FinishVectorPage(vp); err != nil {
+			t.Fatalf("FinishVectorPage: %v", err)
 		}
 	}
 	w.SetOutlines([]pdf.OutlineItem{
