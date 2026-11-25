@@ -6,7 +6,7 @@
 
 简体中文 · [English](README.en.md)
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.3.0-F21158" alt="版本 0.3.0"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.4.0-F21158" alt="版本 0.4.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="支持 macOS、Windows 与 Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="使用 Go 与 MyGo 原生开发"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI 工作流配置"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-zh-CN.svg" height="56" alt="下载 ArcMD Windows 版：x64 安装程序与 ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-zh-CN.svg" height="56" alt="下载 ArcMD Linux 版：x64 与 ARM64，DEB 与 TAR.GZ"></a>
 
-<sub>当前预览版本为 0.3.0，按钮会打开发布页；也可以直接<a href="#从源码运行">从源码运行</a>。</sub>
+<sub>当前预览版本为 0.4.0，按钮会打开发布页；也可以直接<a href="#从源码运行">从源码运行</a>。</sub>
 
 <br><br>
 
@@ -134,6 +134,7 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 | <kbd>⇧⌘M</kbd> | 富文本 ⇄ Markdown 预览（同步位置） | <kbd>⇧⌘F</kbd> | 进入 / 退出专注模式 |
 | <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | 页内查找替换 / 跨文档查找替换 | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | 添加移除书签 / 全部书签列表 |
 | <kbd>⌥⌘T</kbd> | 打开或创建今日笔记 | <kbd>⌥⌘Y</kbd> | 查看版本历史与差异恢复 |
+| <kbd>⌘=</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd> | 放大 / 缩小页面 / 重置为 100% | <kbd>⇧⌘&#92;</kbd> | 一键清除选中文本样式与链接 |
 | <kbd>⌘J</kbd> | 向当前空间提问（空间问答） | <kbd>⇧⌘E</kbd> | 导出矢量 PDF（含书签与链接） |
 
 ---
