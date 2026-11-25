@@ -1139,6 +1139,13 @@ func (e *Editor) buildContextMenu(menu *ui.Menu, read func() string, write func(
 			e.Wrap("*")
 			e.RequestFocus = true
 		}
+		clearItem := menu.Item(i18n.T("清除样式"))
+		if combo := e.binding("clear-format"); combo.Valid() {
+			clearItem.Shortcut(combo.Mods, combo.Key)
+		}
+		if clearItem.Chosen() {
+			e.ClearFormatting()
+		}
 		menuAction(menu, i18n.T("插入表格"), func() { e.Engine.Insert(document.Table(3, 3)); e.RequestFocus = true })
 	}
 }

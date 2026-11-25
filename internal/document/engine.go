@@ -887,6 +887,27 @@ func (e *Engine) SetLink(url string) {
 	e.applyFormat(func(s *Style) { s.Link = url })
 }
 
+func clearInlineStyle(s *Style) {
+	*s = Style{NoMath: s.NoMath}
+}
+
+// ClearFormatting strips all inline formatting (bold, italic, underline,
+// strikethrough, inline code, keycap, script, link, text color, highlight and
+// hand-drawn annotations) from the selection while keeping block structure and
+// Markdown dollar-escape semantics intact. At a collapsed caret, it resets the
+// active typing style to plain text.
+func (e *Engine) ClearFormatting() {
+	if e.ReadOnly {
+		return
+	}
+	if e.Anchor == e.Caret {
+		e.Typing, e.Explicit = Style{}, true
+		return
+	}
+	e.applyFormat(clearInlineStyle)
+	e.Typing, e.Explicit = Style{}, false
+}
+
 func (e *Engine) applyFormat(change func(*Style)) {
 	if e.ReadOnly {
 		return

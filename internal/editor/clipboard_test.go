@@ -190,7 +190,7 @@ func TestBodyContextMenuClipboardAndSelection(t *testing.T) {
 	}
 	tt.RightClickAt(rect.X+4, rect.Y+rect.H/2)
 	menu := tt.Menu()
-	for _, want := range []string{"剪切", "复制", "粘贴", "粘贴为纯文本", "全选", "加粗", "斜体", "插入表格"} {
+	for _, want := range []string{"剪切", "复制", "粘贴", "粘贴为纯文本", "全选", "加粗", "斜体", "清除样式", "插入表格"} {
 		if !slices.Contains(menu, want) {
 			t.Fatalf("context menu %v missing %q", menu, want)
 		}
@@ -280,7 +280,7 @@ func TestBodyContextMenuClipboardAndSelection(t *testing.T) {
 	if !slices.Contains(roMenu, "复制") || !slices.Contains(roMenu, "全选") {
 		t.Fatalf("read-only menu %v missing 复制 or 全选", roMenu)
 	}
-	for _, hidden := range []string{"剪切", "粘贴", "粘贴为纯文本", "加粗", "斜体", "插入表格"} {
+	for _, hidden := range []string{"剪切", "粘贴", "粘贴为纯文本", "加粗", "斜体", "清除样式", "插入表格"} {
 		if slices.Contains(roMenu, hidden) {
 			t.Fatalf("read-only menu %v should not include %q", roMenu, hidden)
 		}

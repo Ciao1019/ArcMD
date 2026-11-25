@@ -911,6 +911,7 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("在下方新建段落"), a.keyLabel("newline"), after(func() { ed.Engine.Insert(model.NewBlock("paragraph", "")) }))
 	cmd(i18n.T("插入链接…"), "", ed.EditLink)
 	cmd(i18n.T("下划线"), a.keyLabel("underline"), after(func() { ed.Wrap("_") }))
+	cmd(i18n.T("清除样式"), a.keyLabel("clear-format"), after(ed.ClearFormatting))
 	cmd(i18n.T("插入表格"), "", after(func() { ed.Engine.Insert(model.Table(3, 3)) }))
 	cmd(i18n.T("插入双栏"), "", after(func() { ed.Engine.Insert(model.Columns()) }))
 	cmd(i18n.T("插入折叠块"), "", after(func() { ed.InsertToggle() }))

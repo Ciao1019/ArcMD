@@ -70,6 +70,7 @@ var bindings = []binding{
 	{id: "underline", label: "下划线", editor: true},
 	{id: "strike", label: "删除线", editor: true},
 	{id: "code", label: "行内代码", editor: true},
+	{id: "clear-format", label: "清除样式", editor: true},
 	{id: "find", label: "查找", editor: true},
 	{id: "replace", label: "查找和替换", editor: true},
 	{id: "newline", label: "在下方新建段落", editor: true},

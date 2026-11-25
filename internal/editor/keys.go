@@ -20,14 +20,15 @@ type Combo struct {
 // keys.
 func DefaultBindings() map[string]Combo {
 	return map[string]Combo{
-		"bold":      {ui.Cmd, ui.KeyB},
-		"italic":    {ui.Cmd, ui.KeyI},
-		"underline": {ui.Cmd, ui.KeyU},
-		"strike":    {ui.Cmd | ui.Shift, ui.KeyX},
-		"code":      {ui.Cmd, ui.KeyE},
-		"find":      {ui.Cmd, ui.KeyF},
-		"replace":   {ui.Cmd | ui.Shift, ui.KeyH},
-		"newline":   {ui.Cmd, ui.KeyEnter},
+		"bold":         {ui.Cmd, ui.KeyB},
+		"italic":       {ui.Cmd, ui.KeyI},
+		"underline":    {ui.Cmd, ui.KeyU},
+		"strike":       {ui.Cmd | ui.Shift, ui.KeyX},
+		"code":         {ui.Cmd, ui.KeyE},
+		"clear-format": {ui.Cmd | ui.Shift, ui.KeyBackslash},
+		"find":         {ui.Cmd, ui.KeyF},
+		"replace":      {ui.Cmd | ui.Shift, ui.KeyH},
+		"newline":      {ui.Cmd, ui.KeyEnter},
 	}
 }
 

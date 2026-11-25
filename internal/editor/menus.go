@@ -741,7 +741,7 @@ func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 	}
 	last, _, _ := e.BoundsForRange(ui.TextInputRange{Start: sel.End, End: sel.End})
 	bounds := surface.Bounds()
-	width, height := float32(390), float32(42)
+	width, height := float32(422), float32(42)
 	windowW, windowH := c.Size()
 	x := max(8, min(bounds.X+first.X-12, windowW-width-12))
 	if first.Y == last.Y {
@@ -816,6 +816,14 @@ func (e *Editor) selectionBar(c *ui.Context, surface ui.Element) {
 			mark("float:`", iconCode, i18n.T("行内代码 (⌘E)\nMarkdown：`代码`"), "`", style.Code)
 			sep()
 			e.annotateSplit(c)
+			clearTip := i18n.T("清除样式")
+			if combo := e.binding("clear-format"); combo.Valid() {
+				clearTip = fmt.Sprintf("%s (%s)", clearTip, combo.Label())
+			}
+			clearBtn := markButton(c, e.page, "float:clear", iconRemoveFormatting, clearTip, false).Label(i18n.T("清除样式"))
+			if clearBtn.Clicked() {
+				e.ClearFormatting()
+			}
 		})
 		if e.annotatePanel {
 			// Below the bar, or above it when the window ends first.
