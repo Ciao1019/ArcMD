@@ -29,13 +29,14 @@ func (e *Editor) numberedMarkerRect(r row) ui.Rect {
 	if e.mapListNumber > 0 {
 		indent = e.mapListIndent
 	}
+	z := e.zoomFactor()
 	label := listNumber(max(1, r.number), indent) + "."
-	w, _ := ui.ShapeRichText([]ui.Span{{Text: label, Size: 16, Features: "tnum"}}, ui.Font{Size: 16}, 0).Size()
+	w, _ := ui.ShapeRichText([]ui.Span{{Text: label, Size: 16 * z, Features: "tnum"}}, ui.Font{Size: 16 * z}, 0).Size()
 	line := r.layout.Caret(0)
-	boxW := max(22, w+8)
-	boxH := max(line.H, 26)
+	boxW := max(22*z, w+8*z)
+	boxH := max(line.H, 26*z)
 	return ui.Rect{
-		X: r.x - 2 - boxW,
+		X: r.x - 2*z - boxW,
 		Y: r.y + line.Y,
 		W: boxW,
 		H: boxH,

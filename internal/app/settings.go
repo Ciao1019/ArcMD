@@ -106,6 +106,7 @@ func (a *App) moreMenu(c *ui.Context) {
 			a.toggleDocumentMap(d)
 		}
 		m.Submenu(i18n.T("页面宽度"), a.pageWidthMenu).Disabled(!a.canAdjustPageWidth(d))
+		m.Submenu(i18n.T("页面缩放"), a.pageZoomMenu).Disabled(!a.canZoomPage(d))
 		if m.Item(i18n.T("打印…")).Disabled(noDoc || isBook || isDB).Chosen() {
 			a.printDoc()
 		}

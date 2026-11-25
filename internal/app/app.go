@@ -462,7 +462,7 @@ func (a *App) Run() error {
 		}
 		if runtime.GOOS == "darwin" {
 			windowItems = append([]*mygo.MenuItem{
-				{Label: i18n.T("主窗口"), Accelerator: "CmdOrCtrl+0", Click: func(*mygo.MenuItem, *mygo.Window) {
+				{Label: i18n.T("主窗口"), Accelerator: "CmdOrCtrl+Shift+0", Click: func(*mygo.MenuItem, *mygo.Window) {
 					a.showMainWindow()
 				}},
 				mygo.Separator(),

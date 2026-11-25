@@ -31,6 +31,7 @@ const mathFont = "KaTeX_Main, Times New Roman, STIX Two Text, Noto Serif, serif"
 type mathShape struct {
 	src   string
 	width float32
+	zoom  float32
 	box   tex.Box
 	err   error
 }
@@ -120,14 +121,15 @@ func (e *Editor) formula(id, src string) mathShape {
 }
 
 func (e *Editor) formulaWidth(id, src string, lineWidth float32) mathShape {
-	if s, ok := e.maths[id]; ok && s.src == src && s.width == lineWidth {
+	z := e.zoomFactor()
+	if s, ok := e.maths[id]; ok && s.src == src && s.width == lineWidth && s.zoom == z {
 		return s
 	}
 	if e.maths == nil {
 		e.maths = map[string]mathShape{}
 	}
-	box, err := tex.LayoutWidth(src, mathSize, lineWidth, e.measureMath)
-	s := mathShape{src: src, width: lineWidth, box: box, err: err}
+	box, err := tex.LayoutWidth(src, mathSize*z, lineWidth, e.measureMath)
+	s := mathShape{src: src, width: lineWidth, zoom: z, box: box, err: err}
 	e.maths[id] = s
 	return s
 }
@@ -135,6 +137,7 @@ func (e *Editor) formulaWidth(id, src string, lineWidth float32) mathShape {
 // mathRow reserves room for the unified card (live formula preview on top and
 // monospace TeX bar below) while editing, or just the clean formula at rest.
 func (e *Editor) mathRow(r *row, textH float32) float32 {
+	z := e.zoomFactor()
 	b := r.leaf.Block
 	src := strings.TrimSpace(b.Text())
 	r.mathScale = 1
@@ -142,7 +145,7 @@ func (e *Editor) mathRow(r *row, textH float32) float32 {
 	r.mathTop = mathMargin
 	r.y = r.rect.Y + mathMargin
 
-	previewH := float32(26)
+	previewH := float32(26) * z
 	if src != "" {
 		width := r.rect.W
 		if !r.mathHidden {

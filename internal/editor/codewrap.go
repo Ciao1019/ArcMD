@@ -65,7 +65,7 @@ func (e *Editor) codeScrollFor(r row) (barBox ui.Rect, clipBox ui.Rect, availW, 
 	if !e.isCodeNoWrap(b) || r.layout == nil {
 		return ui.Rect{}, ui.Rect{}, 0, 0, 0, false
 	}
-	availW = max(24, r.rect.W-80)
+	availW = max(24, r.rect.X+r.rect.W-r.x-20*e.zoomFactor())
 	contentW, _ = r.layout.Size()
 	maxScroll := max(0, contentW-availW)
 	if e.codeScrollX != nil {

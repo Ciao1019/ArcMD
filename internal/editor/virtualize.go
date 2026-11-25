@@ -131,7 +131,7 @@ func (e *Editor) recordTableHeight(b *document.Block, width float32, cols int, s
 	if e.heightHints == nil {
 		e.heightHints = make(map[string]heightHint, 64)
 	}
-	meta := uint64(len(b.Children))<<16 | uint64(cols)
+	meta := uint64(math.Float32bits(e.zoomFactor()))<<32 | uint64(len(b.Children))<<16 | uint64(cols)
 	e.heightHints[b.ID] = heightHint{
 		width:    width,
 		height:   innerH,
@@ -142,19 +142,20 @@ func (e *Editor) recordTableHeight(b *document.Block, width float32, cols int, s
 }
 
 func (e *Editor) estimateTableInnerHeight(b *document.Block, w float32, widths []float32, cols int, stamp runsStamp) float32 {
+	z := e.zoomFactor()
 	nrows := len(b.Children)
-	meta := uint64(nrows)<<16 | uint64(cols)
+	meta := uint64(math.Float32bits(z))<<32 | uint64(nrows)<<16 | uint64(cols)
 	if e.heightHints != nil {
 		if hint, ok := e.heightHints[b.ID]; ok && hint.width == w && hint.fontHash == meta && hint.stamp == stamp {
-			return max(42, hint.height)
+			return max(42*z, hint.height)
 		}
 	}
 	total := float32(0)
 	for _, tr := range b.Children {
-		rh := float32(42)
+		rh := float32(42) * z
 		for ci, cell := range tr.Children {
 			if ci < len(widths) {
-				cw := max(24, widths[ci]-28)
+				cw := max(24, widths[ci]-28*z)
 				lines := 1
 				cur := float32(0)
 				for _, run := range cell.Runs {
@@ -164,9 +165,9 @@ func (e *Editor) estimateTableInnerHeight(b *document.Block, w float32, widths [
 							cur = 0
 							continue
 						}
-						adv := float32(7.5)
+						adv := float32(7.5) * z
 						if r >= 0x1100 {
-							adv = 14
+							adv = 14 * z
 						}
 						if cur+adv > cw && cur > 0 {
 							lines++
@@ -176,7 +177,7 @@ func (e *Editor) estimateTableInnerHeight(b *document.Block, w float32, widths [
 						}
 					}
 				}
-				rh = max(rh, float32(lines)*22+4)
+				rh = max(rh, float32(lines)*22*z+4*z)
 			}
 		}
 		total += rh
@@ -212,7 +213,7 @@ func (e *Editor) cachedTableNaturalWidths(b *document.Block, padX float32) cache
 	if cols == 0 {
 		return cachedTableWidths{allEmpty: true}
 	}
-	fontSize := float32(14)
+	fontSize := float32(14) * e.zoomFactor()
 	if e.mapTablePreview {
 		fontSize = mapCellFont
 	}
@@ -437,7 +438,7 @@ func (e *Editor) tableSpan(b *document.Block, pageW, bodyW float32) (x, w float3
 	if availW <= bodyW {
 		return e.padding, bodyW
 	}
-	cw := e.cachedTableNaturalWidths(b, 14)
+	cw := e.cachedTableNaturalWidths(b, 14*e.zoomFactor())
 	wantW := bodyW
 	if len(b.Widths) == cw.cols {
 		sum := float32(0)
@@ -466,7 +467,8 @@ func (e *Editor) tableSpan(b *document.Block, pageW, bodyW float32) (x, w float3
 }
 
 func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, winTop, winBottom float32, leafOf func(string) document.Leaf, cellTop *float32, header *bool, blockLayout func(*document.Block, float32, float32, float32) float32) float32 {
-	padX, padY, minRow, extra := float32(14), float32(7), float32(42), float32(4)
+	z := e.zoomFactor()
+	padX, padY, minRow, extra := float32(14)*z, float32(7)*z, float32(42)*z, float32(4)*z
 	if e.mapTablePreview {
 		padX, padY, minRow, extra = mapCellX, mapCellY, mapCellMinRow, 2*mapCellY
 	}
@@ -530,9 +532,9 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 						leafRevision: e.Revision(),
 						leaf:         leafOf(cell.ID),
 						rect:         rect,
-						x:            colEdges[ci] + 14,
-						y:            rect.Y + 7,
-						size:         14,
+						x:            colEdges[ci] + padX,
+						y:            rect.Y + padY,
+						size:         14 * z,
 						tableHeader:  ri == 0,
 					})
 					cells = append(cells, decoration{kind: "cell", rect: rect, table: table, header: ri == 0, right: ci+spanCols < cols, below: ri+spanRows < nrows, tone: cell.Background, id: cell.ID, ownerID: b.ID, rowIdx: ri, colIdx: ci})
@@ -622,19 +624,21 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 
 func (e *Editor) blockMetrics(b *document.Block, w float32, header bool) blockMetric {
 	// Body text is 16 on 26 with 8 between blocks; table cells are 14 on 22.
-	m := blockMetric{
-		font:   ui.Font{Family: bodyFamily(e.fontFamily), Size: 16, LineHeight: 26.0 / 16},
-		bottom: 8,
-		gap:    8,
-	}
+	z := e.zoomFactor()
+	baseSize := float32(16)
 	if e.readingSize >= 12 && e.readingSize <= 28 {
-		m.font.Size = e.readingSize
+		baseSize = e.readingSize
+	}
+	m := blockMetric{
+		font:   ui.Font{Family: bodyFamily(e.fontFamily), Size: baseSize * z, LineHeight: 26.0 / 16},
+		bottom: 8 * z,
+		gap:    8 * z,
 	}
 	if e.readingLine >= 1.2 && e.readingLine <= 2.2 {
 		m.font.LineHeight = e.readingLine
 	}
 	if b.Kind == "cell" {
-		m.font.Size, m.font.LineHeight = 14, 22.0/14
+		m.font.Size, m.font.LineHeight = 14*z, 22.0/14
 		if e.mapTablePreview {
 			m.font.Size, m.font.LineHeight = mapCellFont, 1.25
 			m.bottom, m.gap = 0, 0
@@ -643,42 +647,43 @@ func (e *Editor) blockMetrics(b *document.Block, w float32, header bool) blockMe
 	switch b.Kind {
 	case "heading":
 		level := min(6, max(1, b.Level))
-		m.font.Size = []float32{26, 22, 20, 18, 16, 16}[level-1]
-		m.font.LineHeight = []float32{36.4, 30.8, 28, 25.2, 26, 26}[level-1] / m.font.Size
+		baseH := []float32{26, 22, 20, 18, 16, 16}[level-1]
+		m.font.Size = baseH * z
+		m.font.LineHeight = []float32{36.4, 30.8, 28, 25.2, 26, 26}[level-1] / baseH
 		m.font.Weight = 500
-		m.top = []float32{26, 22, 20, 18, 18, 16}[level-1]
-		m.bottom = []float32{10, 8, 8, 8, 8, 8}[level-1]
+		m.top = []float32{26, 22, 20, 18, 18, 16}[level-1] * z
+		m.bottom = []float32{10, 8, 8, 8, 8, 8}[level-1] * z
 		if len(e.Doc.Blocks) > 0 && e.Doc.Blocks[0].ID == b.ID {
 			// The first heading is the page title: 34 on 55.25.
-			m.font.Size, m.font.Weight, m.font.LineHeight = 34, 500, 55.25/34
-			m.top, m.bottom = 0, 22
+			m.font.Size, m.font.Weight, m.font.LineHeight = 34*z, 500, 55.25/34
+			m.top, m.bottom = 0, 22*z
 		}
 	case "code", "raw", "math":
-		m.font.Family, m.font.Size, m.font.LineHeight = "monospace", 14, 22.0/14
-		m.gap = 8
-		m.left, m.right, m.top, m.bottom = 20, 20, 16, 16+m.gap
+		m.font.Family, m.font.Size, m.font.LineHeight = "monospace", 14*z, 22.0/14
+		m.gap = 8 * z
+		m.left, m.right, m.top, m.bottom = 20*z, 20*z, 16*z, 16*z+m.gap
 		if b.Kind == "code" {
-			m.left, m.top, m.bottom = 60, 40, 26+m.gap
+			m.left, m.top, m.bottom = max(float32(44), 60*z), 40, 26*z+m.gap
 		} else if b.Kind == "raw" && isHTMLCommentBlock(b.Text()) {
 			m.top = 34
 		}
 		if b.Kind == "math" {
-			m.font.Size, m.font.LineHeight = 14.4, 22.0/14.4
+			m.font.Size, m.font.LineHeight = 14.4*z, 22.0/14.4
 			m.left, m.right = mathPaddingX, mathPaddingX
 		}
 	case "quote":
-		m.left, m.top, m.bottom, m.gap = 14, 0, 8, 8
+		m.left, m.top, m.bottom, m.gap = 14*z, 0, 8*z, 8*z
 	case "callout":
-		m.gap = 8
-		m.left, m.right, m.top, m.bottom = 48, 16, 16, 16+m.gap
+		m.gap = 8 * z
+		m.left, m.right, m.top, m.bottom = 48*z, 16*z, 16*z, 16*z+m.gap
 	case "bullet", "numbered", "task":
-		m.left = 24 + float32(b.Indent)*24
-		m.bottom = 8
+		m.left = (24 + float32(b.Indent)*24) * z
+		m.bottom = 8 * z
 	case "toggle":
-		m.left = 20 + float32(b.Indent)*20
+		m.left = (20 + float32(b.Indent)*20) * z
 	}
 	if b.Kind == "footnote" {
-		m.left, m.top = 36, 12
+		m.left, m.top = 36*z, 12*z
 	}
 	m.shapeWidth = max(24, w-m.left-m.right)
 	_ = header

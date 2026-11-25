@@ -647,7 +647,7 @@ func (e *Editor) paintInline(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 	}
 	if r.leaf.Block.Kind == "footnote" {
 		n := e.notes[r.leaf.Block.NoteLabel]
-		label := ui.ShapeText(fmt.Sprintf("%d ↩", n.number), ui.Font{Size: 12}, 0)
+		label := ui.ShapeText(fmt.Sprintf("%d ↩", n.number), ui.Font{Size: 12 * e.zoomFactor()}, 0)
 		p.TextLayout(label, bounds.X+r.rect.X+dx, bounds.Y+r.y+dy, t.Accent)
 	}
 }

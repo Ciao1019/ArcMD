@@ -305,7 +305,7 @@ func (e *Editor) inlineClick(x, y float32) bool {
 	}
 	for _, i := range candidates {
 		r := e.ensureRow(i)
-		if r.leaf.Block.Kind == "footnote" && x >= r.rect.X && x < r.x && y >= r.y && y < r.y+26 {
+		if r.leaf.Block.Kind == "footnote" && x >= r.rect.X && x < r.x && y >= r.y && y < r.y+max(float32(26), 26*e.zoomFactor()) {
 			return e.ReturnFootnote()
 		}
 		for _, o := range r.layout.objects {

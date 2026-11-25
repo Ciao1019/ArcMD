@@ -2172,4 +2172,10 @@ var en = map[string]string{
 	"缩小 (⌘-)":                                  "Zoom Out (⌘-)",
 	"放大 (⌘+)":                                  "Zoom In (⌘+)",
 	"清除样式":                                     "Clear Formatting",
+	"页面缩放":                                     "Page Zoom",
+	"页面缩放：%d%%":                                "Page Zoom: %d%%",
+	"放大页面":                                     "Zoom In",
+	"缩小页面":                                     "Zoom Out",
+	"重置页面缩放":                                   "Reset Page Zoom",
+	"重置为 100%":                                 "Reset to 100%",
 }

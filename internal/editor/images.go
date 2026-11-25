@@ -265,8 +265,9 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 		iw, ih = f.resource.Width, f.resource.Height
 	}
 	if iw > 0 && ih > 0 {
-		scale := min(float32(1), w/float32(max(1, iw)))
-		preferred := b.ImageWidth
+		z := e.zoomFactor()
+		scale := min(z, w/float32(max(1, iw)))
+		preferred := b.ImageWidth * z
 		if e.imageResize.id == b.ID {
 			preferred = e.imageResize.width
 		}
