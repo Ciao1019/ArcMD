@@ -7,6 +7,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -87,5 +88,26 @@ func TestClearFormattingCommandBarShortcutAndSettings(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("Clear Formatting") {
 		t.Fatalf("English shortcuts settings missing Clear Formatting: %q", tt.Texts())
+	}
+}
+
+func TestFormatMenuDoesNotInterceptClearFormatting(t *testing.T) {
+	a, _ := newTestApp(t)
+	menu := mygo.NewMenu([]*mygo.MenuItem{a.formatMenu()})
+	items := menu.Items()
+	if len(items) != 1 || items[0].Role != mygo.RoleFormatMenu || items[0].Label == "" {
+		t.Fatalf("unexpected format menu root: %+v", items)
+	}
+	wantRoles := []mygo.MenuRole{mygo.RoleBold, mygo.RoleItalic, mygo.RoleUnderline, mygo.RoleStrikethrough}
+	if len(items[0].Submenu) != len(wantRoles) {
+		t.Fatalf("format submenu len = %d; want %d", len(items[0].Submenu), len(wantRoles))
+	}
+	for i, it := range items[0].Submenu {
+		if it.Role != wantRoles[i] {
+			t.Fatalf("format submenu[%d].Role = %q; want %q", i, it.Role, wantRoles[i])
+		}
+		if it.Accelerator == "Cmd+|" || it.Accelerator == "Shift+Cmd+\\" || it.Accelerator == "Shift+CmdOrCtrl+\\" {
+			t.Fatalf("format submenu item %q intercepts clear-format shortcut: %q", it.Role, it.Accelerator)
+		}
 	}
 }
