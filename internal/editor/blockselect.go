@@ -214,6 +214,13 @@ func (e *Editor) blockKeys(ev ui.InputEvent, write func(string)) bool {
 		}
 		e.copyBlocks(ids, write)
 		return edit(func() { e.Engine.DeleteBlocks(ids); e.clearBlocks() })
+	case e.boundCommand(mods, key) == "clear-format":
+		return edit(func() {
+			e.Engine.ClearBlocksFormatting(ids)
+			e.annotatePanel = false
+			e.markPop.open = false
+			e.drawIn = annotationReveal{}
+		})
 	case mods == ui.Cmd|ui.Alt:
 		for i, k := range []ui.Key{ui.Key0, ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6} {
 			if key == k {

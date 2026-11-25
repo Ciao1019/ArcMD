@@ -163,6 +163,28 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 	return false
 }
 
+// ClearFormatting strips inline formatting (including links, colors,
+// highlights and hand-drawn annotations) from the active text selection,
+// multi-block selection, or typing style at a collapsed caret.
+func (e *Editor) ClearFormatting() {
+	if e.ReadOnly {
+		e.refused = true
+		return
+	}
+	e.UnmarkText()
+	if len(e.blocks.ids) > 0 {
+		e.Engine.ClearBlocksFormatting(e.BlockSelection())
+	} else {
+		e.Engine.ClearFormatting()
+	}
+	e.annotatePanel = false
+	e.markPop.open = false
+	e.drawIn = annotationReveal{}
+	e.sync()
+	e.reveal = true
+	e.RequestFocus = true
+}
+
 func (e *Editor) command(command string, read func() string, write func(string)) bool {
 	// Copy leaves the page where the reader scrolled, even when the
 	// selected text is now offscreen.
@@ -239,6 +261,8 @@ func (e *Editor) command(command string, read func() string, write func(string))
 		e.Wrap("_")
 	case "strikethrough":
 		e.Wrap("~~")
+	case "clearFormatting":
+		e.ClearFormatting()
 	case "delete":
 		e.delete(-1, false, false)
 	default:
@@ -341,6 +365,9 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 	case "code":
 		e.Wrap("`")
 		e.reveal = true
+		return true
+	case "clear-format":
+		e.ClearFormatting()
 		return true
 	case "newline":
 		e.Engine.Insert(document.NewBlock("paragraph", ""))

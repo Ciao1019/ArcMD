@@ -496,7 +496,7 @@ func (a *App) Run() error {
 			a.appMenu(),
 			{Role: mygo.RoleFileMenu},
 			{Role: mygo.RoleEditMenu},
-			{Role: mygo.RoleFormatMenu},
+			a.formatMenu(),
 			{Role: mygo.RoleViewMenu},
 			{Role: mygo.RoleWindow, Submenu: windowItems},
 		}))
@@ -632,6 +632,22 @@ func (a *App) appMenu() *mygo.MenuItem {
 		mygo.Separator(),
 		{Role: mygo.RoleQuit},
 	}}
+}
+
+// formatMenu is the Format menu without MyGo's default alignment items: the
+// editor does not handle alignLeft/alignCenter/alignRight commands, and
+// macOS's RoleAlignCenter binds Cmd+| (Shift+Cmd+\), which would otherwise
+// intercept Clear Formatting in NSMenu before key events reach the window.
+func (a *App) formatMenu() *mygo.MenuItem {
+	return &mygo.MenuItem{
+		Role: mygo.RoleFormatMenu,
+		Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleBold},
+			{Role: mygo.RoleItalic},
+			{Role: mygo.RoleUnderline},
+			{Role: mygo.RoleStrikethrough},
+		},
+	}
 }
 
 // notify queues a message for the user.

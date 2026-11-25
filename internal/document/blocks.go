@@ -175,6 +175,37 @@ func (e *Engine) IndentBlocks(ids []string, delta int) {
 	})
 }
 
+// ClearBlocksFormatting strips inline formatting (including links, colors,
+// highlights and hand-drawn annotations) across the selected top-level blocks
+// ids and their nested children (such as table cells and columns) as one
+// history step, while preserving block structure and Markdown dollar-escape
+// semantics.
+func (e *Engine) ClearBlocksFormatting(ids []string) {
+	set := e.exactSet(ids)
+	if len(set) == 0 {
+		return
+	}
+	var walk func(*Block)
+	walk = func(b *Block) {
+		if len(b.Runs) > 0 {
+			runs := make([]Run, len(b.Runs))
+			copy(runs, b.Runs)
+			for i := range runs {
+				clearInlineStyle(&runs[i].Style)
+			}
+			b.Runs = Compact(runs)
+		}
+		for _, child := range b.Children {
+			walk(child)
+		}
+	}
+	e.Edit(func() {
+		for _, i := range set {
+			walk(e.Doc.Blocks[i])
+		}
+	})
+}
+
 // DuplicateBlocks puts a copy of the blocks ids after the last of them,
 // with fresh IDs, and returns the copies' IDs.
 func (e *Engine) DuplicateBlocks(ids []string) []string {
