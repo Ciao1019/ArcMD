@@ -121,9 +121,13 @@ func TestDayflowSnapshots(t *testing.T) {
 
 	dark = true
 	tt.Frame()
+	tt.Advance(250 * time.Millisecond)
 	tt.Frame()
 	saveDBViewSnapshot(t, filepath.Join(dir, "dayflow-cal-month-dark.png"), tt)
 	dark = false
+	tt.Frame()
+	tt.Advance(250 * time.Millisecond)
+	tt.Frame()
 
 	// Week view.
 	_ = tt.Click("周")

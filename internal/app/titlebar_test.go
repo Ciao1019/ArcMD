@@ -50,7 +50,12 @@ func TestTitleBarControlsStayClear(t *testing.T) {
 			for _, width := range []int{640, 1240} {
 				t.Run(fmt.Sprintf("%s/%s/%d", profile.name, mode, width), func(t *testing.T) {
 					a, tt := titleBarTestApp(t, mode, width, profile.bar)
-					labels := []string{"后退", "前进", "重新载入", "文档路径", "更多格式", "更多"}
+					labels := []string{"后退", "前进", "文档路径", "更多格式", "更多"}
+					if !a.focus && a.split == nil {
+						if _, ok := tt.Find("重新载入"); ok {
+							t.Fatal("toolbar should not show reload button")
+						}
+					}
 					if a.focus {
 						labels = []string{"退出专注模式"}
 					} else if a.split != nil {

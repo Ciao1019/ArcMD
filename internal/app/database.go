@@ -54,9 +54,10 @@ type sidebarDBView struct {
 }
 
 type sidebarDBMeta struct {
-	modTime time.Time
-	size    int64
-	views   []sidebarDBView
+	nodeModNano int64
+	modTime     time.Time
+	size        int64
+	views       []sidebarDBView
 }
 
 type sidebarDBViewRename struct {
@@ -313,6 +314,7 @@ func (h *appRelationHost) ResolveDatabase(spaceRoot, targetDB string) (*database
 	if err != nil {
 		return nil, nil, err
 	}
+	h.app.attachRelationHost(h.sp, extStore)
 	return extStore.Database(), extStore.Records(), nil
 }
 
@@ -334,8 +336,17 @@ func (h *appRelationHost) SyncExternalRelation(spaceRoot, targetDB, syncedPropID
 		return nil, err
 	}
 	affected, err := extStore.ApplySymmetricRelationDelta(syncedPropID, sourceRef, addTargets, removeTargets)
-	if err == nil && len(affected) > 0 {
-		h.app.flushDatabaseEditsToDocs(h.sp, nil, extStore, affected)
+	if err == nil {
+		if len(affected) > 0 {
+			h.app.flushDatabaseEditsToDocs(h.sp, nil, extStore, affected)
+		}
+		if !h.sp.IsExternal() {
+			if encoded, encErr := extStore.EncodeMarkdown(time.Now()); encErr == nil {
+				if disk, rErr := readFile(h.sp, targetRel); rErr == nil && disk != encoded {
+					_ = writeFile(h.sp, targetRel, encoded)
+				}
+			}
+		}
 		h.app.refreshOpenDatabasesExcept(h.sp.ID, h.src)
 	}
 	return affected, err
@@ -449,6 +460,7 @@ func (a *App) followDatabaseRecordMove(sp *space.Space, from, to string) {
 				if info, serr := os.Stat(fullOld); serr == nil && info.IsDir() {
 					if fullNew, nerr := resolveFile(sp, newDir); nerr == nil {
 						if _, existErr := os.Stat(fullNew); errors.Is(existErr, fs.ErrNotExist) {
+							a.releasePDFHandles(sp, oldDir)
 							var movedDir string
 							var mvErr error
 							if parentDir(oldDir) == parentDir(newDir) {
@@ -461,6 +473,8 @@ func (a *App) followDatabaseRecordMove(sp *space.Space, from, to string) {
 								a.followOpenDocMove(sp, oldDir, movedDir)
 								a.followCopied(sp.ID, oldDir, sp.ID, movedDir)
 								a.saveState()
+							} else {
+								a.reopenResidentPDFs(sp, oldDir)
 							}
 						}
 					}
@@ -506,21 +520,58 @@ func (a *App) followOpenDocMove(sp *space.Space, from, to string) {
 		if od != nil && od.space == sp && under(od.rel, from) {
 			delete(a.openDocs, p)
 			od.rel = to + od.rel[len(from):]
+			od.syncMovedPath()
 			a.openDocs[place{sp.ID, od.rel}] = od
 		}
 	}
 	if a.doc != nil && a.doc.space == sp && under(a.doc.rel, from) {
 		a.doc.rel = to + a.doc.rel[len(from):]
+		a.doc.syncMovedPath()
 	}
 }
 
+const maxDBThumbCache = 128
+
+func (a *App) clearDBThumbCache(spaceID string) {
+	if len(a.dbThumbCache) == 0 {
+		a.dbThumbOrder = nil
+		return
+	}
+	if spaceID == "" {
+		for _, c := range a.dbThumbCache {
+			if c.resource.Bitmap != nil {
+				c.resource.Bitmap.ReleasePixels()
+			}
+		}
+		clear(a.dbThumbCache)
+		a.dbThumbOrder = nil
+		return
+	}
+	prefix := spaceID + "\x00"
+	for k, c := range a.dbThumbCache {
+		if strings.HasPrefix(k, prefix) {
+			if c.resource.Bitmap != nil {
+				c.resource.Bitmap.ReleasePixels()
+			}
+			delete(a.dbThumbCache, k)
+		}
+	}
+	a.dbThumbOrder = slices.DeleteFunc(a.dbThumbOrder, func(k string) bool {
+		return strings.HasPrefix(k, prefix)
+	})
+}
+
 func (a *App) invalidatePageDBCache(spaceID string) {
+	a.clearDBThumbCache(spaceID)
 	if spaceID == "" {
 		if a.pageDBCache != nil {
 			clear(a.pageDBCache)
 		}
 		if a.embedDBs != nil {
 			clear(a.embedDBs)
+		}
+		if a.dbViewListCache != nil {
+			clear(a.dbViewListCache)
 		}
 		return
 	}
@@ -533,6 +584,11 @@ func (a *App) invalidatePageDBCache(spaceID string) {
 	for k := range a.embedDBs {
 		if strings.HasPrefix(k, prefix) {
 			delete(a.embedDBs, k)
+		}
+	}
+	for k := range a.dbViewListCache {
+		if strings.HasPrefix(k, prefix) {
+			delete(a.dbViewListCache, k)
 		}
 	}
 }
@@ -557,7 +613,9 @@ func (a *App) trashDatabaseBackingPath(sp *space.Space, rel string) bool {
 		a.openAfterRename = ""
 	}
 	kept, ok := a.keepDeleted(sp.ID, sp.Name, sp.Root, rel)
+	a.releasePDFHandles(sp, rel)
 	if err := a.trashItem(p); err != nil {
+		a.reopenResidentPDFs(sp, rel)
 		if ok {
 			a.bin.Forget(kept)
 		}
@@ -586,10 +644,10 @@ func (a *App) databaseOptionsFor(c *ui.Context, d *document) dbview.Options {
 	if d == nil || !d.isDatabase() {
 		return dbview.Options{}
 	}
-	return a.databaseOptionsForStore(c, d.space, d.dbView.Store, d)
+	return a.databaseOptionsForStore(c, d.space, d.dbView.Store, d, d)
 }
 
-func (a *App) databaseOptionsForStore(c *ui.Context, sp *space.Space, store *database.Store, dbDoc *document) dbview.Options {
+func (a *App) databaseOptionsForStore(c *ui.Context, sp *space.Space, store *database.Store, dbDoc, hostDoc *document) dbview.Options {
 	var now time.Time
 	if c != nil {
 		now = c.Now()
@@ -613,7 +671,7 @@ func (a *App) databaseOptionsForStore(c *ui.Context, sp *space.Space, store *dat
 			return dbs
 		},
 		LoadImage: func(recPath, imgURL string) *ui.Bitmap {
-			return loadDatabaseRecordImage(sp, dbDoc, recPath, imgURL)
+			return a.loadDatabaseRecordImage(sp, dbDoc, hostDoc, recPath, imgURL)
 		},
 		OnChanged: func(affected []string) {
 			a.syncDatabaseEditsToDocs(sp, dbDoc, store, affected)
@@ -697,7 +755,7 @@ func spaceIDOf(sp *space.Space) string {
 	return sp.ID
 }
 
-func loadDatabaseRecordImage(sp *space.Space, dbDoc *document, recPath, imgURL string) *ui.Bitmap {
+func (a *App) loadDatabaseRecordImage(sp *space.Space, dbDoc, hostDoc *document, recPath, imgURL string) *ui.Bitmap {
 	imgURL = strings.TrimSpace(imgURL)
 	if imgURL == "" || sp == nil || sp.Root == "" {
 		return nil
@@ -710,25 +768,55 @@ func loadDatabaseRecordImage(sp *space.Space, dbDoc *document, recPath, imgURL s
 	if rel == "" && dbDoc != nil {
 		rel = filepath.ToSlash(dbDoc.rel)
 	}
-	var full string
-	var err error
-	if rel != "" {
-		full, err = resolveSpaceImage(sp, rel, imgURL)
-	} else {
-		full, err = vault.Resolve(sp.Root, filepath.ToSlash(imgURL))
+
+	owner := dbDoc
+	if owner == nil {
+		owner = hostDoc
 	}
-	if err != nil || full == "" {
+	if owner == nil {
+		owner = a.doc
+	}
+	resKey := imageKey{doc: owner, url: "db:" + sp.ID + "\x00" + rel + "\x00" + imgURL}
+	resolvedEntry, cached := a.imgResolved[resKey]
+	if !cached {
+		var full string
+		var err error
+		if rel != "" {
+			full, err = resolveSpaceImage(sp, rel, imgURL)
+		} else {
+			full, err = vault.Resolve(sp.Root, filepath.ToSlash(imgURL))
+		}
+		if err == nil && full != "" {
+			if relToRoot, relErr := filepath.Rel(sp.Root, full); relErr == nil && filepath.IsLocal(relToRoot) && relToRoot != "." {
+				if resolved, resErr := vault.Resolve(sp.Root, filepath.ToSlash(relToRoot)); resErr == nil {
+					if info, stErr := os.Stat(resolved); stErr == nil && !info.IsDir() {
+						resolvedEntry = resolvedImage{full: resolved}
+					} else {
+						resolvedEntry = resolvedImage{err: errMissing}
+					}
+				} else {
+					resolvedEntry = resolvedImage{err: resErr}
+				}
+			} else {
+				resolvedEntry = resolvedImage{err: vault.ErrOutside}
+			}
+		} else {
+			if err == nil {
+				err = errMissing
+			}
+			resolvedEntry = resolvedImage{err: err}
+		}
+		if owner == nil || a.documentContext > 0 || a.isResidentDocument(owner) {
+			if a.imgResolved == nil {
+				a.imgResolved = map[imageKey]resolvedImage{}
+			}
+			a.imgResolved[resKey] = resolvedEntry
+		}
+	}
+	full := resolvedEntry.full
+	if resolvedEntry.err != nil || full == "" {
 		return nil
 	}
-	relToRoot, relErr := filepath.Rel(sp.Root, full)
-	if relErr != nil || !filepath.IsLocal(relToRoot) || relToRoot == "." {
-		return nil
-	}
-	resolved, resErr := vault.Resolve(sp.Root, filepath.ToSlash(relToRoot))
-	if resErr != nil {
-		return nil
-	}
-	full = resolved
 	info, err := os.Stat(full)
 	if err != nil || info.IsDir() {
 		return nil
@@ -743,14 +831,13 @@ func loadDatabaseRecordImage(sp *space.Space, dbDoc *document, recPath, imgURL s
 			dbDoc.imgCache = make(map[string]cachedImage)
 		}
 		cacheKey := "dbthumb:" + full
-		if c, ok := dbDoc.imgCache[cacheKey]; ok && c.modNano == modNano && c.size == size && c.resource.Bitmap != nil {
+		if c, ok := dbDoc.imgCache[cacheKey]; ok && c.modNano == modNano && c.size == size {
 			return c.resource.Bitmap
 		}
 		res := decodeLocalImageThumb(full)
-		if res.Bitmap == nil {
-			return nil
+		if res.Bitmap != nil {
+			res.LoadedAt = time.Now()
 		}
-		res.LoadedAt = time.Now()
 		dbDoc.imgCache[cacheKey] = cachedImage{
 			modNano:  modNano,
 			size:     size,
@@ -759,7 +846,44 @@ func loadDatabaseRecordImage(sp *space.Space, dbDoc *document, recPath, imgURL s
 		return res.Bitmap
 	}
 
-	return decodeLocalImageThumb(full).Bitmap
+	thumbKey := sp.ID + "\x00" + full
+	if c, ok := a.dbThumbCache[thumbKey]; ok && c.modNano == modNano && c.size == size {
+		if idx := slices.Index(a.dbThumbOrder, thumbKey); idx >= 0 {
+			a.dbThumbOrder = slices.Delete(a.dbThumbOrder, idx, idx+1)
+			a.dbThumbOrder = append(a.dbThumbOrder, thumbKey)
+		}
+		return c.resource.Bitmap
+	}
+	res := decodeLocalImageThumb(full)
+	if res.Bitmap != nil {
+		res.LoadedAt = time.Now()
+	}
+	if a.dbThumbCache == nil {
+		a.dbThumbCache = make(map[string]cachedImage, maxDBThumbCache)
+	}
+	if prev, ok := a.dbThumbCache[thumbKey]; ok && prev.resource.Bitmap != nil && prev.resource.Bitmap != res.Bitmap {
+		prev.resource.Bitmap.ReleasePixels()
+	}
+	a.dbThumbCache[thumbKey] = cachedImage{
+		modNano:  modNano,
+		size:     size,
+		resource: res,
+	}
+	if idx := slices.Index(a.dbThumbOrder, thumbKey); idx >= 0 {
+		a.dbThumbOrder = slices.Delete(a.dbThumbOrder, idx, idx+1)
+	}
+	a.dbThumbOrder = append(a.dbThumbOrder, thumbKey)
+	for len(a.dbThumbCache) > maxDBThumbCache && len(a.dbThumbOrder) > 0 {
+		oldest := a.dbThumbOrder[0]
+		a.dbThumbOrder = a.dbThumbOrder[1:]
+		if old, ok := a.dbThumbCache[oldest]; ok {
+			if old.resource.Bitmap != nil {
+				old.resource.Bitmap.ReleasePixels()
+			}
+			delete(a.dbThumbCache, oldest)
+		}
+	}
+	return res.Bitmap
 }
 
 func (a *App) openRecordPeek(dbDoc *document, store *database.Store, sp *space.Space, rec *database.Record, mode string) {
@@ -1093,7 +1217,7 @@ func (a *App) databaseCorner(c *ui.Context, d *document) {
 	if !d.isDatabase() {
 		return
 	}
-	res := d.dbView.Store.Query(d.dbView.Store.Database().ActiveView, database.QueryOptions{Now: c.Now()})
+	res := d.dbView.Store.Query(d.dbView.Store.SchemaSnapshot().ActiveView, database.QueryOptions{Now: c.Now()})
 	label := fmt.Sprintf(i18n.T("%d 条记录"), res.TotalCount)
 	ui.Box(c.Key("db-corner-count")).Height(22).PaddingX(8).Radius(11).Center().
 		Background(c.Theme().Text.Alpha(0.06)).Children(func() {
@@ -1201,7 +1325,7 @@ func (a *App) pagePropertiesHeader(c *ui.Context, d *document) {
 	}
 	key := d.space.ID + "\x00" + d.rel
 	collapsed := !a.pagePropsExpanded[key]
-	opts := a.databaseOptionsForStore(c, d.space, store, dbDoc)
+	opts := a.databaseOptionsForStore(c, d.space, store, dbDoc, d)
 	ui.Themed(c.Key("page-props:"+key), documentTheme(a.paperDark)).Background(ui.Transparent).Children(func() {
 		dbview.PagePropertiesView(c.Key("page-props-view:"+key), store, recID, st, &collapsed, opts)
 	})
@@ -1262,12 +1386,20 @@ func sidebarViewsFromDatabase(db *database.Database) []sidebarDBView {
 
 // sidebarViewsFor returns the cached view list of dbRel in sp without doing
 // redundant disk I/O per frame. Resident open databases always return live views.
-func (a *App) sidebarViewsFor(sp *space.Space, dbRel string) []sidebarDBView {
+func (a *App) sidebarViewsFor(sp *space.Space, dbRel string, nodeMod time.Time) []sidebarDBView {
 	if sp == nil || !vault.IsDatabase(dbRel) {
 		return nil
 	}
 	if res := a.residentDocument(sp.ID, dbRel); res != nil && res.loadErr == nil && res.isDatabase() {
 		return sidebarViewsFromDatabase(res.dbView.Store.Database())
+	}
+	key := sp.ID + "\x00" + dbRel
+	nodeModNano := nodeMod.UnixNano()
+	if !nodeMod.IsZero() && a.dbViewListCache != nil {
+		if entry, ok := a.dbViewListCache[key]; ok && entry != nil &&
+			(entry.nodeModNano == nodeModNano || entry.modTime.UnixNano() == nodeModNano) {
+			return entry.views
+		}
 	}
 	full, err := resolveFile(sp, dbRel)
 	if err != nil {
@@ -1277,10 +1409,10 @@ func (a *App) sidebarViewsFor(sp *space.Space, dbRel string) []sidebarDBView {
 	if err != nil || info.IsDir() {
 		return nil
 	}
-	key := sp.ID + "\x00" + dbRel
 	if a.dbViewListCache != nil {
 		if entry, ok := a.dbViewListCache[key]; ok && entry != nil &&
 			entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+			entry.nodeModNano = nodeModNano
 			return entry.views
 		}
 	}
@@ -1297,9 +1429,10 @@ func (a *App) sidebarViewsFor(sp *space.Space, dbRel string) []sidebarDBView {
 		a.dbViewListCache = make(map[string]*sidebarDBMeta)
 	}
 	a.dbViewListCache[key] = &sidebarDBMeta{
-		modTime: info.ModTime(),
-		size:    info.Size(),
-		views:   views,
+		nodeModNano: nodeModNano,
+		modTime:     info.ModTime(),
+		size:        info.Size(),
+		views:       views,
 	}
 	return views
 }
@@ -1443,7 +1576,7 @@ func (a *App) databaseViewTree(c *ui.Context, sp *space.Space, n *vault.Node, de
 	if sp == nil || n == nil || n.Dir || !vault.IsDatabase(n.Path) || !sp.IsExpanded(n.Path) {
 		return
 	}
-	views := a.sidebarViewsFor(sp, n.Path)
+	views := a.sidebarViewsFor(sp, n.Path, n.Modified)
 	if len(views) == 0 {
 		return
 	}
@@ -1642,14 +1775,14 @@ func (a *App) loadDatabaseFor(d *document, target string) (*database.Store, dbvi
 		return nil, dbview.Options{}, 0, fmt.Errorf(i18n.T("找不到关联数据库：%s"), target)
 	}
 	if res := a.residentDocument(sp.ID, dbRel); res != nil && res.loadErr == nil && res.isDatabase() {
-		opts := a.databaseOptionsForStore(nil, sp, res.dbView.Store, res)
+		opts := a.databaseOptionsForStore(nil, sp, res.dbView.Store, res, d)
 		opts.Embedded = true
 		return res.dbView.Store, opts, res.dbView.Store.Revision(), nil
 	}
 	key := sp.ID + "\x00" + dbRel
 	if a.embedDBs != nil {
 		if entry, exists := a.embedDBs[key]; exists && entry != nil && entry.store != nil {
-			opts := a.databaseOptionsForStore(nil, sp, entry.store, nil)
+			opts := a.databaseOptionsForStore(nil, sp, entry.store, nil, d)
 			opts.Embedded = true
 			return entry.store, opts, entry.store.Revision(), nil
 		}
@@ -1662,7 +1795,7 @@ func (a *App) loadDatabaseFor(d *document, target string) (*database.Store, dbvi
 		a.embedDBs = make(map[string]*embedDBEntry)
 	}
 	a.embedDBs[key] = &embedDBEntry{dbRel: dbRel, store: store}
-	opts := a.databaseOptionsForStore(nil, sp, store, nil)
+	opts := a.databaseOptionsForStore(nil, sp, store, nil, d)
 	opts.Embedded = true
 	return store, opts, store.Revision(), nil
 }

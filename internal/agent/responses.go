@@ -210,6 +210,23 @@ func (c *Responses) readStream(ctx context.Context, r io.Reader, onDelta func(De
 			Response responseObject
 		}
 		if err := json.Unmarshal([]byte(data), &e); err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return Response{}, cerr
+			}
+			hasMore := false
+			for sc.Scan() {
+				t := strings.TrimSpace(sc.Text())
+				if t != "" && t != "data: [DONE]" && t != "data:[DONE]" {
+					hasMore = true
+					break
+				}
+			}
+			if cerr := ctx.Err(); cerr != nil {
+				return Response{}, cerr
+			}
+			if !hasMore || sc.Err() != nil {
+				return Response{}, fmt.Errorf("%w: %v", ErrStreamCut, err)
+			}
 			return Response{}, fmt.Errorf("invalid Responses event: %w", err)
 		}
 		switch e.Type {

@@ -348,3 +348,36 @@ func TestDatabaseDocuments(t *testing.T) {
 		t.Fatalf("renamed file lost database classification: %q", renamed)
 	}
 }
+
+func TestSanitizeName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"CON", "_CON"},
+		{"con", "_con"},
+		{"PRN", "_PRN"},
+		{"aux.txt", "_aux.txt"},
+		{"NUL.tar.gz", "_NUL.tar.gz"},
+		{"lpt1.md", "_lpt1.md"},
+		{"COM0", "_COM0"},
+		{"com9.arcmd", "_com9.arcmd"},
+		{"COM\u00b9", "_COM\u00b9"},
+		{"com\u00b2.md", "_com\u00b2.md"},
+		{"lpt\u00b3.txt", "_lpt\u00b3.txt"},
+		{"CON.", "_CON"},
+		{"CON .md", "_CON .md"},
+		{"Note .", "Note"},
+		{"Note . .   ", "Note"},
+		{"  ...  ", ""},
+		{" . . ", ""},
+		{"hello\x00\n\tworld", "helloworld"},
+		{"Idea: one/two", "Idea- one-two"},
+		{"Connect.md", "Connect.md"},
+	}
+	for _, tc := range cases {
+		if got := SanitizeName(tc.in); got != tc.want {
+			t.Errorf("SanitizeName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

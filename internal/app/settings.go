@@ -26,6 +26,7 @@ const (
 func (a *App) openSettings(tab string) {
 	a.settingsOpen = true
 	a.settingsTab = tab
+	a.refreshAgentSkillsCache()
 }
 
 // moreMenu keeps document actions at hand. Library and settings lead to
@@ -427,6 +428,8 @@ func (a *App) settingsAppearance(c *ui.Context) {
 		sep()
 		choice("page", i18n.T("页面宽度"), prefs.Pages, []string{i18n.T("窄"), i18n.T("标准"), i18n.T("宽"), i18n.T("全宽")}, &a.prefs.Page, a.setPageWidth)
 		sep()
+		choice("sidebar-density", i18n.T("侧边栏行高"), prefs.SidebarDensities, []string{i18n.T("紧凑"), i18n.T("标准"), i18n.T("舒适")}, &a.prefs.SidebarDensity, nil)
+		sep()
 		for _, item := range []struct {
 			label string
 			value float32
@@ -467,7 +470,7 @@ func (a *App) settingsAppearance(c *ui.Context) {
 			Font(family).FontSize(size).LineHeight(a.prefs.ReadingLine())
 	})
 	if ui.Button(c.Key("appearance-reset"), i18n.T("恢复默认外观")).AlignSelf(ui.Start).Clicked() {
-		a.prefs.FontSize, a.prefs.LineHeight, a.prefs.Font, a.prefs.Page = 0, 0, "", ""
+		a.prefs.FontSize, a.prefs.LineHeight, a.prefs.Font, a.prefs.Page, a.prefs.SidebarDensity = 0, 0, "", "", ""
 		a.pageWidthBeforeFull = ""
 		a.savePrefs()
 	}

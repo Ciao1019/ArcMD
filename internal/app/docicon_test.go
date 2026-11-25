@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func TestLeadingEmoji(t *testing.T) {
@@ -35,7 +37,14 @@ func TestDocName(t *testing.T) {
 
 func TestDocInitial(t *testing.T) {
 	for title, want := range map[string]string{
-		"周报": "周", "roadmap": "R", "  (draft) Plan": "D", "2026 年计划": "2", "---": "·",
+		"roadmap":  "R",
+		"  plan":   "P",
+		"周报":       "周",
+		"📚 读书笔记":   "读",
+		"2026 规划":  "2",
+		"---":      "·",
+		"":         "·",
+		"   🚀✨   ": "·",
 	} {
 		if got := docInitial(title); got != want {
 			t.Errorf("docInitial(%q) = %q, want %q", title, got, want)
@@ -43,22 +52,30 @@ func TestDocInitial(t *testing.T) {
 	}
 }
 
-// A title keeps its color, whatever its case, and a handful of titles use
-// several colors.
-func TestDocColor(t *testing.T) {
-	if docColorIndex("Roadmap") != docColorIndex("roadmap ") {
-		t.Error("the color depends on case or spaces")
+// Each supported file type gets its own distinct monochrome Lucide icon.
+func TestFileIconGlyphsDistinct(t *testing.T) {
+	samples := map[string]string{
+		"markdown":   "Roadmap.md",
+		"database":   "Tasks.db.md",
+		"whiteboard": "Diagram.excalidraw.svg",
+		"pdf":        "Paper.pdf",
+		"epub":       "Novel.epub",
+		"html":       "Page.html",
 	}
-	seen := map[int]bool{}
-	for _, s := range []string{"Welcome", "Ideas", "周报", "Roadmap", "Reading", "Trip", "会议记录", "Budget"} {
-		seen[docColorIndex(s)] = true
-	}
-	if len(seen) < 5 {
-		t.Errorf("8 titles share %d colors", len(seen))
+	seen := map[*ui.SVG]string{}
+	for kind, rel := range samples {
+		g := fileIconGlyph(rel)
+		if g == nil {
+			t.Fatalf("fileIconGlyph(%q) returned nil", rel)
+		}
+		if prev, dup := seen[g]; dup {
+			t.Errorf("%s and %s share the same icon glyph", prev, kind)
+		}
+		seen[g] = kind
 	}
 }
 
-// TestDocIconSnapshot renders favorites and a tree of varied names, for
+// TestDocIconSnapshot renders favorites and a tree of varied file types, for
 // review.
 func TestDocIconSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render the document icons")
@@ -72,17 +89,29 @@ func TestDocIconSnapshot(t *testing.T) {
 			tt.SetSize(1000, 640)
 			tt.SetDark(dark)
 			sp := a.state.ActiveSpace()
-			for _, n := range []string{"周报", "Roadmap", "📚 读书笔记", "会议记录", "✈️ Trip"} {
-				rel := n + ".md"
-				os.WriteFile(filepath.Join(sp.Root, rel), []byte("# "+n+"\n"), 0o644)
-				if n != "会议记录" {
-					a.state.ToggleFavorite(sp.ID, rel)
+			files := []struct {
+				rel, content string
+				fav          bool
+			}{
+				{"周报.md", "# 周报\n", true},
+				{"Roadmap.md", "# Roadmap\n", true},
+				{"📚 读书笔记.md", "# 读书笔记\n", true},
+				{"✈️ Trip.md", "# Trip\n", true},
+				{"会议记录.md", "# 会议记录\n", false},
+				{"项目看板.db.md", "# 项目看板\n", false},
+				{"架构草图.excalidraw.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", false},
+				{"设计规范.pdf", "%PDF-1.4\n", false},
+				{"三体.epub", "", false},
+				{"产品页.html", "<html><body>Hi</body></html>", false},
+			}
+			for _, f := range files {
+				os.WriteFile(filepath.Join(sp.Root, f.rel), []byte(f.content), 0o644)
+				if f.fav {
+					a.state.ToggleFavorite(sp.ID, f.rel)
 				}
 			}
 			a.refreshTree()
-			for range 3 {
-				tt.Frame()
-			}
+			settle(tt)
 			writePNG(t, filepath.Join(dir, fmt.Sprint(name, ".png")), tt.Image())
 		})
 	}

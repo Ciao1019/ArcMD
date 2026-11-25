@@ -406,7 +406,7 @@ func renderTimelineHeaderRow(
 					bw := min(max(float32(26), spec.dayW-4), float32(32))
 					badge := ui.Rect{X: txCenter - bw*0.5, Y: r.Y + 27, W: bw, H: 18}
 					p.Fill(badge, pal.Danger, 9)
-					p.Text(txCenter-7.5, badge.Y+2.5, fmt.Sprintf("%02d", today.Day()), 10.5, ui.RGB(255, 255, 255))
+					p.Text(txCenter-7.5, badge.Y+2.5, fmt.Sprintf("%02d", today.Day()), 10.5, pal.OnSolid)
 				}
 			})
 		})

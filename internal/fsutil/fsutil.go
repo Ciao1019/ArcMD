@@ -4,9 +4,13 @@ package fsutil
 
 import (
 	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
+
+var linkFile = os.Link
 
 // IsMissingFile reports whether err indicates that path (or a missing
 // directory along path) does not exist, rather than a regular file blocking
@@ -85,9 +89,38 @@ func writeAtomic(path string, data []byte, perm os.FileMode, exclusive bool) err
 		return err
 	}
 	if exclusive {
-		return os.Link(tmp, path)
+		err := linkFile(tmp, path)
+		if err == nil || errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		return writeExclusiveFallback(path, data, perm)
 	}
 	return os.Rename(tmp, path)
+}
+
+func writeExclusiveFallback(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	if n, err := f.Write(data); err != nil || n != len(data) {
+		_ = f.Close()
+		_ = os.Remove(path)
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
 }
 
 func writeInPlace(path string, data []byte, perm os.FileMode, target os.FileInfo) error {

@@ -39,6 +39,7 @@ func (a *App) restoreDeleted(it trashbin.Item) {
 		a.notify("恢复「%s」失败。%v", it.Name(), err)
 		return
 	}
+	a.invalidateConflictsCache()
 	a.library.items, a.library.err = a.bin.List(time.Now())
 	if sp == a.state.ActiveSpace() {
 		a.refreshTree()

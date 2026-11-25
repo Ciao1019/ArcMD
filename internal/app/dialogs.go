@@ -154,12 +154,16 @@ func (a *App) removeSpace(id string) {
 	if a.state.ActiveSpace() != nil && a.state.ActiveSpace().ID == id {
 		a.suspendSplit()
 	}
+	if sp := a.state.Get(id); sp != nil {
+		a.releasePDFHandles(sp, "")
+	}
 	for _, d := range a.residentDocuments() {
 		if d.space.ID == id {
 			a.replaceReferences(d, nil)
 		}
 	}
 	if a.state.Remove(id) == nil {
+		a.invalidateConflictsCache()
 		a.forgetCopiedSpace(id)
 		delete(a.sessions, id)
 		a.saveState()

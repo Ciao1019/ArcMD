@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Ciao1019/ArcMD/internal/spacefs"
 )
@@ -372,5 +373,71 @@ func TestModels(t *testing.T) {
 	}
 	if err := (Settings{BaseURL: "https://api.openai.com/v1", APIKey: "k"}).CheckService(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestChatStreamOmitsIndexContextCancelAndUTF8Truncation(t *testing.T) {
+	// 1. OpenAI-compatible servers omitting tool_call index on streamed argument chunks.
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"id":"c_no_idx","type":"function","function":{"name":"read","arguments":"{\"path\":"}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"C# 笔记.md\"}"}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"id":"c_second","type":"function","function":{"name":"grep","arguments":"{\"pattern\":"}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"x\"}"}}]}}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+	resp, err := readChatStream(context.Background(), strings.NewReader(stream), func(Delta) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Message.Calls) != 2 ||
+		resp.Message.Calls[0] != (ToolCall{ID: "c_no_idx", Name: "read", Args: `{"path":"C# 笔记.md"}`}) ||
+		resp.Message.Calls[1] != (ToolCall{ID: "c_second", Name: "grep", Args: `{"pattern":"x"}`}) {
+		t.Fatalf("omitted-index calls = %+v", resp.Message.Calls)
+	}
+
+	// 2. Context cancellation checked at the start of each scanner iteration.
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err = readChatStream(ctx, strings.NewReader(
+		"data: {\"choices\":[{\"delta\":{\"content\":\"前\"}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"content\":\"后\"},\"finish_reason\":\"stop\"}]}\n\n",
+	), func(Delta) { cancel() })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from readChatStream, got %v", err)
+	}
+
+	// 3. UTF-8 safe truncation in truncateUTF8, runTool, and apiError.
+	cjk := strings.Repeat("中", 200) // 600 bytes (3 bytes per rune)
+	for n := 0; n <= 10; n++ {
+		s := truncateUTF8(cjk, n)
+		if !utf8.ValidString(s) || len(s) > n {
+			t.Fatalf("truncateUTF8(%d) invalid or too long: len=%d valid=%v", n, len(s), utf8.ValidString(s))
+		}
+	}
+	bigToolOut := "a" + strings.Repeat("中", maxToolResult/3+10) // misaligns maxToolResult mid-rune
+	cutOut, err := runTool(context.Background(), map[string]Tool{
+		"big": {Run: func(context.Context, json.RawMessage) (string, error) { return bigToolOut, nil }},
+	}, ToolCall{ID: "1", Name: "big", Args: "{}"})
+	if err != nil || !utf8.ValidString(cutOut) || !strings.HasSuffix(cutOut, "\n(result cut; ask for less)") {
+		t.Fatalf("runTool UTF-8 truncation failed: err=%v valid=%v", err, utf8.ValidString(cutOut))
+	}
+
+	errBody := `{"error":{"message":"` + "x" + strings.Repeat("错", 200) + `"}}` // 500 falls mid-rune
+	apiErr := apiError(&http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader(errBody))})
+	if !utf8.ValidString(apiErr.Error()) {
+		t.Fatalf("apiError produced invalid UTF-8: %q", apiErr.Error())
+	}
+
+	// 4. Citations with '#' in filenames and case-insensitive localhost check.
+	cs := Citations("请参考 [C# 笔记.md#L1-L5] 与 [Issue #12.md#L3] 以及普通链接 [说明](https://example.com)。")
+	if len(cs) != 2 || cs[0].Path != "C# 笔记.md" || cs[0].From != 1 || cs[0].To != 5 || cs[1].Path != "Issue #12.md" || cs[1].From != 3 || cs[1].To != 3 {
+		t.Fatalf("Citations with # in filename = %+v", cs)
+	}
+	if !IsLocal("http://LOCALHOST:11434/v1") {
+		t.Fatal("IsLocal rejected uppercase LOCALHOST")
+	}
+	if err := (Settings{BaseURL: "http://LOCALHOST:11434/v1", Model: "qwen"}).Check(); err != nil {
+		t.Fatalf("Settings.Check rejected uppercase LOCALHOST: %v", err)
 	}
 }

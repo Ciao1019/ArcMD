@@ -558,12 +558,9 @@ func (a *App) toolbar(c *ui.Context, compact bool, caption float32) {
 		if iconButton(c, "forward", iconForward, i18n.T("前进"), a.withKey(i18n.T("前进"), "forward"), !a.canGo(1)).Clicked() {
 			a.goHistory(1)
 		}
-		if iconButton(c, "reload", iconReload, i18n.T("重新载入"), a.withKey(i18n.T("从磁盘重新载入"), "reload"), a.doc == nil).Clicked() {
-			a.reload()
-		}
-		ui.Box(c).Width(8)
+		ui.Box(c).Width(6)
 		a.address(c)
-		ui.Box(c).Width(8)
+		ui.Box(c).Width(6)
 		a.documentCorner(c, a.doc)
 		a.gitToolbarButton(c)
 		ask := iconButton(c, "ask", iconAsk, i18n.T("问答"), a.withKey(i18n.T("向当前空间提问"), "ask"), a.state.ActiveSpace() == nil)
@@ -577,15 +574,14 @@ func (a *App) toolbar(c *ui.Context, compact bool, caption float32) {
 	})
 }
 
-// address shows where the document is, as Arc's address field: the
+// address shows where the document is as a quiet clickable title bar: the
 // space, its folders and its name; a click opens the command bar.
 func (a *App) address(c *ui.Context) {
 	t := c.Theme()
-	f := ui.Row(c.Key("address")).Grow(1).MinWidth(0).Height(32).Radius(9).PaddingX(12).Gap(8).
-		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("文档路径")).
-		Background(field(t))
+	f := ui.Row(c.Key("address")).Grow(1).MinWidth(0).Height(30).Radius(8).PaddingX(8).Gap(7).
+		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("文档路径"))
 	if f.Hovered() {
-		f.Background(field(t).Mix(white, 0.2))
+		f.Background(hoverFill(t))
 	}
 	f.Children(func() {
 		if a.spaceForm.open && a.spaceForm.id == "" {

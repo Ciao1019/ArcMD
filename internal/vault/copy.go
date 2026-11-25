@@ -174,35 +174,35 @@ func sameOrInsideDir(src, dstDir string) bool {
 // which already exists as a freshly created directory. Symbolic links, hidden
 // entries and dependency directories are skipped.
 func copyFolderContents(src, dst string) error {
+	return walkCopy(src, dst, true)
+}
+
+func walkCopy(src, dst string, skipHidden bool) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if p == src {
-			return nil
-		}
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() {
-			if skipDir(name) {
+		if p != src && skipHidden {
+			name := d.Name()
+			if d.IsDir() && skipDir(name) {
 				return filepath.SkipDir
 			}
-			rel, err := filepath.Rel(src, p)
-			if err != nil {
-				return err
+			if !d.IsDir() && strings.HasPrefix(name, ".") {
+				return nil
 			}
-			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
-		}
-		if strings.HasPrefix(name, ".") {
-			return nil
 		}
 		rel, err := filepath.Rel(src, p)
 		if err != nil {
 			return err
 		}
-		return copyFileExclusive(p, filepath.Join(dst, rel))
+		out := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(out, 0o755)
+		}
+		return copyFileExclusive(p, out)
 	})
 }
 

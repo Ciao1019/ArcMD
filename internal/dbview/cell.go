@@ -179,7 +179,7 @@ func cellViewStyled(
 				cb.Draw(func(p *ui.Painter, r ui.Rect) {
 					if checked {
 						p.Fill(r, pal.Accent, 4)
-						p.Icon(iconCheck, rectInset(r, 3), ui.RGB(255, 255, 255))
+						p.Icon(iconCheck, rectInset(r, 3), pal.AccentText)
 					} else {
 						p.Stroke(rectInset(r, 0.5), pal.BorderStrong, 4, 1.3)
 					}

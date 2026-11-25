@@ -387,18 +387,29 @@ func TestDatabasePhase2ViewsCoverAndPersistence(t *testing.T) {
 	a.open("Roadmap.db.md")
 	tt.Frame()
 
-	// Verify cover image loading, caching, and traversal/remote rejection.
-	bmp := loadDatabaseRecordImage(sp, a.doc, "Roadmap/alpha.md", "assets/cover.png")
+	// Verify cover image loading, caching, negative path cache, and traversal/remote rejection.
+	bmp := a.loadDatabaseRecordImage(sp, a.doc, nil, "Roadmap/alpha.md", "assets/cover.png")
 	if bmp == nil {
 		t.Fatal("expected loadDatabaseRecordImage to load Roadmap/assets/cover.png")
 	}
-	if loadDatabaseRecordImage(sp, a.doc, "Roadmap/alpha.md", "assets/cover.png") != bmp {
+	if a.loadDatabaseRecordImage(sp, a.doc, nil, "Roadmap/alpha.md", "assets/cover.png") != bmp {
 		t.Fatal("expected cached *ui.Bitmap hit on repeated cover load")
 	}
-	if loadDatabaseRecordImage(sp, a.doc, "Roadmap/alpha.md", "../../etc/passwd") != nil {
+	// Linked View (dbDoc == nil) must cache decoded thumbnails in a.dbThumbCache instead of leaking a fresh Bitmap per frame.
+	embedBmp := a.loadDatabaseRecordImage(sp, nil, a.doc, "Roadmap/alpha.md", "assets/cover.png")
+	if embedBmp == nil || a.loadDatabaseRecordImage(sp, nil, a.doc, "Roadmap/alpha.md", "assets/cover.png") != embedBmp {
+		t.Fatal("expected App-level dbThumbCache hit when dbDoc == nil")
+	}
+	if a.loadDatabaseRecordImage(sp, nil, a.doc, "Roadmap/alpha.md", "missing-bare-cover.png") != nil {
+		t.Fatal("expected missing cover image to return nil")
+	}
+	if len(a.imgResolved) == 0 {
+		t.Fatal("expected a.imgResolved to cache resolved and negative lookup results")
+	}
+	if a.loadDatabaseRecordImage(sp, a.doc, nil, "Roadmap/alpha.md", "../../etc/passwd") != nil {
 		t.Fatal("expected traversal path ../../etc/passwd to be rejected")
 	}
-	if loadDatabaseRecordImage(sp, a.doc, "Roadmap/alpha.md", "https://example.com/cover.png") != nil {
+	if a.loadDatabaseRecordImage(sp, a.doc, nil, "Roadmap/alpha.md", "https://example.com/cover.png") != nil {
 		t.Fatal("expected remote URL to return nil")
 	}
 

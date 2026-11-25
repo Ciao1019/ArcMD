@@ -351,3 +351,75 @@ func TestSpaceSwitchStopsOnSaveFailure(t *testing.T) {
 		t.Fatal("retry did not save and restore the original editor")
 	}
 }
+
+func TestSidebarHeaderNewAndDensitySetting(t *testing.T) {
+	a, tt := newTestApp(t)
+	sp := a.state.ActiveSpace()
+	for i := 0; i < 30; i++ {
+		if err := vault.Write(sp.Root, fmt.Sprintf("Doc %02d.md", i), "# Doc\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.refreshTree()
+	tt.Frame()
+
+	// The quick-new '+' button sits at the right edge of the fixed space header,
+	// aligned with the sidebar controls, with the hover space menu beside it.
+	addRect, ok := tt.Find("快速新建")
+	if !ok || addRect.W <= 0 || addRect.H <= 0 {
+		t.Fatalf("space header quick-new button missing: %+v", addRect)
+	}
+	moreRect, ok := tt.Find("空间菜单")
+	if !ok || addRect.X <= moreRect.X {
+		t.Fatalf("quick-new (%+v) should sit right of space menu (%+v)", addRect, moreRect)
+	}
+	if err := tt.Click("快速新建"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.newModal.open {
+		t.Fatal("clicking space header '+' did not open the new modal")
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+
+	rowHeightOf := func(name string) float32 {
+		t.Helper()
+		r, ok := tt.Find(name)
+		if !ok {
+			t.Fatalf("row %q not found", name)
+		}
+		return r.H
+	}
+	if got := rowHeightOf("Journal"); got != 32 {
+		t.Fatalf("default sidebar row height = %v, want 32", got)
+	}
+
+	// Switch sidebar row height in Settings -> Appearance.
+	a.openSettings(tabAppearance)
+	tt.Frame()
+	if err := tt.Click("紧凑"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.prefs.SidebarDensity != "compact" || rowHeightOf("Journal") != 28 {
+		t.Fatalf("compact density: pref=%q height=%v", a.prefs.SidebarDensity, rowHeightOf("Journal"))
+	}
+	if err := tt.Click("舒适"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.prefs.SidebarDensity != "comfortable" || rowHeightOf("Journal") != 40 {
+		t.Fatalf("comfortable density: pref=%q height=%v", a.prefs.SidebarDensity, rowHeightOf("Journal"))
+	}
+	r, _ := tt.Find("恢复默认外观")
+	tt.Scroll(r.X, 400, 0, 400)
+	tt.Frame()
+	if err := tt.Click("恢复默认外观"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.prefs.SidebarDensity != "" || rowHeightOf("Journal") != 32 {
+		t.Fatalf("reset appearance: pref=%q height=%v", a.prefs.SidebarDensity, rowHeightOf("Journal"))
+	}
+}

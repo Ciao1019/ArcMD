@@ -149,17 +149,44 @@ func (a *App) cloudSyncStateDir() string {
 	return filepath.Dir(p)
 }
 
+type docConflictSyncCache struct {
+	doc     *document
+	spaceID string
+	rel     string
+	gen     uint64
+	docRev  uint64
+	cf      persistedConflict
+	ok      bool
+	valid   bool
+}
+
+func (a *App) invalidateConflictsCache() {
+	a.conflictsValid = false
+	a.conflictsCache = nil
+	a.docConflictGen++
+	a.docConflict = docConflictSyncCache{}
+}
+
 func (a *App) loadPersistedConflicts() []persistedConflict {
+	if a.conflictsValid {
+		return a.conflictsCache
+	}
 	dir := a.cloudSyncStateDir()
 	if dir == "" {
+		a.conflictsCache = nil
+		a.conflictsValid = true
 		return nil
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "conflicts.json"))
 	if err != nil || len(raw) == 0 {
+		a.conflictsCache = nil
+		a.conflictsValid = true
 		return nil
 	}
 	var items []persistedConflict
 	if json.Unmarshal(raw, &items) != nil {
+		a.conflictsCache = nil
+		a.conflictsValid = true
 		return nil
 	}
 	// Filter out entries whose conflict copy was already deleted manually and
@@ -189,10 +216,29 @@ func (a *App) loadPersistedConflicts() []persistedConflict {
 		}
 		valid = append(valid, it)
 	}
+	a.conflictsCache = valid
+	a.conflictsValid = true
 	return valid
 }
 
+func (a *App) savePersistedConflicts(items []persistedConflict) {
+	a.invalidateConflictsCache()
+	dir := a.cloudSyncStateDir()
+	if dir == "" {
+		return
+	}
+	file := filepath.Join(dir, "conflicts.json")
+	if len(items) == 0 {
+		_ = os.Remove(file)
+		return
+	}
+	if out, err := json.Marshal(items); err == nil {
+		_ = fsutil.WriteFileAtomic(file, out, 0o600)
+	}
+}
+
 func (a *App) removePersistedConflict(spaceID, rel string) {
+	a.invalidateConflictsCache()
 	dir := a.cloudSyncStateDir()
 	if dir == "" {
 		return
@@ -213,13 +259,7 @@ func (a *App) removePersistedConflict(spaceID, rel string) {
 		}
 		kept = append(kept, it)
 	}
-	if len(kept) == 0 {
-		_ = os.Remove(file)
-		return
-	}
-	if out, err := json.Marshal(kept); err == nil {
-		_ = fsutil.WriteFileAtomic(file, out, 0o600)
-	}
+	a.savePersistedConflicts(kept)
 }
 
 func readCloudBaseSnapshot(stateDir, spaceID, rel string) (string, bool) {
@@ -374,6 +414,7 @@ func (a *App) openGitChanges() {
 }
 
 func (a *App) refreshGitChanges() {
+	a.invalidateConflictsCache()
 	prevCollapsed := map[string]bool{}
 	prevSkips := map[string]map[int]bool{}
 	for _, old := range a.gitChanges.items {
@@ -888,10 +929,35 @@ func (a *App) spaceModal(c *ui.Context, key string, open *bool, fn func(mt *ui.T
 // syncConflictBarFor renders a top banner on documents that have an unresolved
 // Cloud Sync conflict (or are themselves a "(冲突副本 ...)" document).
 func (a *App) syncConflictBarFor(c *ui.Context, d *document) {
-	if d == nil || d.conflict || d.missing {
+	if d == nil || d.space == nil || d.conflict || d.missing {
 		return
 	}
-	cf, ok := a.findConflictForDoc(d)
+	var rev uint64
+	if d.ed != nil {
+		rev = d.ed.Revision()
+	}
+	var cf persistedConflict
+	var ok bool
+	if a.docConflict.valid &&
+		a.docConflict.doc == d &&
+		a.docConflict.spaceID == d.space.ID &&
+		a.docConflict.rel == d.rel &&
+		a.docConflict.gen == a.docConflictGen &&
+		a.docConflict.docRev == rev {
+		cf, ok = a.docConflict.cf, a.docConflict.ok
+	} else {
+		cf, ok = a.findConflictForDoc(d)
+		a.docConflict = docConflictSyncCache{
+			doc:     d,
+			spaceID: d.space.ID,
+			rel:     d.rel,
+			gen:     a.docConflictGen,
+			docRev:  rev,
+			cf:      cf,
+			ok:      ok,
+			valid:   true,
+		}
+	}
 	if !ok {
 		return
 	}
@@ -911,6 +977,9 @@ func (a *App) syncConflictBarFor(c *ui.Context, d *document) {
 			a.openGitChanges()
 		}
 		if ui.PrimaryButton(c.Key("open-3way"), i18n.T("三栏合并…")).Clicked() {
+			if fresh, ok2 := a.findConflictForDoc(d); ok2 {
+				cf = fresh
+			}
 			a.openMergeForConflict(cf)
 		}
 	})

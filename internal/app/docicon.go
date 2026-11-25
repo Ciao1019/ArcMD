@@ -1,7 +1,6 @@
 package app
 
 import (
-	"hash/fnv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -10,60 +9,45 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// A document's icon is made from its name, as a browser shows a site's
-// favicon: nothing to set and nothing read from the file. A name starting
-// with an emoji shows the emoji; any other shows its first letter in one of
-// a few quiet colors, on a tint of that color. The color follows the name,
-// so a document keeps it as it moves, and documents side by side seldom
-// share one.
+// A document's icon uses a leading emoji when the author puts one in the
+// title; otherwise it shows a clean monochrome Lucide glyph tailored to the
+// file type (Markdown, Database, Whiteboard, PDF, EPUB, HTML).
 
-// fileIcon draws the icon of rel/title: whiteboards and PDFs without a leading
-// emoji show their type glyph on their title color tile; Markdown files show docIcon.
-func fileIcon(c *ui.Context, rel, title string, size float32) ui.Element {
-	if vault.IsDatabase(rel) && leadingEmoji(title) == "" {
-		ink, fill := docIconColors(c.Theme(), title)
-		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
-			ui.Icon(c, iconDatabase).FontSize(size * 0.64).TextColor(ink)
-		})
+// fileIconGlyph returns the monochrome Lucide icon for the document path rel.
+func fileIconGlyph(rel string) *ui.SVG {
+	switch {
+	case vault.IsDatabase(rel):
+		return iconDatabase
+	case vault.IsWhiteboard(rel):
+		return iconWhiteboard
+	case vault.IsPDF(rel):
+		return iconFilePDF
+	case vault.IsEPUB(rel):
+		return iconBookOpen
+	case vault.IsHTML(rel):
+		return iconFileCode
+	default:
+		return iconFile
 	}
-	if vault.IsWhiteboard(rel) && leadingEmoji(title) == "" {
-		ink, fill := docIconColors(c.Theme(), title)
-		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
-			ui.Icon(c, iconWhiteboard).FontSize(size * 0.64).TextColor(ink)
-		})
-	}
-	if vault.IsPDF(rel) && leadingEmoji(title) == "" {
-		ink, fill := docIconColors(c.Theme(), title)
-		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
-			ui.Icon(c, iconFile).FontSize(size * 0.64).TextColor(ink)
-		})
-	}
-	if vault.IsEPUB(rel) && leadingEmoji(title) == "" {
-		ink, fill := docIconColors(c.Theme(), title)
-		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
-			ui.Icon(c, iconBookOpen).FontSize(size * 0.64).TextColor(ink)
-		})
-	}
-	if vault.IsHTML(rel) && leadingEmoji(title) == "" {
-		ink, fill := docIconColors(c.Theme(), title)
-		return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
-			ui.Icon(c, iconFileCode).FontSize(size * 0.64).TextColor(ink)
-		})
-	}
-	return docIcon(c, title, size)
 }
 
-// docIcon draws the icon of the document titled title, size DIPs square.
-func docIcon(c *ui.Context, title string, size float32) ui.Element {
+// fileIcon draws the icon of rel/title: a leading emoji if present, otherwise
+// the file type's monochrome Lucide glyph in a size×size box.
+func fileIcon(c *ui.Context, rel, title string, size float32) ui.Element {
 	if e := leadingEmoji(title); e != "" {
 		return ui.Box(c).Size(size, size).Shrink(0).Center().Children(func() {
 			ui.Text(c, e).FontSize(size * 0.86).NoWrap()
 		})
 	}
-	ink, fill := docIconColors(c.Theme(), title)
-	return ui.Box(c).Size(size, size).Shrink(0).Radius(size * 0.28).Background(fill).Center().Children(func() {
-		ui.Text(c, docInitial(title)).FontSize(size * 0.6).FontWeight(650).TextColor(ink).NoWrap()
+	ink := docIconInk(c.Theme())
+	return ui.Box(c).Size(size, size).Shrink(0).Center().Children(func() {
+		ui.Icon(c, fileIconGlyph(rel)).FontSize(size * 0.94).TextColor(ink)
 	})
+}
+
+// docIcon draws the icon of a Markdown document titled title, size DIPs square.
+func docIcon(c *ui.Context, title string, size float32) ui.Element {
+	return fileIcon(c, "", title, size)
 }
 
 // docName is a title as it shows beside its icon: without the emoji the
@@ -77,8 +61,7 @@ func docName(title string) string {
 	return title
 }
 
-// docInitial is the letter of a document's icon: the first letter or digit
-// of its title, in upper case.
+// docInitial returns the first letter or digit of title in upper case.
 func docInitial(title string) string {
 	for _, r := range title {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
@@ -86,13 +69,6 @@ func docInitial(title string) string {
 		}
 	}
 	return "·"
-}
-
-// docColorIndex picks the document's color from its title.
-func docColorIndex(title string) int {
-	h := fnv.New32a()
-	h.Write([]byte(strings.ToLower(strings.TrimSpace(title))))
-	return int(h.Sum32() % uint32(len(docPalette)))
 }
 
 // leadingEmoji is the emoji a title starts with, with what joins and

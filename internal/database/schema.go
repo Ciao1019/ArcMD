@@ -893,12 +893,14 @@ func (d *Database) IsPrimaryView(viewID string) bool {
 	return viewID != "" && d.PrimaryViewID() == viewID
 }
 
-// Clone returns a deep copy of d.
-func (d *Database) Clone() *Database {
+// CloneSchema returns a deep copy of d's schema, views, and templates without
+// cloning InlineRows.
+func (d *Database) CloneSchema() *Database {
 	if d == nil {
 		return nil
 	}
 	out := *d
+	out.InlineRows = nil
 	out.Source = d.Source.Clone()
 	if d.Properties != nil {
 		out.Properties = make([]Property, len(d.Properties))
@@ -918,13 +920,22 @@ func (d *Database) Clone() *Database {
 			out.Templates[i] = t.Clone()
 		}
 	}
+	return &out
+}
+
+// Clone returns a deep copy of d.
+func (d *Database) Clone() *Database {
+	if d == nil {
+		return nil
+	}
+	out := d.CloneSchema()
 	if d.InlineRows != nil {
 		out.InlineRows = make([]*Record, len(d.InlineRows))
 		for i, r := range d.InlineRows {
 			out.InlineRows[i] = r.Clone()
 		}
 	}
-	return &out
+	return out
 }
 
 // Digest computes a deterministic SHA-256 hash of the Database state.

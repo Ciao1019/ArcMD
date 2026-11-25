@@ -117,6 +117,7 @@ type State struct {
 	CalendarMiniMonth         time.Time
 	CalendarHiddenCats        map[string]bool
 	CalendarAutoUnschedViewID string
+	calZeroWidthRetriedKey    string
 	CalendarUnscheduledOpen   bool
 	CalendarOverflowDay       string
 	CalendarOverflowOpen      bool
@@ -206,6 +207,7 @@ type State struct {
 	RootHandle   ui.Handle
 	RequestFocus bool
 	Motion       dbMotionState
+	BoardDrag    boardDragState
 }
 
 // NewState initializes UI state backed by store.
@@ -244,8 +246,11 @@ func (s *State) ActiveView() *database.ViewConfig {
 	if s == nil || s.Store == nil {
 		return nil
 	}
-	db := s.Store.Database()
-	if db == nil {
+	return s.activeViewFrom(s.Store.SchemaSnapshot())
+}
+
+func (s *State) activeViewFrom(db *database.Database) *database.ViewConfig {
+	if s == nil || db == nil {
 		return nil
 	}
 	if s.LocalView && s.LocalViewID != "" {
@@ -284,8 +289,11 @@ func (s *State) SetActiveView(viewID string) {
 	s.CloseToolbarPopovers()
 	s.FocusRow, s.FocusCol = -1, -1
 	s.FormSubmittedTitle = ""
+	s.calZeroWidthRetriedKey = ""
 	s.Motion.drag = dbDragPreview{}
 	s.Motion.settle = dbDragSettle{}
+	s.Motion.suppressOverlay = false
+	s.BoardDrag.reset()
 	if s.LocalView {
 		s.LocalViewID = viewID
 		return
@@ -410,7 +418,7 @@ func (s *State) CommitTextEdit(opts Options) {
 	s.EditFocusPending = false
 	s.EditWasFocused = false
 
-	db := s.Store.Database()
+	db := s.Store.SchemaSnapshot()
 	if db == nil {
 		return
 	}

@@ -263,7 +263,8 @@ func TestBookViewNavigationSearchLinksAndSource(t *testing.T) {
 			t.Fatalf("expected click to switch to chapter 2, got ch=%d", v.CurrentChapter)
 		}
 
-		// Step chapter forward via StepChapter and back via BracketLeft ('[').
+		// Step chapter forward via StepChapter and back via BracketLeft ('['),
+		// then verify bare Left/Right/PageDown/PageUp arrow navigation with focus inside the chapter editor.
 		v.StepChapter(1)
 		tt.Frame()
 		if v.CurrentChapter != 2 || !tt.HasText("第 3 / 3 章") {
@@ -274,12 +275,38 @@ func TestBookViewNavigationSearchLinksAndSource(t *testing.T) {
 		if v.CurrentChapter != 1 {
 			t.Fatalf("expected BracketLeft -> chapter 2 (idx 1), got ch=%d", v.CurrentChapter)
 		}
+		tt.Key(0, ui.KeyRight)
+		tt.Frame()
+		if v.CurrentChapter != 2 {
+			t.Fatalf("expected KeyRight -> chapter 3 (idx 2), got ch=%d", v.CurrentChapter)
+		}
+		tt.Key(0, ui.KeyLeft)
+		tt.Frame()
+		if v.CurrentChapter != 1 {
+			t.Fatalf("expected KeyLeft -> chapter 2 (idx 1), got ch=%d", v.CurrentChapter)
+		}
+		tt.Key(0, ui.KeyPageDown)
+		tt.Frame()
+		if v.CurrentChapter != 2 {
+			t.Fatalf("expected KeyPageDown at end of short chapter -> chapter 3 (idx 2), got ch=%d", v.CurrentChapter)
+		}
+		tt.Key(0, ui.KeyPageUp)
+		tt.Frame()
+		if v.CurrentChapter != 1 {
+			t.Fatalf("expected KeyPageUp at top of chapter -> chapter 2 (idx 1), got ch=%d", v.CurrentChapter)
+		}
 
-		// Find across chapters jumps to matching chapter and highlights result; Esc closes find.
+		// Find across chapters jumps to matching chapter and highlights result;
+		// while find is open, Left/Right must not turn chapters; Esc closes find.
 		v.FindText("灰度发布")
 		tt.Frame()
 		if !v.FindOpen || len(v.Matches) == 0 || v.CurrentChapter != 2 {
 			t.Fatalf("expected FindText('灰度发布') -> ch 2, open=%v matches=%+v ch=%d", v.FindOpen, v.Matches, v.CurrentChapter)
+		}
+		tt.Key(0, ui.KeyLeft)
+		tt.Frame()
+		if v.CurrentChapter != 2 {
+			t.Fatalf("KeyLeft while find bar is open must not change chapter, got ch=%d", v.CurrentChapter)
 		}
 		tt.Key(0, ui.KeyEscape)
 		tt.Frame()

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // paragraphs renders a file as one part per paragraph, IDs b0, b1…, which
@@ -307,5 +308,50 @@ func TestSearchRanksPassagesDescribeAndFormattedGrep(t *testing.T) {
 	loc := p.Describe(5, 5)
 	if loc.Section != "决定" || !strings.Contains(loc.Excerpt, "因为安全与证书还没下来") || strings.Contains(loc.Excerpt, "<mark") {
 		t.Fatalf("Describe: %+v", loc)
+	}
+}
+
+func TestBackslashPathsAndSingleLineTruncation(t *testing.T) {
+	hugeSingleLine := strings.Repeat("架构测试数据", 6000) // 108,000 UTF-8 bytes on 1 line
+	fs := space(t, map[string]string{
+		"工作/计划.md":    "# 计划\n\n见 [[周报]] #目标",
+		"工作/周报.md":    "# 周报\n\n回到 [[计划]]",
+		"工作/单行大文件.md": hugeSingleLine,
+	})
+
+	if p, err := fs.Page(`工作\计划.md`); err != nil || p.Title != "计划" {
+		t.Fatalf("Page backslash = %+v, %v", p, err)
+	}
+	if out, err := fs.Read(`工作\计划.md`, 1, 1); err != nil || !strings.Contains(out, "1→# 计划") {
+		t.Fatalf("Read backslash = %q, %v", out, err)
+	}
+	if out, err := fs.Outline(`工作\计划.md`); err != nil || !strings.HasPrefix(out, "工作/计划.md: ") {
+		t.Fatalf("Outline backslash = %q, %v", out, err)
+	}
+	if out, err := fs.Links(`工作\计划.md`); err != nil || !strings.Contains(out, "工作/周报.md:3:回到 [[计划]]") {
+		t.Fatalf("Links backslash = %q, %v", out, err)
+	}
+	if out, err := fs.Glob(`工作\**`, false, 0); err != nil || !strings.HasPrefix(out, "3 documents.") {
+		t.Fatalf("Glob backslash = %q, %v", out, err)
+	}
+	if out, err := fs.Grep(GrepArgs{Pattern: "周报", Scope: `工作\计划.md`}); err != nil || !strings.Contains(out, "1 matches") {
+		t.Fatalf("Grep backslash = %q, %v", out, err)
+	}
+	if _, err := fs.Read(`..\outside.md`, 0, 0); err == nil {
+		t.Fatal("backslash dot-dot read succeeded")
+	}
+
+	out, err := fs.Read(`工作\单行大文件.md`, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(out) {
+		t.Fatal("truncated single-line Read produced invalid UTF-8")
+	}
+	if !strings.Contains(out, "… [truncated]") {
+		t.Fatalf("expected truncation marker, got tail %q", out[max(0, len(out)-80):])
+	}
+	if len(out) > MaxReadChars+128 {
+		t.Fatalf("single-line Read exceeded MaxReadChars budget: got %d bytes", len(out))
 	}
 }

@@ -644,3 +644,193 @@ func TestPrimaryViewProtectionAndMultiViewSyncScope(t *testing.T) {
 		t.Fatalf("expected prop_status removed from Gantt TableProps, got %v", gv.Timeline.TableProps)
 	}
 }
+
+func TestSetCellsAndManualOrderAtMaxHistory(t *testing.T) {
+	db := NewDefault("HistoryCap", SourceConfig{Type: SourceInline})
+	db.Properties = append(db.Properties, Property{ID: "p_num", Key: "num", Name: "数值", Type: PropNumber})
+	for _, id := range []string{"r1", "r2", "r3"} {
+		db.InlineRows = append(db.InlineRows, &Record{
+			ID:    id,
+			Title: strings.ToUpper(id),
+			Props: map[string]Value{
+				"prop_status": TextValue("未开始"),
+				"p_num":       NumberValue(0),
+			},
+		})
+	}
+	viewID := db.Views[0].ID
+	db.Views[0].ManualOrder = []string{"r1", "r2", "r3"}
+
+	st := NewStore("", "cap.db.md", db)
+	for i := 1; i <= maxHistoryEntries+5; i++ {
+		if _, err := st.SetCell("r1", "p_num", NumberValue(float64(i))); err != nil {
+			t.Fatalf("SetCell %d: %v", i, err)
+		}
+	}
+	if st.History().Len() != maxHistoryEntries {
+		t.Fatalf("expected history capped at %d, got %d", maxHistoryEntries, st.History().Len())
+	}
+
+	// 1. Combined cell edit + manual order when history is full.
+	wantOrder1 := []string{"r2", "r3", "r1"}
+	if _, err := st.SetCellsAndManualOrder(
+		[]CellEdit{{RecordID: "r2", PropID: "prop_status", Value: TextValue("已完成")}},
+		viewID,
+		wantOrder1,
+	); err != nil {
+		t.Fatalf("SetCellsAndManualOrder: %v", err)
+	}
+	if got := st.Record("r2").Props["prop_status"].Text; got != "已完成" {
+		t.Fatalf("status after SetCellsAndManualOrder = %q, want 已完成", got)
+	}
+	if got := st.SchemaSnapshot().Views[0].ManualOrder; !slices.Equal(got, wantOrder1) {
+		t.Fatalf("ManualOrder = %v, want %v", got, wantOrder1)
+	}
+
+	if _, ok := st.Undo(); !ok {
+		t.Fatal("expected Undo to succeed")
+	}
+	if got := st.Record("r2").Props["prop_status"].Text; got != "未开始" {
+		t.Fatalf("status after Undo = %q, want 未开始", got)
+	}
+	if got := st.SchemaSnapshot().Views[0].ManualOrder; !slices.Equal(got, []string{"r1", "r2", "r3"}) {
+		t.Fatalf("ManualOrder after Undo = %v, want [r1 r2 r3]", got)
+	}
+
+	if _, ok := st.Redo(); !ok {
+		t.Fatal("expected Redo to succeed")
+	}
+	if got := st.Record("r2").Props["prop_status"].Text; got != "已完成" {
+		t.Fatalf("status after Redo = %q, want 已完成", got)
+	}
+	if got := st.SchemaSnapshot().Views[0].ManualOrder; !slices.Equal(got, wantOrder1) {
+		t.Fatalf("ManualOrder after Redo = %v, want %v", got, wantOrder1)
+	}
+
+	// 2. Identical cell value (no-op SetCellsBatch) + manual order change when history is full.
+	wantOrder2 := []string{"r3", "r2", "r1"}
+	if _, err := st.SetCellsAndManualOrder(
+		[]CellEdit{{RecordID: "r2", PropID: "prop_status", Value: TextValue("已完成")}},
+		viewID,
+		wantOrder2,
+	); err != nil {
+		t.Fatalf("SetCellsAndManualOrder (no-op cell): %v", err)
+	}
+	if _, ok := st.Undo(); !ok {
+		t.Fatal("expected Undo of manual-order-only step to succeed")
+	}
+	if got := st.SchemaSnapshot().Views[0].ManualOrder; !slices.Equal(got, wantOrder1) {
+		t.Fatalf("ManualOrder after Undo of no-op cell step = %v, want %v", got, wantOrder1)
+	}
+	if _, ok := st.Redo(); !ok {
+		t.Fatal("expected Redo of manual-order-only step to succeed")
+	}
+	if got := st.SchemaSnapshot().Views[0].ManualOrder; !slices.Equal(got, wantOrder2) {
+		t.Fatalf("ManualOrder after Redo of no-op cell step = %v, want %v", got, wantOrder2)
+	}
+}
+
+func TestSpliceManualOrderPreservesFilteredRecords(t *testing.T) {
+	db := NewDefault("FilteredOrder", SourceConfig{Type: SourceInline})
+	var initOrder []string
+	for i := range 10 {
+		id := fmt.Sprintf("row_%02d", i)
+		initOrder = append(initOrder, id)
+		status := "未开始"
+		if i == 2 || i == 7 {
+			status = "进行中"
+		}
+		db.InlineRows = append(db.InlineRows, &Record{
+			ID:    id,
+			Title: fmt.Sprintf("Task %02d", i),
+			Props: map[string]Value{"prop_status": TextValue(status)},
+		})
+	}
+	viewID := db.Views[0].ID
+	db.Views[0].ManualOrder = slices.Clone(initOrder)
+	db.Views[0].Filter = &FilterGroup{
+		Conjunction: "and",
+		Rules:       []FilterRule{{ID: "f1", PropertyID: "prop_status", Op: OpEquals, Value: TextValue("进行中")}},
+	}
+
+	st := NewStore("", "filtered.db.md", db)
+	filtered := st.Query(viewID, QueryOptions{})
+	if len(filtered.Rows) != 2 || filtered.Rows[0].ID != "row_02" || filtered.Rows[1].ID != "row_07" {
+		t.Fatalf("expected 2 visible rows [row_02 row_07], got %+v", filtered.Rows)
+	}
+
+	// Reorder the 2 visible rows (move row_07 before row_02) while 8 rows are filtered out.
+	curView, _ := st.SchemaSnapshot().ViewByID(viewID)
+	nextOrder := SpliceManualOrder(curView.ManualOrder, st.Records(), "row_07", "row_02", "")
+	if err := st.SetManualOrder(viewID, nextOrder); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFull := []string{
+		"row_00", "row_01", "row_07", "row_02", "row_03",
+		"row_04", "row_05", "row_06", "row_08", "row_09",
+	}
+	if got := st.SchemaSnapshot().Views[0].ManualOrder; !slices.Equal(got, wantFull) {
+		t.Fatalf("ManualOrder = %v, want %v", got, wantFull)
+	}
+
+	// Clear filter and verify all 10 rows appear in exact preserved order.
+	unfilteredView := curView.Clone()
+	unfilteredView.ManualOrder = slices.Clone(nextOrder)
+	unfilteredView.Filter = nil
+	if err := st.UpdateView(unfilteredView); err != nil {
+		t.Fatal(err)
+	}
+	allRes := st.Query(viewID, QueryOptions{})
+	gotIDs := make([]string, len(allRes.Rows))
+	for i, r := range allRes.Rows {
+		gotIDs[i] = r.ID
+	}
+	if !slices.Equal(gotIDs, wantFull) {
+		t.Fatalf("unfiltered query rows = %v, want %v", gotIDs, wantFull)
+	}
+}
+
+func TestCloneSchemaAndSchemaSnapshotOmitInlineRows(t *testing.T) {
+	db := NewDefault("SchemaSnap", SourceConfig{Type: SourceInline, TagFilter: []string{"#work"}})
+	db.Icon = "📦"
+	db.Cover = "assets/cover.jpg"
+	db.Templates = []Template{{
+		ID:    "tpl_1",
+		Name:  "Bug",
+		Props: map[string]Value{"prop_status": TextValue("未开始")},
+	}}
+	db.InlineRows = []*Record{{
+		ID:    "r1",
+		Title: "Inline Row",
+		Props: map[string]Value{"prop_status": TextValue("进行中")},
+	}}
+
+	st := NewStore("", "snap.db.md", db)
+	snap := st.SchemaSnapshot()
+	if snap == nil {
+		t.Fatal("SchemaSnapshot returned nil")
+	}
+	if snap.InlineRows != nil {
+		t.Fatalf("expected SchemaSnapshot InlineRows == nil, got %+v", snap.InlineRows)
+	}
+	if snap.Title != "SchemaSnap" || snap.Icon != "📦" || snap.Cover != "assets/cover.jpg" ||
+		snap.Version != CurrentVersion || snap.ActiveView != db.ActiveView || len(snap.Templates) != 1 {
+		t.Fatalf("unexpected SchemaSnapshot metadata: %+v", snap)
+	}
+
+	// Mutating snapshot slices/maps must not affect Store state.
+	snap.Properties[0].Name = "Mutated"
+	snap.Views[0].Name = "MutatedView"
+	snap.Templates[0].Props["prop_status"] = TextValue("Mutated")
+	snap.Source.TagFilter[0] = "#mutated"
+
+	fresh := st.Database()
+	if fresh.Properties[0].Name == "Mutated" || fresh.Views[0].Name == "MutatedView" ||
+		fresh.Templates[0].Props["prop_status"].Text == "Mutated" || fresh.Source.TagFilter[0] == "#mutated" {
+		t.Fatal("mutating SchemaSnapshot leaked into Store")
+	}
+	if len(fresh.InlineRows) != 1 {
+		t.Fatalf("expected Store.Database() to still include InlineRows, got %d", len(fresh.InlineRows))
+	}
+}

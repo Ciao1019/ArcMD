@@ -4,9 +4,11 @@ package pdfdoc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 	_ "image/png"
 	"net/url"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -165,7 +168,7 @@ func openPlatformFile(path string) (platformDoc, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &cliLinuxPDF{path: path, raw: raw}, nil
+		return &cliLinuxPDF{path: filepath.Clean(path), raw: raw}, nil
 	}
 	return nil, errors.New("poppler unavailable")
 }
@@ -349,8 +352,15 @@ func (l *linuxPDF) Close() {
 }
 
 type cliLinuxPDF struct {
+	mu   sync.Mutex
 	path string
 	raw  *rawPDF
+}
+
+func (c *cliLinuxPDF) SetPath(p string) {
+	c.mu.Lock()
+	c.path = filepath.Clean(p)
+	c.mu.Unlock()
 }
 
 func (c *cliLinuxPDF) PageCount() int { return len(c.raw.pageInfos) }
@@ -368,8 +378,13 @@ func (c *cliLinuxPDF) RenderPage(page int, widthPx, heightPx int, extraRotate in
 	if rot == 90 || rot == 270 {
 		baseW = heightPx
 	}
+	c.mu.Lock()
+	pdfPath := c.path
+	c.mu.Unlock()
 	pNum := fmt.Sprintf("%d", page+1)
-	cmd := exec.Command(pdftoppmBin, "-png", "-singlefile", "-f", pNum, "-l", pNum, "-scale-to-x", fmt.Sprintf("%d", baseW), "-scale-to-y", "-1", c.path)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, pdftoppmBin, "-png", "-singlefile", "-f", pNum, "-l", pNum, "-scale-to-x", fmt.Sprintf("%d", baseW), "-scale-to-y", "-1", "--", pdfPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -380,16 +395,7 @@ func (c *cliLinuxPDF) RenderPage(page int, widthPx, heightPx int, extraRotate in
 	}
 	b := img.Bounds()
 	rgba := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	for y := range b.Dy() {
-		for x := range b.Dx() {
-			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-			off := y*rgba.Stride + x*4
-			rgba.Pix[off] = uint8(r >> 8)
-			rgba.Pix[off+1] = uint8(g >> 8)
-			rgba.Pix[off+2] = uint8(bl >> 8)
-			rgba.Pix[off+3] = uint8(a >> 8)
-		}
-	}
+	draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
 	return rotateRGBA(rgba, rot), nil
 }
 

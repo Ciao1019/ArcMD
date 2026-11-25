@@ -204,8 +204,9 @@ func TestNewDocSlidesButton(t *testing.T) {
 	if maxStep > 28 {
 		t.Fatalf("新建 jumped %v DIPs in one frame: %v", maxStep, ys)
 	}
-	if total := ys[len(ys)-1] - before; total < 38 || total > 44 {
-		t.Fatalf("新建 moved %v DIPs, want ~41: %v", total, ys)
+	want := a.sidebarRowHeight() + rowGap
+	if total := ys[len(ys)-1] - before; total < want-3 || total > want+3 {
+		t.Fatalf("新建 moved %v DIPs, want ~%v: %v", total, want, ys)
 	}
 }
 

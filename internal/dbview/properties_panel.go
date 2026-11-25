@@ -22,7 +22,7 @@ func PagePropertiesView(
 	if store == nil || st == nil {
 		return
 	}
-	db := store.Database()
+	db := store.SchemaSnapshot()
 	rec := store.Record(recordID)
 	if db == nil || rec == nil {
 		return

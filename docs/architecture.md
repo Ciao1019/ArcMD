@@ -4,20 +4,29 @@ ArcMD is one Go binary with no web stack: [MyGo](https://github.com/egoist/mygo)
 opens the window and draws the interface on the GPU from Go (`package ui`).
 
 ```
-cmd/arcmd ──▶ internal/app ──▶ internal/space    spaces and spaces.json
-                   │      ├──▶ internal/vault    documents and import files in a space folder
-                   │      ├──▶ internal/plugin   manifests, registry, install, Host contract
-                   │      ├──▶ internal/document rich document model, codec and transactions
-                   │      ├──▶ internal/editor   native layout, input and interchange
-                   │      ├──▶ internal/database amphibious .db.md schema, query, formula & sync engine
-                   │      ├──▶ internal/dbview   native 9-view database UI and spring motion engine
-                   │      └──▶ internal/fuzzy    command bar ranking
-                   ▼
-            github.com/egoist/mygo (mygo, ui)
+cmd/arcmd ──▶ internal/app ──▶ internal/space       spaces and spaces.json (v10)
+    │              │      ├──▶ internal/vault       documents and file ops inside a Space
+    │              │      ├──▶ internal/document    rich document model, codec and transactions
+    │              │      ├──▶ internal/editor      native layout, input and Markdown interchange
+    │              │      ├──▶ internal/whiteboard  hand-drawn .excalidraw.svg scene & Rough engine
+    │              │      ├──▶ internal/database    amphibious .db.md schema, query, Formula 2.0 & sync
+    │              │      ├──▶ internal/dbview      native 9-view database UI and spring motion engine
+    │              │      ├──▶ internal/mindmap     native document mind-map layout & navigation
+    │              │      ├──▶ internal/pdf / pdfdoc / bookdoc   vector PDF writer & PDF/EPUB/HTML readers
+    │              │      ├──▶ internal/agent / spacefs          read-only Space Q&A loop & Markdown projection
+    │              │      ├──▶ internal/plugin      marketplace catalog, install, wazero WASM sandbox
+    │              │      └──▶ internal/fuzzy / search           command bar ranking & incremental index
+    ├──▶ internal/agentmcp     stdio MCP server, SKILL.md installer & rich format guide
+    ├──▶ internal/sysproxy     system proxy auto-detection for HTTP transports
+    ▼
+github.com/egoist/mygo v0.10.0 (mygo, ui)
 ```
 
-The domain packages never import MyGo, so they test without a window and can
-serve a future CLI or plugin host.
+The domain packages never import MyGo, so they test without a window and serve
+both the GUI, the CLI (`arcmd ask`, `arcmd space/doc/board/db`), the stdio MCP
+server (`arcmd mcp`), and the plugin host. When a desktop window is open, CLI
+and MCP commands synchronize live over a loopback Bearer-token IPC endpoint
+(`agentctl_ipc.go`), falling back to headless disk operations when closed.
 
 ## The UI layer
 
@@ -48,6 +57,7 @@ cannot show the compositor's decorations.
 | `document.go` | The open rich document and read-only export preview: dirty tracking, autosave, images, links |
 | `split.go`, `splitview.go`, `splitstore.go` | Document pane lifecycle, native split cards and dividers, saved layout |
 | `database.go`, `newmodal.go` | Database workspace host, side/center peek drawers, sidebar view tree, unified new-item modal |
+| `agentctl*.go` | Local CLI/MCP loopback IPC server and live/headless Space, Markdown, whiteboard & database controllers |
 | `theme.go` | Design tokens: the space-tinted theme and chrome colors |
 
 ### Window
@@ -122,7 +132,7 @@ conversion and word navigation read only intersecting leaves. A flattened
 display string is materialized only for consumers that need the whole value.
 The writing surface supplies its accessibility value through MyGo's lazy
 `Access` callback, retaining the full display text, including preedit. MyGo
-0.7.4 keeps that callback's node type internal; a small generic bridge infers
+v0.10.0 keeps that callback's node type internal; a small generic bridge infers
 the type and sets its exported `Value` field through reflection, without unsafe
 access or a toolkit fork.
 
@@ -223,9 +233,10 @@ writes never trigger a scan, rewrites follow the events' old→new paths and
 only fall back to name matching when exactly one file matches, closed
 documents are rescanned and rewritten in the background with a kept history
 snapshot of the previous content — while reading alone already resolves them,
-so opening a document never writes it. Missing pictures keep their negative
+so opening a document never writes it. missing pictures keep their negative
 resolution in a cache cleared on file events, so a broken reference does not
-walk the folder every frame. GIFs show their first frame.
+walk the folder every frame. Animated GIFs play in view, falling back to their
+first frame for print, export, thumbnails, and reduced motion.
 
 `editor/images.go` owns image layout, recovery cards, focus targets and the
 image preview. Figures follow Textus: natural size, centered in the column,
@@ -250,8 +261,8 @@ MyGo's `OnOpenFile` handles installed file associations and Dock drops. A single
 instance forwards later opens to the existing window. Development command-line
 runs also accept document paths. The deepest matching Space owns an opened file;
 external files belong to a single built-in External space, created on first use
-and retained even when empty. State version 9 stores an explicit local-name to
-absolute-file map. This collection never scans parent directories: sidebar,
+and retained even when empty. State version 10 stores an explicit local-name to
+absolute-file map alongside per-Space `attachmentsDir` settings. This collection never scans parent directories: sidebar,
 library, search and agent tools see only registered files. Duplicate basenames
 receive distinct list names. A single-file watcher follows each entry; file
 reads, in-place saves, images and exports use the original location.
@@ -269,10 +280,13 @@ its temporary output. A completed export is published under an exclusive,
 numbered filename, never over an existing PDF. Printing opens a unique temporary
 PDF in the system viewer.
 
-`internal/pdf.Writer` streams JPEG pages and retains only object offsets and a
-Unicode alphabet. An invisible Unicode text layer uses the editor's cluster
-positions for selection, copying and search; formula artwork and image pixels
-remain raster content. This is not a tagged PDF or a fully vector export.
+`internal/pdf.Writer` streams pure-Go vector PDF objects directly: glyph outlines
+from embedded KaTeX and system fonts are emitted as Type 3 font subsets with
+`/ToUnicode` CMaps for crisp zoom, selection, copying and search; headings
+produce hierarchical `/Outlines` bookmarks; external URLs and internal heading
+anchors emit clickable `/Link` annotations; tables, code blocks, formulas,
+Mermaid diagrams and whiteboards render as vector paths while raster images embed
+directly.
 
 ## Plugins
 
@@ -280,13 +294,14 @@ See [plugins.md](plugins.md).
 
 ### Reading and inline editing
 
-Document version 6 adds `Style.Script` (`sup`/`sub`), `Style.NoMath` for literal
-Markdown dollars, `Block.ImageWidth`, and footnote blocks with `NoteLabel`.
-Versions 1–5 migrate in memory; older versions claiming newer attributes are
+Legacy `.arcmd` format version 9 supports `Style.Script` (`sup`/`sub`), `Style.NoMath` for literal
+Markdown dollars, `Block.ImageWidth`, footnote blocks with `NoteLabel`, hand-drawn annotations,
+custom callout emoji, `toggle` disclosures, and document word `goal`s.
+Versions 1–8 migrate in memory; older versions claiming newer attributes are
 rejected. Footnote definitions keep styled text, references stay lossless in
 runs, and numbering follows first reference order. Jump/return remembers the
 originating reference. Scripts use native inline objects per grapheme because
-MyGo 0.7.4 measures baseline shifts but its glyph painter omits the displacement.
+MyGo v0.10.0 measures baseline shifts while inline script objects preserve exact displacement.
 The layout mapping preserves selection boundaries and the PDF text layer.
 
 `linkpopover.go` edits a captured range beside the link. A revision check

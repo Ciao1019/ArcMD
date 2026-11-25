@@ -407,7 +407,7 @@ func renderCalendarSidebar(
 						if checked {
 							box.Background(evCol.line)
 							box.Children(func() {
-								ui.Icon(c, iconCheck).FontSize(10).TextColor(ui.RGB(255, 255, 255))
+								ui.Icon(c, iconCheck).FontSize(10).TextColor(evCol.selectedText)
 							})
 						} else {
 							box.Background(ui.Transparent).Border(1.5, evCol.line)
@@ -832,6 +832,22 @@ func renderCalendarWeekdayBar(c *ui.Context, cfg database.CalendarViewConfig, pa
 	})
 }
 
+func (s *State) requestCalMeasureOnce(c *ui.Context, key string, w float32) {
+	if s == nil {
+		return
+	}
+	if w > 0 {
+		if s.calZeroWidthRetriedKey == key {
+			s.calZeroWidthRetriedKey = ""
+		}
+		return
+	}
+	if s.calZeroWidthRetriedKey != key {
+		s.calZeroWidthRetriedKey = key
+		c.AnimationFrame()
+	}
+}
+
 func renderMonthView(
 	c *ui.Context,
 	st *State,
@@ -858,8 +874,8 @@ func renderMonthView(
 
 		scroll := ui.Scroll(c.Key("cal-scroll")).TrackScroll(&st.CalendarScroll).Grow(1).MinHeight(0)
 		gridW := scroll.LayoutBounds().W
+		st.requestCalMeasureOnce(c, view.ID+":month", gridW)
 		if gridW <= 0 {
-			c.AnimationFrame()
 			gridW = 880
 		}
 

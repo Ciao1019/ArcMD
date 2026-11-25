@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ciao1019/ArcMD/internal/agentmcp"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
@@ -34,7 +35,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -305,8 +306,22 @@ type App struct {
 	pageDBCache       map[string]*pageDBEntry
 	embedDBs          map[string]*embedDBEntry
 	dbViewListCache   map[string]*sidebarDBMeta
+	dbThumbCache      map[string]cachedImage
+	dbThumbOrder      []string
 	dbViewRename      sidebarDBViewRename
 	pagePropsExpanded map[string]bool
+
+	conflictsCache []persistedConflict
+	conflictsValid bool
+	docConflictGen uint64
+	docConflict    docConflictSyncCache
+
+	agentIPC           *agentIPCServer
+	agentHomeDir       string
+	agentSkillTargets  []agentmcp.SkillTarget
+	agentBinCmd        string
+	agentSkillsChecked bool
+	controlExec        func(func() (any, error)) (any, error)
 }
 
 // trashItem moves the file or folder at p to the system's trash.
@@ -534,13 +549,16 @@ func (a *App) Run() error {
 		a.search.async = true
 		a.refreshSearch()
 		a.updates.svc, a.updates.async = mygoUpdates{}, true
+		_ = a.startAgentIPC()
 		a.win.OnClose(func(event *mygo.CloseEvent) {
 			if !a.closeMain(a.win, runtime.GOOS) {
 				event.PreventDefault()
 			}
 		})
 	})
-	return mygo.App.Run()
+	err := mygo.App.Run()
+	a.stopAgentIPC()
+	return err
 }
 
 type mainWindow interface {
@@ -601,6 +619,8 @@ func (a *App) closeMain(w mainWindow, goos string) bool {
 		return false
 	}
 	a.cancelPDF()
+	a.clearDBThumbCache("")
+	a.stopAgentIPC()
 	a.closePlugins()
 	return true
 }
@@ -763,10 +783,11 @@ func (a *App) retireClosedDocuments(candidates ...*document) {
 	if len(a.imgResolved) > 0 {
 		removed := 0
 		for k := range a.imgResolved {
-			if k.doc == nil || !resident[k.doc] {
-				if k.doc != nil {
-					k.doc.close()
-				}
+			if k.doc != nil && !resident[k.doc] {
+				k.doc.close()
+				delete(a.imgResolved, k)
+				removed++
+			} else if k.doc == nil && len(resident) == 0 {
 				delete(a.imgResolved, k)
 				removed++
 			}
@@ -1427,8 +1448,10 @@ func (a *App) finishRename(openDuplicated bool) {
 		rel = renaming.rel
 	}
 	sources := a.renameSources(sp, rel)
+	a.releasePDFHandles(sp, rel)
 	to, err := renameFile(sp, rel, name)
 	if err != nil {
+		a.reopenResidentPDFs(sp, rel)
 		a.notify("重命名 %s 失败。%v", path.Base(rel), err)
 		if dupPending {
 			a.flushPendingDupUndo(sp.ID, rel)
@@ -1443,6 +1466,8 @@ func (a *App) finishRename(openDuplicated bool) {
 		if vault.IsDocument(rel) {
 			a.relink(vault.Title(rel), vault.Title(to), sources)
 		}
+	} else {
+		a.reopenResidentPDFs(sp, rel)
 	}
 	if dupPending {
 		a.flushPendingDupUndo(sp.ID, to)
@@ -1491,6 +1516,7 @@ func (a *App) moved(sp *space.Space, from, to string) {
 	_ = history.Move(sp.Root, from, to)
 	a.state.Renamed(sp.ID, from, to)
 	a.invalidateResolvedImages()
+	a.invalidateConflictsCache()
 	if a.dragGrab.active && a.dragGrab.space == sp.ID && a.dragGrab.rel == from {
 		a.dragGrab.rel = to
 	}
@@ -1524,6 +1550,7 @@ func (a *App) switchSpaceOnly(id string) bool {
 	}
 	a.suspendSplit()
 	a.state.SetActive(id)
+	a.invalidateConflictsCache()
 	a.saveState()
 	a.syncOpen()
 	a.doc = nil
@@ -1653,7 +1680,9 @@ func (a *App) trash(rel string) {
 		return
 	}
 	kept, ok := a.keepDeleted(sp.ID, sp.Name, sp.Root, rel)
+	a.releasePDFHandles(sp, rel)
 	if err := a.trashItem(p); err != nil {
+		a.reopenResidentPDFs(sp, rel)
 		if ok {
 			a.bin.Forget(kept)
 		}
@@ -1668,6 +1697,7 @@ func (a *App) trash(rel string) {
 	a.forgetPicks(sp.ID, rel)
 	a.forgetCopied(sp.ID, rel)
 	a.state.Forget(sp.ID, rel)
+	a.invalidateConflictsCache()
 	a.saveState()
 	a.refreshTree()
 	if ok {
@@ -1695,6 +1725,7 @@ func (a *App) reloadPlugins() {
 		a.notify("读取插件文件夹失败。%v", err)
 	}
 	a.syncPluginInstances()
+	a.invalidateConflictsCache()
 }
 
 // defaultRoot returns the folder a new space named name gets by default.

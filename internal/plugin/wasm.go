@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/fsutil"
 	"github.com/tetratelabs/wazero"
@@ -26,9 +27,32 @@ import (
 )
 
 const (
-	maxStateBytes    = 16 << 20
-	maxHTTPBodyBytes = 64 << 20
+	maxStateBytes       = 16 << 20
+	maxHTTPBodyBytes    = 64 << 20
+	maxPluginStdioBytes = 1 << 20
+	wasmMemoryLimitPage = 4096 // 256 MiB (4096 * 64 KiB)
 )
+
+type limitedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	origLen := len(p)
+	rem := b.limit - b.buf.Len()
+	if rem <= 0 {
+		b.truncated = true
+		return origLen, nil
+	}
+	if len(p) > rem {
+		b.truncated = true
+		p = p[:rem]
+	}
+	_, _ = b.buf.Write(p)
+	return origLen, nil
+}
 
 type invCtxKey struct{}
 
@@ -52,7 +76,11 @@ func NewWASMHost(ctx context.Context, cfg HostConfig) (*WASMHost, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rCfg := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	if cfg.HTTPClient == nil {
+		defaultClient := &http.Client{Timeout: 60 * time.Second}
+		cfg.HTTPClient = func() *http.Client { return defaultClient }
+	}
+	rCfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(wasmMemoryLimitPage).WithCloseOnContextDone(true)
 	rt := wazero.NewRuntimeWithConfig(ctx, rCfg)
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
 		_ = rt.Close(ctx)
@@ -187,12 +215,13 @@ func (w *wasmInstance) Invoke(ctx context.Context, req Request) (*Response, erro
 	}
 	invCtx := context.WithValue(ctx, invCtxKey{}, inv)
 
-	var stdout, stderr bytes.Buffer
+	stdout := &limitedBuffer{limit: maxPluginStdioBytes}
+	stderr := &limitedBuffer{limit: maxPluginStdioBytes}
 	modCfg := wazero.NewModuleConfig().
 		WithName("").
 		WithStdin(bytes.NewReader(reqBytes)).
-		WithStdout(&stdout).
-		WithStderr(&stderr).
+		WithStdout(stdout).
+		WithStderr(stderr).
 		WithRandSource(rand.Reader).
 		WithSysWalltime().
 		WithSysNanotime().
@@ -209,13 +238,16 @@ func (w *wasmInstance) Invoke(ctx context.Context, req Request) (*Response, erro
 		}
 	}
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(stderr.buf.String())
 		if msg != "" {
 			return nil, fmt.Errorf("plugin: %s: %w (%s)", w.installed.Manifest.ID, err, msg)
 		}
 		return nil, fmt.Errorf("plugin: %s: %w", w.installed.Manifest.ID, err)
 	}
-	rawOut := bytes.TrimSpace(stdout.Bytes())
+	if stdout.truncated {
+		return nil, fmt.Errorf("plugin: %s output exceeds %d bytes", w.installed.Manifest.ID, maxPluginStdioBytes)
+	}
+	rawOut := bytes.TrimSpace(stdout.buf.Bytes())
 	if len(rawOut) == 0 {
 		return &Response{}, nil
 	}
@@ -514,7 +546,7 @@ func (h *WASMHost) doHTTP(ctx context.Context, req HostRequest, body []byte) (Ho
 		client = h.cfg.HTTPClient()
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 60 * time.Second}
 	}
 	// Shallow copy so CheckRedirect guards every hop without mutating a shared client.
 	guarded := *client

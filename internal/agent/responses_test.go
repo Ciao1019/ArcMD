@@ -275,3 +275,33 @@ func TestFitCountsPlainTextAfterSwitch(t *testing.T) {
 		t.Fatal("budget ignored assistant text sent by the new provider")
 	}
 }
+
+func TestResponsesCutSSEFrameWrapsErrStreamCutAndRetries(t *testing.T) {
+	c := Responses{}
+	_, err := c.readStream(context.Background(), strings.NewReader(`data: {"type":"response.reasoning_summary_text.del`), func(Delta) {})
+	if !errors.Is(err, ErrStreamCut) || !Retryable(err) {
+		t.Fatalf("expected ErrStreamCut on truncated SSE data frame, got %v", err)
+	}
+
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if attempts == 1 {
+			fmt.Fprint(w, `data: {"type":"response.function_call_arguments.delta","del`)
+			return
+		}
+		sse(w, `{"type":"response.output_text.delta","delta":"recovered"}`, `{"type":"response.completed","response":{"status":"completed"}}`)
+	}))
+	defer srv.Close()
+
+	a := Agent{
+		Provider: &Responses{ChatCompletions{BaseURL: srv.URL, Model: "test"}},
+		Retries:  1,
+		Wait:     func(context.Context, int) error { return nil },
+	}
+	msgs, err := a.Run(context.Background(), []Message{{Role: User, Text: "q"}}, nil)
+	if err != nil || attempts != 2 || len(msgs) != 1 || msgs[0].Text != "recovered" {
+		t.Fatalf("expected automatic retry on cut SSE frame: attempts=%d msgs=%+v err=%v", attempts, msgs, err)
+	}
+}

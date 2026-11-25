@@ -596,7 +596,7 @@ func renderColumnHeaderCell(
 			})
 			colHandle.Opacity(vis).IgnoreInput(!(hovered || colOpen))
 			if colHandle.Hovered() || colOpen {
-				colHandle.Background(be.primary.Mix(ui.RGB(255, 255, 255), 0.14))
+				colHandle.Background(be.primaryHover)
 			}
 			colHandle.Children(func() {
 				ui.Icon(c, iconMoreHoriz).FontSize(10).TextColor(be.primaryFg)
@@ -940,7 +940,7 @@ func renderRecordRow(
 					})
 					rowHandle.Opacity(rVis).IgnoreInput(!(hovered || rowOpen || rowDragging))
 					if rowHandle.Hovered() || rowOpen {
-						rowHandle.Background(be.primary.Mix(ui.RGB(255, 255, 255), 0.14))
+						rowHandle.Background(be.primaryHover)
 					}
 					if len(view.Sorts) == 0 {
 						rowHandle.Drag(rowDrag{recordID: rec.ID})
@@ -1403,20 +1403,30 @@ func reorderViewColumn(st *State, view *database.ViewConfig, db *database.Databa
 }
 
 func reorderRecordRow(st *State, view *database.ViewConfig, res *database.QueryResult, fromID, toID string, opts Options) {
-	if res == nil || len(res.Rows) == 0 {
+	if view == nil || res == nil || len(res.Rows) == 0 || fromID == "" || toID == "" || fromID == toID {
 		return
 	}
-	ids := make([]string, len(res.Rows))
-	for i, r := range res.Rows {
-		ids[i] = r.ID
-	}
-	fromIdx := slices.Index(ids, fromID)
-	toIdx := slices.Index(ids, toID)
+	fromIdx := slices.IndexFunc(res.Rows, func(r *database.Record) bool { return r != nil && r.ID == fromID })
+	toIdx := slices.IndexFunc(res.Rows, func(r *database.Record) bool { return r != nil && r.ID == toID })
 	if fromIdx < 0 || toIdx < 0 || fromIdx == toIdx {
 		return
 	}
-	ids = slices.Delete(ids, fromIdx, fromIdx+1)
-	ids = slices.Insert(ids, toIdx, fromID)
+	var beforeID, afterID string
+	if fromIdx > toIdx {
+		beforeID = toID
+	} else {
+		afterID = toID
+	}
+	var allRecords []*database.Record
+	if st != nil && st.Store != nil {
+		allRecords = st.Store.Records()
+	} else {
+		allRecords = res.Rows
+	}
+	ids := database.SpliceManualOrder(view.ManualOrder, allRecords, fromID, beforeID, afterID)
+	if st == nil || st.Store == nil || len(ids) == 0 {
+		return
+	}
 	if err := st.Store.SetManualOrder(view.ID, ids); err == nil && opts.OnChanged != nil {
 		opts.OnChanged(nil)
 	}

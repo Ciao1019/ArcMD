@@ -196,3 +196,36 @@ func stringContains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestSidebarDensityRoundTrip(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	p, err := s.Load()
+	if err != nil || p.SidebarRowHeight() != 32 {
+		t.Fatalf("default sidebar row height = %v, err=%v", p.SidebarRowHeight(), err)
+	}
+	for _, tc := range []struct {
+		density string
+		want    float32
+	}{
+		{"compact", 28},
+		{"", 32},
+		{"comfortable", 40},
+	} {
+		p.SidebarDensity = tc.density
+		if err := s.Save(p); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Load()
+		if err != nil || got.SidebarDensity != tc.density || got.SidebarRowHeight() != tc.want {
+			t.Fatalf("density %q: got %+v height=%v err=%v", tc.density, got, got.SidebarRowHeight(), err)
+		}
+	}
+	p.SidebarDensity = "giant"
+	if err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Load()
+	if err != nil || got.SidebarDensity != "" || got.SidebarRowHeight() != 32 {
+		t.Fatalf("invalid density did not fall back: %+v err=%v", got, err)
+	}
+}

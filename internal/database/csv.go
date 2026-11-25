@@ -668,6 +668,9 @@ func extractZipSecure(zipPath, destDir string, totalWritten *int64, limit int64,
 	hasContent := false
 
 	for _, f := range zr.File {
+		if f.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("database: unsafe symlink zip entry %q", f.Name)
+		}
 		relName := filepath.Clean(filepath.FromSlash(strings.ReplaceAll(f.Name, `\`, "/")))
 		if relName == "." || relName == "" {
 			continue

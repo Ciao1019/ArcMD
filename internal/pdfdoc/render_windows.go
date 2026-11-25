@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/draw"
 	_ "image/png"
 	"runtime"
 	"sync"
@@ -345,16 +346,7 @@ func (w *winPDF) RenderPage(page int, widthPx, heightPx int, extraRotate int) (*
 	}
 	b := img.Bounds()
 	rgba := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	for y := range b.Dy() {
-		for x := range b.Dx() {
-			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
-			off := y*rgba.Stride + x*4
-			rgba.Pix[off] = uint8(r >> 8)
-			rgba.Pix[off+1] = uint8(g >> 8)
-			rgba.Pix[off+2] = uint8(bl >> 8)
-			rgba.Pix[off+3] = uint8(a >> 8)
-		}
-	}
+	draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
 	return rotateRGBA(rgba, rot), nil
 }
 

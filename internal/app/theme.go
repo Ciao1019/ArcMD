@@ -420,7 +420,7 @@ func closeMarkInk(t *ui.Theme) ui.Color {
 	return pick(t, t.Text.Alpha(0.55), white.Alpha(0.6))
 }
 
-// docPalette are the colors of documents' icons (docicon.go): quiet hues
+// docPalette are the colors of documents' icons (documentmap.go): quiet hues
 // spread around the wheel, each dark enough to read on its own tint.
 var docPalette = []ui.Color{
 	ui.RGB(0x3B, 0x82, 0xF6), // blue
@@ -437,12 +437,10 @@ var docPalette = []ui.Color{
 	ui.RGB(0x08, 0x91, 0xB2), // cyan
 }
 
-// docIconColors are the letter's color and the tint behind it of the
-// document titled title: the color itself on a light tint, lighter on a
-// deeper tint in the dark.
-func docIconColors(t *ui.Theme, title string) (ink, fill ui.Color) {
-	c := docPalette[docColorIndex(title)]
-	return pick(t, c.Mix(black, 0.08), c.Mix(white, 0.35)), pick(t, c.Alpha(0.16), c.Alpha(0.28))
+// docIconInk is the quiet monochrome tone of file-type icons in the sidebar,
+// toolbar, and cards, following the chrome's ink without noisy badge fills.
+func docIconInk(t *ui.Theme) ui.Color {
+	return pick(t, t.Text.Alpha(0.62), white.Alpha(0.68))
 }
 
 // previewLook are the colors of the card a folder or a document shows

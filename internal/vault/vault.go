@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/Ciao1019/ArcMD/internal/fsutil"
 )
@@ -358,14 +359,47 @@ func Create(root, dir, title string) (string, error) {
 	return "", fmt.Errorf("vault: too many documents named %q", title)
 }
 
-// sanitize makes title a file name that every platform accepts.
-func sanitize(title string) string {
+// SanitizeName makes title a file name that every platform accepts.
+func SanitizeName(title string) string {
 	title = strings.Map(func(r rune) rune {
 		switch {
-		case r < 32 || strings.ContainsRune(`/\:*?"<>|`, r):
+		case r < 0x20:
+			return -1
+		case strings.ContainsRune(`/\:*?"<>|`, r):
 			return '-'
 		}
 		return r
 	}, title)
-	return strings.Trim(strings.TrimSpace(title), ".")
+	title = strings.TrimFunc(title, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '.'
+	})
+	if title == "" {
+		return ""
+	}
+	stem := title
+	if dot := strings.IndexByte(title, '.'); dot >= 0 {
+		stem = title[:dot]
+	}
+	stem = strings.TrimRightFunc(stem, unicode.IsSpace)
+	if isWindowsReservedName(stem) {
+		return "_" + title
+	}
+	return title
+}
+
+func isWindowsReservedName(stem string) bool {
+	switch strings.ToUpper(stem) {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		"COM\u00b9", "COM\u00b2", "COM\u00b3",
+		"LPT\u00b9", "LPT\u00b2", "LPT\u00b3":
+		return true
+	}
+	return false
+}
+
+// sanitize makes title a file name that every platform accepts.
+func sanitize(title string) string {
+	return SanitizeName(title)
 }

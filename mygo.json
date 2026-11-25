@@ -2,7 +2,7 @@
   "name": "ArcMD",
   "slug": "arcmd",
   "identifier": "com.cizai.arcmd",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "icon": "resources/icon.png",
   "main": "./cmd/arcmd",
@@ -20,6 +20,30 @@
       "name": "ArcMD Document",
       "mimeType": "application/x-arcmd",
       "role": "Editor"
+    },
+    {
+      "ext": ["excalidraw"],
+      "name": "Excalidraw Whiteboard",
+      "mimeType": "application/vnd.excalidraw+json",
+      "role": "Editor"
+    },
+    {
+      "ext": ["pdf"],
+      "name": "PDF Document",
+      "mimeType": "application/pdf",
+      "role": "Viewer"
+    },
+    {
+      "ext": ["epub"],
+      "name": "EPUB Book",
+      "mimeType": "application/epub+zip",
+      "role": "Viewer"
+    },
+    {
+      "ext": ["html", "htm"],
+      "name": "HTML Document",
+      "mimeType": "text/html",
+      "role": "Viewer"
     }
   ],
   "macos": {

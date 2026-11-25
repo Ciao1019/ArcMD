@@ -57,28 +57,6 @@ func filterRowsByAssignee(rows []*database.Record, personProp *database.Property
 	return out
 }
 
-var boardAvatarPalette = []ui.Color{
-	ui.Hex("#3B82F6"),
-	ui.Hex("#8B5CF6"),
-	ui.Hex("#10B981"),
-	ui.Hex("#F59E0B"),
-	ui.Hex("#EC4899"),
-	ui.Hex("#0EA5E9"),
-	ui.Hex("#EA580C"),
-	ui.Hex("#14B8A6"),
-}
-
-func personAvatarColor(name string) ui.Color {
-	h := 0
-	for _, r := range name {
-		h = h*31 + int(r)
-	}
-	if h < 0 {
-		h = -h
-	}
-	return boardAvatarPalette[h%len(boardAvatarPalette)]
-}
-
 func personInitial(name string) string {
 	s := strings.TrimSpace(name)
 	if s == "" {
@@ -95,7 +73,7 @@ func renderPersonAvatarCircle(c *ui.Context, name string, size float32, ringColo
 		el.Border(1.5, ringColor)
 	}
 	el.Children(func() {
-		ui.Text(c, personInitial(name)).FontSize(size * 0.46).FontWeight(600).TextColor(ui.RGB(255, 255, 255)).NoWrap()
+		ui.Text(c, personInitial(name)).FontSize(size * 0.46).FontWeight(600).TextColor(solidAvatarTextColor()).NoWrap()
 	})
 	return el
 }
@@ -390,6 +368,7 @@ func moveBoardCardHoriz(
 	st.BoardFocusedCardID = rec.ID
 	st.BoardFocusPending = true
 	applyBoardCardDrop(st, view, db, res, boardCardDrag{
+		state:        st,
 		recordID:     rec.ID,
 		fromGroupKey: fromGroupKey,
 		fromSubKey:   fromSubKey,
@@ -420,20 +399,12 @@ func moveBoardCardVert(
 			}
 		}
 		target := idx + dir
-		if idx < 0 || target < 0 || target >= len(g.Rows) {
+		if idx < 0 || target < 0 || target >= len(g.Rows) || g.Rows[target] == nil {
 			return
-		}
-		beforeID := ""
-		if dir < 0 {
-			beforeID = g.Rows[target].ID
-		} else if target+1 < len(g.Rows) {
-			beforeID = g.Rows[target+1].ID
 		}
 		st.BoardFocusedCardID = recordID
 		st.BoardFocusPending = true
-		if beforeID != "" {
-			reorderRecordRow(st, view, res, recordID, beforeID, opts)
-		}
+		reorderRecordRow(st, view, res, recordID, g.Rows[target].ID, opts)
 		return
 	}
 }
@@ -475,24 +446,6 @@ func splitDayflowBoardProps(db *database.Database, bcfg database.BoardViewConfig
 	return priProp, dateProp, personProp, extra
 }
 
-func priorityLevelAndColor(valText string, opt database.SelectOption) (bars int, color ui.Color) {
-	low := strings.ToLower(strings.TrimSpace(valText))
-	switch {
-	case strings.Contains(low, "p0") || strings.Contains(low, "紧急") || strings.Contains(low, "high") || strings.Contains(low, "高"):
-		return 3, ui.Hex("#EF4444")
-	case strings.Contains(low, "p1") || strings.Contains(low, "medium") || strings.Contains(low, "中"):
-		return 2, ui.Hex("#F59E0B")
-	case strings.Contains(low, "p2") || strings.Contains(low, "p3") || strings.Contains(low, "low") || strings.Contains(low, "低"):
-		return 1, ui.Hex("#22C55E")
-	default:
-		col := StatusDotColor(false, opt.Color)
-		if opt.Color == "" || opt.Color == "default" {
-			col = ui.Hex("#94A3B8")
-		}
-		return 2, col
-	}
-}
-
 func renderDayflowPriorityBadge(
 	c *ui.Context,
 	st *State,
@@ -506,7 +459,7 @@ func renderDayflowPriorityBadge(
 		return false
 	}
 	opt := findOption(priProp, val.Text)
-	level, barCol := priorityLevelAndColor(val.Text, opt)
+	level, barCol := priorityLevelAndColor(pal, val.Text, opt)
 	popoverHere := st.EditPopoverOpen && st.ActivePopoverRecordID == rec.ID && st.ActivePopoverPropID == priProp.ID
 
 	badge := ui.Row(c.Key("bpri:"+priProp.ID)).Padding(2, 5).Radius(5).Gap(4).

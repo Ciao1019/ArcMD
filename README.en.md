@@ -6,7 +6,7 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.3.0-F21158" alt="Version 0.3.0"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.4.0-F21158" alt="Version 0.4.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.3.0. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current preview version is 0.4.0. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
@@ -116,9 +116,9 @@ ArcMD edits and autosaves standard **`.md` Markdown** files (`.md`, `.markdown`,
 | **Splits, Command Bar & Templates** | Up to four side-by-side split panes or dedicated native windows; sidebar multi-select & batch move/folder creation; zero-blocking <kbd>⌘K</kbd> command bar (Pinyin/initials & multi-keyword full-text search with persistent disk cache, undoable <kbd>⇧⌘R</kbd> cross-document replace); Space templates (`{{date}}`, `{{time}}`, `{{weekday}}`, `{{title}}`) & <kbd>⌥⌘T</kbd> Daily Notes. |
 | **Mind Map, Links & Safety** | <kbd>⌃⌘M</kbd> navigable document mind map; `[[Wiki links]]` autocomplete across spaces, backlinks footer & rename sync, workspace `#tags`; <kbd>⇧⌘F</kbd> Focus Mode, paragraph afterglow dimming, typewriter scroll, word goals & per-pane reading lock; <kbd>⇧⌘M</kbd> synced Markdown preview, pure-Go vector PDF (Type 3 outlines, bookmarks & clickable links) & standalone HTML export; `.arcmd/history` named milestones, Git diff view & IDEA-style 3-Way Merge conflict resolution. |
 | **Amphibious Databases** | Native `.db.md` local-first database engine (each record is a plain `.md` file with lossless YAML frontmatter sync and an embedded GFM snapshot); **9 native views** (Table, Board, Calendar with Day/Week/Month/Year/Agenda, Timeline/Gantt, List, Gallery, Chart, Feed, and Form), 18 property types (including bidirectional Relation, Rollup, and Formula 2.0), conditional coloring, CSV / Notion import, inline Linked View blocks, and 120 Hz spring drag-and-drop motion. |
-| **Space Q&A & Cloud Sync** | Press <kbd>⌘J</kbd> for a zero-index Space research panel streaming cited answers with inline monogram chips, gliding source previews, OpenAI / DeepSeek / OpenRouter / local Ollama presets, streaming Chat Completions & Responses protocol selection, and `arcmd ask -protocol` / `ARCMD_AI_PROTOCOL`; pure-Go `wazero` WASM plugin sandbox with the bundled official **Cloud Sync** plugin (S3 / R2 / OSS / COS / MinIO & WebDAV bidirectional incremental sync). |
+| **Space Q&A & Cloud Sync** | Press <kbd>⌘J</kbd> for a zero-index Space research panel streaming cited answers with inline monogram chips, gliding source previews, OpenAI / DeepSeek / OpenRouter / local Ollama presets, streaming Chat Completions & Responses protocol selection, and `arcmd ask -protocol` / `ARCMD_AI_PROTOCOL`; built-in `arcmd mcp` and CLI control for local coding agents; pure-Go `wazero` WASM plugin sandbox with on-demand marketplace plugins including **Cloud Sync** (S3 / R2 / OSS / COS / MinIO & WebDAV 3-way incremental sync) and **Image Host**. |
 
-**Small core, extensible by design**: ArcMD builds in a read-only Space Q&A agent and a pure-Go `wazero` WASM plugin sandbox (with permission prompts, isolated secrets, local `.zip` install, and bundled Cloud Sync) so the core editor stays fast and lean. The remote marketplace index and `process` runtime are in active development. See the [plugin specification](docs/plugins.md).
+**Small core, extensible by design**: ArcMD builds in a read-only Space Q&A agent, local CLI/MCP agent control, and a pure-Go `wazero` WASM plugin sandbox (with permission prompts, isolated secrets, verified marketplace downloads, and local `.zip` install), while official plugins live in [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) for on-demand installation so the core editor stays fast and lean. See the [plugin specification](docs/plugins.md).
 
 ---
 
@@ -129,11 +129,12 @@ Every action is reachable from the <kbd>⌘K</kbd> command bar, and shortcuts ca
 | Shortcut | Action | Shortcut | Action |
 | --- | --- | --- | --- |
 | <kbd>⌘K</kbd> / <kbd>⌘P</kbd> | Command bar & full-text search | <kbd>⌃1</kbd>…<kbd>⌃9</kbd> | Switch to Space 1–9 |
-| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> / <kbd>⌥⌘B</kbd> | New document / folder / whiteboard | <kbd>⇧⌘L</kbd> | Open Library (Spaces / Plugins / Trash) |
+| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> / <kbd>⌥⌘B</kbd> / <kbd>⌥⌘G</kbd> | New document / folder / whiteboard / database | <kbd>⇧⌘L</kbd> | Open Library (Spaces / Plugins / Trash) |
 | <kbd>⌘&#92;</kbd> | Collapse / expand sidebar | <kbd>⌃⇧=</kbd> / <kbd>⌃⇧−</kbd> | Add / close split pane |
 | <kbd>⇧⌘M</kbd> | Rich text ⇄ Markdown preview (synced) | <kbd>⇧⌘F</kbd> | Toggle Focus Mode |
 | <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | Find & replace / Replace across space | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | Toggle bookmark / All bookmarks |
 | <kbd>⌥⌘T</kbd> | Open or create Today's Note | <kbd>⌥⌘Y</kbd> | Version history & diff restore |
+| <kbd>⌘=</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd> | Zoom in / out / reset to 100% | <kbd>⇧⌘&#92;</kbd> | Clear inline formatting & links |
 | <kbd>⌘J</kbd> | Ask current Space (Space Q&A) | <kbd>⇧⌘E</kbd> | Export vector PDF with outlines & links |
 
 ---

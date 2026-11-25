@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Role is who said a message.
@@ -238,9 +239,22 @@ func runTool(ctx context.Context, tools map[string]Tool, call ToolCall) (string,
 		return "", err
 	}
 	if len(out) > maxToolResult {
-		out = out[:maxToolResult] + "\n(result cut; ask for less)"
+		out = truncateUTF8(out, maxToolResult) + "\n(result cut; ask for less)"
 	}
 	return out, nil
+}
+
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }
 
 // complete sends one step, again when it fails in a way worth retrying

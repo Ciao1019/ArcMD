@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type memSecrets map[string][]byte
@@ -510,6 +511,235 @@ func buildEchoSecretsWASM() []byte {
 	binary.LittleEndian.PutUint32(iov[4:8], uint32(len(outJSON)))
 	addSeg(iovOff, iov)
 	addSeg(outOff, outJSON)
+	sec(11, dsec.Bytes())
+
+	return mod.Bytes()
+}
+
+func TestWASMSandboxLimitsAndDefaultHTTPTimeout(t *testing.T) {
+	ctx := context.Background()
+	host, err := NewWASMHost(ctx, HostConfig{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	if host.cfg.HTTPClient == nil {
+		t.Fatal("expected default HTTPClient provider when HTTPClient is nil")
+	}
+	if hc := host.cfg.HTTPClient(); hc == nil || hc == http.DefaultClient || hc.Timeout != 60*time.Second {
+		t.Fatalf("expected default 60s HTTP client when HTTPClient is nil, got %+v", hc)
+	}
+
+	makePlugin := func(id string, wasmBytes []byte) *Installed {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "plugin.wasm"), wasmBytes, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return &Installed{
+			Dir:     dir,
+			Enabled: true,
+			Manifest: &Manifest{
+				ID:      id,
+				Name:    id,
+				Version: "0.1.0",
+				Runtime: RuntimeWASM,
+				Main:    "plugin.wasm",
+			},
+		}
+	}
+
+	// 1. Plugin declaring > 4096 linear memory pages (> 256 MiB) is rejected by RuntimeConfig limit.
+	if _, err := host.Start(ctx, makePlugin("dev.arcmd.memlimit", buildWASMWithMinPages(5000))); err == nil {
+		t.Fatal("expected WASM module exceeding 4096 memory pages to be rejected")
+	}
+
+	// 2. Stdout exceeding 1 MiB is capped and rejected without OOM; stderr > 1 MiB is capped and tolerated.
+	spamOutInst, err := host.Start(ctx, makePlugin("dev.arcmd.spamout", buildSpamStdioWASM(1, 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spamOutInst.Close()
+	if _, err := spamOutInst.Invoke(ctx, Request{Command: "run"}); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversized stdout error, got %v", err)
+	}
+
+	spamErrInst, err := host.Start(ctx, makePlugin("dev.arcmd.spamerr", buildSpamStdioWASM(2, 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spamErrInst.Close()
+	if resp, err := spamErrInst.Invoke(ctx, Request{Command: "run"}); err != nil || resp == nil {
+		t.Fatalf("oversized stderr broke valid invocation: resp=%+v err=%v", resp, err)
+	}
+
+	// 3. Infinite WASM loop aborts promptly when context times out.
+	loopInst, err := host.Start(ctx, makePlugin("dev.arcmd.infloop", buildInfiniteLoopWASM()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loopInst.Close()
+	tctx, cancel := context.WithTimeout(ctx, 40*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := loopInst.Invoke(tctx, Request{Command: "hang"}); err == nil {
+		t.Fatal("expected infinite WASM loop to fail on context timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("WASM cancellation took too long: %v", elapsed)
+	}
+}
+
+func wasmLEBU32(v uint32) []byte {
+	var out []byte
+	for {
+		b := byte(v & 0x7f)
+		v >>= 7
+		if v != 0 {
+			b |= 0x80
+		}
+		out = append(out, b)
+		if v == 0 {
+			break
+		}
+	}
+	return out
+}
+
+func buildWASMWithMinPages(pages uint32) []byte {
+	var mod bytes.Buffer
+	mod.Write([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00})
+	var msec bytes.Buffer
+	msec.WriteByte(1)    // 1 memory
+	msec.WriteByte(0x00) // min only
+	msec.Write(wasmLEBU32(pages))
+	mod.WriteByte(5)
+	mod.Write(wasmLEBU32(uint32(msec.Len())))
+	mod.Write(msec.Bytes())
+	return mod.Bytes()
+}
+
+func buildInfiniteLoopWASM() []byte {
+	var mod bytes.Buffer
+	mod.Write([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00})
+	sec := func(id byte, body []byte) {
+		mod.WriteByte(id)
+		mod.Write(wasmLEBU32(uint32(len(body))))
+		mod.Write(body)
+	}
+	// Type 0: () -> ()
+	sec(1, []byte{1, 0x60, 0, 0})
+	// Func 0: type 0
+	sec(3, []byte{1, 0})
+	// Memory: 1 page
+	sec(5, []byte{1, 0x00, 1})
+	// Export "_start" -> func 0
+	sec(7, append([]byte{1, 6}, append([]byte("_start"), 0x00, 0)...))
+	// Code: (loop (br 0))
+	body := []byte{0, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b}
+	sec(10, append([]byte{1, byte(len(body))}, body...))
+	return mod.Bytes()
+}
+
+// buildSpamStdioWASM writes chunks of 32 KiB 'x' bytes to fd (1=stdout, 2=stderr)
+// iterations times via WASI fd_write.
+func buildSpamStdioWASM(fd int32, iterations int32) []byte {
+	var mod bytes.Buffer
+	mod.Write([]byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00})
+	sec := func(id byte, body []byte) {
+		mod.WriteByte(id)
+		mod.Write(wasmLEBU32(uint32(len(body))))
+		mod.Write(body)
+	}
+	str := func(s string) []byte {
+		return append(wasmLEBU32(uint32(len(s))), s...)
+	}
+	// Types: 0=(i32,i32,i32,i32)->i32 [fd_write], 1=()->() [_start]
+	var tsec bytes.Buffer
+	tsec.WriteByte(2)
+	tsec.Write([]byte{0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f})
+	tsec.Write([]byte{0x60, 0, 0})
+	sec(1, tsec.Bytes())
+
+	// Import wasi_snapshot_preview1.fd_write (func 0)
+	var isec bytes.Buffer
+	isec.WriteByte(1)
+	isec.Write(str("wasi_snapshot_preview1"))
+	isec.Write(str("fd_write"))
+	isec.Write([]byte{0x00, 0})
+	sec(2, isec.Bytes())
+
+	// Function 1: type 1
+	sec(3, []byte{1, 1})
+	// Memory: 1 page (64 KiB)
+	sec(5, []byte{1, 0x00, 1})
+
+	// Exports: memory + _start
+	var esec bytes.Buffer
+	esec.WriteByte(2)
+	esec.Write(str("memory"))
+	esec.Write([]byte{0x02, 0})
+	esec.Write(str("_start"))
+	esec.Write([]byte{0x00, 1})
+	sec(7, esec.Bytes())
+
+	i32const := func(dst *bytes.Buffer, v int32) {
+		dst.WriteByte(0x41)
+		for {
+			b := byte(v & 0x7f)
+			v >>= 7
+			if (v == 0 && b&0x40 == 0) || (v == -1 && b&0x40 != 0) {
+				dst.WriteByte(b)
+				break
+			}
+			dst.WriteByte(b | 0x80)
+		}
+	}
+
+	// Code for _start: local 0 = iterations; loop { fd_write(fd, 16, 1, 32); local0--; br_if 0 }
+	var fn bytes.Buffer
+	fn.Write([]byte{1, 1, 0x7f}) // 1 i32 local
+	i32const(&fn, iterations)
+	fn.Write([]byte{0x21, 0})    // local.set 0
+	fn.Write([]byte{0x03, 0x40}) // loop
+	i32const(&fn, fd)
+	i32const(&fn, 16)
+	i32const(&fn, 1)
+	i32const(&fn, 32)
+	fn.Write([]byte{0x10, 0}) // call fd_write
+	fn.WriteByte(0x1a)        // drop
+	fn.Write([]byte{0x20, 0}) // local.get 0
+	i32const(&fn, 1)
+	fn.WriteByte(0x6b)           // i32.sub
+	fn.Write([]byte{0x22, 0})    // local.tee 0
+	fn.Write([]byte{0x0d, 0x00}) // br_if 0
+	fn.WriteByte(0x0b)           // end loop
+	fn.WriteByte(0x0b)           // end func
+
+	var csec bytes.Buffer
+	csec.WriteByte(1)
+	csec.Write(wasmLEBU32(uint32(fn.Len())))
+	csec.Write(fn.Bytes())
+	sec(10, csec.Bytes())
+
+	// Data section: iovec {1024, 32768} at offset 16, and 32768 'x' bytes at offset 1024
+	var dsec bytes.Buffer
+	dsec.WriteByte(2)
+	iov := make([]byte, 8)
+	binary.LittleEndian.PutUint32(iov[0:4], 1024)
+	binary.LittleEndian.PutUint32(iov[4:8], 32768)
+	dsec.WriteByte(0)
+	i32const(&dsec, 16)
+	dsec.WriteByte(0x0b)
+	dsec.Write(wasmLEBU32(8))
+	dsec.Write(iov)
+
+	payload := bytes.Repeat([]byte{'x'}, 32768)
+	dsec.WriteByte(0)
+	i32const(&dsec, 1024)
+	dsec.WriteByte(0x0b)
+	dsec.Write(wasmLEBU32(uint32(len(payload))))
+	dsec.Write(payload)
 	sec(11, dsec.Bytes())
 
 	return mod.Bytes()

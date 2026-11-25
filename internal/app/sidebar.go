@@ -17,15 +17,64 @@ import (
 // space, which it may leave for another (crossspace.go), and its path.
 type dragged struct{ space, rel string }
 
-// The list's rows as Cra measures Arc 1.171's: 40 DIPs tall and 1 apart,
-// the fill 2 in from top and bottom with 10 DIP corners, starting after a
-// nested row's indent of 16; the icon 10 into the fill.
+// Sidebar list geometry: row height follows the user's density preference
+// (28 compact, 32 standard, 40 comfortable), with matching corner radius,
+// icon size and font size.
 const (
-	rowHeight = 40
 	rowIndent = 16
 	rowGap    = 1
 	rowInset  = 8 // the rows' margin from the sidebar's edges
 )
+
+func (a *App) sidebarDensity() string {
+	if a.prefs == nil {
+		return ""
+	}
+	return a.prefs.SidebarDensity
+}
+
+func (a *App) sidebarRowHeight() float32 {
+	if a.prefs == nil {
+		return 32
+	}
+	return a.prefs.SidebarRowHeight()
+}
+
+func (a *App) sidebarRowFontSize() float32 {
+	switch a.sidebarDensity() {
+	case "compact":
+		return 13
+	case "comfortable":
+		return 14
+	default:
+		return 13.5
+	}
+}
+
+func (a *App) sidebarRowRadius() float32 {
+	switch a.sidebarDensity() {
+	case "compact":
+		return 7
+	case "comfortable":
+		return 10
+	default:
+		return 8
+	}
+}
+
+func (a *App) sidebarRowInsetY() float32 {
+	if a.sidebarDensity() == "compact" {
+		return 1.5
+	}
+	return 2
+}
+
+func (a *App) sidebarRowIconSize() float32 {
+	if a.sidebarDensity() == "compact" {
+		return 15
+	}
+	return 16
+}
 
 // sidebar is Arc's sidebar: room for the window's buttons, the favorites,
 // the strip of spaces with the active one's header and folders, and the
@@ -263,7 +312,8 @@ func (a *App) divider(c *ui.Context, live, shown bool) {
 // a dashed row saying "拖到此处置顶", lit while the drop would land there.
 func (a *App) pinPlaceholder(c *ui.Context, active bool) {
 	t := c.Theme()
-	row := ui.Row(c.Key("pin-placeholder")).Height(rowHeight).Radius(10).Gap(6).Center().
+	rh, rad, insetY := a.sidebarRowHeight(), a.sidebarRowRadius(), a.sidebarRowInsetY()
+	row := ui.Row(c.Key("pin-placeholder")).Height(rh).Radius(rad).Gap(6).Center().
 		Transition(ui.ElementTransition{Animation: &listAnim, Position: true, Enter: &ui.Motion{Scale: 0.98}})
 	a.rows = append(a.rows, rowFrame{placeholder: true, parent: pinRoot, r: row.Bounds()})
 	border := t.TextMuted.Alpha(0.3)
@@ -272,7 +322,7 @@ func (a *App) pinPlaceholder(c *ui.Context, active bool) {
 		row.Background(hoverFill(t))
 	}
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
-		p.StrokeDashed(ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: r.W - 1, H: r.H - 5}, border, 10, 1)
+		p.StrokeDashed(ui.Rect{X: r.X + 0.5, Y: r.Y + insetY + 0.5, W: r.W - 1, H: max(0, r.H-2*insetY-1)}, border, rad, 1)
 	})
 	row.Children(func() {
 		ui.Icon(c, iconPin).FontSize(11).TextColor(t.TextMuted)
@@ -284,7 +334,8 @@ func (a *App) pinPlaceholder(c *ui.Context, active bool) {
 // the list while a row is lifted onto the floating drag card.
 func (a *App) dragSlot(c *ui.Context, depth int, parent string, index int, self bool) {
 	t := c.Theme()
-	row := ui.Box(c.Key("drag-slot")).Height(rowHeight).Background(ui.Transparent)
+	rh, rad, insetY := a.sidebarRowHeight(), a.sidebarRowRadius(), a.sidebarRowInsetY()
+	row := ui.Box(c.Key("drag-slot")).Height(rh).Background(ui.Transparent)
 	var enter *ui.Motion
 	if !a.slot.fromList {
 		enter = &ui.Motion{Scale: 0.97}
@@ -307,11 +358,11 @@ func (a *App) dragSlot(c *ui.Context, depth int, parent string, index int, self 
 	inset := float32(depth * rowIndent)
 	fill, border := dashedSlotColors(t, 1)
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
-		fr := ui.Rect{X: r.X + inset + 0.5, Y: r.Y + 2.5, W: max(0, r.W-inset-1), H: max(0, r.H-5)}
+		fr := ui.Rect{X: r.X + inset + 0.5, Y: r.Y + insetY + 0.5, W: max(0, r.W-inset-1), H: max(0, r.H-2*insetY-1)}
 		if fill.A > 0 {
-			p.Fill(fr, fill, 10)
+			p.Fill(fr, fill, rad)
 		}
-		p.StrokeDashed(fr, border, 10, 1)
+		p.StrokeDashed(fr, border, rad, 1)
 	})
 }
 
@@ -394,12 +445,29 @@ func (a *App) spaceHeader(c *ui.Context, sp *space.Space, live bool) {
 				ui.Text(c, sp.Name).FontSize(13).FontWeight(600).TextColor(ink).SingleLine().MinWidth(0)
 			})
 		}
-		more := iconButton(c, "space-more", iconEllipsis, i18n.T("空间菜单"), i18n.T("空间菜单"), false).Size(24, 24)
+		more := iconButton(c, "space-more", iconEllipsis, i18n.T("空间菜单"), i18n.T("空间菜单"), false).Size(24, 24).Shrink(0)
 		if !lit {
 			more.Opacity(0)
 		}
 		if live {
 			more.Menu(func(m *ui.Menu) { a.listMenu(m, sp) })
+		}
+		addLabel, addTip := i18n.T("快速新建"), i18n.T("新建文档、数据库或白板")
+		if sp.IsExternal() {
+			addLabel, addTip = i18n.T("在外部空间打开文件"), i18n.T("只添加选中的文件，保留原位置")
+		}
+		add := iconButton(c, "space-new", iconPlus, addLabel, addTip, false).Size(24, 24).Shrink(0).Margin(0, 0, 0, 2)
+		if !live {
+			add.Opacity(0)
+		} else if !lit && !add.Hovered() && !a.newModal.open {
+			add.Opacity(0.55)
+		}
+		if live && add.Clicked() {
+			if sp.IsExternal() {
+				a.chooseExternalFiles()
+			} else {
+				a.openNewModal("")
+			}
 		}
 	})
 	if !live {
@@ -599,6 +667,8 @@ func docCount(n *vault.Node) int {
 // the divider to pin or unpin, or onto the favorites.
 func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, parent string, index int, live bool, prev []rowFrame) {
 	t := c.Theme()
+	rh, rad, insetY := a.sidebarRowHeight(), a.sidebarRowRadius(), a.sidebarRowInsetY()
+	fontSize, iconSize := a.sidebarRowFontSize(), a.sidebarRowIconSize()
 	chosen := !n.Dir && a.doc != nil && a.doc.space == sp && a.doc.rel == n.Path
 	highlighted := a.rowHighlighted(sp, n.Path, chosen)
 	open := n.Dir && sp.IsExpanded(n.Path)
@@ -637,7 +707,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				cardW = sidebarWidth - 2*rowInset - inset
 			}
 			gx := min(max(px-cardX, 8), max(8, cardW-8))
-			gy := min(max(py-cardY, 4), rowHeight-4)
+			gy := min(max(py-cardY, 4), rh-4)
 			a.dragGrab = dragGrab{
 				active:     true,
 				space:      sp.ID,
@@ -669,11 +739,11 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		return
 	}
 
-	gap := float32(10)
+	gap := float32(9)
 	if n.Dir {
-		gap = 11
+		gap = 10
 	}
-	row.Height(rowHeight).PaddingStart(float32(10 + depth*rowIndent)).PaddingEnd(8).
+	row.Height(rh).PaddingStart(float32(10 + depth*rowIndent)).PaddingEnd(8).
 		Gap(gap).AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Label(n.Title())
 	if n.Dir {
 		row.Role(ui.RoleTreeItem).Expanded(open).Selected(highlighted)
@@ -760,11 +830,11 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			if tr.W <= 0 && len(a.rows) >= 2 {
 				above := a.rows[len(a.rows)-2].r
 				if above.W > 0 {
-					tr = ui.Rect{X: above.X, Y: above.Y + above.H + rowGap, W: above.W, H: rowHeight}
+					tr = ui.Rect{X: above.X, Y: above.Y + above.H + rowGap, W: above.W, H: rh}
 				}
 			}
 			if tr.W <= 0 {
-				tr = ui.Rect{X: rowInset, Y: a.dragSettle.fromY, W: sidebarWidth - 2*rowInset, H: rowHeight}
+				tr = ui.Rect{X: rowInset, Y: a.dragSettle.fromY, W: sidebarWidth - 2*rowInset, H: rh}
 			}
 			a.dragSettle.toRect = ui.Rect{X: tr.X + inset, Y: tr.Y, W: tr.W - inset, H: tr.H}
 			a.dragSettle.hasTarget = true
@@ -829,25 +899,25 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
 		if settling {
 			sfill, sborder := dashedSlotColors(t, slotFade)
-			sfr := ui.Rect{X: r.X + inset + 0.5, Y: r.Y + 2.5, W: max(0, r.W-inset-1), H: max(0, r.H-5)}
+			sfr := ui.Rect{X: r.X + inset + 0.5, Y: r.Y + insetY + 0.5, W: max(0, r.W-inset-1), H: max(0, r.H-2*insetY-1)}
 			if sfill.A > 0 {
-				p.Fill(sfr, scaleAlpha(sfill, slotFade), 10)
+				p.Fill(sfr, scaleAlpha(sfill, slotFade), rad)
 			}
-			p.StrokeDashed(sfr, scaleAlpha(sborder, slotFade), 10, 1)
+			p.StrokeDashed(sfr, scaleAlpha(sborder, slotFade), rad, 1)
 			return
 		}
-		fr := ui.Rect{X: r.X + inset, Y: r.Y + 2, W: r.W - inset, H: r.H - 4}
+		fr := ui.Rect{X: r.X + inset, Y: r.Y + insetY, W: r.W - inset, H: max(0, r.H-2*insetY)}
 		if lifted {
-			p.Shadow(fr, 10, 0, 1, 3, 0, black.Alpha(0.06))
+			p.Shadow(fr, rad, 0, 1, 3, 0, black.Alpha(0.06))
 		}
 		if fill.A > 0 {
-			p.Fill(fr, fill, 10)
+			p.Fill(fr, fill, rad)
 		}
 		if pulse > 0 {
-			p.Fill(fr, t.Accent.Alpha(0.18*pulse), 10)
+			p.Fill(fr, t.Accent.Alpha(0.18*pulse), rad)
 		}
 		if into {
-			p.Stroke(fr, t.Text.Alpha(0.3), 10, 1.5)
+			p.Stroke(fr, t.Text.Alpha(0.3), rad, 1.5)
 		}
 	})
 	closed := false
@@ -856,7 +926,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			dim := pinned && !opened
 			if n.Dir {
 				folderGlyph(c, a.columnLook(sp), open, a.holdsOpen(sp, n.Path))
-			} else if icon := fileIcon(c, n.Path, n.Title(), 16); dim {
+			} else if icon := fileIcon(c, n.Path, n.Title(), iconSize); dim {
 				icon.Opacity(closedIconAlpha)
 			}
 			if renaming {
@@ -867,7 +937,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			if dim {
 				ink = closedInk(t)
 			}
-			name := ui.Text(c, docName(n.Title())).FontSize(14).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
+			name := ui.Text(c, docName(n.Title())).FontSize(fontSize).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
 			if n.Dir {
 				name.FontWeight(500)
 			}
@@ -917,7 +987,8 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			switch {
 			case minus:
 				// The button takes the dot's place while hovered, as Arc's.
-				b := ui.Box(c.Key("close-open")).Size(24, 24).Radius(6).Shrink(0).Cursor(ui.CursorPointer).
+				closeSize := min(float32(24), rh-6)
+				b := ui.Box(c.Key("close-open")).Size(closeSize, closeSize).Radius(6).Shrink(0).Cursor(ui.CursorPointer).
 					Focusable().Role(ui.RoleButton).Label(i18n.T("关闭并保持置顶")).Tooltip(i18n.T("关闭并保持置顶"))
 				if b.Hovered() {
 					b.Background(hoverFill(t))
@@ -989,7 +1060,8 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 // renameField edits the name of the row being renamed: Enter or leaving
 // it keeps the name, Escape gives up.
 func (a *App) renameField(c *ui.Context) {
-	in := ui.TextInput(c.Key("rename"), &a.newName).Grow(1).MinWidth(0).Height(26).Padding(2, 6).
+	h := min(float32(26), a.sidebarRowHeight()-4)
+	in := ui.TextInput(c.Key("rename"), &a.newName).Grow(1).MinWidth(0).Height(h).Padding(2, 6).
 		TextColor(c.Theme().Text).AutoFocus().Label(i18n.T("名称"))
 	switch {
 	case in.Shortcut(0, ui.KeyEscape), c.Shortcut(0, ui.KeyEscape):
@@ -1365,7 +1437,8 @@ func (a *App) newDocRow(c *ui.Context) {
 			a.newDocPulse = time.Time{}
 		}
 	}
-	row := ui.Row(c.Key("new-doc-row")).Height(rowHeight).PaddingX(10).Gap(6).Radius(10).Center().
+	rh, rad, insetY := a.sidebarRowHeight(), a.sidebarRowRadius(), a.sidebarRowInsetY()
+	row := ui.Row(c.Key("new-doc-row")).Height(rh).PaddingX(10).Gap(6).Radius(rad).Center().
 		Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(label).Tooltip(tip).
 		Background(ui.Transparent)
 	if pulsing || a.listDragging {
@@ -1374,11 +1447,11 @@ func (a *App) newDocRow(c *ui.Context) {
 	lit := row.Animate("lit", b2f(row.Hovered() || pulsing || a.newModal.open), 180*time.Millisecond)
 	fill, border := dashedSlotColors(t, lit)
 	row.Draw(func(p *ui.Painter, r ui.Rect) {
-		fr := ui.Rect{X: r.X + 0.5, Y: r.Y + 2.5, W: max(0, r.W-1), H: max(0, r.H-5)}
+		fr := ui.Rect{X: r.X + 0.5, Y: r.Y + insetY + 0.5, W: max(0, r.W-1), H: max(0, r.H-2*insetY-1)}
 		if fill.A > 0 {
-			p.Fill(fr, fill, 10)
+			p.Fill(fr, fill, rad)
 		}
-		p.StrokeDashed(fr, border, 10, 1)
+		p.StrokeDashed(fr, border, rad, 1)
 	})
 	alpha := 0.48 + 0.34*lit
 	row.Children(func() {

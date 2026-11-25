@@ -16,17 +16,22 @@ func View(c *ui.Context, st *State, opts Options) {
 	if st == nil || st.Store == nil {
 		return
 	}
-	db := st.Store.Database()
+	db := st.Store.SchemaSnapshot()
 	if db == nil {
 		return
 	}
 	pal := paletteOf(c.Theme())
 
-	view := st.ActiveView()
+	view := st.activeViewFrom(db)
 	if view == nil {
 		return
 	}
 	st.Motion.beginFrame(c)
+	if view.Type != database.ViewBoard && (st.BoardDrag.grab.active || st.BoardDrag.settle.active) {
+		st.BoardDrag.reset()
+		st.Motion.drag = dbDragPreview{}
+		st.Motion.settle = dbDragSettle{}
+	}
 
 	root := ui.Column(c.Key("db-root")).Grow(1).MinWidth(0).MinHeight(0).
 		Background(pal.Paper).Focusable().Role(ui.RoleMain).Label(db.Title).Bind(&st.RootHandle)
@@ -209,28 +214,28 @@ func renderUnifiedNewButton(c *ui.Context, st *State, db *database.Database, vie
 			Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label("+ " + i18n.T("新建")).
 			Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 		if newBtn.Hovered() {
-			newBtn.Background(ui.RGBA(255, 255, 255, 0.12))
+			newBtn.Background(pal.AccentText.Alpha(0.12))
 		}
 		applyPressSpring(newBtn, false)
 		newBtn.Children(func() {
-			ui.Text(c, "+ "+i18n.T("新建")).FontSize(12.5).FontWeight(500).TextColor(ui.RGB(255, 255, 255)).NoWrap()
+			ui.Text(c, "+ "+i18n.T("新建")).FontSize(12.5).FontWeight(500).TextColor(pal.AccentText).NoWrap()
 		})
 		if newBtn.Clicked() {
 			createRecordWithDefaults(st, db, "", database.EmptyValue(), opts)
 		}
 
-		ui.Box(c).Width(1).Height(15).Background(ui.RGBA(255, 255, 255, 0.24)).Shrink(0)
+		ui.Box(c).Width(1).Height(15).Background(pal.AccentText.Alpha(0.24)).Shrink(0)
 
 		tplBtn := ui.Box(c.Key("db-tpl-menu")).Size(25, 29).Center().
 			Cursor(ui.CursorPointer).Focusable().
 			Role(ui.RoleButton).Label(i18n.T("模板菜单")).Tooltip(i18n.T("记录模板")).
 			Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Colors: true})
 		if tplBtn.Hovered() || st.TemplatesOpen {
-			tplBtn.Background(ui.RGBA(255, 255, 255, 0.16))
+			tplBtn.Background(pal.AccentText.Alpha(0.16))
 		}
 		applyPressSpring(tplBtn, false)
 		tplBtn.Children(func() {
-			ui.Icon(c, iconChevronDown).FontSize(12).TextColor(ui.RGB(255, 255, 255))
+			ui.Icon(c, iconChevronDown).FontSize(12).TextColor(pal.AccentText)
 		})
 		if tplBtn.Clicked() {
 			open := !st.TemplatesOpen

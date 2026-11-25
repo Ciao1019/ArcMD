@@ -530,6 +530,20 @@ func (a *App) replaceReferences(old, replacement *document) {
 	if a.doc == old {
 		a.doc = replacement
 	}
+	if old != nil {
+		if replacement == nil {
+			if a.dbPeek.doc == old || a.dbPeek.dbDoc == old {
+				a.closeRecordPeek()
+			}
+		} else {
+			if a.dbPeek.doc == old {
+				a.dbPeek.doc = replacement
+			}
+			if a.dbPeek.dbDoc == old {
+				a.dbPeek.dbDoc = replacement
+			}
+		}
+	}
 	for _, w := range a.windows {
 		if w.doc == old && old != nil {
 			w.doc = replacement

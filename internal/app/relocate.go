@@ -44,12 +44,14 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 	if err != nil {
 		return "", false, err
 	}
+	a.releasePDFHandles(src, rel)
 	if src.ID == dst.ID {
 		to, err = vault.Move(sourceRoot, sourcePath, dir)
 	} else {
 		to, copied, err = vault.MoveTo(sourceRoot, sourcePath, dst.Root, dir)
 	}
 	if err != nil || to == rel && src.Root == dst.Root {
+		a.reopenResidentPDFs(src, rel)
 		return to, copied, err
 	}
 	var created []string
@@ -73,6 +75,8 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 			if _, statErr := os.Lstat(old); errors.Is(statErr, fs.ErrNotExist) {
 				if rollbackErr := os.Rename(moved, old); rollbackErr != nil {
 					err = errors.Join(err, fmt.Errorf(i18n.T("移回原位置：%w"), rollbackErr))
+				} else {
+					a.reopenResidentPDFs(src, rel)
 				}
 			} else {
 				err = errors.Join(err, errors.New(i18n.T("原位置已被占用，文档仍保留在目标位置")))
@@ -81,6 +85,7 @@ func (a *App) moveWithResources(src *space.Space, rel string, dst *space.Space, 
 			// This is an unpublished copy; the user's original still exists.
 			p, _ := vault.Resolve(dst.Root, to)
 			_ = os.RemoveAll(p)
+			a.reopenResidentPDFs(src, rel)
 		}
 	}()
 	for _, d := range docs {

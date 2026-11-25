@@ -6,7 +6,7 @@
 
 简体中文 · [English](README.en.md)
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.3.0-F21158" alt="版本 0.3.0"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.4.0-F21158" alt="版本 0.4.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="支持 macOS、Windows 与 Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="使用 Go 与 MyGo 原生开发"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI 工作流配置"></a>
@@ -25,7 +25,7 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-zh-CN.svg" height="56" alt="下载 ArcMD Windows 版：x64 安装程序与 ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-zh-CN.svg" height="56" alt="下载 ArcMD Linux 版：x64 与 ARM64，DEB 与 TAR.GZ"></a>
 
-<sub>当前预览版本为 0.3.0，按钮会打开发布页；也可以直接<a href="#从源码运行">从源码运行</a>。</sub>
+<sub>当前预览版本为 0.4.0，按钮会打开发布页；也可以直接<a href="#从源码运行">从源码运行</a>。</sub>
 
 <br><br>
 
@@ -116,9 +116,9 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 | **分屏、命令栏与模板** | 最多四分屏并排或拆分为独立原生窗口；侧边栏多选与批量移动/建夹；零阻塞 <kbd>⌘K</kbd> 命令栏（拼音/首字母与多关键词全文检索、持久化磁盘缓存、<kbd>⇧⌘R</kbd> 跨文档替换与一键撤销）；空间模板（`{{date}}` / `{{time}}` / `{{weekday}}` / `{{title}}`）与 <kbd>⌥⌘T</kbd> 今日笔记。 |
 | **导图、双链与守护** | <kbd>⌃⌘M</kbd> 原生可导航文档思维导图；`[[双链]]` 跨空间补全、反向链接聚合与改名自动同步，`#标签` 全局整理；<kbd>⇧⌘F</kbd> 专注模式、段落余晖淡化、打字机滚动、字数目标与分屏只读锁；<kbd>⇧⌘M</kbd> 同步位置 Markdown 预览、纯 Go 矢量 PDF（Type 3 字形、目录书签与可点击链接） / 独立 HTML 导出；`.arcmd/history` 命名里程碑、Git 差异视图与 IDEA 式三栏合并恢复。 |
 | **两栖多维数据库** | 原生 `.db.md` 两栖多维表格引擎（每条记录即本地 `.md` + Frontmatter 双向同步，自带离线 GFM 表格快照）；支持表格、看板、日历（日/周/月/年/日程）、甘特时间轴、列表、画廊、图表、动态流与表单 **9 种视图**、18 种属性（含跨库双向 Relation / Rollup / Formula 2.0）、条件着色、CSV / Notion 导入、文档内嵌 Linked View 与 120 Hz 弹簧微动效。 |
-| **空间问答与云端同步** | <kbd>⌘J</kbd> 打开只读空间问答面板（零向量库，流式内联引用胶囊、滑移预览与直达块定位，支持 OpenAI / DeepSeek / OpenRouter / 本地 Ollama、流式 Chat Completions 与 Responses 协议切换及终端 `arcmd ask -protocol` / `ARCMD_AI_PROTOCOL`）；纯 Go `wazero` WASM 插件沙箱与内置官方「云端同步」插件（支持 S3 / R2 / OSS / COS / MinIO 与坚果云 / Nextcloud / Alist WebDAV 三路增量同步）。 |
+| **空间问答与云端同步** | <kbd>⌘J</kbd> 打开只读空间问答面板（零向量库，流式内联引用胶囊、滑移预览与直达块定位，支持 OpenAI / DeepSeek / OpenRouter / 本地 Ollama、流式 Chat Completions 与 Responses 协议切换及终端 `arcmd ask -protocol` / `ARCMD_AI_PROTOCOL`）；支持 `arcmd mcp` 与 CLI 让本地 Agent 协同读写空间、白板与数据库；纯 Go `wazero` WASM 插件沙箱，支持从插件市场按需安装官方「云端同步」（S3 / R2 / OSS / COS / MinIO 与 WebDAV 三路增量同步）与「图床上传」插件。 |
 
-**轻量核心，按需扩展**：核心内置只读的空间问答 Agent 与纯 Go `wazero` WASM 插件沙箱（支持权限确认、凭据隔离、本地 `.zip` 安装与内置「云端同步」插件），让编辑器核心始终纯粹轻快。远程插件市场索引与进程运行时正在建设中，详见[插件规范与路线图（英文）](docs/plugins.md)。
+**轻量核心，按需扩展**：核心内置只读的空间问答 Agent、本地 Agent CLI/MCP 控制接口与纯 Go `wazero` WASM 插件沙箱（支持权限确认、凭据隔离、远程市场 SHA-256 校验安装与本地 `.zip` 安装），官方插件独立托管于 [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) 按需下载，让编辑器核心始终纯粹轻快。详见[插件规范（英文）](docs/plugins.md)。
 
 ---
 
@@ -129,11 +129,12 @@ ArcMD 直接以标准 **`.md` Markdown** 作为主格式，编辑时在后台原
 | 快捷键 | 功能 | 快捷键 | 功能 |
 | --- | --- | --- | --- |
 | <kbd>⌘K</kbd> / <kbd>⌘P</kbd> | 打开命令栏与全文搜索 | <kbd>⌃1</kbd>…<kbd>⌃9</kbd> | 切换到第 N 个空间 |
-| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> / <kbd>⌥⌘B</kbd> | 新建文档 / 文件夹 / 白板 | <kbd>⇧⌘L</kbd> | 打开资料库（空间 / 插件 / 最近删除） |
+| <kbd>⌘N</kbd> / <kbd>⇧⌘N</kbd> / <kbd>⌥⌘B</kbd> / <kbd>⌥⌘G</kbd> | 新建文档 / 文件夹 / 白板 / 数据库 | <kbd>⇧⌘L</kbd> | 打开资料库（空间 / 插件 / 最近删除） |
 | <kbd>⌘&#92;</kbd> | 收起 / 展开侧边栏 | <kbd>⌃⇧=</kbd> / <kbd>⌃⇧−</kbd> | 添加 / 关闭分屏面板 |
 | <kbd>⇧⌘M</kbd> | 富文本 ⇄ Markdown 预览（同步位置） | <kbd>⇧⌘F</kbd> | 进入 / 退出专注模式 |
 | <kbd>⌘F</kbd> / <kbd>⇧⌘R</kbd> | 页内查找替换 / 跨文档查找替换 | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | 添加移除书签 / 全部书签列表 |
 | <kbd>⌥⌘T</kbd> | 打开或创建今日笔记 | <kbd>⌥⌘Y</kbd> | 查看版本历史与差异恢复 |
+| <kbd>⌘=</kbd> / <kbd>⌘−</kbd> / <kbd>⌘0</kbd> | 放大 / 缩小页面 / 重置为 100% | <kbd>⇧⌘&#92;</kbd> | 一键清除选中文本样式与链接 |
 | <kbd>⌘J</kbd> | 向当前空间提问（空间问答） | <kbd>⇧⌘E</kbd> | 导出矢量 PDF（含书签与链接） |
 
 ---

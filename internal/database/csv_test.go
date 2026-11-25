@@ -211,4 +211,34 @@ func TestNotionZIPImportAndZipSlipProtection(t *testing.T) {
 	if _, err := database.ImportNotionZIP(spaceRoot, "", evilPath); err == nil {
 		t.Fatal("expected zip-slip archive to be rejected")
 	}
+
+	// Verify symlink entry rejection.
+	symZipPath := filepath.Join(zipDir, "symlink.zip")
+	sf, err := os.Create(symZipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sz := zip.NewWriter(sf)
+	hdr := &zip.FileHeader{
+		Name:   "secret-link.md",
+		Method: zip.Store,
+	}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	sw, err := sz.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sw.Write([]byte("/etc/hosts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := sz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	symSpace := t.TempDir()
+	if _, err := database.ImportNotionZIP(symSpace, "", symZipPath); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink zip entry to be rejected, got err=%v", err)
+	}
 }

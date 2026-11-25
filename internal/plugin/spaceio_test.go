@@ -211,3 +211,55 @@ func TestFolderSpacesOperations(t *testing.T) {
 		t.Fatal("Touched() is empty")
 	}
 }
+
+func TestIsSyncPathInAndCustomAttachmentsDir(t *testing.T) {
+	if !IsSyncPathIn("attachments/clip.bin", "attachments") ||
+		!IsSyncPathIn("Notes/attachments/clip.bin", "attachments") ||
+		!IsSyncPathIn("Files/Media/clip.mp4", "Files/Media") ||
+		!IsSyncPathIn("Files/Media/2026/clip.mp4", "Files/Media/") ||
+		!IsSyncPathIn(".arcmd/templates/attachments/clip.bin", "attachments") {
+		t.Fatal("IsSyncPathIn rejected valid custom attachment paths")
+	}
+	if IsSyncPathIn("Notes/archive.zip", "") ||
+		IsSyncPathIn("Notes/archive.zip", ".") ||
+		IsSyncPathIn("attachments/.DS_Store", "attachments") ||
+		IsSyncPathIn("Notes/archive.zip", "../escape") {
+		t.Fatal("IsSyncPathIn accepted disallowed or unsafe paths")
+	}
+
+	root := t.TempDir()
+	full := filepath.Join(root, "Files", "Media", "demo.mp4")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside.zip"), []byte("zip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fs := NewFolderSpaces([]SpaceSnapshot{{
+		ID:             "sp1",
+		Name:           "MediaSpace",
+		Root:           root,
+		AttachmentsDir: "Files/Media",
+	}}, nil, func(_, _, spRoot, rel string) error {
+		return os.Remove(filepath.Join(spRoot, filepath.FromSlash(rel)))
+	})
+
+	list, err := fs.ListFiles("sp1")
+	if err != nil || len(list) != 1 || list[0].Path != "Files/Media/demo.mp4" {
+		t.Fatalf("ListFiles with AttachmentsDir = %+v, %v", list, err)
+	}
+	data, meta, err := fs.ReadFile("sp1", "Files/Media/demo.mp4")
+	if err != nil || string(data) != "video" || meta.SHA256 == "" {
+		t.Fatalf("ReadFile with AttachmentsDir = %q, %+v, %v", data, meta, err)
+	}
+	if _, err := fs.WriteFile("sp1", "Files/Media/new.bin", []byte("bin"), "", 0); err != nil {
+		t.Fatalf("WriteFile in AttachmentsDir failed: %v", err)
+	}
+	if err := fs.DeleteFile("sp1", "Files/Media/demo.mp4", meta.SHA256); err != nil {
+		t.Fatalf("DeleteFile in AttachmentsDir failed: %v", err)
+	}
+}
