@@ -26,6 +26,7 @@ type layoutPageKey struct {
 	has                           bool
 	page                          Page
 	fontSize, lineHeight, column  float32
+	zoom                          float32
 	fullWidth                     bool
 	fontFamily                    string
 	noteKey                       string
@@ -40,6 +41,7 @@ func sameLayoutPageKey(a, b layoutPageKey) bool {
 		a.lineHeight == b.lineHeight &&
 		a.fontFamily == b.fontFamily &&
 		a.column == b.column &&
+		a.zoom == b.zoom &&
 		a.fullWidth == b.fullWidth &&
 		a.noteKey == b.noteKey &&
 		a.codeNoWrap == b.codeNoWrap &&
@@ -155,6 +157,9 @@ type Editor struct {
 	noteOriginID              string
 	noteOriginOffset          int
 	readingSize, readingLine  float32
+	pageZoom                  float32
+	onZoom                    func(float32)
+	zoomWheelAccum            float32
 	fontFamily                string
 	openLink                  func(string)
 	directLinks               bool
@@ -506,9 +511,14 @@ func (e *Editor) paintLanguage(p *ui.Painter, r ui.Rect, d decoration, t *ui.The
 	p.Icon(iconChevron, ui.Rect{X: r.X + 6 + w, Y: r.Y + 4, W: 14, H: 14}, e.page.Placeholder)
 }
 
-// calloutIconRect is a callout's icon, which picks its color.
+// calloutIconRect is a callout's icon at 100% zoom, which picks its color.
 func calloutIconRect(d decoration) ui.Rect {
 	return ui.Rect{X: d.rect.X + 16, Y: d.rect.Y + 17, W: 24, H: 24}
+}
+
+func (e *Editor) calloutIconBox(d decoration) ui.Rect {
+	z := e.zoomFactor()
+	return ui.Rect{X: d.rect.X + 16*z, Y: d.rect.Y + 17*z, W: 24 * z, H: 24 * z}
 }
 
 // calloutHue is the color of a callout's tone.
@@ -635,6 +645,10 @@ type Options struct {
 	CodeMaxHeight        float32
 	ImageMaxHeight       float32
 	FontSize, LineHeight float32
+	// Zoom scales the entire document page proportionally (0.50–2.00; 0 means 1.0).
+	// OnZoom, when set, receives updated zoom values from ⌘/Ctrl+wheel and trackpad pinch.
+	Zoom   float32
+	OnZoom func(float32)
 	// Column is the text column's width, 0 for 820. FullWidth spans the full
 	// viewport width, keeping only the side gutters. Code keeps its monospace.
 	FontFamily   string
@@ -855,6 +869,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.cropImage = o.CropImage
 	e.dropFiles, e.pasteImage = o.DropFiles, o.PasteImage
 	e.typewriter, e.dim, e.bindings = o.Typewriter, o.Dim, o.Bindings
+	e.onZoom = o.OnZoom
 	if !e.openReveal.checked {
 		e.openReveal = openReveal{checked: true, pending: o.DrawAnnotations && hasAnnotations(e.Doc.Blocks)}
 	}
@@ -1176,9 +1191,40 @@ func (e *Editor) surfaceBounds(surface ui.Element) ui.Rect {
 	return b
 }
 
+func clampPageZoom(z float32) float32 {
+	if math.IsNaN(float64(z)) || math.IsInf(float64(z), 0) || z <= 0 {
+		return 1
+	}
+	if z < 0.5 {
+		return 0.5
+	}
+	if z > 2.0 {
+		return 2.0
+	}
+	return float32(math.Round(float64(z)*100)) / 100
+}
+
+func (e *Editor) zoomFactor() float32 {
+	if e.printing || e.mapTablePreview || e.pageZoom <= 0 {
+		return 1
+	}
+	return clampPageZoom(e.pageZoom)
+}
+
+// HasZoomModal reports whether an overlay or active embedded surface with its
+// own zoom controls (image lightbox, Mermaid viewer, or interactive embedded
+// PDF/book/whiteboard) is open.
+func (e *Editor) HasZoomModal() bool {
+	return e.imageViewer.open || e.mermaidViewer.open ||
+		e.boardModalID != "" || e.pdfModalID != "" || e.bookModalID != "" ||
+		e.boardEditing != "" || e.pdfBrowsing != ""
+}
+
 func (e *Editor) layout(o Options) {
 	e.collectNotes()
 	e.readingSize, e.readingLine, e.fontFamily = o.FontSize, o.LineHeight, o.FontFamily
+	e.pageZoom = clampPageZoom(o.Zoom)
+	z := e.zoomFactor()
 	defer func() { e.laidInline = e.inlineEditing }()
 	pageKey := layoutPageKey{
 		has:            true,
@@ -1187,6 +1233,7 @@ func (e *Editor) layout(o Options) {
 		lineHeight:     o.LineHeight,
 		fontFamily:     o.FontFamily,
 		column:         o.Column,
+		zoom:           z,
 		fullWidth:      o.FullWidth,
 		noteKey:        e.noteKey(),
 		codeNoWrap:     e.codeNoWrap,
@@ -1196,8 +1243,9 @@ func (e *Editor) layout(o Options) {
 	}
 	finishResize := e.resizePending && (!o.Resizing || e.resizeBatch)
 	refreshResize := e.resizePending && e.resizeScroll != e.Scroll.Y
+	zoomChanged := e.laidPage.has && e.laidPage.zoom != pageKey.zoom
 	anchor := resizeAnchor{}
-	if e.resizePending || o.Resizing {
+	if e.resizePending || o.Resizing || zoomChanged {
 		anchor = e.resizeAnchor()
 	}
 	pageSame := sameLayoutPageKey(e.laidPage, pageKey)
@@ -1272,7 +1320,12 @@ func (e *Editor) layout(o Options) {
 	e.laidFindKey = findKey
 	// The text column is 820 wide unless the reader picked another,
 	// or FullWidth spans the viewport keeping only the side gutters.
+	// Zooming in grows the column proportionally up to the viewport width
+	// so enlarged headings, tables and code remain spacious without overflowing.
 	e.column = columnWidth(o.Column)
+	if !o.FullWidth && z > 1 {
+		e.column *= z
+	}
 	var centerPad float32
 	if o.FullWidth {
 		e.column = max(80, o.Width)
@@ -1348,14 +1401,16 @@ func (e *Editor) layout(o Options) {
 			// The fold triangle sits just left of the block, 20
 			// left of the text; the handle further out.
 			fx := e.padding - 22
+			tri := float32(16)
 			if isList(b.Kind) {
-				fx += float32(b.Indent) * 24
+				fx += float32(b.Indent) * 24 * z
 			}
 			if b.Kind == "toggle" {
 				// A toggle's triangle is its marker, always shown.
-				fx = e.padding + float32(b.Indent)*20 - 1
+				fx = e.padding + float32(b.Indent)*20*z - z
+				tri = 16 * z
 			}
-			e.foldButtons = append(e.foldButtons, foldButton{id: b.ID, rect: ui.Rect{X: fx, Y: hy + 4, W: 16, H: 16}, folded: b.Folded, always: b.Kind == "toggle"})
+			e.foldButtons = append(e.foldButtons, foldButton{id: b.ID, rect: ui.Rect{X: fx, Y: hy + 12 - tri/2, W: tri, H: tri}, folded: b.Folded, always: b.Kind == "toggle"})
 			if fx-hx < 26 {
 				hx = fx - 28
 			}
@@ -1450,6 +1505,7 @@ func (e *Editor) layoutOptions() Options {
 		Width:          e.width,
 		FontSize:       e.readingSize,
 		LineHeight:     e.readingLine,
+		Zoom:           e.pageZoom,
 		FontFamily:     e.fontFamily,
 		Column:         e.laidPage.column,
 		FullWidth:      e.laidPage.fullWidth,
@@ -1869,18 +1925,19 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				}
 				p.Fill(r, look.Fill, 8)
 				p.Stroke(r, look.Border, 8, 1)
-				icon := calloutIconRect(d)
+				icon := e.calloutIconBox(d)
 				icon.X += bounds.X + ddx
 				icon.Y += bounds.Y + ddy
-				if d.id == e.colorID && e.colorOpen || e.hovered(calloutIconRect(d), 0) {
+				if d.id == e.colorID && e.colorOpen || e.hovered(e.calloutIconBox(d), 0) {
 					p.Fill(icon, e.page.Hover, 4)
 				}
+				cz := e.zoomFactor()
 				if d.label != "" {
-					span := ui.Span{Text: d.label, Size: 18}
+					span := ui.Span{Text: d.label, Size: 18 * cz}
 					w, h := p.MeasureText(0, span)
 					p.RichText(icon.X+(icon.W-w)/2, icon.Y+(icon.H-h)/2, 0, span)
 				} else {
-					p.Icon(calloutIcon(d.tone), ui.Rect{X: icon.X + 3, Y: icon.Y + 3, W: 18, H: 18}, look.Icon)
+					p.Icon(calloutIcon(d.tone), ui.Rect{X: icon.X + 3*cz, Y: icon.Y + 3*cz, W: 18 * cz, H: 18 * cz}, look.Icon)
 				}
 			case "quote":
 				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 2, H: r.H}, e.page.QuoteBar, 1)
@@ -2121,7 +2178,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	}
 	if len(e.Doc.Blocks) == 1 && e.Doc.Blocks[0].Kind == "paragraph" && e.Len() == 0 && !e.focused {
 		// The starter below says the rest.
-		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, i18n.T("开始写作"), 16, t.TextMuted.Alpha(.8))
+		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, i18n.T("开始写作"), 16*e.zoomFactor(), t.TextMuted.Alpha(.8))
 	}
 	inlineCaretDoc, hasInlineCaret := e.paintInlineMathPopover(p, bounds, t)
 	caretMoving := false
@@ -2242,9 +2299,9 @@ func (e *Editor) hoverControl(x, y float32) bool {
 	for i := range e.decorationSpace.between(y-28, y+28) {
 		d := *e.indexedDecoration(i)
 		switch {
-		case d.kind == "callout" && d.id != "" && in(calloutIconRect(d)):
+		case d.kind == "callout" && d.id != "" && in(e.calloutIconBox(d)):
 			e.colorOpen = !(e.colorOpen && e.colorID == d.id)
-			e.colorID, e.colorAt = d.id, calloutIconRect(d)
+			e.colorID, e.colorAt = d.id, e.calloutIconBox(d)
 			return true
 		case d.kind == "code" && d.id != "" && in(languageButton(d)):
 			e.langOpen = !(e.langOpen && e.langID == d.id)
@@ -2323,7 +2380,7 @@ func (e *Editor) paintHint(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) {
 		return
 	}
 	line := r.layout.Caret(0)
-	span := ui.Span{Text: hint, Size: size, Color: e.page.Placeholder}
+	span := ui.Span{Text: hint, Size: size * e.zoomFactor(), Color: e.page.Placeholder}
 	if b.Kind == "heading" {
 		span.Weight = 500
 	}
@@ -2339,22 +2396,25 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 	if kind != "bullet" && kind != "numbered" && kind != "task" {
 		return
 	}
+	z := e.zoomFactor()
 	dx, dy := e.visualOffset(r)
 	line := r.layout.Caret(0)
-	cy := bounds.Y + r.y + dy + line.Y + max(line.H, 26)/2
+	cy := bounds.Y + r.y + dy + line.Y + max(line.H, 26*z)/2
 	x := bounds.X + r.x + dx
 	pg := e.page
 	switch kind {
 	case "bullet":
 		// Nested lists cycle disc, circle and square.
-		dot := ui.Rect{X: x - 20, Y: cy - 2.75, W: 5.5, H: 5.5}
+		dotSize := 5.5 * z
+		dot := ui.Rect{X: x - 20*z, Y: cy - dotSize/2, W: dotSize, H: dotSize}
 		switch r.leaf.Block.Indent % 3 {
 		case 0:
-			p.Fill(dot, pg.Marker, 2.75)
+			p.Fill(dot, pg.Marker, dotSize/2)
 		case 1:
-			p.Stroke(dot, pg.Marker, 2.75, 1)
+			p.Stroke(dot, pg.Marker, dotSize/2, max(1, z))
 		default:
-			p.Fill(ui.Rect{X: x - 19.75, Y: cy - 2.5, W: 5, H: 5}, pg.Marker, 0)
+			sq := 5 * z
+			p.Fill(ui.Rect{X: x - 19.75*z, Y: cy - sq/2, W: sq, H: sq}, pg.Marker, 0)
 		}
 	case "numbered":
 		indent := r.leaf.Block.Indent
@@ -2372,14 +2432,16 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 				fg = t.Accent
 			}
 		}
-		span := ui.Span{Text: label, Size: 16, Color: fg, Features: "tnum"}
+		span := ui.Span{Text: label, Size: 16 * z, Color: fg, Features: "tnum"}
 		w, h := p.MeasureText(0, span)
-		p.RichText(x-6-w, cy-h/2, 0, span)
+		p.RichText(x-6*z-w, cy-h/2, 0, span)
 	case "task":
-		box := ui.Rect{X: x - 24, Y: cy - 8, W: 16, H: 16}
+		boxSize := 16 * z
+		box := ui.Rect{X: x - 24*z, Y: cy - boxSize/2, W: boxSize, H: boxSize}
 		if r.leaf.Block.Checked {
 			scale := float32(1)
-			revealW := float32(12)
+			iconSize := 12 * z
+			revealW := iconSize
 			if !e.printing && !e.reduceMotion && e.taskAnim != nil {
 				if at, ok := e.taskAnim[r.leaf.Block.ID]; ok {
 					if at.IsZero() {
@@ -2391,7 +2453,7 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 						u := float64(elapsed) / float64(200*time.Millisecond)
 						scale = 1 + 0.14*float32(math.Sin(math.Pi*u)*math.Exp(-1.6*u))
 						checkP := min(1, float32(u*1.45))
-						revealW = 12 * checkP
+						revealW = iconSize * checkP
 						p.AnimationFrame()
 					} else {
 						delete(e.taskAnim, r.leaf.Block.ID)
@@ -2399,10 +2461,10 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 				}
 			}
 			drawChecked := func() {
-				p.Fill(box, pg.Marker.Alpha(0.10), 4)
-				p.Stroke(box, pg.Marker, 4, 1.2)
-				iconRect := ui.Rect{X: box.X + 2, Y: box.Y + 2, W: 12, H: 12}
-				if revealW < 11.9 {
+				p.Fill(box, pg.Marker.Alpha(0.10), 4*z)
+				p.Stroke(box, pg.Marker, 4*z, max(1, 1.2*z))
+				iconRect := ui.Rect{X: box.X + 2*z, Y: box.Y + 2*z, W: iconSize, H: iconSize}
+				if revealW < iconSize-0.1 {
 					p.Clip(ui.Rect{X: iconRect.X, Y: iconRect.Y, W: max(0.5, revealW), H: iconRect.H}, 0, func() {
 						p.Icon(iconCheck, iconRect, pg.Marker)
 					})
@@ -2416,8 +2478,8 @@ func (e *Editor) paintMarker(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 				drawChecked()
 			}
 		} else {
-			p.Fill(box, t.Background, 4)
-			p.Stroke(box, pg.TaskBorder, 4, 1)
+			p.Fill(box, t.Background, 4*z)
+			p.Stroke(box, pg.TaskBorder, 4*z, max(1, z))
 		}
 	}
 }
@@ -2434,6 +2496,11 @@ func (e *Editor) paintLineNumbers(p *ui.Painter, bounds ui.Rect, d decoration) {
 	clip := !e.printing && e.viewport > 0
 	visTop := e.Scroll.Y - 40
 	visBot := e.Scroll.Y + e.viewport + 40
+	z := e.zoomFactor()
+	lineSize := 14 * z
+	lineH := 22 * z
+	gutterX := max(float32(28), 36*z)
+	clipW := max(float32(40), 54*z)
 	_, vClipBox, viewH, _, scrollY, compact := e.codeVScrollFor(*r)
 	drawNums := func() {
 		pos := 0
@@ -2452,19 +2519,19 @@ func (e *Editor) paintLineNumbers(p *ui.Painter, bounds ui.Rect, d decoration) {
 				if caret.Y > scrollY+viewH+24 {
 					break
 				}
-				if caret.Y+max(caret.H, 22) >= scrollY-24 {
-					span := ui.Span{Text: strconv.Itoa(i + 1), Font: "monospace", Size: 14, Color: e.page.Caption, Features: "tnum"}
+				if caret.Y+max(caret.H, lineH) >= scrollY-24 {
+					span := ui.Span{Text: strconv.Itoa(i + 1), Font: "monospace", Size: lineSize, Color: e.page.Caption, Features: "tnum"}
 					w, h := p.MeasureText(0, span)
-					p.RichText(bounds.X+d.rect.X+36-w, bounds.Y+lineY+(22-h)/2, 0, span)
+					p.RichText(bounds.X+d.rect.X+gutterX-w, bounds.Y+lineY+(lineH-h)/2, 0, span)
 				}
 			} else {
 				if clip && lineY > visBot {
 					break
 				}
-				if !clip || lineY+max(caret.H, 22) >= visTop {
-					span := ui.Span{Text: strconv.Itoa(i + 1), Font: "monospace", Size: 14, Color: e.page.Caption, Features: "tnum"}
+				if !clip || lineY+max(caret.H, lineH) >= visTop {
+					span := ui.Span{Text: strconv.Itoa(i + 1), Font: "monospace", Size: lineSize, Color: e.page.Caption, Features: "tnum"}
 					w, h := p.MeasureText(0, span)
-					p.RichText(bounds.X+d.rect.X+36-w, bounds.Y+lineY+(22-h)/2, 0, span)
+					p.RichText(bounds.X+d.rect.X+gutterX-w, bounds.Y+lineY+(lineH-h)/2, 0, span)
 				}
 			}
 			if nl < 0 {
@@ -2475,7 +2542,7 @@ func (e *Editor) paintLineNumbers(p *ui.Painter, bounds ui.Rect, d decoration) {
 		}
 	}
 	if compact {
-		p.Clip(ui.Rect{X: bounds.X + d.rect.X, Y: bounds.Y + vClipBox.Y, W: 54, H: vClipBox.H}, 0, drawNums)
+		p.Clip(ui.Rect{X: bounds.X + d.rect.X, Y: bounds.Y + vClipBox.Y, W: clipW, H: vClipBox.H}, 0, drawNums)
 		return
 	}
 	drawNums()
@@ -2511,7 +2578,7 @@ func (e *Editor) linkAt(at int) string {
 }
 func (e *Editor) toggleTask(at int, x float32) bool {
 	r := e.rowAt(at)
-	if r == nil || r.leaf.Block.Kind != "task" || x > r.x || x < r.x-28 {
+	if r == nil || r.leaf.Block.Kind != "task" || x > r.x || x < r.x-max(float32(28), 28*e.zoomFactor()) {
 		return false
 	}
 	wasChecked := r.leaf.Block.Checked

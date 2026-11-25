@@ -269,6 +269,12 @@ func (a *App) shortcuts(c *ui.Context) {
 		a.toggleActiveDocumentMap()
 	case a.pressed(c, "full-width"):
 		a.toggleFullWidth()
+	case !a.overlayBlocksZoom() && a.canZoomPage(a.doc) && a.pressed(c, "zoom-in"):
+		a.stepPageZoom(1)
+	case !a.overlayBlocksZoom() && a.canZoomPage(a.doc) && a.pressed(c, "zoom-out"):
+		a.stepPageZoom(-1)
+	case !a.overlayBlocksZoom() && a.canZoomPage(a.doc) && a.pressed(c, "zoom-reset"):
+		a.resetPageZoom()
 	case a.pressed(c, "bookmark"):
 		a.toggleBookmarkAtCaret()
 	case a.pressed(c, "bookmarks"):

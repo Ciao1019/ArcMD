@@ -238,6 +238,9 @@ func (a *App) documentCorner(c *ui.Context, d *document) {
 		return
 	}
 	if !d.source {
+		if a.showPageZoomButton(d) {
+			a.pageZoomButton(c, d)
+		}
 		a.pageWidthButton(c, d)
 		b := iconButton(c, "document-map", iconListTree, i18n.T("思维导图"), a.withKey(i18n.T("思维导图"), "mindmap"), false)
 		if d.mindMap != nil {

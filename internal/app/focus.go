@@ -149,6 +149,10 @@ func (a *App) focusView(c *ui.Context) {
 				words.Opacity(words.Animate("shown", b2f(show), 150*time.Millisecond))
 			}
 			ui.Spacer(c)
+			if a.showPageZoomButton(a.doc) {
+				zb := a.pageZoomButton(c, a.doc)
+				zb.Opacity(zb.Animate("shown", b2f(show || zb.Focused()), 150*time.Millisecond))
+			}
 			if a.canAdjustPageWidth(a.doc) {
 				pw := a.pageWidthButton(c, a.doc)
 				pw.Opacity(pw.Animate("shown", b2f(show || pw.Focused()), 150*time.Millisecond))
@@ -229,6 +233,8 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 	return editor.Options{
 		FontSize:              a.prefs.ReadingSize(),
 		LineHeight:            a.prefs.ReadingLine(),
+		Zoom:                  a.pageZoom(),
+		OnZoom:                a.setPageZoom,
 		FontFamily:            a.prefs.BodyFamily(),
 		DocTitle:              docTitle,
 		Column:                a.prefs.Column(),

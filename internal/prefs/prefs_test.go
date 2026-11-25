@@ -106,3 +106,93 @@ func TestMaxHeightNormalizeAndRoundTrip(t *testing.T) {
 		t.Fatalf("sanitized = %+v, err=%v", sanitized, err)
 	}
 }
+
+func TestPageZoomDefaultsStepAndRoundTrip(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	p, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PageZoom != 0 || p.Zoom() != DefaultPageZoom {
+		t.Fatalf("default zoom = (%v, %v); want (0, %v)", p.PageZoom, p.Zoom(), DefaultPageZoom)
+	}
+
+	if got := NormalizePageZoom(0); got != DefaultPageZoom {
+		t.Fatalf("NormalizePageZoom(0) = %v; want 1", got)
+	}
+	if got := NormalizePageZoom(0.2); got != MinPageZoom {
+		t.Fatalf("NormalizePageZoom(0.2) = %v; want %v", got, MinPageZoom)
+	}
+	if got := NormalizePageZoom(4.5); got != MaxPageZoom {
+		t.Fatalf("NormalizePageZoom(4.5) = %v; want %v", got, MaxPageZoom)
+	}
+
+	if got := StepPageZoom(1.0, 1); got != 1.1 {
+		t.Fatalf("StepPageZoom(1.0, +1) = %v; want 1.1", got)
+	}
+	if got := StepPageZoom(1.0, -1); got != 0.9 {
+		t.Fatalf("StepPageZoom(1.0, -1) = %v; want 0.9", got)
+	}
+	if got := StepPageZoom(1.25, 1); got != 1.3 {
+		t.Fatalf("StepPageZoom(1.25, +1) = %v; want 1.3", got)
+	}
+	if got := StepPageZoom(1.25, -1); got != 1.2 {
+		t.Fatalf("StepPageZoom(1.25, -1) = %v; want 1.2", got)
+	}
+	if got := StepPageZoom(MaxPageZoom, 1); got != MaxPageZoom {
+		t.Fatalf("StepPageZoom(max, +1) = %v; want %v", got, MaxPageZoom)
+	}
+	if got := StepPageZoom(MinPageZoom, -1); got != MinPageZoom {
+		t.Fatalf("StepPageZoom(min, -1) = %v; want %v", got, MinPageZoom)
+	}
+
+	p.PageZoom = 1.3
+	if err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.Load()
+	if err != nil || loaded.PageZoom != 1.3 || loaded.Zoom() != 1.3 {
+		t.Fatalf("loaded = %+v, err=%v", loaded, err)
+	}
+
+	// Default 1.0 normalizes to 0 and is omitted from prefs.json.
+	loaded.PageZoom = DefaultPageZoom
+	if err := s.Save(loaded); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.PageZoom != 0 || string(raw) == "" {
+		t.Fatalf("default zoom did not normalize to 0: %+v", loaded)
+	}
+	if stringContains(string(raw), "pageZoom") {
+		t.Fatalf("default 100%% zoom should be omitted from json: %s", raw)
+	}
+
+	// Out-of-range JSON values clamp cleanly on load.
+	if err := os.WriteFile(s.Path, []byte(`{"version":1,"pageZoom":9.9}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clamped, err := s.Load()
+	if err != nil || clamped.Zoom() != MaxPageZoom {
+		t.Fatalf("clamped high = %+v, err=%v", clamped, err)
+	}
+	if err := os.WriteFile(s.Path, []byte(`{"version":1,"pageZoom":0.1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clamped, err = s.Load()
+	if err != nil || clamped.Zoom() != MinPageZoom {
+		t.Fatalf("clamped low = %+v, err=%v", clamped, err)
+	}
+}
+
+func stringContains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

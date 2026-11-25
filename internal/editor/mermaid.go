@@ -215,13 +215,15 @@ func (e *Editor) mermaidRow(r *row, textH, gap float32) (total float32, wellOff 
 			if !r.mermaidHidden {
 				availW = max(24, r.rect.W-2*mermaidPadX)
 			}
-			scale := float32(1)
-			if diag.W > availW {
+			z := e.zoomFactor()
+			scale := z
+			if diag.W*scale > availW {
 				scale = availW / diag.W
 			}
 			if !r.mermaidHidden {
-				if diag.H*scale > mermaidMaxH {
-					scale = min(scale, mermaidMaxH/diag.H)
+				maxH := mermaidMaxH * z
+				if diag.H*scale > maxH {
+					scale = min(scale, maxH/diag.H)
 				}
 			} else if e.printing && e.printPageH > 0 && e.printPageH < 1e6 {
 				// Fit a printed diagram onto a single A4 page, while interactive

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -16,11 +17,22 @@ import (
 // CurrentVersion is the version of prefs.json this ArcMD writes.
 const CurrentVersion = 1
 
+// Page zoom bounds and discrete keyboard/menu step (10%).
+const (
+	MinPageZoom     float32 = 0.50
+	MaxPageZoom     float32 = 2.00
+	DefaultPageZoom float32 = 1.00
+	PageZoomStep    float32 = 0.10
+)
+
 // Prefs are the preferences.
 type Prefs struct {
 	Version    int     `json:"version"`
 	FontSize   float32 `json:"fontSize,omitempty"`
 	LineHeight float32 `json:"lineHeight,omitempty"`
+	// PageZoom scales the entire document page proportionally (0.50–2.00);
+	// 0 means 100% (DefaultPageZoom).
+	PageZoom float32 `json:"pageZoom,omitempty"`
 	// NoAutosave disables background automatic saving so edits stay in memory
 	// until explicitly saved or confirmed when closing.
 	NoAutosave bool `json:"noAutosave,omitempty"`
@@ -135,6 +147,61 @@ func (p *Prefs) ReadingLine() float32 {
 	return 26.0 / 16
 }
 
+// NormalizePageZoom clamps zoom to [MinPageZoom, MaxPageZoom] rounded to whole
+// percents, returning DefaultPageZoom for invalid or non-positive values.
+func NormalizePageZoom(z float32) float32 {
+	if math.IsNaN(float64(z)) || math.IsInf(float64(z), 0) || z <= 0 {
+		return DefaultPageZoom
+	}
+	pct := math.Round(float64(z) * 100)
+	if pct < float64(MinPageZoom*100) {
+		pct = float64(MinPageZoom * 100)
+	}
+	if pct > float64(MaxPageZoom*100) {
+		pct = float64(MaxPageZoom * 100)
+	}
+	return float32(pct / 100)
+}
+
+// StepPageZoom moves cur up (delta > 0) or down (delta < 0) in PageZoomStep
+// (10%) stops within [MinPageZoom, MaxPageZoom].
+func StepPageZoom(cur float32, delta int) float32 {
+	z := NormalizePageZoom(cur)
+	if delta == 0 {
+		return z
+	}
+	pct := int(math.Round(float64(z) * 100))
+	step := int(math.Round(float64(PageZoomStep) * 100))
+	minPct := int(math.Round(float64(MinPageZoom) * 100))
+	maxPct := int(math.Round(float64(MaxPageZoom) * 100))
+	if delta > 0 {
+		next := ((pct / step) + 1) * step
+		if delta > 1 {
+			next += (delta - 1) * step
+		}
+		if next > maxPct {
+			next = maxPct
+		}
+		return float32(next) / 100
+	}
+	next := ((pct - 1) / step) * step
+	if delta < -1 {
+		next += (delta + 1) * step
+	}
+	if next < minPct {
+		next = minPct
+	}
+	return float32(next) / 100
+}
+
+// Zoom returns the document page zoom factor (1.0 when unset).
+func (p *Prefs) Zoom() float32 {
+	if p == nil {
+		return DefaultPageZoom
+	}
+	return NormalizePageZoom(p.PageZoom)
+}
+
 // Fonts are the typefaces body text may be set in, and Pages the widths
 // of the text column, by the names prefs.json keeps them under.
 var (
@@ -186,6 +253,14 @@ func (p *Prefs) normalize() {
 	}
 	if !(p.LineHeight >= 1.2 && p.LineHeight <= 2.2) {
 		p.LineHeight = 0
+	}
+	if p.PageZoom != 0 {
+		z := NormalizePageZoom(p.PageZoom)
+		if z == DefaultPageZoom {
+			p.PageZoom = 0
+		} else {
+			p.PageZoom = z
+		}
 	}
 	p.CodeMaxHeight = sanitizeMaxHeight(p.CodeMaxHeight)
 	p.ImageMaxHeight = sanitizeMaxHeight(p.ImageMaxHeight)

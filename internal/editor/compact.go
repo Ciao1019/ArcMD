@@ -251,7 +251,7 @@ func (e *Editor) handleCompactScrollInput(ev ui.InputEvent) bool {
 		}
 	}
 
-	if ev.Kind != ui.InputScroll || ev.Mods&ui.Shift != 0 {
+	if ev.Kind != ui.InputScroll || ev.Mods&(ui.Shift|ui.Cmd|ui.Ctrl) != 0 {
 		return false
 	}
 	delta := ev.DY
@@ -328,7 +328,7 @@ func (e *Editor) handleImageBoxInput(id string, bounds ui.Rect, ev ui.InputEvent
 	if e.imageVBarDrag == id || (ev.Kind == ui.InputPointerDown && ev.Button == 0 && edEv.X >= barBox.X && edEv.X <= barBox.X+barBox.W && edEv.Y >= barBox.Y && edEv.Y <= barBox.Y+barBox.H) {
 		return handleVerticalBarEvent(edEv, id, barBox, viewH, contentH, scrollY, &e.imageVBarDrag, &e.imageVBarGrab, &e.imageScrollY)
 	}
-	if ev.Kind == ui.InputScroll && ev.Mods&ui.Shift == 0 && math.Abs(float64(ev.DY)) >= 0.01 && abs32(ev.DY) >= abs32(ev.DX) {
+	if ev.Kind == ui.InputScroll && ev.Mods&(ui.Shift|ui.Cmd|ui.Ctrl) == 0 && math.Abs(float64(ev.DY)) >= 0.01 && abs32(ev.DY) >= abs32(ev.DX) {
 		next := min(max(0, scrollY+ev.DY), contentH-viewH)
 		if next != scrollY {
 			setScrollY(&e.imageScrollY, id, next, contentH-viewH)

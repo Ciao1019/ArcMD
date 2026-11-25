@@ -10,8 +10,64 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func (e *Editor) handleZoomInput(ev ui.InputEvent) bool {
+	if e.onZoom == nil || e.printing || e.HasZoomModal() {
+		return false
+	}
+	if ev.Kind == ui.InputZoom {
+		if ev.Scale > 0 && !math.IsNaN(float64(ev.Scale)) && !math.IsInf(float64(ev.Scale), 0) {
+			next := clampPageZoom(e.zoomFactor() * ev.Scale)
+			if next != e.zoomFactor() {
+				e.onZoom(next)
+			}
+		}
+		return true
+	}
+	if ev.Kind == ui.InputScroll && ev.Mods&(ui.Cmd|ui.Ctrl) != 0 {
+		delta := -ev.DY
+		if delta == 0 {
+			delta = ev.DX
+		}
+		if delta == 0 {
+			return true
+		}
+		if e.zoomWheelAccum != 0 && (delta > 0) != (e.zoomWheelAccum > 0) {
+			e.zoomWheelAccum = 0
+		}
+		e.zoomWheelAccum += delta
+		const notch = float32(24)
+		steps := 0
+		switch {
+		case e.zoomWheelAccum >= notch:
+			steps = 1
+			e.zoomWheelAccum = 0
+		case e.zoomWheelAccum <= -notch:
+			steps = -1
+			e.zoomWheelAccum = 0
+		}
+		if steps != 0 {
+			curPct := int(math.Round(float64(e.zoomFactor()) * 100))
+			var targetPct int
+			if steps > 0 {
+				targetPct = ((curPct / 10) + 1) * 10
+			} else {
+				targetPct = ((curPct - 1) / 10) * 10
+			}
+			next := clampPageZoom(float32(targetPct) / 100)
+			if next != e.zoomFactor() {
+				e.onZoom(next)
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string), open func(string)) bool {
 	e.lastInput = ev.Time
+	if e.handleZoomInput(ev) {
+		return true
+	}
 	e.sync()
 	if e.blockPointer(ev) {
 		return true

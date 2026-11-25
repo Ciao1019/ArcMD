@@ -130,6 +130,8 @@ func (a *App) bookOptionsFor(c *ui.Context, d *document) editor.BookOptions {
 		FontFamily:     a.prefs.BodyFamily(),
 		Column:         a.prefs.Column(),
 		FullWidth:      a.prefs.FullWidth(),
+		Zoom:           a.pageZoom(),
+		OnZoom:         a.setPageZoom,
 		RevealFile:     revealFn,
 		OpenInBrowser:  browserFn,
 		SaveAsMarkdown: saveMDFn,
@@ -149,6 +151,9 @@ func (a *App) bookCorner(c *ui.Context, d *document) {
 	}
 	t := c.Theme()
 	ui.Row(c.Key("book-corner")).Gap(2).AlignItems(ui.Center).Children(func() {
+		if a.showPageZoomButton(d) {
+			a.pageZoomButton(c, d)
+		}
 		if a.canAdjustPageWidth(d) {
 			a.pageWidthButton(c, d)
 		}

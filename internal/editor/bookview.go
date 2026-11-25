@@ -68,6 +68,8 @@ type BookOptions struct {
 	FontFamily string
 	Column     float32
 	FullWidth  bool
+	Zoom       float32
+	OnZoom     func(float32)
 
 	PinnedChapter int // 1-based pinned chapter for EPUB embeds when > 0
 	PinChapter    func(ch1Based int)
@@ -911,6 +913,12 @@ func BookView(c *ui.Context, v *BookViewer, opts BookOptions) ui.Element {
 					}
 				}
 
+				zoom := opts.Zoom
+				onZoom := opts.OnZoom
+				if opts.Compact || v.ShowSource {
+					zoom = 0
+					onZoom = nil
+				}
 				View(c.Key(edKey), ed, Options{
 					Width:              availW,
 					Theme:              t,
@@ -920,6 +928,8 @@ func BookView(c *ui.Context, v *BookViewer, opts BookOptions) ui.Element {
 					FontFamily:         opts.FontFamily,
 					Column:             col,
 					FullWidth:          fullW,
+					Zoom:               zoom,
+					OnZoom:             onZoom,
 					CompactMargins:     opts.Compact,
 					Outline:            false,
 					DirectLinks:        true,

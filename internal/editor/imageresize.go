@@ -42,7 +42,7 @@ func (e *Editor) imageHandles(c *ui.Context, r row) {
 			e.ready = false
 		}
 		if _, _, ended := h.DragEnded(); ended && e.imageResize.id == id {
-			e.SetImageWidth(id, e.imageResize.width)
+			e.SetImageWidth(id, e.imageResize.width/e.zoomFactor())
 			e.imageResize = imageResize{}
 			e.ready = false
 		}
@@ -50,11 +50,12 @@ func (e *Editor) imageHandles(c *ui.Context, r row) {
 			if ev.Kind != ui.InputKeyDown {
 				return false
 			}
+			z := e.zoomFactor()
 			switch ev.Key {
 			case ui.KeyLeft, ui.KeyDown:
-				e.SetImageWidth(id, max(48, rect.W-10))
+				e.SetImageWidth(id, max(48, rect.W-10)/z)
 			case ui.KeyRight, ui.KeyUp:
-				e.SetImageWidth(id, min(r.rect.W, rect.W+10))
+				e.SetImageWidth(id, min(r.rect.W, rect.W+10)/z)
 			case ui.KeyHome:
 				e.SetImageWidth(id, 0)
 			case ui.KeyEscape:

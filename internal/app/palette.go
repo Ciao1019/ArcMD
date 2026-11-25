@@ -11,6 +11,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/fuzzy"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/prefs"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/update"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -546,6 +547,13 @@ func (a *App) actions() []action {
 					key = a.keyLabel("full-width")
 				}
 				cmd(fmt.Sprintf(i18n.T("页面宽度：%s"), i18n.T(opt.label)), key, func() { a.setPageWidth(page) })
+			}
+		}
+		if a.canZoomPage(a.doc) {
+			cmd(i18n.T("放大页面"), a.keyLabel("zoom-in"), func() { a.stepPageZoom(1) })
+			cmd(i18n.T("缩小页面"), a.keyLabel("zoom-out"), func() { a.stepPageZoom(-1) })
+			if a.pageZoom() != prefs.DefaultPageZoom {
+				cmd(i18n.T("重置页面缩放"), a.keyLabel("zoom-reset"), a.resetPageZoom)
 			}
 		}
 		if a.doc.loadErr == nil && !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isPDF() && !a.doc.isBook() && !a.doc.isDatabase() {
