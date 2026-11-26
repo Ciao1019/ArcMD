@@ -3,10 +3,12 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -441,6 +443,255 @@ func TestMDZSearchQAExternalAndI18n(t *testing.T) {
 	if !tt.HasText("Unpack to Document") {
 		t.Fatalf("expected English MDZ corner label")
 	}
+}
+
+func TestMDZBugFixes(t *testing.T) {
+	t.Run("ctlDocRead_returns_archive_content_not_stat_stamp", func(t *testing.T) {
+		a, _ := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		if err := os.WriteFile(filepath.Join(sp.Root, "Handbook.mdz"), buildTestProjectMDZ(t), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		req, err := json.Marshal(map[string]any{
+			"space": sp.Name,
+			"path":  "Handbook.mdz",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resAny, err := a.ctlDocRead(req)
+		if err != nil {
+			t.Fatalf("ctlDocRead(.mdz) failed: %v", err)
+		}
+		res, ok := resAny.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected ctlDocRead result type: %T", resAny)
+		}
+		if res["kind"] != "mdz" {
+			t.Fatalf("kind = %v, want mdz", res["kind"])
+		}
+		content, _ := res["content"].(string)
+		if !strings.Contains(content, "MDZSearchToken99") || strings.HasPrefix(content, "mdz:") {
+			t.Fatalf("expected archive markdown content, got %q", content)
+		}
+	})
+
+	t.Run("exportMDZ_with_extensionless_assets_file_does_not_hang", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		sp.AttachmentsDir = "media"
+		if err := os.MkdirAll(filepath.Join(sp.Root, "media"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(sp.Root, "notes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Extensionless file named "assets" beside the document + external attachment in media/.
+		if err := os.WriteFile(filepath.Join(sp.Root, "notes", "assets"), []byte("plain file named assets"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		imgBytes := makeBookSnapshotPNG(t, 80, 60, color.RGBA{40, 120, 200, 255}, color.RGBA{240, 248, 255, 255}, color.RGBA{96, 165, 250, 255})
+		if err := os.WriteFile(filepath.Join(sp.Root, "media", "pic.png"), imgBytes, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		md := "# Collision\n\n[raw file](assets)\n\n![pic](../media/pic.png)\n"
+		if err := os.WriteFile(filepath.Join(sp.Root, "notes", "Collision.md"), []byte(md), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("notes/Collision.md")
+		settle(tt)
+
+		a.exportMDZ()
+		exported := filepath.Join(sp.Root, "notes", "Collision.mdz")
+		arc, err := mdz.Open(exported)
+		if err != nil {
+			t.Fatalf("mdz.Open(Collision.mdz): %v", err)
+		}
+		defer func() { _ = arc.Close() }()
+		if !arc.HasFile("assets") || !arc.HasFile("assets-2/pic.png") {
+			t.Fatalf("expected assets and assets-2/pic.png in archive, got files=%v", arc.Files())
+		}
+	})
+
+	t.Run("activeEditor_caches_read_error_editor", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		raw := makeCustomZIPForTest(t, map[string][]byte{
+			"index.md": {0xff, 0xfe, 0xfd}, // invalid UTF-8 triggers ReadMarkdown error
+		}, false)
+		if err := os.WriteFile(filepath.Join(sp.Root, "BadUTF8.mdz"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("BadUTF8.mdz")
+		settle(tt)
+		ed1 := a.doc.mdz.activeEditor()
+		ed2 := a.doc.mdz.activeEditor()
+		if ed1 == nil || ed1 != ed2 {
+			t.Fatalf("expected error editor to be cached across frames")
+		}
+	})
+
+	t.Run("orderedMDZPages_groups_directories_contiguously_for_subdir_entry", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		raw, err := mdz.Build(mdz.WriteOptions{
+			Manifest: mdz.Manifest{
+				Title:      "Subdir Entry",
+				Mode:       mdz.ModeProject,
+				EntryPoint: "guide/intro.md",
+			},
+			Files: []mdz.File{
+				{Path: "guide/intro.md", Data: []byte("# Intro\n")},
+				{Path: "guide/setup.md", Data: []byte("# Setup\n")},
+				{Path: "guide/sub/deep.md", Data: []byte("# Deep\n")},
+				{Path: "api/ref.md", Data: []byte("# Ref\n")},
+				{Path: "root.md", Data: []byte("# Root\n")},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sp.Root, "Subdir.mdz"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("Subdir.mdz")
+		settle(tt)
+		want := []string{"guide/intro.md", "guide/setup.md", "root.md", "api/ref.md", "guide/sub/deep.md"}
+		if !slices.Equal(a.doc.mdz.pages, want) {
+			t.Fatalf("orderedMDZPages = %v, want %v", a.doc.mdz.pages, want)
+		}
+	})
+
+	t.Run("toggleOutline_collapses_multipage_rail_and_opens_outline", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		tt.SetSize(1200, 760)
+		sp := a.state.ActiveSpace()
+		raw, err := mdz.Build(mdz.WriteOptions{
+			Manifest: mdz.Manifest{
+				Title:      "Outline Test",
+				Mode:       mdz.ModeProject,
+				EntryPoint: "index.md",
+			},
+			Files: []mdz.File{
+				{Path: "index.md", Data: []byte("# Title\n\n## Section One\n\nBody.\n\n## Section Two\n\nMore.\n")},
+				{Path: "other.md", Data: []byte("# Other\n")},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sp.Root, "Outline.mdz"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("Outline.mdz")
+		settle(tt)
+		if !a.doc.mdz.sidebarOpen || a.outlineOpen() {
+			t.Fatalf("expected rail open and outline closed initially, rail=%v outline=%v", a.doc.mdz.sidebarOpen, a.outlineOpen())
+		}
+		a.toggleOutline()
+		settle(tt)
+		if a.doc.mdz.sidebarOpen || !a.outlineOpen() {
+			t.Fatalf("expected toggleOutline to collapse rail and open outline, rail=%v outline=%v", a.doc.mdz.sidebarOpen, a.outlineOpen())
+		}
+	})
+
+	t.Run("subdir_image_not_shadowed_by_manifest_cover_and_html_book_img_relative", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		rootCover := makeBookSnapshotPNG(t, 200, 100, color.RGBA{220, 40, 40, 255}, color.RGBA{255, 240, 240, 255}, color.RGBA{240, 100, 100, 255})
+		subImg := makeBookSnapshotPNG(t, 123, 77, color.RGBA{30, 150, 70, 255}, color.RGBA{240, 255, 245, 255}, color.RGBA{80, 200, 120, 255})
+		htmlImg := makeBookSnapshotPNG(t, 91, 55, color.RGBA{40, 90, 220, 255}, color.RGBA{240, 245, 255, 255}, color.RGBA{90, 140, 240, 255})
+		raw, err := mdz.Build(mdz.WriteOptions{
+			Manifest: mdz.Manifest{
+				Title:      "Cover Shadow Test",
+				Mode:       mdz.ModeProject,
+				EntryPoint: "docs/entry.md",
+				Cover:      "assets/cover.png",
+			},
+			Files: []mdz.File{
+				{Path: "assets/cover.png", Data: rootCover},
+				{Path: "docs/assets/cover.png", Data: subImg},
+				{Path: "docs/entry.md", Data: []byte("# Entry\n\n![sub](assets/cover.png)\n")},
+				{Path: "docs/embeds/demo.html", Data: []byte("<html><body><img src=\"pic.png\"></body></html>")},
+				{Path: "docs/embeds/pic.png", Data: htmlImg},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sp.Root, "Shadow.mdz"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("Shadow.mdz")
+		settle(tt)
+
+		// Relative "assets/cover.png" inside docs/entry.md must resolve to docs/assets/cover.png (123x77), not root 200x100.
+		gotSub := a.mdzLoadImage(a.doc, "assets/cover.png")
+		if gotSub.Width != 123 || gotSub.Height != 77 {
+			t.Fatalf("docs/entry.md assets/cover.png loaded %dx%d, want 123x77 (docs/assets/cover.png)", gotSub.Width, gotSub.Height)
+		}
+		// Manifest cover was wired as ../assets/cover.png and resolves to root cover (200x100).
+		ed := a.doc.mdz.activeEditor()
+		gotCover := a.mdzLoadImage(a.doc, ed.Doc.Cover)
+		if gotCover.Width != 200 || gotCover.Height != 100 {
+			t.Fatalf("manifest cover %q loaded %dx%d, want 200x100", ed.Doc.Cover, gotCover.Width, gotCover.Height)
+		}
+		// Embedded HTML external image resolves relative to docs/embeds/demo.html -> docs/embeds/pic.png (91x55).
+		res := a.mdzLoadBookExternalImage(a.doc, "embeds/demo.html", "pic.png")
+		if res.Width != 91 || res.Height != 55 {
+			t.Fatalf("embedded HTML relative image loaded %dx%d, want 91x55", res.Width, res.Height)
+		}
+		// Unpacking docs/entry.md must extract BOTH root cover (200x100) and docs/assets/cover.png (123x77) without conflating them.
+		a.unpackMDZAsDocument(a.doc)
+		settle(tt)
+		if a.doc.isMDZ() {
+			t.Fatalf("expected unpacked .md open")
+		}
+		if a.doc.ed.Doc.Cover == "" {
+			t.Fatalf("expected unpacked cover preserved")
+		}
+		var imgURL string
+		for _, b := range a.doc.ed.Doc.Blocks {
+			if b.Kind == "image" {
+				imgURL = b.URL
+				break
+			}
+		}
+		if imgURL == "" || imgURL == a.doc.ed.Doc.Cover {
+			t.Fatalf("expected distinct unpacked URLs for root cover (%q) and subdir image (%q)", a.doc.ed.Doc.Cover, imgURL)
+		}
+	})
+
+	t.Run("bookmarks_and_templates_guarded_for_mdz", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		if err := os.WriteFile(filepath.Join(sp.Root, "ReadOnly.mdz"), buildTestProjectMDZ(t), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("ReadOnly.mdz")
+		settle(tt)
+
+		if a.bookmarkable() != nil {
+			t.Fatalf("bookmarkable() must be nil for MDZ")
+		}
+		beforeMarks := len(a.state.Bookmarks)
+		a.toggleBookmarkAtCaret()
+		if len(a.state.Bookmarks) != beforeMarks {
+			t.Fatalf("toggleBookmarkAtCaret mutated bookmarks for MDZ")
+		}
+		beforeTemplates := len(a.spaceTemplates(sp))
+		a.saveAsTemplate()
+		if len(a.spaceTemplates(sp)) != beforeTemplates {
+			t.Fatalf("saveAsTemplate created a template from MDZ")
+		}
+	})
 }
 
 func TestMDZSnapshot(t *testing.T) {

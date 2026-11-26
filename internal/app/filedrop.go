@@ -59,13 +59,13 @@ func fileDropCardLabels() (md, pdf *ui.TextLayout) {
 	return fileDropMDLabel, fileDropPDFLabel
 }
 
-// isImportableDoc reports whether name is a Markdown (.md), PDF (.pdf), HTML,
-// or EPUB file allowed for external drag-and-drop import.
+// isImportableDoc reports whether name is a Markdown (.md), MDZip (.mdz),
+// PDF (.pdf), HTML, or EPUB file allowed for external drag-and-drop import.
 func isImportableDoc(name string) bool {
 	ext := filepath.Ext(name)
-	return strings.EqualFold(ext, ".md") || strings.EqualFold(ext, ".pdf") ||
-		strings.EqualFold(ext, ".html") || strings.EqualFold(ext, ".htm") ||
-		strings.EqualFold(ext, ".epub")
+	return strings.EqualFold(ext, ".md") || strings.EqualFold(ext, ".mdz") ||
+		strings.EqualFold(ext, ".pdf") || strings.EqualFold(ext, ".html") ||
+		strings.EqualFold(ext, ".htm") || strings.EqualFold(ext, ".epub")
 }
 
 func isMarkdownFile(name string) bool {
@@ -157,7 +157,7 @@ func (a *App) importDroppedFiles(sp *space.Space, dir string, paths []string) {
 		created = append(created, rel)
 	}
 	if len(skipped) > 0 {
-		a.notify("仅支持拖入 Markdown (.md)、PDF、HTML 和 EPUB 文档：%s 未导入。", strings.Join(skipped, "、"))
+		a.notify("仅支持拖入 Markdown (.md)、MDZip (.mdz)、PDF、HTML 和 EPUB 文档：%s 未导入。", strings.Join(skipped, "、"))
 	}
 	if len(created) == 0 && len(existing) == 0 {
 		return
@@ -211,7 +211,7 @@ func (a *App) handleEditorFileDrop(paths []string, at int) {
 			hasImage = true
 			break
 		}
-		if isMarkdownFile(p) {
+		if isMarkdownFile(p) || vault.IsMDZ(p) {
 			hasMD = true
 		}
 	}

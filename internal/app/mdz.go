@@ -34,20 +34,21 @@ const (
 )
 
 type mdzState struct {
-	archive      *mdz.Archive
-	loadErr      error
-	pages        []string
-	currentPage  string
-	sidebarOpen  bool
-	history      []string
-	historyAt    int
-	editors      map[string]*editor.Editor
-	editorOrder  []string
-	images       map[string]editor.ImageResource
-	whiteboards  map[string]*whiteboard.Scene
-	pdfs         map[string]*pdfdoc.Document
-	books        map[string]*bookdoc.Document
-	requestFocus bool
+	archive        *mdz.Archive
+	loadErr        error
+	pages          []string
+	currentPage    string
+	sidebarOpen    bool
+	history        []string
+	historyAt      int
+	editors        map[string]*editor.Editor
+	editorOrder    []string
+	images         map[string]editor.ImageResource
+	whiteboards    map[string]*whiteboard.Scene
+	pdfs           map[string]*pdfdoc.Document
+	books          map[string]*bookdoc.Document
+	requestFocus   bool
+	pendingOutline bool
 
 	previewReady   bool
 	previewTitle   string
@@ -126,11 +127,12 @@ func (m *mdzState) activeEditor() *editor.Editor {
 		doc.Blocks = []*model.Block{model.NewBlock("paragraph", fmt.Sprintf(i18n.T("无法读取包内文档：%v"), err))}
 		ed := editor.FromOwnedDocument(doc)
 		ed.ReadOnly = true
+		m.putEditor(m.currentPage, ed)
 		return ed
 	}
 	doc := editor.ImportMarkdown(md)
 	if m.currentPage == m.archive.EntryPoint() && doc.Cover == "" && m.archive.CoverPath() != "" {
-		doc.Cover = m.archive.CoverPath()
+		doc.Cover = relativeArchiveURL(m.currentPage, m.archive.CoverPath())
 	}
 	ed := editor.FromOwnedDocument(doc)
 	ed.ReadOnly = true
@@ -335,20 +337,68 @@ func orderedMDZPages(arc *mdz.Archive) []string {
 	}
 	all := arc.MarkdownPages()
 	ep := arc.EntryPoint()
-	if ep == "" {
-		return all
+	dirOf := func(p string) string {
+		d := path.Dir(p)
+		if d == "." {
+			return ""
+		}
+		return d
+	}
+	epDir := ""
+	if ep != "" {
+		epDir = dirOf(ep)
+	}
+	dirRank := func(d string) int {
+		if ep != "" && d == epDir {
+			return 0
+		}
+		if d == "" {
+			return 1
+		}
+		return 2
 	}
 	out := make([]string, 0, len(all))
-	out = append(out, ep)
 	for _, p := range all {
 		if p != ep {
 			out = append(out, p)
 		}
 	}
+	slices.SortFunc(out, func(a, b string) int {
+		da, db := dirOf(a), dirOf(b)
+		if ra, rb := dirRank(da), dirRank(db); ra != rb {
+			return ra - rb
+		}
+		if cmp := strings.Compare(da, db); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(path.Base(a), path.Base(b))
+	})
+	if ep != "" {
+		out = append([]string{ep}, out...)
+	}
 	return out
 }
 
+func relativeArchiveURL(fromPage, targetPath string) string {
+	fromDir := path.Dir(fromPage)
+	if fromDir == "." || fromDir == "" {
+		return encodeArchiveRelURL(targetPath)
+	}
+	rel, err := filepath.Rel(filepath.FromSlash(fromDir), filepath.FromSlash(targetPath))
+	if err != nil {
+		return encodeArchiveRelURL(targetPath)
+	}
+	return encodeArchiveRelURL(filepath.ToSlash(rel))
+}
+
 func (a *App) mdzLoadImage(d *document, rawURL string) editor.ImageResource {
+	if d == nil || !d.isMDZ() || d.mdz.archive == nil {
+		return editor.ImageResource{Problem: editor.ImageMissing, Local: true}
+	}
+	return a.mdzLoadImageFrom(d, d.mdz.currentPage, rawURL, true)
+}
+
+func (a *App) mdzLoadImageFrom(d *document, basePage, rawURL string, allowManifestCover bool) editor.ImageResource {
 	if d == nil || !d.isMDZ() || d.mdz.archive == nil {
 		return editor.ImageResource{Problem: editor.ImageMissing, Local: true}
 	}
@@ -365,14 +415,15 @@ func (a *App) mdzLoadImage(d *document, rawURL string) editor.ImageResource {
 		return a.remoteImageResource(d, trimmed)
 	}
 	var targetPath string
-	if cov := m.archive.CoverPath(); cov != "" && trimmed == cov && m.archive.HasFile(cov) {
-		targetPath = cov
-	} else {
-		res := m.archive.ResolveLink(m.currentPage, trimmed)
-		if res.Kind != mdz.LinkInternal || !res.Found {
-			return editor.ImageResource{Problem: editor.ImageMissing, Local: true}
+	if link := m.archive.ResolveLink(basePage, trimmed); link.Kind == mdz.LinkInternal && link.Found {
+		targetPath = link.Path
+	} else if allowManifestCover && m.currentPage == m.archive.EntryPoint() {
+		if cov := m.archive.CoverPath(); cov != "" && trimmed == cov && m.archive.HasFile(cov) {
+			targetPath = cov
 		}
-		targetPath = res.Path
+	}
+	if targetPath == "" {
+		return editor.ImageResource{Problem: editor.ImageMissing, Local: true}
 	}
 	if m.images == nil {
 		m.images = make(map[string]editor.ImageResource)
@@ -399,6 +450,19 @@ func (a *App) mdzLoadImage(d *document, rawURL string) editor.ImageResource {
 	}
 	m.images[targetPath] = res
 	return res
+}
+
+func (a *App) mdzLoadBookExternalImage(d *document, bookURL, imgSrc string) editor.ImageResource {
+	if d == nil || !d.isMDZ() || d.mdz.archive == nil {
+		return editor.ImageResource{Problem: editor.ImageMissing, Local: true}
+	}
+	basePage := d.mdz.currentPage
+	if cleanBook, _, _ := editor.ParseBookURLRef(bookURL); cleanBook != "" {
+		if res := d.mdz.archive.ResolveLink(basePage, cleanBook); res.Kind == mdz.LinkInternal && res.Found {
+			basePage = res.Path
+		}
+	}
+	return a.mdzLoadImageFrom(d, basePage, imgSrc, false)
 }
 
 func (a *App) mdzLoadWhiteboard(d *document, rawURL string) (*whiteboard.Scene, uint64, error) {
@@ -539,7 +603,7 @@ func (a *App) mdzOpenWiki(d *document, name string) {
 	a.notify("归档中找不到双链文档「%s」。", target)
 }
 
-func (a *App) mdzEditorOptions(c *ui.Context, width float32, focus bool, d *document) editor.Options {
+func (a *App) mdzEditorOptions(c *ui.Context, width float32, focus, showRail bool, d *document) editor.Options {
 	opts := a.editorOptionsFor(c, width, focus, d)
 	if d != nil && d.isMDZ() && d.mdz.archive != nil {
 		title := docName(d.title())
@@ -591,10 +655,12 @@ func (a *App) mdzEditorOptions(c *ui.Context, width float32, focus bool, d *docu
 	opts.LoadWhiteboard = func(u string) (*whiteboard.Scene, uint64, error) { return a.mdzLoadWhiteboard(d, u) }
 	opts.LoadPDF = func(u string) (*pdfdoc.Document, uint64, error) { return a.mdzLoadPDF(d, u) }
 	opts.LoadBook = func(u string) (*bookdoc.Document, uint64, error) { return a.mdzLoadBook(d, u) }
-	opts.LoadBookExternalImg = func(_, imgSrc string) editor.ImageResource { return a.mdzLoadImage(d, imgSrc) }
+	opts.LoadBookExternalImg = func(bookURL, imgSrc string) editor.ImageResource {
+		return a.mdzLoadBookExternalImage(d, bookURL, imgSrc)
+	}
 	opts.OpenLink = func(u string) { a.mdzOpenLink(d, u) }
 	opts.OpenWiki = func(name string) { a.mdzOpenWiki(d, name) }
-	if d != nil && d.isMDZ() && len(d.mdz.pages) > 1 && d.mdz.sidebarOpen && !focus {
+	if showRail {
 		// Avoid stacking the editor heading outline next to the multi-page archive rail.
 		opts.Outline = false
 		opts.SetOutline = nil
@@ -753,9 +819,15 @@ func (a *App) mdzView(c *ui.Context, d *document, width float32, focus bool) {
 			ui.Box(c).Width(1).Shrink(0).AlignSelf(ui.Stretch).Background(dt.Border)
 		}
 		ui.Column(c.Key("mdz-editor-wrap")).Grow(1).MinHeight(0).MinWidth(0).AlignSelf(ui.Stretch).Children(func() {
-			editor.View(c.Key(fmt.Sprintf("mdz:%p:%s", m, m.currentPage)), ed, a.mdzEditorOptions(c, editorW, focus, d))
+			editor.View(c.Key(fmt.Sprintf("mdz:%p:%s", m, m.currentPage)), ed, a.mdzEditorOptions(c, editorW, focus, showRail, d))
 		})
 	})
+	if m.pendingOutline {
+		m.pendingOutline = false
+		if !showRail && !ed.OutlineOpen() {
+			ed.ToggleOutline()
+		}
+	}
 }
 
 func (a *App) mdzPageRail(c *ui.Context, d *document, dt *ui.Theme) {
@@ -789,14 +861,14 @@ func (a *App) mdzPageRail(c *ui.Context, d *document, dt *ui.Theme) {
 		ui.Box(c).Height(1).Shrink(0).Background(dt.Border.Alpha(0.6))
 		ui.Scroll(c.Key("mdz-rail-scroll")).Grow(1).MinHeight(0).Padding(6).Children(func() {
 			lastDir := ""
-			for _, pagePath := range m.pages {
+			for i, pagePath := range m.pages {
 				p := pagePath
 				dir := path.Dir(p)
 				if dir == "." {
 					dir = ""
 				}
 				if dir != "" && dir != lastDir {
-					ui.Row(c.Key("mdz-dir:"+dir)).Height(24).Padding(6, 8, 2, 8).Gap(5).AlignItems(ui.Center).Children(func() {
+					ui.Row(c.Key(fmt.Sprintf("mdz-dir:%d:%s", i, dir))).Height(24).Padding(6, 8, 2, 8).Gap(5).AlignItems(ui.Center).Children(func() {
 						ui.Icon(c, iconFolder).FontSize(12).TextColor(dt.TextMuted.Alpha(0.75))
 						ui.Text(c, dir).FontSize(11).FontWeight(500).TextColor(dt.TextMuted).SingleLine().Grow(1).MinWidth(0)
 					})
@@ -991,6 +1063,10 @@ func (a *App) exportMDZ() {
 	anyRewritten := false
 
 	allocAssetsPath := func(origBase string) string {
+		dir := assetsDir
+		for d := 2; usedNFC[dir] || usedFold[cases.Fold().String(dir)]; d++ {
+			dir = fmt.Sprintf("%s-%d", assetsDir, d)
+		}
 		cleanBase := sanitizeMDZFilename(origBase)
 		ext := vault.FileExt(cleanBase)
 		stem := strings.TrimSuffix(cleanBase, ext)
@@ -1002,7 +1078,7 @@ func (a *App) exportMDZ() {
 			if i > 1 {
 				cand = fmt.Sprintf("%s %d%s", stem, i, ext)
 			}
-			archPath := path.Join(assetsDir, cand)
+			archPath := path.Join(dir, cand)
 			if mdz.ValidateEntryPath(archPath, false) == nil && !conflictsPath(archPath) {
 				return norm.NFC.String(archPath)
 			}
@@ -1227,32 +1303,36 @@ func (a *App) unpackMDZAsDocument(d *document) {
 		return
 	}
 	doc := editor.ImportMarkdown(mdText)
+	fromManifestCover := false
 	if pagePath == m.archive.EntryPoint() && doc.Cover == "" && m.archive.CoverPath() != "" {
-		doc.Cover = m.archive.CoverPath()
+		doc.Cover = relativeArchiveURL(pagePath, m.archive.CoverPath())
+		fromManifestCover = true
 	}
 
 	extracted := make(map[string]string) // archive path -> relative URL from unpacked .md
 	anyRewritten := false
-	extractAsset := func(rawRef string, isLink bool) (string, bool) {
+	extractAsset := func(rawRef string, isLink, allowManifestCover bool) (string, bool) {
 		trimmed := strings.TrimSpace(rawRef)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "data:") || strings.HasPrefix(trimmed, "gradient:") || hasSchemePrefix(trimmed) {
 			return rawRef, false
 		}
 		var targetArch string
-		var frag string
-		var hasFrag bool
-		if cov := m.archive.CoverPath(); cov != "" && trimmed == cov && m.archive.HasFile(cov) {
-			targetArch = cov
-		} else {
-			_, frag, hasFrag = strings.Cut(trimmed, "#")
-			res := m.archive.ResolveLink(pagePath, trimmed)
-			if res.Kind != mdz.LinkInternal || !res.Found {
-				return rawRef, false
-			}
+		_, frag, hasFrag := strings.Cut(trimmed, "#")
+		res := m.archive.ResolveLink(pagePath, trimmed)
+		if res.Kind == mdz.LinkInternal && res.Found {
 			if isLink && mdz.IsMarkdownPath(res.Path) {
 				return rawRef, false
 			}
 			targetArch = res.Path
+		} else if allowManifestCover {
+			if cov := m.archive.CoverPath(); cov != "" && trimmed == cov && m.archive.HasFile(cov) {
+				targetArch = cov
+				hasFrag = false
+				frag = ""
+			}
+		}
+		if targetArch == "" {
+			return rawRef, false
 		}
 		relURL, ok := extracted[targetArch]
 		if !ok {
@@ -1275,7 +1355,7 @@ func (a *App) unpackMDZAsDocument(d *document) {
 	}
 
 	if doc.Cover != "" && !strings.HasPrefix(doc.Cover, "gradient:") {
-		if nextCover, changed := extractAsset(doc.Cover, false); changed {
+		if nextCover, changed := extractAsset(doc.Cover, false, fromManifestCover); changed {
 			doc.Cover = nextCover
 			anyRewritten = true
 		}
@@ -1287,14 +1367,14 @@ func (a *App) unpackMDZAsDocument(d *document) {
 				continue
 			}
 			if b.Kind == "image" && b.URL != "" {
-				if nextURL, changed := extractAsset(b.URL, false); changed {
+				if nextURL, changed := extractAsset(b.URL, false, false); changed {
 					b.URL = nextURL
 					anyRewritten = true
 				}
 			}
 			for i := range b.Runs {
 				if b.Runs[i].Style.Link != "" {
-					if nextURL, changed := extractAsset(b.Runs[i].Style.Link, true); changed {
+					if nextURL, changed := extractAsset(b.Runs[i].Style.Link, true, false); changed {
 						b.Runs[i].Style.Link = nextURL
 						anyRewritten = true
 					}

@@ -111,8 +111,17 @@ func (a *App) toggleOutline() {
 		return
 	}
 	if a.doc.isMDZ() {
-		if ed := a.doc.mdz.activeEditor(); ed != nil {
-			ed.ToggleOutline()
+		m := a.doc.mdz
+		if m.hasActivePage() {
+			if len(m.pages) > 1 && m.sidebarOpen && !a.focus {
+				m.sidebarOpen = false
+				m.pendingOutline = true
+				a.setOutline(true)
+				return
+			}
+			if ed := m.activeEditor(); ed != nil {
+				ed.ToggleOutline()
+			}
 		}
 		return
 	}
@@ -133,6 +142,9 @@ func (a *App) outlineOpen() bool {
 		return a.doc.book.SidebarOpen
 	}
 	if a.doc.isMDZ() {
+		if len(a.doc.mdz.pages) > 1 && a.doc.mdz.sidebarOpen && !a.focus {
+			return false
+		}
 		if ed := a.doc.mdz.activeEditor(); ed != nil {
 			return ed.OutlineOpen()
 		}

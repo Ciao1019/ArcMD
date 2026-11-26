@@ -200,21 +200,22 @@ func TestDropImportRejectsNonMDAndNonPDF(t *testing.T) {
 			t.Errorf("unsupported entry %s should not be imported", name)
 		}
 	}
-	if !tt.HasText("仅支持拖入 Markdown (.md)、PDF、HTML 和 EPUB 文档") {
+	if !tt.HasText("仅支持拖入 Markdown (.md)、MDZip (.mdz)、PDF、HTML 和 EPUB 文档") {
 		t.Fatalf("expected unsupported notice, got %q", tt.Texts())
 	}
 
-	// Mixed drop imports .md, .pdf, .html, and .epub while skipping .txt.
+	// Mixed drop imports .md, .mdz, .pdf, .html, and .epub while skipping .txt.
 	mdPath := writeExternalFile(t, srcDir, "Valid.md", []byte("# Valid\n"))
+	mdzPath := writeExternalFile(t, srcDir, "Valid.mdz", buildTestProjectMDZ(t))
 	pdfPath := writeExternalFile(t, srcDir, "Valid.pdf", buildRichSamplePDF(t))
 	htmlPath := writeExternalFile(t, srcDir, "Valid.html", []byte("<html><head><title>Valid HTML</title></head><body><p>Body</p></body></html>"))
 	epubPath := writeExternalFile(t, srcDir, "Valid.epub", buildSampleEPUB(t))
-	if !tt.DropFiles(x, y, txtFile, mdPath, pdfPath, htmlPath, epubPath) {
+	if !tt.DropFiles(x, y, txtFile, mdPath, mdzPath, pdfPath, htmlPath, epubPath) {
 		t.Fatal("mixed drop failed")
 	}
 	tt.Frame()
 
-	for _, name := range []string{"Valid.md", "Valid.pdf", "Valid.html", "Valid.epub"} {
+	for _, name := range []string{"Valid.md", "Valid.mdz", "Valid.pdf", "Valid.html", "Valid.epub"} {
 		if _, err := os.Stat(filepath.Join(sp.Root, name)); err != nil {
 			t.Fatalf("%s should be imported: %v", name, err)
 		}

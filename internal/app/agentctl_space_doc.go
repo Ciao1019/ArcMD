@@ -644,7 +644,7 @@ func (a *App) ctlDocRead(raw []byte) (any, error) {
 			"snapshot":    snap,
 		}, nil
 
-	case "pdf", "book":
+	case "pdf", "book", "mdz":
 		vfs := a.qaSpace(sp.ID)
 		if vfs == nil {
 			return nil, errors.New("space reader unavailable")
