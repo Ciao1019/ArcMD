@@ -55,6 +55,9 @@ func readDocSource(sp *space.Space, rel string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if info.IsDir() {
+			return "", &os.PathError{Op: "open", Path: full, Err: os.ErrNotExist}
+		}
 		prefix := "pdf"
 		if vault.IsBook(rel) {
 			prefix = "book"
@@ -112,9 +115,8 @@ func (a *App) forgetExternal(sp *space.Space, rel string) {
 	a.state.Forget(sp.ID, rel)
 	delete(sp.ExternalFiles, rel)
 	_ = history.Forget(sp.Root, rel)
-	delete(a.pageTrees, sp.ID)
 	a.saveState()
-	a.refreshTree()
+	a.refreshExternalTree(sp)
 	a.refreshSearch()
 }
 
@@ -149,4 +151,137 @@ func (a *App) externalSpace() (*space.Space, error) {
 		return nil, err
 	}
 	return a.state.EnsureExternal(i18n.T("外部空间"), root), nil
+}
+
+func countMissingNodes(nodes []*vault.Node) int {
+	n := 0
+	for _, node := range nodes {
+		if !node.Dir && node.Missing {
+			n++
+		}
+	}
+	return n
+}
+
+func (a *App) cachedMissingExternal(sp *space.Space) int {
+	if sp == nil || !sp.IsExternal() {
+		return 0
+	}
+	var nodes []*vault.Node
+	if sp == a.state.ActiveSpace() {
+		nodes = a.tree
+	} else if pt, ok := a.pageTrees[sp.ID]; ok {
+		nodes = pt.nodes
+	} else if a.library.open && a.library.page == libSpaces {
+		nodes = a.library.trees[sp.ID]
+	}
+	return countMissingNodes(nodes)
+}
+
+func (a *App) externalCleanMenuLabel(sp *space.Space) string {
+	if n := a.cachedMissingExternal(sp); n > 0 {
+		return fmt.Sprintf(i18n.T("清理不存在的文件 (%d)"), n)
+	}
+	return i18n.T("清理不存在的文件")
+}
+
+func (a *App) refreshExternalTree(sp *space.Space) {
+	if sp == nil || !sp.IsExternal() {
+		return
+	}
+	delete(a.pageTrees, sp.ID)
+	if sp == a.state.ActiveSpace() {
+		a.refreshTree()
+	}
+	if a.library.open && a.library.page == libSpaces {
+		if a.library.trees == nil {
+			a.library.trees = map[string][]*vault.Node{}
+		}
+		if a.library.errs == nil {
+			a.library.errs = map[string]error{}
+		}
+		if sp.ID == a.treeFor {
+			a.library.trees[sp.ID], a.library.errs[sp.ID] = a.tree, a.treeErr
+		} else {
+			a.library.trees[sp.ID], a.library.errs[sp.ID] = readTree(sp)
+		}
+	} else if a.library.trees != nil {
+		delete(a.library.trees, sp.ID)
+	}
+}
+
+// cleanMissingExternal removes references in the built-in external space whose
+// target files no longer exist on disk. It never touches disk files and skips
+// any open document that still holds unsaved edits in memory.
+func (a *App) cleanMissingExternal(sp *space.Space) (removed, skipped int) {
+	if sp == nil || !sp.IsExternal() {
+		return 0, 0
+	}
+	files := vault.Files(sp.ExternalFiles)
+	var missing []string
+	for _, d := range files.List() {
+		if files.Missing(d.Path) {
+			missing = append(missing, d.Path)
+		}
+	}
+	if len(missing) == 0 {
+		a.refreshExternalTree(sp)
+		a.notify("外部空间中没有不存在的文件。")
+		return 0, 0
+	}
+
+	a.dismissPreview()
+	resident := a.residentDocuments()
+	for _, rel := range missing {
+		var docs []*document
+		dirty := false
+		for _, d := range resident {
+			if d.space == sp && d.rel == rel {
+				if d.dirty() {
+					dirty = true
+					break
+				}
+				docs = append(docs, d)
+			}
+		}
+		if dirty {
+			skipped++
+			continue
+		}
+		for _, d := range docs {
+			a.replaceReferences(d, nil)
+		}
+		if a.renameSpace == sp.ID && a.renaming == rel {
+			a.renaming = ""
+		}
+		a.forgetPicks(sp.ID, rel)
+		a.forgetCopied(sp.ID, rel)
+		a.state.Forget(sp.ID, rel)
+		delete(sp.ExternalFiles, rel)
+		_ = history.Forget(sp.Root, rel)
+		removed++
+	}
+
+	if removed > 0 {
+		a.invalidateConflictsCache()
+		a.saveState()
+		a.refreshExternalTree(sp)
+		a.refreshSearch()
+	} else {
+		a.refreshExternalTree(sp)
+	}
+
+	switch {
+	case removed == 0 && skipped == 1:
+		a.notify("1 个不存在的文件有未保存修改，已跳过。")
+	case removed == 0 && skipped > 1:
+		a.notify("%d 个不存在的文件有未保存修改，已跳过。", skipped)
+	case removed == 1 && skipped == 0:
+		a.notify("已清理外部空间中 1 个不存在的文件。")
+	case removed > 1 && skipped == 0:
+		a.notify("已清理外部空间中 %d 个不存在的文件。", removed)
+	default:
+		a.notify("已清理外部空间中 %d 个不存在的文件，另有 %d 个因存在未保存修改已跳过。", removed, skipped)
+	}
+	return removed, skipped
 }

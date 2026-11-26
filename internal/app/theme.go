@@ -398,6 +398,11 @@ func glass(t *ui.Theme) ui.Color {
 	return pick(t, white.Alpha(0.74), white.Alpha(0.13))
 }
 
+// glassHover is the brighter chrome button fill under the pointer.
+func glassHover(t *ui.Theme) ui.Color {
+	return pick(t, white.Alpha(0.90), white.Alpha(0.20))
+}
+
 // separator is the hairline between the list's pinned and the rest.
 func separator(t *ui.Theme) ui.Color {
 	return pick(t, black.Alpha(0.09), white.Alpha(0.12))

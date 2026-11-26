@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/Ciao1019/ArcMD/internal/fsutil"
 )
 
 // Files is an explicit collection of local names mapped to absolute files.
@@ -35,13 +37,39 @@ func (f Files) List() []Doc {
 	return docs
 }
 
+// Missing reports whether the registered file at rel is missing on disk or
+// has been replaced by a directory. Permission and other non-existence errors
+// return false so temporarily unreadable files are not treated as missing.
+func (f Files) Missing(rel string) bool {
+	full, err := f.Resolve(rel)
+	if err != nil {
+		return false
+	}
+	return isMissingExternalPath(full)
+}
+
+func isMissingExternalPath(full string) bool {
+	info, err := os.Stat(full)
+	if err == nil {
+		return info.IsDir()
+	}
+	return fsutil.IsMissingFile(full, err)
+}
+
 // Tree is flat: opening a document does not import its siblings or folders.
 func (f Files) Tree() []*Node {
 	var nodes []*Node
 	for _, d := range f.List() {
 		n := &Node{Name: d.Path, Path: d.Path}
-		if info, err := os.Stat(f[d.Path]); err == nil {
-			n.Modified = info.ModTime()
+		full := f[d.Path]
+		if info, err := os.Stat(full); err == nil {
+			if info.IsDir() {
+				n.Missing = true
+			} else {
+				n.Modified = info.ModTime()
+			}
+		} else if fsutil.IsMissingFile(full, err) {
+			n.Missing = true
 		}
 		nodes = append(nodes, n)
 	}

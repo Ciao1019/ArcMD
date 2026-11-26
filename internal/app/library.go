@@ -559,7 +559,11 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 						a.newDoc("")
 					}
 				}
-				if m.Item(i18n.T("在访达中显示")).Disabled(s.IsExternal()).Chosen() {
+				if s.IsExternal() {
+					if m.Item(a.externalCleanMenuLabel(s)).Disabled(len(s.ExternalFiles) == 0).Chosen() {
+						a.cleanMissingExternal(s)
+					}
+				} else if m.Item(i18n.T("在访达中显示")).Chosen() {
 					revealDir(s.Root)
 				}
 				m.Separator()
@@ -577,7 +581,7 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 func (a *App) cardNodes(c *ui.Context, s *space.Space, nodes []*vault.Node, depth int) {
 	for _, n := range nodes {
 		if !n.Dir {
-			a.cardDoc(c, s, n.Path, n.Title(), depth)
+			a.cardDoc(c, s, n, depth)
 			continue
 		}
 		t := c.Theme()
@@ -656,24 +660,38 @@ func cardIntoBadge(c *ui.Context) {
 
 // cardDoc is a document's row in a card; the open document is glass. A
 // click opens it in its space and closes the library.
-func (a *App) cardDoc(c *ui.Context, s *space.Space, rel, title string, depth int) {
+func (a *App) cardDoc(c *ui.Context, s *space.Space, n *vault.Node, depth int) {
 	t := c.Theme()
+	rel, title := n.Path, n.Title()
+	missing := s.IsExternal() && n.Missing
 	chosen := a.doc != nil && a.doc.space == s && a.doc.rel == rel
 	row := a.cardRow(c, "doc:"+rel, title, depth).Role(ui.RoleTreeItem).Selected(chosen)
-	if a.library.move == nil {
+	if !missing && a.library.move == nil {
 		row.Drag(cardDragged{space: s.ID, rel: rel})
 		if row.Dragging() {
 			row.Opacity(0.4)
 		}
 	}
+	if missing {
+		row.Tooltip(i18n.T("文件已不存在") + " · " + s.ExternalFiles[rel])
+	}
 	if chosen {
 		row.Background(glass(t)).Shadow(0, 1, 3, 0, black.Alpha(0.07))
 	}
 	row.Children(func() {
-		fileIcon(c, rel, title, 15)
-		name := ui.Text(c, docName(title)).FontSize(13).TextColor(t.Text).SingleLine().Grow(1).MinWidth(0)
+		if icon := fileIcon(c, rel, title, 15); missing {
+			icon.Opacity(closedIconAlpha)
+		}
+		ink := t.Text
+		if missing {
+			ink = closedInk(t)
+		}
+		name := ui.Text(c, docName(title)).FontSize(13).TextColor(ink).SingleLine().Grow(1).MinWidth(0)
 		if chosen {
 			name.FontWeight(600)
+		}
+		if missing {
+			ui.Icon(c, iconAlert).FontSize(12).TextColor(t.TextMuted.Alpha(0.75)).Shrink(0)
 		}
 	})
 	if row.Clicked() {

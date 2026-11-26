@@ -165,6 +165,11 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 				ui.Column(c.Key("header-pad")).Margin(8, 0, 0, 0).Children(func() { a.spaceHeader(c, sp, live) })
 			}
 			nodes, err := a.treeOf(sp)
+			if sp.IsExternal() {
+				if missing := countMissingNodes(nodes); missing > 0 {
+					a.externalMissingBar(c, sp, missing, live)
+				}
+			}
 			pins := pinnedNodes(sp, nodes)
 			tree := ui.Scroll(c.Key("tree")).Grow(1).MinHeight(0).TrackScroll(&a.session(sp.ID).tree)
 			var prev []rowFrame
@@ -286,6 +291,46 @@ func (a *App) spaceColumn(c *ui.Context, sp *space.Space, live, header bool) {
 // sectionMove slides the list's sections and line to new places with
 // their rows.
 var sectionMove = ui.ElementTransition{Animation: &listAnim, Position: true, Colors: true}
+
+// externalMissingBar appears directly under the External Space header only
+// when one or more registered external files no longer exist on disk.
+func (a *App) externalMissingBar(c *ui.Context, sp *space.Space, missing int, live bool) {
+	t := c.Theme()
+	bar := ui.Row(c.Key("external-missing-bar")).Height(30).Margin(4, 0, 2, 0).Padding(0, 5, 0, 10).Gap(6).
+		Radius(8).AlignItems(ui.Center).Background(hoverFill(t))
+	bar.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Stroke(r, separator(t), 8, 1)
+	})
+	bar.Children(func() {
+		ui.Icon(c, iconAlert).FontSize(13).TextColor(t.TextMuted).Shrink(0)
+		label := fmt.Sprintf(i18n.T("%d 个文件已不存在"), missing)
+		if missing == 1 {
+			label = i18n.T("1 个文件已不存在")
+		}
+		ui.Text(c, label).FontSize(12).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+		btn := ui.Box(c.Key("external-clean-btn")).Height(22).PaddingX(8).Radius(6).Shrink(0).Center()
+		if live {
+			btn.Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).
+				Label(i18n.T("清理不存在的文件")).Tooltip(i18n.T("仅从外部空间移除，不删除磁盘文件"))
+		}
+		fill := glass(t)
+		if live && btn.Hovered() {
+			fill = glassHover(t)
+		}
+		btn.Background(fill).Draw(func(p *ui.Painter, r ui.Rect) {
+			if !t.Dark {
+				p.Shadow(r, 6, 0, 1, 2, 0, black.Alpha(0.06))
+			}
+			p.Stroke(r, separator(t), 6, 1)
+		})
+		btn.Children(func() {
+			ui.Text(c, i18n.T("清理")).FontSize(11.5).FontWeight(500).TextColor(t.Text).SingleLine()
+		})
+		if live && btn.Clicked() {
+			a.cleanMissingExternal(sp)
+		}
+	})
+}
 
 // divider is Cra's line between the pinned and the rest: 18 DIPs with a
 // hairline 18 in from the sidebar's edges, while there is a rest to part.
@@ -675,6 +720,8 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 	renaming := live && a.renameSpace == sp.ID && a.renaming == n.Path
 	pinned := !n.Dir && inPins(sp, n.Path)
 	opened := pinned && a.isOpen(sp, n.Path)
+	missing := !n.Dir && sp.IsExternal() && n.Missing
+	dim := pinned && !opened || missing
 	inset := float32(depth * rowIndent)
 
 	row := ui.Row(c.Key("node:" + n.Path))
@@ -716,7 +763,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				dir:        n.Dir,
 				openFolder: open,
 				holdsOpen:  a.holdsOpen(sp, n.Path),
-				dim:        pinned && !opened,
+				dim:        dim,
 				title:      n.Title(),
 				grabX:      gx,
 				grabY:      gy,
@@ -731,7 +778,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			a.dragGrab.count = len(a.dragGroup(sp.ID, n.Path))
 			a.dragGrab.openFolder = open
 			a.dragGrab.holdsOpen = a.holdsOpen(sp, n.Path)
-			a.dragGrab.dim = pinned && !opened
+			a.dragGrab.dim = dim
 		}
 		// Keep the source node alive with zero layout footprint so MyGo's
 		// drag stays active while the floating card owns all visuals.
@@ -751,7 +798,11 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		row.Role(ui.RoleTreeItem).Selected(highlighted)
 	}
 	if sp.IsExternal() {
-		row.Tooltip(sp.ExternalFiles[n.Path])
+		tip := sp.ExternalFiles[n.Path]
+		if n.Missing {
+			tip = i18n.T("文件已不存在") + " · " + tip
+		}
+		row.Tooltip(tip)
 	}
 
 	justLanded := live && a.dragGrab.active && !a.dragGrab.consumed && a.dragGrab.space == sp.ID && a.dragGrab.rel == n.Path
@@ -765,7 +816,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				dir:        n.Dir,
 				openFolder: open,
 				holdsOpen:  a.holdsOpen(sp, n.Path),
-				dim:        pinned && !opened,
+				dim:        dim,
 				title:      n.Title(),
 				fromX:      a.dragGrab.x,
 				fromY:      a.dragGrab.y,
@@ -869,7 +920,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 		switch {
 		case n.Dir && !open:
 			a.hoverRow(previewFolder, sp, n.Path, row.Bounds())
-		case !n.Dir && a.overClosed != (place{sp.ID, n.Path}):
+		case !n.Dir && !n.Missing && a.overClosed != (place{sp.ID, n.Path}):
 			// Not while the pointer is on the row's minus, about to click it.
 			a.hoverRow(previewDoc, sp, n.Path, row.Bounds())
 		}
@@ -923,7 +974,6 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 	closed := false
 	if !settling {
 		row.Children(func() {
-			dim := pinned && !opened
 			if n.Dir {
 				folderGlyph(c, a.columnLook(sp), open, a.holdsOpen(sp, n.Path))
 			} else if icon := fileIcon(c, n.Path, n.Title(), iconSize); dim {
@@ -1006,6 +1056,8 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 				}
 			case chosen && a.doc.dirty():
 				ui.Box(c).Size(6, 6).Radius(3).Background(t.Accent).Tooltip(i18n.T("已修改"))
+			case missing:
+				ui.Icon(c, iconAlert).FontSize(12).TextColor(t.TextMuted.Alpha(0.75)).Shrink(0)
 			}
 			if into {
 				intoBadge(c)
@@ -1245,6 +1297,9 @@ func (a *App) listMenu(m *ui.Menu, sp *space.Space) {
 		if m.Item(i18n.T("打开文件…")).Chosen() {
 			a.chooseExternalFiles()
 		}
+		if m.Item(a.externalCleanMenuLabel(sp)).Disabled(len(sp.ExternalFiles) == 0).Chosen() {
+			a.cleanMissingExternal(sp)
+		}
 		a.sortMenu(m, sp, "")
 		return
 	}
@@ -1357,7 +1412,11 @@ func (a *App) spaceBar(c *ui.Context) {
 					b.ContextMenu(func(m *ui.Menu) {
 						a.spaceEditMenu(m, s)
 						m.Separator()
-						if m.Item(i18n.T("在访达中显示")).Disabled(s.IsExternal()).Chosen() {
+						if s.IsExternal() {
+							if m.Item(a.externalCleanMenuLabel(s)).Disabled(len(s.ExternalFiles) == 0).Chosen() {
+								a.cleanMissingExternal(s)
+							}
+						} else if m.Item(i18n.T("在访达中显示")).Chosen() {
 							revealDir(s.Root)
 						}
 						m.Separator()
