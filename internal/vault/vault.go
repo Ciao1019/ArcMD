@@ -24,7 +24,7 @@ import (
 // Extensions are the file extensions the vault lists, lowercase.
 var Extensions = []string{".md", ".markdown", ".mdx"}
 
-// Compound, raw whiteboard, database, PDF, HTML, and EPUB extensions.
+// Compound, raw whiteboard, database, PDF, HTML, EPUB, and MDZip extensions.
 const (
 	ExtWhiteboard    = ".excalidraw.svg"
 	ExtWhiteboardRaw = ".excalidraw"
@@ -33,6 +33,7 @@ const (
 	ExtHTML          = ".html"
 	ExtHTM           = ".htm"
 	ExtEPUB          = ".epub"
+	ExtMDZ           = ".mdz"
 )
 
 // FileExt returns the document extension of name, recognizing compound
@@ -48,9 +49,16 @@ func FileExt(name string) string {
 	return path.Ext(base)
 }
 
-// IsDocument includes native rich documents, Markdown sources, databases, whiteboards, PDFs, HTML, and EPUBs.
+// IsDocument includes native rich documents, Markdown sources, databases, whiteboards, PDFs, HTML, EPUBs, and MDZip archives.
 func IsDocument(name string) bool {
-	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsDatabase(name) || IsWhiteboard(name) || IsPDF(name) || IsBook(name)
+	return strings.EqualFold(FileExt(name), ".arcmd") || IsMarkdown(name) || IsDatabase(name) || IsWhiteboard(name) || IsPDF(name) || IsBook(name) || IsMDZ(name)
+}
+
+// IsMDZ reports whether name is an MDZip archive (.mdz).
+func IsMDZ(name string) bool {
+	base := path.Base(filepath.ToSlash(name))
+	ext := strings.ToLower(FileExt(base))
+	return len(base) > len(ext) && ext == ExtMDZ
 }
 
 // IsDatabase reports whether name is an amphibious database document (.db.md).

@@ -369,7 +369,7 @@ func (a *App) currentDocumentText(sp *space.Space, rel string) (string, bool) {
 // findConflictForDoc returns a Cloud Sync conflict or orphan "(冲突副本 ...)"
 // match for the given document if one exists.
 func (a *App) findConflictForDoc(d *document) (persistedConflict, bool) {
-	if d == nil || d.space == nil || d.space.IsExternal() || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() {
+	if d == nil || d.space == nil || d.space.IsExternal() || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() {
 		return persistedConflict{}, false
 	}
 	for _, it := range a.loadPersistedConflicts() {

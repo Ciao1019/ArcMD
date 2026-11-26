@@ -430,7 +430,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 			mod = a.fileModTime(sp, rel)
 			p.shownMod = mod
 		}
-		if a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() {
+		if a.doc.isPDF() || a.doc.isBook() || a.doc.isMDZ() || a.doc.isDatabase() {
 			return a.doc
 		}
 		if a.doc.isWhiteboard() {
@@ -492,6 +492,11 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 	}
 	if vault.IsBook(rel) {
 		d := openBookDocument(sp, rel, "")
+		a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
+		return d
+	}
+	if vault.IsMDZ(rel) {
+		d := openMDZDocument(sp, rel, "")
 		a.putThumb(key, thumb{doc: d, changed: info.ModTime()})
 		return d
 	}
@@ -708,6 +713,8 @@ func (a *App) pickPreview(c *ui.Context, rel string) {
 			a.doc.pdf.RequestFocus = true
 		} else if a.doc.isBook() {
 			a.doc.book.RequestFocus = true
+		} else if a.doc.isMDZ() {
+			a.doc.mdz.requestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
 		} else if a.doc.isDatabase() {
@@ -798,6 +805,35 @@ func (a *App) docPreview(c *ui.Context) {
 				})
 			}
 			pt.Stroke(dst, ui.RGBA(0, 0, 0, 0.10), 3, 1)
+		})
+	} else if d.isMDZ() {
+		paper.Draw(func(pt *ui.Painter, r ui.Rect) {
+			if d.mdz == nil || d.mdz.archive == nil {
+				return
+			}
+			d.mdz.ensurePreview()
+			pad := float32(12)
+			x, y, w := r.X+pad, r.Y+pad, max(20, r.W-2*pad)
+			if bmp := d.mdz.previewCover; bmp != nil {
+				covW, covH := float32(46), float32(66)
+				cov := ui.Rect{X: x, Y: y, W: covW, H: covH}
+				pt.Clip(cov, 3, func() { pt.Image(bmp, cov, ui.Cover) })
+				pt.Stroke(cov, dt.Border, 3, 1)
+				x += covW + 10
+				w = max(20, w-covW-10)
+			}
+			title := d.mdz.previewTitle
+			if title == "" {
+				title = docName(d.title())
+			}
+			head := ui.ShapeText("MDZ · "+title, ui.Font{Family: "system-ui", Size: 11, Weight: 600}, w)
+			_, hh := head.Size()
+			pt.TextLayout(head, x, y, dt.Text)
+			y += hh + 6
+			if d.mdz.previewExcerpt != "" {
+				body := ui.ShapeText(d.mdz.previewExcerpt, ui.Font{Family: "system-ui", Size: 9.5, LineHeight: 1.45}, w)
+				pt.TextLayout(body, x, y, dt.TextMuted)
+			}
 		})
 	} else if d.isBook() {
 		paper.Draw(func(pt *ui.Painter, r ui.Rect) {

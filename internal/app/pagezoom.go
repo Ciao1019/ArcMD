@@ -26,6 +26,12 @@ func (a *App) canZoomPage(d *document) bool {
 	if !a.canAdjustPageWidth(d) {
 		return false
 	}
+	if d.isMDZ() {
+		if ed := d.mdz.activeEditor(); ed != nil && ed.HasZoomModal() {
+			return false
+		}
+		return true
+	}
 	if !d.isBook() && d.ed != nil && d.ed.HasZoomModal() {
 		return false
 	}

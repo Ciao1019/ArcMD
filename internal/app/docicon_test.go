@@ -61,6 +61,7 @@ func TestFileIconGlyphsDistinct(t *testing.T) {
 		"pdf":        "Paper.pdf",
 		"epub":       "Novel.epub",
 		"html":       "Page.html",
+		"mdz":        "Bundle.mdz",
 	}
 	seen := map[*ui.SVG]string{}
 	for kind, rel := range samples {

@@ -58,7 +58,7 @@ func (a *App) renameTag(from, to string) {
 		if d.loadErr != nil {
 			continue
 		}
-		if d.isPDF() || d.isBook() || d.isDatabase() {
+		if d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() {
 			continue
 		}
 		if d.isWhiteboard() {
@@ -107,7 +107,7 @@ func (a *App) renameTag(from, to string) {
 		}
 	}
 	for _, p := range places {
-		if resident[p] != nil || vault.IsPDF(p.rel) || vault.IsBook(p.rel) || vault.IsDatabase(p.rel) {
+		if resident[p] != nil || vault.IsPDF(p.rel) || vault.IsBook(p.rel) || vault.IsMDZ(p.rel) || vault.IsDatabase(p.rel) {
 			continue
 		}
 		sp := a.state.Get(p.space)
@@ -120,7 +120,7 @@ func (a *App) renameTag(from, to string) {
 			continue
 		}
 		var ok bool
-		if d.isPDF() || d.isBook() || d.isDatabase() {
+		if d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() {
 			continue
 		}
 		if d.isWhiteboard() {

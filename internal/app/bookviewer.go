@@ -43,6 +43,12 @@ func (d *document) syncMovedPath() {
 		d.reopenPDF()
 		return
 	}
+	if d.isMDZ() && d.mdz.archive != nil {
+		if full, err := resolveFile(d.space, d.rel); err == nil {
+			d.mdz.archive.SetPath(full)
+		}
+		return
+	}
 	if !d.isBook() || d.book.Doc == nil {
 		return
 	}
@@ -425,7 +431,7 @@ func (a *App) pickEPUBFiles() {
 
 func (a *App) pickBookAssets(title, filterName string, exts []string) {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.ed.ReadOnly {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.ed.ReadOnly {
 		return
 	}
 	done := func(paths []string) {

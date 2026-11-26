@@ -44,6 +44,12 @@
       "name": "HTML Document",
       "mimeType": "text/html",
       "role": "Viewer"
+    },
+    {
+      "ext": ["mdz"],
+      "name": "MDZip Document",
+      "mimeType": "application/vnd.mdzip",
+      "role": "Viewer"
     }
   ],
   "macos": {

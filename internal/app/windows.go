@@ -220,6 +220,11 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 			editor.BookView(c.Key(d.viewKey()), d.book, a.bookOptionsFor(c, d))
 			return
 		}
+		if d.isMDZ() {
+			width, _ := c.Size()
+			a.mdzView(c, d, width, false)
+			return
+		}
 		if d.isDatabase() {
 			width, _ := c.Size()
 			a.databaseWorkspace(c, d, width)

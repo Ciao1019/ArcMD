@@ -1036,6 +1036,8 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 				replacement.book.GoToChapter(resident.book.CurrentChapter, true)
 				replacement.book.SidebarOpen = resident.book.SidebarOpen
 				replacement.book.ShowSource = resident.book.ShowSource
+			} else if resident.isMDZ() && replacement.isMDZ() {
+				replacement.mdz.preserveFrom(resident.mdz)
 			} else if resident.isDatabase() && replacement.isDatabase() {
 				if v := resident.dbView.Store.Database().ActiveView; v != "" {
 					replacement.dbView.SetActiveView(v)
@@ -1086,6 +1088,8 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 			a.doc.pdf.RequestFocus = true
 		} else if a.doc.isBook() {
 			a.doc.book.RequestFocus = true
+		} else if a.doc.isMDZ() {
+			a.doc.mdz.requestFocus = true
 		} else if a.doc.isWhiteboard() {
 			a.doc.board.RequestFocus = true
 		} else if a.doc.isDatabase() {
@@ -1212,6 +1216,8 @@ func (a *App) reload() {
 		next.book.GoToChapter(a.doc.book.CurrentChapter, true)
 		next.book.SidebarOpen = a.doc.book.SidebarOpen
 		next.book.ShowSource = a.doc.book.ShowSource
+	} else if a.doc.isMDZ() && next.isMDZ() {
+		next.mdz.preserveFrom(a.doc.mdz)
 	}
 	a.search.writeSeq++
 	next.savedSeq = a.search.writeSeq
@@ -1313,7 +1319,7 @@ func isUntitled(name string) bool {
 // by hand keeps its name. A title taken by another file is numbered.
 func (a *App) followTitle() {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
 	if _, composing := d.ed.MarkedRange(); composing {
@@ -1474,7 +1480,7 @@ func (a *App) finishRename(openDuplicated bool) {
 	}
 	if openPending && sp == a.state.ActiveSpace() && vault.IsDocument(to) {
 		a.open(to)
-		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() && !d.isDatabase() {
+		if d := a.doc; d != nil && d.space == sp && d.rel == to && d.loadErr == nil && !d.isWhiteboard() && !d.isPDF() && !d.isBook() && !d.isMDZ() && !d.isDatabase() {
 			d.ensureBodyParagraph()
 			leaves := d.ed.Doc.Leaves()
 			pos := 0
@@ -1774,7 +1780,7 @@ func writeNative(root, rel, markdown string) error {
 }
 
 func (a *App) exportMarkdown() {
-	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isDatabase() {
+	if a.doc == nil || a.doc.loadErr != nil || a.doc.isWhiteboard() || a.doc.isPDF() || a.doc.isBook() || a.doc.isMDZ() || a.doc.isDatabase() {
 		return
 	}
 	a.doc.ed.UnmarkText()

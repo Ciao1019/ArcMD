@@ -298,6 +298,8 @@ func (a *App) replaceDoc(text string) {
 		d.book.GoToChapter(old.book.CurrentChapter, true)
 		d.book.SidebarOpen = old.book.SidebarOpen
 		d.book.ShowSource = old.book.ShowSource
+	} else if old.isMDZ() && d.isMDZ() {
+		d.mdz.preserveFrom(old.mdz)
 	} else if old.isDatabase() && d.isDatabase() {
 		if v := old.dbView.Store.Database().ActiveView; v != "" {
 			d.dbView.SetActiveView(v)

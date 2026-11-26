@@ -105,6 +105,7 @@ func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 			// loading tens of megabytes into memory during background indexing.
 			if (vault.IsPDF(d.Path) && info.Size() > 32<<20) ||
 				(vault.IsEPUB(d.Path) && info.Size() > 32<<20) ||
+				(vault.IsMDZ(d.Path) && info.Size() > 32<<20) ||
 				(vault.IsHTML(d.Path) && info.Size() > 16<<20) {
 				changed = true
 				next.entries[k] = &entry{file: fullFile, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}

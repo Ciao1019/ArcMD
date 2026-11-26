@@ -39,11 +39,12 @@ func (a *App) moreMenu(c *ui.Context) {
 		wb := a.doc != nil && a.doc.isWhiteboard()
 		isPDF := a.doc != nil && a.doc.isPDF()
 		isBook := a.doc != nil && a.doc.isBook()
+		isMDZ := a.doc != nil && a.doc.isMDZ()
 		isDB := a.doc != nil && a.doc.isDatabase()
 		if a.menuKey(m.Item(i18n.T("专注模式")), "focus").Checked(a.focus).Chosen() {
 			a.toggleFocus()
 		}
-		if a.menuKey(m.Item(i18n.T("目录")), "outline").Checked(a.outlineOpen()).Disabled(noDoc || a.doc.source || wb || isDB).Chosen() {
+		if a.menuKey(m.Item(i18n.T("目录")), "outline").Checked(a.outlineOpen()).Disabled(noDoc || a.doc.source || wb || isDB || (isMDZ && !a.doc.mdz.hasActivePage())).Chosen() {
 			a.toggleOutline()
 		}
 
@@ -51,14 +52,14 @@ func (a *App) moreMenu(c *ui.Context) {
 		if a.doc != nil && a.doc.source {
 			mode = i18n.T("返回富文本编辑")
 		}
-		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb || isPDF || isBook || isDB).Chosen() {
+		if a.menuKey(m.Item(mode), "source").Disabled(noDoc || wb || isPDF || isBook || isMDZ || isDB).Chosen() {
 			a.toggleSource()
 		}
 		if a.menuKey(m.Item(i18n.T("添加分屏")), "split-add").Disabled(a.doc == nil).Chosen() {
 			a.addSplitPane()
 		}
 		m.Separator()
-		if a.menuKey(m.Item(i18n.T("版本历史…")), "history").Disabled(noDoc || isPDF || isBook).Chosen() {
+		if a.menuKey(m.Item(i18n.T("版本历史…")), "history").Disabled(noDoc || isPDF || isBook || isMDZ).Chosen() {
 			a.openVersions()
 		}
 		sp := a.state.ActiveSpace()
@@ -76,16 +77,19 @@ func (a *App) moreMenu(c *ui.Context) {
 					_, _ = a.exportDatabaseCSV(d)
 				}
 			}
-			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb || isPDF || isBook || isDB).Chosen() {
+			if sub.Item(i18n.T("导出 Markdown 文件")).Disabled(noDoc || wb || isPDF || isBook || isMDZ || isDB).Chosen() {
 				a.exportMarkdown()
 			}
-			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc || isPDF || isBook || isDB).Chosen() {
+			if a.menuKey(sub.Item(i18n.T("导出 PDF")), "export-pdf").Disabled(noDoc || isPDF || isBook || isMDZ || isDB).Chosen() {
 				a.exportPDF()
 			}
-			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb || isPDF || isBook || isDB).Chosen() {
+			if sub.Item(i18n.T("导出 HTML 网页")).Disabled(noDoc || wb || isPDF || isBook || isMDZ || isDB).Chosen() {
 				a.exportHTML()
 			}
-		}).Disabled(noDoc || isPDF || isBook)
+			if sub.Item(i18n.T("导出 MDZip (.mdz)")).Disabled(noDoc || wb || isPDF || isBook || isMDZ || isDB).Chosen() {
+				a.exportMDZ()
+			}
+		}).Disabled(noDoc || isPDF || isBook || isMDZ)
 		m.Submenu(i18n.T("导入数据"), func(sub *ui.Menu) {
 			if sub.Item(i18n.T("从 CSV 导入数据库…")).Chosen() {
 				a.pickAndImportCSV(nil)
@@ -103,12 +107,12 @@ func (a *App) moreMenu(c *ui.Context) {
 				a.pickAndImportNotionFolder()
 			}
 		}).Disabled(sp == nil || sp.IsExternal())
-		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || isPDF || isBook || isDB || d.source).Chosen() {
+		if a.menuKey(m.Item(i18n.T("思维导图")), "mindmap").Checked(!noDoc && d.mindMap != nil).Disabled(noDoc || wb || isPDF || isBook || isMDZ || isDB || d.source).Chosen() {
 			a.toggleDocumentMap(d)
 		}
 		m.Submenu(i18n.T("页面宽度"), a.pageWidthMenu).Disabled(!a.canAdjustPageWidth(d))
 		m.Submenu(i18n.T("页面缩放"), a.pageZoomMenu).Disabled(!a.canZoomPage(d))
-		if m.Item(i18n.T("打印…")).Disabled(noDoc || isBook || isDB).Chosen() {
+		if m.Item(i18n.T("打印…")).Disabled(noDoc || isBook || isMDZ || isDB).Chosen() {
 			a.printDoc()
 		}
 		if m.Item(i18n.T("在访达中显示文档")).Disabled(noDoc).Chosen() {

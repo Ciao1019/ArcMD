@@ -59,6 +59,9 @@ type document struct {
 	book             *editor.BookViewer
 	bookModNano      int64
 	bookSize         int64
+	mdz              *mdzState
+	mdzModNano       int64
+	mdzSize          int64
 	version          uint64
 	edited           time.Time
 	saveErr          error
@@ -130,6 +133,9 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 	if vault.IsBook(rel) {
 		return openBookDocument(sp, rel, text)
 	}
+	if vault.IsMDZ(rel) {
+		return openMDZDocument(sp, rel, text)
+	}
 	if vault.IsDatabase(rel) {
 		return openDatabaseDocument(sp, rel, text)
 	}
@@ -167,7 +173,7 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 }
 func (d *document) title() string { return vault.Title(d.rel) }
 func (d *document) text() string {
-	if d.isPDF() || d.isBook() {
+	if d.isPDF() || d.isBook() || d.isMDZ() {
 		return ""
 	}
 	if d.isWhiteboard() {
@@ -195,7 +201,7 @@ func (d *document) ensureBodyParagraph() {
 // already dirty); other changes re-evaluate against the baseline once and
 // re-arm leaf-level tracking when the skeleton matches.
 func (d *document) dirty() bool {
-	if d.loadErr != nil || d.isPDF() || d.isBook() {
+	if d.loadErr != nil || d.isPDF() || d.isBook() || d.isMDZ() {
 		return false
 	}
 	if d.isWhiteboard() {
@@ -449,7 +455,7 @@ type cachedImage struct {
 
 // changed hashes the document and compares it with the saved baseline.
 func (d *document) changed() bool {
-	if d.isPDF() || d.isBook() {
+	if d.isPDF() || d.isBook() || d.isMDZ() {
 		return false
 	}
 	if d.isWhiteboard() {
@@ -467,7 +473,7 @@ func (d *document) changed() bool {
 }
 
 func (d *document) toggleMode() {
-	if d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() {
+	if d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() {
 		return
 	}
 	d.ed.UnmarkText()
@@ -731,7 +737,7 @@ func (d *document) write(force bool) error {
 			return errMissing
 		}
 	}
-	if d.isPDF() || d.isBook() {
+	if d.isPDF() || d.isBook() || d.isMDZ() {
 		return nil
 	}
 	if d.isWhiteboard() {
@@ -864,6 +870,9 @@ func (d *document) viewKey() string {
 	if d.isBook() {
 		return fmt.Sprintf("book:%p", d.book)
 	}
+	if d.isMDZ() {
+		return fmt.Sprintf("mdz:%p", d.mdz)
+	}
 	if d.isWhiteboard() {
 		return fmt.Sprintf("board:%p", d.board)
 	}
@@ -876,7 +885,7 @@ func (d *document) viewKey() string {
 func (d *document) autosave(c *ui.Context) { d.autosaveWith(c, nil) }
 
 func (d *document) autosaveWith(c *ui.Context, post func(func())) {
-	if d.isPDF() || d.isBook() {
+	if d.isPDF() || d.isBook() || d.isMDZ() {
 		return
 	}
 	d.pollAsyncSave()
@@ -1201,6 +1210,9 @@ func (d *document) close() {
 	}
 	if d.book != nil {
 		d.book.Close()
+	}
+	if d.mdz != nil {
+		d.mdz.close()
 	}
 	if d.ed != nil {
 		d.ed.ClearImages()

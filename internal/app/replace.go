@@ -133,12 +133,12 @@ func (a *App) replaceEverywhere() {
 			n += k
 			return out
 		}
-		if vault.IsPDF(h.Path) || vault.IsBook(h.Path) {
+		if vault.IsPDF(h.Path) || vault.IsBook(h.Path) || vault.IsMDZ(h.Path) {
 			skipped++
 			continue
 		}
 		if d := resident[place{h.Space, h.Path}]; d != nil {
-			if d.isPDF() || d.isBook() || d.isDatabase() {
+			if d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() {
 				skipped++
 				continue
 			}

@@ -26,6 +26,8 @@ func fileIconGlyph(rel string) *ui.SVG {
 		return iconBookOpen
 	case vault.IsHTML(rel):
 		return iconFileCode
+	case vault.IsMDZ(rel):
+		return iconFileArchive
 	default:
 		return iconFile
 	}

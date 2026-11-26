@@ -90,7 +90,11 @@ func (e *Editor) paintReadOnlyNotice(p *ui.Painter, bounds ui.Rect, t *ui.Theme)
 	if since > readOnlyHold {
 		k = 1 - float32(since-readOnlyHold)/float32(readOnlyFade)
 	}
-	span := ui.Span{Text: i18n.T("当前为只读 · 点击右上角的锁恢复编辑"), Size: 13, Color: e.page.OnScrim.Alpha(k)}
+	notice := e.readOnlyNotice
+	if notice == "" {
+		notice = i18n.T("当前为只读 · 点击右上角的锁恢复编辑")
+	}
+	span := ui.Span{Text: notice, Size: 13, Color: e.page.OnScrim.Alpha(k)}
 	w, h := p.MeasureText(0, span)
 	r := ui.Rect{X: bounds.X + (bounds.W-w)/2 - 14, Y: bounds.Y + e.Scroll.Y + 14, W: w + 28, H: h + 14}
 	p.Fill(r, e.page.Scrim.Alpha(float32(e.page.Scrim.A)/255*k*1.6), r.H/2)

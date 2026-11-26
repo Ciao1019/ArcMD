@@ -165,6 +165,7 @@ type Editor struct {
 	directLinks               bool
 	disableFind               bool
 	hideReadOnlyNotice        bool
+	readOnlyNotice            string
 	outline                   []outlineItem
 	outlineState              outlineState
 	pointer                   ui.Point
@@ -754,6 +755,7 @@ type Options struct {
 	DirectLinks        bool
 	DisableFind        bool
 	HideReadOnlyNotice bool
+	ReadOnlyNotice     string
 	CompactMargins     bool
 	// Database Linked View embed integration callbacks.
 	LoadDatabase     func(target string) (*database.Store, dbview.Options, uint64, error)
@@ -875,6 +877,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	}
 	e.openWiki, e.openTag, e.openLink = o.OpenWiki, o.OpenTag, o.OpenLink
 	e.directLinks, e.disableFind, e.hideReadOnlyNotice = o.DirectLinks, o.DisableFind, o.HideReadOnlyNotice
+	e.readOnlyNotice = o.ReadOnlyNotice
 	e.loadWhiteboard = o.LoadWhiteboard
 	e.createWhiteboard = o.CreateWhiteboard
 	e.saveWhiteboard = o.SaveWhiteboard

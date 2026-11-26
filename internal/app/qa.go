@@ -20,6 +20,7 @@ import (
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/mdz"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/Ciao1019/ArcMD/internal/spacefs"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -271,6 +272,41 @@ func QAPage(name, content string) (*spacefs.Page, error) {
 			}
 			parts = append(parts, spacefs.Part{
 				Block: fmt.Sprintf("chapter:%d", i+1),
+				Text:  head,
+			})
+		}
+		return spacefs.PageOf(name, parts), nil
+	}
+	if vault.IsMDZ(name) {
+		arc, err := mdz.OpenBytes([]byte(content))
+		if arc == nil {
+			return nil, err
+		}
+		defer arc.Close()
+		var order []string
+		if ep := arc.EntryPoint(); ep != "" {
+			order = append(order, ep)
+		}
+		for _, p := range arc.MarkdownPages() {
+			if p != arc.EntryPoint() {
+				order = append(order, p)
+			}
+		}
+		cnt := min(len(order), 200)
+		var parts []spacefs.Part
+		for i := range cnt {
+			pagePath := order[i]
+			md, err := arc.ReadMarkdown(pagePath)
+			if err != nil {
+				continue
+			}
+			txt := strings.TrimSpace(md)
+			head := "## " + pagePath
+			if txt != "" {
+				head += "\n" + txt
+			}
+			parts = append(parts, spacefs.Part{
+				Block: "mdz:" + pagePath,
 				Text:  head,
 			})
 		}
@@ -719,6 +755,17 @@ func (a *App) openCitation(spaceID string, c agent.Citation) {
 			}
 		}
 		a.doc.book.RequestFocus = true
+		return
+	}
+	if a.doc.isMDZ() {
+		if page, err := fs.Page(c.Path); err == nil {
+			if at, ok := page.Locate(c.From); ok {
+				if pagePath, has := strings.CutPrefix(at.Block, "mdz:"); has {
+					a.doc.mdz.openPage(pagePath, true, "")
+				}
+			}
+		}
+		a.doc.mdz.requestFocus = true
 		return
 	}
 	if a.doc.isDatabase() {
