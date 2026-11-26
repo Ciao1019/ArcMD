@@ -46,7 +46,7 @@ func readFile(sp *space.Space, rel string) (string, error) {
 // stat stamp for read-only binary PDFs so opening, pinning, and watching PDFs
 // never copy multi-megabyte files into Go strings.
 func readDocSource(sp *space.Space, rel string) (string, error) {
-	if vault.IsPDF(rel) || vault.IsBook(rel) {
+	if vault.IsPDF(rel) || vault.IsBook(rel) || vault.IsMDZ(rel) {
 		full, err := resolveFile(sp, rel)
 		if err != nil {
 			return "", err
@@ -58,6 +58,8 @@ func readDocSource(sp *space.Space, rel string) (string, error) {
 		prefix := "pdf"
 		if vault.IsBook(rel) {
 			prefix = "book"
+		} else if vault.IsMDZ(rel) {
+			prefix = "mdz"
 		}
 		return fmt.Sprintf("%s:%d:%d", prefix, info.ModTime().UnixNano(), info.Size()), nil
 	}

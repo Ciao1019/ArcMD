@@ -470,7 +470,7 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 		}
 	}
 	for _, file := range files {
-		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) || vault.IsBook(file.rel) || vault.IsDatabase(file.rel) {
+		if resident[file] || !vault.IsDocument(file.rel) || vault.IsPDF(file.rel) || vault.IsBook(file.rel) || vault.IsMDZ(file.rel) || vault.IsDatabase(file.rel) {
 			continue
 		}
 		sp := a.state.Get(file.space)
@@ -550,7 +550,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 			continue
 		}
 		resident[d.rel] = true
-		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isDatabase() || d.ed.ReadOnly {
+		if d.loadErr != nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() || d.ed.ReadOnly {
 			continue
 		}
 		urls := map[string]string{}
@@ -571,7 +571,7 @@ func (a *App) relinkWhiteboardEmbed(sp *space.Space, oldRel, newRel string) {
 		return
 	}
 	for _, info := range docs {
-		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) || vault.IsBook(info.Path) || vault.IsDatabase(info.Path) {
+		if resident[info.Path] || vault.IsWhiteboard(info.Path) || vault.IsPDF(info.Path) || vault.IsBook(info.Path) || vault.IsMDZ(info.Path) || vault.IsDatabase(info.Path) {
 			continue
 		}
 		text, rErr := readFile(sp, info.Path)

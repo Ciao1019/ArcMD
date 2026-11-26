@@ -37,6 +37,9 @@ func (a *App) canAdjustPageWidth(d *document) bool {
 	if d.isBook() {
 		return d.book != nil && !d.book.ShowSource && (d.book.IsEPUB() || a.hostWindowFor(d) == nil)
 	}
+	if d.isMDZ() {
+		return d.mdz.hasActivePage()
+	}
 	return true
 }
 

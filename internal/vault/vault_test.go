@@ -30,7 +30,7 @@ func TestResolve(t *testing.T) {
 
 func TestListSkipsHiddenAndNonMarkdown(t *testing.T) {
 	root := t.TempDir()
-	for _, p := range []string{"b.md", "A.md", "notes/z.MD", "notes/deep/y.md", ".git/c.md", ".hidden.md", "img.png", "node_modules/x.md"} {
+	for _, p := range []string{"b.md", "A.md", "notes/z.MD", "notes/deep/y.md", "pack.mdz", ".git/c.md", ".hidden.md", "img.png", "node_modules/x.md"} {
 		full := filepath.Join(root, filepath.FromSlash(p))
 		os.MkdirAll(filepath.Dir(full), 0o755)
 		os.WriteFile(full, []byte("x"), 0o644)
@@ -43,9 +43,15 @@ func TestListSkipsHiddenAndNonMarkdown(t *testing.T) {
 	for _, d := range docs {
 		paths = append(paths, d.Path)
 	}
-	want := []string{"A.md", "b.md", "notes/z.MD", "notes/deep/y.md"}
+	want := []string{"A.md", "b.md", "pack.mdz", "notes/z.MD", "notes/deep/y.md"}
 	if !slices.Equal(paths, want) {
 		t.Errorf("List = %q, want %q", paths, want)
+	}
+	if !IsMDZ("pack.mdz") || !IsMDZ("dir/PACK.MDZ") || IsMDZ(".mdz") || IsMDZ("note.md") {
+		t.Errorf("IsMDZ classification unexpected")
+	}
+	if !IsDocument("pack.mdz") {
+		t.Errorf("IsDocument(pack.mdz) = false, want true")
 	}
 }
 

@@ -73,6 +73,8 @@ func (a *App) toggleFocus() {
 			a.doc.pdf.RequestFocus = true
 		} else if a.doc.isBook() {
 			a.doc.book.RequestFocus = true
+		} else if a.doc.isMDZ() {
+			a.doc.mdz.requestFocus = true
 		} else if a.doc.isDatabase() {
 			a.doc.dbView.RequestFocus = true
 		} else {
@@ -108,6 +110,12 @@ func (a *App) toggleOutline() {
 		a.doc.book.ToggleOutline()
 		return
 	}
+	if a.doc.isMDZ() {
+		if ed := a.doc.mdz.activeEditor(); ed != nil {
+			ed.ToggleOutline()
+		}
+		return
+	}
 	if !a.doc.source && !a.doc.isWhiteboard() && !a.doc.isDatabase() {
 		a.doc.ed.ToggleOutline()
 	}
@@ -123,6 +131,12 @@ func (a *App) outlineOpen() bool {
 	}
 	if a.doc.isBook() {
 		return a.doc.book.SidebarOpen
+	}
+	if a.doc.isMDZ() {
+		if ed := a.doc.mdz.activeEditor(); ed != nil {
+			return ed.OutlineOpen()
+		}
+		return false
 	}
 	return a.doc.ed.OutlineOpen()
 }
@@ -184,6 +198,8 @@ func (a *App) focusView(c *ui.Context) {
 					editor.PDFView(c.Key(a.doc.viewKey()), a.doc.pdf, a.pdfOptionsFor(c, a.doc))
 				} else if a.doc.isBook() {
 					editor.BookView(c.Key(a.doc.viewKey()), a.doc.book, a.bookOptionsFor(c, a.doc))
+				} else if a.doc.isMDZ() {
+					a.mdzView(c, a.doc, w-18, true)
 				} else if a.doc.isDatabase() {
 					a.databaseWorkspace(c, a.doc, w-18)
 				} else {

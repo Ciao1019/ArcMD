@@ -396,3 +396,39 @@ func TestClickingAfterLinkPlacesCaretWithoutOpeningPopover(t *testing.T) {
 		t.Fatal("clicking directly inside link glyphs did not open link popover")
 	}
 }
+
+func TestReadOnlyDirectLinksAndCustomNotice(t *testing.T) {
+	e := New("[Jump](guide/setup.md)")
+	e.ReadOnly = true
+	var opened string
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, e, Options{
+			Width:          820,
+			Theme:          c.Theme(),
+			DirectLinks:    true,
+			ReadOnlyNotice: "MDZip archive is read-only",
+			OpenLink:       func(u string) { opened = u },
+		})
+	}, 820, 600)
+	tt.Frame()
+
+	b, ok := tt.Find("文档")
+	if !ok {
+		t.Fatal("missing editor surface")
+	}
+	r := e.rows[0]
+	rects := r.layout.SelectionRects(ui.TextInputRange{Start: 0, End: r.leaf.End - r.leaf.Start})
+	if len(rects) == 0 {
+		t.Fatal("missing link rect")
+	}
+	cx := b.X + r.x + rects[0].X + rects[0].W/2
+	cy := b.Y + r.y + rects[0].Y + rects[0].H/2
+	tt.ClickAt(cx, cy)
+	tt.Frame()
+	if opened != "guide/setup.md" {
+		t.Fatalf("single click with DirectLinks=true opened %q, want guide/setup.md", opened)
+	}
+	if e.readOnlyNotice != "MDZip archive is read-only" {
+		t.Fatalf("readOnlyNotice = %q", e.readOnlyNotice)
+	}
+}

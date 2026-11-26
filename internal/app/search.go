@@ -10,6 +10,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/database"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/mdz"
 	"github.com/Ciao1019/ArcMD/internal/pdfdoc"
 	"github.com/Ciao1019/ArcMD/internal/search"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -70,6 +71,15 @@ func extractText(name, content string) (search.Extracted, error) {
 		}
 		defer doc.Close()
 		return search.Extracted{Text: doc.PlainText(200)}, nil
+	}
+	if vault.IsMDZ(name) {
+		arc, err := mdz.OpenBytes([]byte(content))
+		if arc == nil {
+			_ = err
+			return search.Extracted{}, nil
+		}
+		defer arc.Close()
+		return search.Extracted{Text: arc.PlainText(2 << 20)}, nil
 	}
 	if vault.IsWhiteboard(name) {
 		scene, err := whiteboard.Decode(content)
@@ -238,6 +248,15 @@ func (d *document) plainText() string {
 		}
 		return d.plain
 	}
+	if d.isMDZ() {
+		if !d.plainKnown {
+			if d.mdz != nil && d.mdz.archive != nil {
+				d.plain = d.mdz.archive.PlainText(2 << 20)
+			}
+			d.plainKnown = true
+		}
+		return d.plain
+	}
 	if d.isWhiteboard() {
 		if rev := d.board.Revision(); !d.plainKnown || rev != d.plainRev {
 			d.plain, d.plainRev, d.plainKnown = d.board.Scene.PlainText(), rev, true
@@ -319,6 +338,25 @@ func (a *App) openAtTextTerm(id, rel, query, term string) {
 		}
 		if needle != "" {
 			a.doc.book.FindText(needle)
+		}
+		return
+	}
+	if a.doc.isMDZ() {
+		needle := strings.TrimSpace(term)
+		if needle == "" {
+			needle = strings.TrimSpace(query)
+		}
+		if needle != "" && a.doc.mdz.archive != nil {
+			low := strings.ToLower(needle)
+			for _, p := range a.doc.mdz.pages {
+				if md, err := a.doc.mdz.archive.ReadMarkdown(p); err == nil && strings.Contains(strings.ToLower(md), low) {
+					a.doc.mdz.openPage(p, true, "")
+					break
+				}
+			}
+			if ed := a.doc.mdz.activeEditor(); ed != nil {
+				ed.FindText(needle)
+			}
 		}
 		return
 	}

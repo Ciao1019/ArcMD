@@ -371,7 +371,7 @@ func (a *App) openPDFFrom(d *document, rawURL string, split bool) {
 // (or beside the document), and inserts them as inline PDF blocks at the caret.
 func (a *App) pickPDFs() {
 	d := a.doc
-	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.ed.ReadOnly {
+	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.ed.ReadOnly {
 		return
 	}
 	done := func(paths []string) {

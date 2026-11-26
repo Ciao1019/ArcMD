@@ -40,7 +40,7 @@ func (a *App) printDoc()  { a.startPDF(true) }
 
 func (a *App) startPDF(printing bool) {
 	d := a.doc
-	if d == nil || d.loadErr != nil || d.isPDF() || d.isBook() || d.isDatabase() || a.pdfExport != nil {
+	if d == nil || d.loadErr != nil || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() || a.pdfExport != nil {
 		return
 	}
 	if d.isWhiteboard() {
