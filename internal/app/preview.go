@@ -449,7 +449,7 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 		// The open one, as edited, in an editor of its own: one editor
 		// takes one place in a frame. Only the top blocks can fit in the
 		// 150 DIP thumbnail card, so long documents skip cloning the rest.
-		rev := a.doc.ed.Revision()
+		rev := a.doc.ed.Revision() ^ (a.doc.sourceVersion << 32)
 		if th, ok := p.thumbs[key]; ok && th.rev == rev {
 			a.touchThumb(key)
 			if !th.changed.IsZero() {
@@ -457,7 +457,12 @@ func (a *App) thumbOf(sp *space.Space, rel string) *document {
 			}
 			return th.doc
 		}
-		cloned := clonePreviewPrefix(a.doc.ed.Committed())
+		var cloned *model.Document
+		if a.doc.sourceHasPendingEdits() {
+			cloned = clonePreviewPrefix(editor.ImportMarkdown(truncateMarkdownForPreview(a.doc.preview)))
+		} else {
+			cloned = clonePreviewPrefix(a.doc.ed.Committed())
+		}
 		d := &document{space: sp, rel: rel, ed: editor.FromOwnedDocument(cloned)}
 		a.putThumb(key, thumb{doc: d, changed: mod, rev: rev})
 		return d

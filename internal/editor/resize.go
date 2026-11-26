@@ -98,27 +98,30 @@ func (e *Editor) restoreResizeAnchor(anchor resizeAnchor) {
 	if anchor.id == "" {
 		return
 	}
-	if idx, ok := e.rowIDs[anchor.id]; ok {
-		r := e.indexedRow(idx)
+	apply := func(r *row) {
 		nextY := max(0, r.rect.Y+min(anchor.offset, max(0, r.rect.H-1)))
 		dy := nextY - e.Scroll.Y
 		e.Scroll.Y = nextY
-		if e.scrollGlide.active && abs32(dy) > 0.01 {
-			e.scrollGlide.to = max(0, e.scrollGlide.to+dy)
-			e.scrollGlide.lastY = max(0, e.scrollGlide.lastY+dy)
+		if abs32(dy) > 0.01 {
+			if e.scrollGlide.active {
+				e.scrollGlide.to = max(0, e.scrollGlide.to+dy)
+				e.scrollGlide.lastY = max(0, e.scrollGlide.lastY+dy)
+			}
+			if e.outlineState.jump.id != "" {
+				e.outlineState.jump.from = max(0, e.outlineState.jump.from+dy)
+				e.outlineState.jump.to = max(0, e.outlineState.jump.to+dy)
+				e.outlineState.jump.last += dy
+			}
 		}
+	}
+	if idx, ok := e.rowIDs[anchor.id]; ok {
+		apply(e.indexedRow(idx))
 		return
 	}
 	for i := range e.rows {
 		r := e.indexedRow(i)
 		if r.leaf.Block.ID == anchor.id {
-			nextY := max(0, r.rect.Y+min(anchor.offset, max(0, r.rect.H-1)))
-			dy := nextY - e.Scroll.Y
-			e.Scroll.Y = nextY
-			if e.scrollGlide.active && abs32(dy) > 0.01 {
-				e.scrollGlide.to = max(0, e.scrollGlide.to+dy)
-				e.scrollGlide.lastY = max(0, e.scrollGlide.lastY+dy)
-			}
+			apply(r)
 			return
 		}
 	}

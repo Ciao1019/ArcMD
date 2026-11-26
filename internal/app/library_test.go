@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/space"
+	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -368,5 +369,264 @@ func TestLibraryDragSnapshot(t *testing.T) {
 	defer file.Close()
 	if err := png.Encode(file, tt.Image()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// cardBlankPoint returns a point in the empty body area of space name's card.
+func cardBlankPoint(t *testing.T, tt *ui.Tester, name string) (float32, float32) {
+	t.Helper()
+	head, ok := tt.Find("打开空间 " + name)
+	if !ok {
+		t.Fatalf("no card head for %s", name)
+	}
+	grip, ok := tt.Find("移动空间 " + name)
+	if !ok {
+		t.Fatalf("no card grip for %s", name)
+	}
+	return head.X + head.W/2, grip.Y - 30
+}
+
+// Clicking an inactive space card's blank body switches to it and closes the
+// library; clicking the active card's blank body keeps the library open, and
+// clicking a folder row inside an inactive card toggles that folder alone.
+func TestLibraryClickSpaceCard(t *testing.T) {
+	a, tt := libraryApp(t)
+	personal, work, travel := a.state.Spaces[0], a.state.Spaces[1], a.state.Spaces[2]
+
+	a.openLibrary(libSpaces)
+	settle(tt)
+
+	// Clicking an inactive card's blank body switches to Work and closes the library.
+	wx, wy := cardBlankPoint(t, tt, "Work")
+	tt.ClickAt(wx, wy)
+	settle(tt)
+	if a.library.open || a.state.ActiveSpace() != work {
+		t.Fatalf("clicking Work card: open=%v active=%s", a.library.open, a.state.ActiveSpace().Name)
+	}
+
+	// Clicking Travel's header switches to Travel and closes the library.
+	a.openLibrary(libSpaces)
+	settle(tt)
+	if err := tt.Click("打开空间 Travel"); err != nil {
+		t.Fatal(err)
+	}
+	settle(tt)
+	if a.library.open || a.state.ActiveSpace() != travel {
+		t.Fatalf("clicking Travel head: open=%v active=%s", a.library.open, a.state.ActiveSpace().Name)
+	}
+
+	// Clicking the active card's blank body does not close the library.
+	a.openLibrary(libSpaces)
+	settle(tt)
+	tx, ty := cardBlankPoint(t, tt, "Travel")
+	tt.ClickAt(tx, ty)
+	settle(tt)
+	if !a.library.open || a.state.ActiveSpace() != travel {
+		t.Fatalf("clicking active Travel card: open=%v active=%s", a.library.open, a.state.ActiveSpace().Name)
+	}
+
+	// Clicking a folder row inside Personal (inactive) toggles its expansion without closing or switching.
+	wasOpen := personal.IsExpanded("Journal")
+	if err := tt.Click("Journal"); err != nil {
+		t.Fatal(err)
+	}
+	settle(tt)
+	if !a.library.open || a.state.ActiveSpace() != travel {
+		t.Fatalf("clicking folder switched or closed: open=%v active=%s", a.library.open, a.state.ActiveSpace().Name)
+	}
+	if personal.IsExpanded("Journal") == wasOpen {
+		t.Fatal("clicking Personal's Journal folder did not toggle it")
+	}
+}
+
+// Rows inside library space cards drag across spaces (to a card's root or
+// into a folder, opening closed folders on hover) and within a space, with
+// Escape canceling and external spaces refusing drops.
+func TestLibraryDragAcrossSpaces(t *testing.T) {
+	a, tt := libraryApp(t)
+	personal, work, travel := a.state.Spaces[0], a.state.Spaces[1], a.state.Spaces[2]
+
+	// Give Work and Travel distinct folder names for unambiguous hit targets.
+	os.MkdirAll(filepath.Join(work.Root, "WorkBox"), 0o755)
+	os.MkdirAll(filepath.Join(travel.Root, "TravelBox"), 0o755)
+	os.WriteFile(filepath.Join(travel.Root, "TravelBox/Inside.md"), []byte("# Inside\n"), 0o644)
+	travel.SetExpanded("TravelBox", true)
+
+	a.openLibrary(libSpaces)
+	settle(tt)
+
+	// 1. Cross-space drop onto Travel card root, then undo.
+	planRect, ok := tt.Find("Work Plan")
+	if !ok {
+		t.Fatalf("no Work Plan row: %q", tt.Texts())
+	}
+	sx, sy := planRect.X+20, planRect.Y+planRect.H/2
+	tx, ty := cardBlankPoint(t, tt, "Travel")
+	tt.Press(sx, sy)
+	tt.Move(sx, sy+6)
+	tt.Frame()
+	glide(tt, sx, sy+6, tx, ty)
+	if !tt.HasText("移到此空间") {
+		t.Fatalf("missing cross-space drop hint: %q", tt.Texts())
+	}
+	tt.Release(tx, ty)
+	settle(tt)
+	if exists(work, "Work Plan.md") || !exists(travel, "Work Plan.md") {
+		t.Fatal("Work Plan.md did not move to Travel root")
+	}
+	if !a.library.open || vault.Find(a.library.trees[travel.ID], "Work Plan.md") == nil || vault.Find(a.library.trees[work.ID], "Work Plan.md") != nil {
+		t.Fatal("library trees did not refresh after cross-space drop")
+	}
+	if !tt.HasText("已移到空间「Travel」") {
+		t.Fatalf("missing undo toast: %q", tt.Texts())
+	}
+	if err := tt.Click("撤销"); err != nil {
+		t.Fatal(err)
+	}
+	settle(tt)
+	if !exists(work, "Work Plan.md") || exists(travel, "Work Plan.md") {
+		t.Fatal("undo did not move Work Plan.md back to Work")
+	}
+	if vault.Find(a.library.trees[work.ID], "Work Plan.md") == nil {
+		t.Fatal("library trees did not refresh after undo")
+	}
+
+	// 2. Cross-space drop into a target folder row (Work Ideas -> Travel/TravelBox).
+	ideasRect, ok := tt.Find("Work Ideas")
+	if !ok {
+		t.Fatal("no Work Ideas row")
+	}
+	folderRect, ok := tt.Find("TravelBox")
+	if !ok {
+		t.Fatal("no TravelBox folder row")
+	}
+	ix, iy := ideasRect.X+20, ideasRect.Y+ideasRect.H/2
+	fx, fy := folderRect.X+20, folderRect.Y+folderRect.H/2
+	tt.Press(ix, iy)
+	tt.Move(ix, iy+6)
+	tt.Frame()
+	glide(tt, ix, iy+6, fx, fy)
+	if !tt.HasText("移到文件夹") {
+		t.Fatalf("missing folder drop badge: %q", tt.Texts())
+	}
+	tt.Release(fx, fy)
+	settle(tt)
+	if exists(work, "Notes/Work Ideas.md") || !exists(travel, "TravelBox/Work Ideas.md") {
+		t.Fatal("Work Ideas.md did not move into Travel/TravelBox")
+	}
+
+	// 3. Cross-space drag of an entire folder (Travel/TravelBox -> Personal root).
+	folderRect, ok = tt.Find("TravelBox")
+	if !ok {
+		t.Fatal("no TravelBox row")
+	}
+	fx, fy = folderRect.X+20, folderRect.Y+folderRect.H/2
+	px, py := cardBlankPoint(t, tt, "Personal")
+	tt.Press(fx, fy)
+	tt.Move(fx, fy+6)
+	tt.Frame()
+	glide(tt, fx, fy+6, px, py)
+	tt.Release(px, py)
+	settle(tt)
+	if exists(travel, "TravelBox") || !exists(personal, "TravelBox/Work Ideas.md") || !exists(personal, "TravelBox/Inside.md") {
+		t.Fatal("TravelBox folder did not move to Personal")
+	}
+
+	// 4. Hovering over a collapsed folder opens it after springDelay.
+	work.SetExpanded("WorkBox", false)
+	tt.Frame()
+	welcomeRect, ok := tt.Find("Welcome")
+	if !ok {
+		t.Fatal("no Welcome row")
+	}
+	workBoxRect, ok := tt.Find("WorkBox")
+	if !ok {
+		t.Fatal("no WorkBox row")
+	}
+	wx0, wy0 := welcomeRect.X+20, welcomeRect.Y+welcomeRect.H/2
+	wbx, wby := workBoxRect.X+20, workBoxRect.Y+workBoxRect.H/2
+	tt.Press(wx0, wy0)
+	tt.Move(wx0, wy0+6)
+	tt.Frame()
+	glide(tt, wx0, wy0+6, wbx, wby)
+	tt.Advance(springDelay + 100*time.Millisecond)
+	tt.Frame()
+	if !work.IsExpanded("WorkBox") {
+		t.Fatal("hovering collapsed folder did not spring-open WorkBox")
+	}
+
+	// 5. Pressing Escape during drag cancels it without closing the library or moving the file.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	tt.Release(wbx, wby)
+	settle(tt)
+	if !a.library.open || !exists(personal, "Welcome.md") || exists(work, "WorkBox/Welcome.md") {
+		t.Fatalf("Escape did not cancel drag cleanly: open=%v", a.library.open)
+	}
+
+	// 6. Same-space drag into folder and back to root.
+	welcomeRect, _ = tt.Find("Welcome")
+	journalRect, ok := tt.Find("Journal")
+	if !ok {
+		t.Fatal("no Journal folder row")
+	}
+	wx0, wy0 = welcomeRect.X+20, welcomeRect.Y+welcomeRect.H/2
+	jx, jy := journalRect.X+20, journalRect.Y+journalRect.H/2
+	tt.Press(wx0, wy0)
+	tt.Move(wx0, wy0+6)
+	tt.Frame()
+	glide(tt, wx0, wy0+6, jx, jy)
+	tt.Release(jx, jy)
+	settle(tt)
+	if exists(personal, "Welcome.md") || !exists(personal, "Journal/Welcome.md") {
+		t.Fatal("same-space drag into Journal failed")
+	}
+
+	welcomeRect, ok = tt.Find("Welcome")
+	if !ok {
+		t.Fatal("no Welcome row in Journal")
+	}
+	wx0, wy0 = welcomeRect.X+20, welcomeRect.Y+welcomeRect.H/2
+	px, py = cardBlankPoint(t, tt, "Personal")
+	tt.Press(wx0, wy0)
+	tt.Move(wx0, wy0+6)
+	tt.Frame()
+	glide(tt, wx0, wy0+6, px, py)
+	if !tt.HasText("移到根目录") {
+		t.Fatalf("missing same-space root drop hint: %q", tt.Texts())
+	}
+	tt.Release(px, py)
+	settle(tt)
+	if !exists(personal, "Welcome.md") || exists(personal, "Journal/Welcome.md") {
+		t.Fatal("same-space drag back to root failed")
+	}
+
+	// 7. External space refuses drops.
+	extFile := filepath.Join(t.TempDir(), "ExtDoc.md")
+	if err := os.WriteFile(extFile, []byte("# Ext\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !a.openSystemFile(extFile) {
+		t.Fatal("openSystemFile failed")
+	}
+	ext := a.state.Get("external")
+	if ext == nil || !ext.IsExternal() {
+		t.Fatal("missing external space")
+	}
+	a.openLibrary(libSpaces)
+	settle(tt)
+	tt.SetSize(1400, 760)
+	tt.Frame()
+	planRect, _ = tt.Find("Work Plan")
+	sx, sy = planRect.X+20, planRect.Y+planRect.H/2
+	ex, ey := cardBlankPoint(t, tt, ext.Name)
+	tt.Press(sx, sy)
+	tt.Move(sx, sy+6)
+	tt.Frame()
+	glide(tt, sx, sy+6, ex, ey)
+	tt.Release(ex, ey)
+	settle(tt)
+	if !exists(work, "Work Plan.md") {
+		t.Fatal("external space accepted a drop")
 	}
 }

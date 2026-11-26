@@ -440,8 +440,16 @@ func (a *App) relink(from, to string, allowed map[string]bool) {
 				if !d.boardReadOnly && d.board.RewriteWikiLinks(from, to) {
 					changed++
 				}
-			} else if d.ed.Engine.MapText(rename) {
-				changed++
+			} else {
+				if d.sourceHasPendingEdits() {
+					d.syncSourceToModel()
+				}
+				if d.ed.Engine.MapText(rename) {
+					if d.source {
+						d.refreshSourceFromModel()
+					}
+					changed++
+				}
 			}
 		}
 	}

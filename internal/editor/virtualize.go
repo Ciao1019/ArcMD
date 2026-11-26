@@ -18,6 +18,7 @@ const (
 	maxCachedShapes         = 768
 	cacheTrimHysteresis     = 128
 	virtualOverscanMin      = 1200
+	maxMaterializePasses    = 64
 )
 
 // runsStamp is a pointer-free 128-bit fingerprint of a block's styled runs so
@@ -966,23 +967,28 @@ func (e *Editor) materializeViewport(o Options) {
 	if !e.shouldVirtualize() {
 		return
 	}
-	winTop, winBottom := e.virtualWindow()
-	targets := e.collectUnshapedRows(winTop, winBottom, true)
-	if len(targets) > 0 {
-		e.materializeRows(targets, o.Theme)
+	for range maxMaterializePasses {
+		winTop, winBottom := e.virtualWindow()
+		targets := e.collectUnshapedRows(winTop, winBottom, true)
+		if len(targets) == 0 || e.materializeRows(targets, o.Theme) == 0 {
+			break
+		}
 	}
+	winTop, winBottom := e.virtualWindow()
 	e.trimShapeCache(winTop, winBottom)
 }
 
 // ensureVisibleShaped shapes any deferred rows inside [Scroll.Y-slack, Scroll.Y+viewport+slack]
 // before paint traverses rowSpace/decorationSpace.
 func (e *Editor) ensureVisibleShaped(slack float32, theme *ui.Theme) {
-	if !e.shouldVirtualize() {
+	if !e.shouldVirtualize() || theme == nil {
 		return
 	}
-	targets := e.collectUnshapedRows(e.Scroll.Y-slack, e.Scroll.Y+e.viewport+slack, false)
-	if len(targets) > 0 {
-		e.materializeRows(targets, theme)
+	for range maxMaterializePasses {
+		targets := e.collectUnshapedRows(e.Scroll.Y-slack, e.Scroll.Y+e.viewport+slack, false)
+		if len(targets) == 0 || e.materializeRows(targets, theme) == 0 {
+			return
+		}
 	}
 }
 
@@ -1102,9 +1108,9 @@ func (e *Editor) materializeTable(rowIndex int, owner string, o Options) bool {
 
 // materializeRows shapes ascending row indices using O(log B) suffix Fenwick
 // shifts while preserving the current reading anchor and scroll glide target.
-func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
+func (e *Editor) materializeRows(targets []int, theme *ui.Theme) int {
 	if len(targets) == 0 || theme == nil {
-		return
+		return 0
 	}
 	anchor := e.resizeAnchor()
 	if e.cache == nil {
@@ -1113,6 +1119,7 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 	o := e.layoutOptions()
 	o.Theme = theme
 	seenTables := make(map[string]bool)
+	shaped := 0
 
 	for _, idx := range targets {
 		if idx < 0 || idx >= len(e.rows) {
@@ -1128,7 +1135,9 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 				continue
 			}
 			seenTables[r.leaf.Owner] = true
-			e.materializeTable(idx, r.leaf.Owner, o)
+			if e.materializeTable(idx, r.leaf.Owner, o) {
+				shaped++
+			}
 			continue
 		}
 
@@ -1144,6 +1153,7 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 			e.cache[b.ID] = cached
 		}
 		r.layout = cached.layout
+		shaped++
 		_, h := cached.layout.Size()
 		h = max(h, m.font.Size*m.font.LineHeight)
 		newH := e.applyCodeCompact(r, m.top, m.bottom, m.gap, h)
@@ -1197,6 +1207,7 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) {
 		e.syncMotionAfterShift(b.ID, origY+origH, dy)
 	}
 	e.restoreResizeAnchor(anchor)
+	return shaped
 }
 
 // trimShapeCache evicts the least-recently-used offscreen TextLayouts once the

@@ -1357,6 +1357,9 @@ func (a *App) commitMarkdownForControl(sp *space.Space, rel, nextText string) er
 		res.ed.ReadOnly = false
 		res.ed.Engine.ReplaceDocument(editor.ImportMarkdown(nextText))
 		res.ed.ReadOnly = wasRO
+		if res.source {
+			res.refreshSourceFromModel()
+		}
 		if err := res.write(true); err != nil {
 			return err
 		}

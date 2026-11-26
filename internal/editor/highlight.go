@@ -846,10 +846,12 @@ func lexConfigLine(lang lexLang, line string, pg Page) []ui.Span {
 	}
 	if idx := strings.IndexByte(line[i:], sep); idx > 0 {
 		keyPart := line[i : i+idx]
-		if !strings.ContainsAny(keyPart, "#\"'") {
+		afterSep := i + idx + 1
+		validYAMLColon := lang != langYAML || afterSep >= n || line[afterSep] == ' ' || line[afterSep] == '\t' || line[afterSep] == '\r' || line[afterSep] == '\n'
+		if validYAMLColon && !strings.ContainsAny(keyPart, "#\"'") {
 			emit(keyPart, pg.Tokens.Type)
-			emit(line[i+idx:i+idx+1], pg.CodeText)
-			i += idx + 1
+			emit(line[i+idx:afterSep], pg.CodeText)
+			i = afterSep
 		}
 	}
 	for i < n {

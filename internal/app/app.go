@@ -35,7 +35,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.4.0"
+const Version = "0.5.0"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -512,7 +512,7 @@ func (a *App) Run() error {
 			{Role: mygo.RoleFileMenu},
 			{Role: mygo.RoleEditMenu},
 			a.formatMenu(),
-			{Role: mygo.RoleViewMenu},
+			a.viewMenu(),
 			{Role: mygo.RoleWindow, Submenu: windowItems},
 		}))
 		a.watchFiles = a.watchFolder
@@ -666,6 +666,22 @@ func (a *App) formatMenu() *mygo.MenuItem {
 			{Role: mygo.RoleItalic},
 			{Role: mygo.RoleUnderline},
 			{Role: mygo.RoleStrikethrough},
+		},
+	}
+}
+
+// viewMenu is the View menu without MyGo's webview reload and zoom roles:
+// native UI windows ignore those roles in performRole, yet their NSMenu
+// key equivalents (Cmd+R, Shift+Cmd+R, Cmd+0, Cmd++ / hidden Cmd+=, and
+// Cmd+-) would otherwise intercept ArcMD's reload, global replace, and
+// zoom shortcuts before key events reach the window.
+func (a *App) viewMenu() *mygo.MenuItem {
+	return &mygo.MenuItem{
+		Role: mygo.RoleViewMenu,
+		Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleToggleDevTools},
+			mygo.Separator(),
+			{Role: mygo.RoleToggleFullScreen},
 		},
 	}
 }
@@ -1044,6 +1060,9 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 				}
 			} else {
 				replacement.ed.Scroll = resident.ed.Scroll
+				if resident.source {
+					replacement.previewScroll = resident.previewScroll
+				}
 			}
 			a.replaceReferences(resident, replacement)
 			resident = replacement
@@ -1322,6 +1341,9 @@ func (a *App) followTitle() {
 	if d == nil || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() || d.space.IsExternal() || d.loadErr != nil || d.conflict || d.missing || !vault.IsDocument(d.rel) || d.dirty() {
 		return
 	}
+	if d.source && d.sourceComposing {
+		return
+	}
 	if _, composing := d.ed.MarkedRange(); composing {
 		return // renaming now would end the input method's composition
 	}
@@ -1329,7 +1351,7 @@ func (a *App) followTitle() {
 	if !isUntitled(name) && name != d.named {
 		return
 	}
-	title := docTitle(d.ed.Doc)
+	title := docTitle(d.committedForRead())
 	if title == "" || title == name || title == d.namedFor && name == d.named {
 		return // nothing to do, or done for this title already
 	}
@@ -1359,7 +1381,11 @@ func (a *App) followTitle() {
 				a.relink(name, vault.Title(to), sources)
 			}
 		}
-		d.ed.RequestFocus = focus
+		if d.source {
+			d.sourceFocusPending = true
+		} else {
+			d.ed.RequestFocus = focus
+		}
 		return
 	}
 }
@@ -1754,7 +1780,7 @@ ArcMD is a calm place for writing, in the spirit of Arc and Zen. Documents save 
 
 - **Spaces** keep separate worlds apart: each is a folder of local documents with its own color. Switch with the icons at the foot of the sidebar, or ⌘1…⌘9.
 - **The command bar** (⌘K) finds documents and runs commands; click the address above to open it.
-- **⌘N** makes a document, **⌘\\** folds the sidebar away (point at the window's left edge to peek at it), **⇧⌘M** opens the Markdown export preview.
+- **⌘N** makes a document, **⌘\\** folds the sidebar away (point at the window's left edge to peek at it), **⇧⌘M** switches to Markdown source mode.
 - [ ] Drag a document onto a folder to move it
 - [ ] Right-click a name and choose Rename to rename it
 

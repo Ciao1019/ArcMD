@@ -139,6 +139,32 @@ func TestReplaceDocumentAndMapText(t *testing.T) {
 	}
 }
 
+func TestReplaceDocumentPreservesImportSource(t *testing.T) {
+	orig := New()
+	orig.Blocks[0].Runs = []Run{{Text: "item"}}
+	orig.ImportSource = "* item\n"
+	e := NewEngine(orig)
+	v0 := e.Version()
+
+	updated := orig.Clone()
+	updated.ImportSource = "- item\n"
+	e.ReplaceDocument(updated)
+	if e.Version() == v0 {
+		t.Fatal("ReplaceDocument did not record an edit when only ImportSource changed")
+	}
+	if e.Doc.ImportSource != "- item\n" {
+		t.Fatalf("ImportSource = %q, want %q", e.Doc.ImportSource, "- item\n")
+	}
+	e.Undo()
+	if e.Doc.ImportSource != "* item\n" {
+		t.Fatalf("after Undo ImportSource = %q, want %q", e.Doc.ImportSource, "* item\n")
+	}
+	e.Redo()
+	if e.Doc.ImportSource != "- item\n" {
+		t.Fatalf("after Redo ImportSource = %q, want %q", e.Doc.ImportSource, "- item\n")
+	}
+}
+
 func TestSetFrontmatterUndoRedo(t *testing.T) {
 	e := NewEngine(New())
 	v0 := e.Version()

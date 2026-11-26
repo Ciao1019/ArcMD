@@ -254,3 +254,166 @@ func TestLongEquationWrapsBeforeShrinking(t *testing.T) {
 		t.Fatalf("wide LayoutInlineWidth changed single-line geometry: got %+v, want %+v", wide, single)
 	}
 }
+
+func TestLineBreakSpacing(t *testing.T) {
+	// 1. \\[8pt], \\[0.5em], \\*[6pt], \\[-2pt] do not render dimension text and adjust row spacing.
+	for _, tc := range []struct {
+		name string
+		base string
+		gap  string
+	}{
+		{"cases", `\begin{cases} 1 & x > 0 \\ 0 & x \le 0 \end{cases}`, `\begin{cases} 1 & x > 0 \\[8pt] 0 & x \le 0 \end{cases}`},
+		{"aligned", `\begin{aligned} a &= b \\ c &= d \end{aligned}`, `\begin{aligned} a &= b \\[0.5em] c &= d \end{aligned}`},
+		{"pmatrix", `\begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}`, `\begin{pmatrix} 1 & 2 \\*[6pt] 3 & 4 \end{pmatrix}`},
+		{"lines", `a = b \\ c = d`, `a = b \\[8pt] c = d`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b0 := layout(t, tc.base)
+			b1 := layout(t, tc.gap)
+			joined := strings.Join(texts(b1), "")
+			if strings.Contains(joined, "8pt") || strings.Contains(joined, "0.5em") || strings.Contains(joined, "6pt") || strings.Contains(joined, "[") || strings.Contains(joined, "]") {
+				t.Fatalf("dimension parameter leaked into text %q", joined)
+			}
+			h0 := b0.Ascent + b0.Descent
+			h1 := b1.Ascent + b1.Descent
+			if h1 <= h0+5 {
+				t.Fatalf("expected extra row spacing to increase height: base=%v gap=%v", h0, h1)
+			}
+		})
+	}
+
+	// Negative dimension shrinks spacing without leaking text or inverting rows.
+	neg := layout(t, `a = b \\[-2pt] c = d`)
+	if got := strings.Join(texts(neg), ""); got != "a=bc=d" {
+		t.Fatalf("negative dimen leaked text: %q", got)
+	}
+
+	// Non-dimension bracket after \\ must be preserved on the next line.
+	interval := layout(t, `a \\ [b, c]`)
+	if got := strings.Join(texts(interval), ""); got != "a[b,c]" {
+		t.Fatalf("non-dimension bracket after \\\\ lost: %q", got)
+	}
+}
+
+func TestStandaloneVertDelimiters(t *testing.T) {
+	for _, src := range []string{
+		`\dfrac{\lvert A \rvert}{\lambda}`,
+		`\lVert x \rVert`,
+		`\vert x \vert`,
+		`\Vert x \Vert`,
+		`\left\lVert x \right\rVert`,
+	} {
+		b := layout(t, src)
+		for _, op := range b.Ops {
+			if op.Error {
+				t.Fatalf("%s had error op: %+v", src, op)
+			}
+		}
+	}
+
+	// \lvert A \rvert emits single vertical bars; \lVert x \rVert emits double bars.
+	if got := strings.Join(texts(layout(t, `\lvert A \rvert`)), ""); got != "|A|" {
+		t.Fatalf("\\lvert A \\rvert texts = %q, want %q", got, "|A|")
+	}
+	if got := strings.Join(texts(layout(t, `\lVert x \rVert`)), ""); got != "‖x‖" {
+		t.Fatalf("\\lVert x \\rVert texts = %q, want %q", got, "‖x‖")
+	}
+
+	// Inside \lvert -x \rvert, '-' acts as unary sign (tighter than binary operator).
+	unary := layout(t, `\lvert -x \rvert`)
+	binary := layout(t, `a - x`)
+	var ux, ul float32
+	for _, op := range unary.Ops {
+		if op.Text == "−" {
+			ux = op.X
+		}
+		if op.Text == "|" && ul == 0 {
+			ul = op.X
+		}
+	}
+	var bx, ba float32
+	for _, op := range binary.Ops {
+		if op.Text == "−" {
+			bx = op.X
+		}
+		if op.Text == "a" {
+			ba = op.X
+		}
+	}
+	if ux-ul >= bx-ba {
+		t.Fatalf("expected unary minus after \\lvert to have less leading space than binary minus: unary=%v binary=%v", ux-ul, bx-ba)
+	}
+}
+
+func TestNegatedSymbolsAndExtensibleArrows(t *testing.T) {
+	for _, src := range []string{
+		`A \nRightarrow B`,
+		`A \not\Rightarrow B`,
+		`a \not= b`,
+		`x \not\in S`,
+		`A \not\subset B`,
+		`p \not\mid q`,
+		`a \not\approx b`,
+		`\not\alpha`,
+	} {
+		b := layout(t, src)
+		for _, op := range b.Ops {
+			if op.Error {
+				t.Fatalf("%s had error op: %+v", src, op)
+			}
+		}
+	}
+
+	if got := strings.Join(texts(layout(t, `A \nRightarrow B`)), ""); got != "A⇏B" {
+		t.Fatalf("\\nRightarrow = %q, want %q", got, "A⇏B")
+	}
+	if got := strings.Join(texts(layout(t, `A \not\Rightarrow B`)), ""); got != "A⇏B" {
+		t.Fatalf("\\not\\Rightarrow = %q, want %q", got, "A⇏B")
+	}
+	if kinds(layout(t, `\not\alpha`), "path") != 1 {
+		t.Fatal("expected fallback slash path for \\not\\alpha")
+	}
+
+	// Extensible arrows: above, below, empty, bidirectional.
+	short := layout(t, `A \xrightarrow{} B`)
+	long := layout(t, `A \xrightarrow{r_1 \leftrightarrow r_2} B`)
+	if kinds(short, "path") < 2 || kinds(long, "path") < 2 {
+		t.Fatalf("expected shaft + head paths for xrightarrow, got short=%d long=%d", kinds(short, "path"), kinds(long, "path"))
+	}
+	if long.W <= short.W {
+		t.Fatalf("expected labeled xrightarrow to stretch wider: short=%v long=%v", short.W, long.W)
+	}
+	for _, op := range long.Ops {
+		if op.Error {
+			t.Fatalf("xrightarrow error op: %+v", op)
+		}
+	}
+
+	both := layout(t, `A \xleftarrow[\text{below}]{\text{above}} B`)
+	if kinds(both, "path") < 2 {
+		t.Fatalf("expected shaft + head paths for xleftarrow, got %d", kinds(both, "path"))
+	}
+	var aboveY, belowY, shaftY float32
+	for _, op := range both.Ops {
+		if op.Error {
+			t.Fatalf("xleftarrow error op: %+v", op)
+		}
+		if op.Text == "above" {
+			aboveY = op.Y
+		}
+		if op.Text == "below" {
+			belowY = op.Y
+		}
+		if op.Kind == "path" && len(op.Points) == 2 {
+			shaftY = op.Points[0][1]
+		}
+	}
+	if aboveY >= shaftY || belowY <= shaftY {
+		t.Fatalf("expected aboveY (%v) < shaftY (%v) < belowY (%v)", aboveY, shaftY, belowY)
+	}
+
+	bi := layout(t, `X \xleftrightarrow[a]{b} Y`)
+	if kinds(bi, "path") < 3 {
+		t.Fatalf("expected shaft + 2 heads for xleftrightarrow, got %d paths", kinds(bi, "path"))
+	}
+}

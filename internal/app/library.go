@@ -79,10 +79,91 @@ type library struct {
 	cards ui.ScrollState
 	// move is the card the pointer drags to reorder the spaces.
 	move *cardMove
+	// spring is the closed folder held under a card drag, waiting to open.
+	spring     cardSpring
+	springSeen bool
 	// query filters what was deleted; items is what the bin lists.
 	query string
 	items []trashbin.Item
 	err   error
+}
+
+// cardDragged is a file or folder row dragged out of a library space card.
+type cardDragged struct {
+	space, rel string
+	dir        bool
+}
+
+// cardSpring tracks a closed folder in a library card held under a drag.
+type cardSpring struct {
+	space, rel string
+	since      time.Time
+}
+
+// canDropOnCard reports whether a dragged file or folder can land on dst's root.
+func canDropOnCard(d cardDragged, dst *space.Space) bool {
+	if dst == nil || dst.IsExternal() {
+		return false
+	}
+	if d.space != dst.ID {
+		return true
+	}
+	return parentDir(d.rel) != ""
+}
+
+// canDropInCardFolder reports whether a dragged file or folder can land in folderRel of dst.
+func canDropInCardFolder(d cardDragged, dst *space.Space, folderRel string) bool {
+	if dst == nil || dst.IsExternal() {
+		return false
+	}
+	if d.space != dst.ID {
+		return true
+	}
+	return !under(folderRel, d.rel) && parentDir(d.rel) != folderRel
+}
+
+// moveInSpace moves rel inside sp into dir ("" for root) and refreshes the library trees.
+func (a *App) moveInSpace(sp *space.Space, rel, dir string) string {
+	if sp == nil || sp.IsExternal() || under(dir, rel) || parentDir(rel) == dir {
+		return ""
+	}
+	moving := a.residentDocument(sp.ID, rel)
+	if !a.flush() {
+		return ""
+	}
+	if moving != nil {
+		rel = moving.rel
+	}
+	from := parentDir(rel)
+	to, _, err := a.moveWithResources(sp, rel, sp, dir)
+	if err != nil {
+		a.notify("移动 %s 失败。%v", path.Base(rel), err)
+		return ""
+	}
+	if dir != "" {
+		sp.SetExpanded(dir, true)
+	}
+	a.moved(sp, rel, to)
+	delete(a.pageTrees, sp.ID)
+	if a.library.open && a.library.page == libSpaces {
+		a.loadLibrary()
+	}
+	a.offerUndo(i18n.T("已移到「")+folderName(sp, dir)+"」", path.Base(to), func() {
+		a.moveInSpace(sp, to, from)
+	})
+	return to
+}
+
+// dropInLibrary moves a dragged row onto dst's root or dir.
+func (a *App) dropInLibrary(d cardDragged, dst *space.Space, dir string) {
+	if dst == nil || dst.IsExternal() {
+		return
+	}
+	if d.space != dst.ID {
+		a.moveAcross(d.space, d.rel, dst.ID, dir)
+		return
+	}
+	a.moveInSpace(dst, d.rel, dir)
 }
 
 // openLibrary shows the library on page.
@@ -124,7 +205,7 @@ func (a *App) loadLibrary() {
 // closeLibrary gives the sidebar back its spaces.
 func (a *App) closeLibrary() {
 	if a.library.open {
-		a.library.open, a.library.frames, a.library.move = false, 0, nil
+		a.library.open, a.library.frames, a.library.move, a.library.spring = false, 0, nil, cardSpring{}
 	}
 }
 
@@ -300,6 +381,7 @@ func (a *App) librarySpaces(c *ui.Context) {
 			// A drag the grip starts while the row builds shows from the
 			// next frame: this one built the card in its place already.
 			moved := a.library.move
+			a.library.springSeen = false
 			shown, slot := a.cardOrder()
 			for i, s := range shown {
 				if i == slot {
@@ -309,6 +391,9 @@ func (a *App) librarySpaces(c *ui.Context) {
 			}
 			if slot == len(shown) {
 				cardSlot(c)
+			}
+			if !a.library.springSeen {
+				a.library.spring = cardSpring{}
 			}
 			if m := a.library.move; m != moved {
 				c.AnimationFrame()
@@ -351,6 +436,7 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 	look := lookOf(space.ThemeOf(s), base.Dark)
 	t := spaceTheme(base, look)
 	active := s == a.state.ActiveSpace()
+	canInteract := !moved && a.library.move == nil
 	card := ui.Themed(c.Key("card-"+s.ID), t).Width(libraryCardW).Shrink(0).Radius(14).Padding(8).Gap(4).
 		Role(ui.RoleGroup).Label(s.Name).Clip()
 	if moved {
@@ -367,15 +453,44 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 	} else {
 		card.Transition(ui.ElementTransition{Animation: &listAnim, Position: true})
 	}
+	dropOver, dropCross := false, false
+	if canInteract && !s.IsExternal() {
+		if d, ok := ui.Drop[cardDragged](card); ok && canDropOnCard(d, s) {
+			a.dropInLibrary(d, s, "")
+		}
+		if d, ok := ui.DragOver[cardDragged](card); ok && canDropOnCard(d, s) {
+			dropOver = true
+			dropCross = d.space != s.ID
+		}
+	}
+	cardHovered := canInteract && !active && card.Hovered()
+	if canInteract && !active {
+		card.Cursor(ui.CursorPointer)
+		if card.Clicked() {
+			a.switchSpace(s.ID)
+			if a.state.ActiveSpace() == s {
+				a.closeLibrary()
+			}
+		}
+	}
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		look.paint(p, r, 14, false)
 		if active {
 			p.Fill(r, white.Alpha(0.22), 14)
 		}
+		if dropOver {
+			p.Fill(r, t.Accent.Alpha(0.10), 14)
+		} else if cardHovered {
+			p.Fill(r, white.Alpha(0.08), 14)
+		}
 	})
 	switch {
+	case dropOver:
+		card.Border(2, t.Accent.Alpha(0.85))
 	case active:
 		card.Border(2, white.Alpha(0.7))
+	case cardHovered:
+		card.Border(1.5, white.Alpha(0.45))
 	default:
 		card.Border(1, t.Border.Alpha(0.4))
 	}
@@ -424,6 +539,14 @@ func (a *App) spaceCard(c *ui.Context, s *space.Space, moved bool) ui.Element {
 		ui.Row(c.Key("foot")).Height(30).Gap(2).AlignItems(ui.Center).Children(func() {
 			a.cardGrip(c, s, slices.Index(a.state.Spaces, s))
 			ui.Spacer(c)
+			if dropOver {
+				hint := i18n.T("移到根目录")
+				if dropCross {
+					hint = i18n.T("移到此空间")
+				}
+				ui.Text(c, hint).FontSize(11.5).FontWeight(600).TextColor(t.Accent).NoWrap()
+				ui.Spacer(c)
+			}
 			iconButton(c, "menu", iconEllipsis, s.Name+i18n.T(" 的菜单"), i18n.T("更多"), false).Size(28, 28).Menu(func(m *ui.Menu) {
 				if m.Item(i18n.T("编辑空间…")).Chosen() {
 					a.closeLibrary()
@@ -460,6 +583,42 @@ func (a *App) cardNodes(c *ui.Context, s *space.Space, nodes []*vault.Node, dept
 		t := c.Theme()
 		open := s.IsExpanded(n.Path)
 		row := a.cardRow(c, "dir:"+n.Path, n.Title(), depth).Role(ui.RoleTreeItem).Expanded(open)
+		into := false
+		if a.library.move == nil {
+			row.Drag(cardDragged{space: s.ID, rel: n.Path, dir: true})
+			if row.Dragging() {
+				row.Opacity(0.4)
+			}
+			if !s.IsExternal() {
+				if d, ok := ui.Drop[cardDragged](row); ok && canDropInCardFolder(d, s, n.Path) {
+					a.dropInLibrary(d, s, n.Path)
+				}
+				if d, ok := ui.DragOver[cardDragged](row); ok && canDropInCardFolder(d, s, n.Path) {
+					into = true
+				}
+			}
+		}
+		if into {
+			row.Background(hoverFill(t))
+			row.Draw(func(p *ui.Painter, r ui.Rect) {
+				p.Stroke(ui.Rect{X: r.X + 0.5, Y: r.Y + 0.5, W: max(0, r.W-1), H: max(0, r.H-1)}, t.Accent.Alpha(0.75), 8, 1.5)
+			})
+			if !open {
+				a.library.springSeen = true
+				switch {
+				case a.library.spring.space != s.ID || a.library.spring.rel != n.Path:
+					a.library.spring = cardSpring{space: s.ID, rel: n.Path, since: c.Now()}
+					c.After(springDelay)
+				case c.Now().Sub(a.library.spring.since) >= springDelay:
+					s.SetExpanded(n.Path, true)
+					a.saveState()
+					a.library.spring = cardSpring{}
+					c.AnimationFrame()
+				default:
+					c.After(springDelay - c.Now().Sub(a.library.spring.since))
+				}
+			}
+		}
 		row.Children(func() {
 			icon := iconFolder
 			if open {
@@ -467,15 +626,32 @@ func (a *App) cardNodes(c *ui.Context, s *space.Space, nodes []*vault.Node, dept
 			}
 			ui.Icon(c, icon).FontSize(15).TextColor(t.Accent)
 			ui.Text(c, n.Title()).FontSize(13).FontWeight(600).SingleLine().Grow(1).MinWidth(0)
+			if into {
+				cardIntoBadge(c)
+			}
 		})
 		if row.Clicked() {
 			s.SetExpanded(n.Path, !open)
 			a.saveState()
 		}
-		if open {
+		if s.IsExpanded(n.Path) {
 			a.cardNodes(c, s, n.Children, depth+1)
 		}
 	}
+}
+
+// cardIntoBadge is the pill shown on a library card folder while a drag hovers over it.
+func cardIntoBadge(c *ui.Context) {
+	t := c.Theme()
+	fill := white.Alpha(0.9)
+	if t.Dark {
+		fill = white.Alpha(0.14)
+	}
+	ui.Row(c.Key("into-badge")).Absolute().Right(6).Top(4).Height(22).PaddingX(8).Gap(4).Radius(11).
+		AlignItems(ui.Center).Background(fill).Shadow(0, 1, 2, 0, black.Alpha(0.08)).Children(func() {
+		ui.Icon(c, iconFolder).FontSize(12).TextColor(t.Text)
+		ui.Text(c, i18n.T("移到文件夹")).FontSize(11).FontWeight(600).TextColor(t.Text).NoWrap()
+	})
 }
 
 // cardDoc is a document's row in a card; the open document is glass. A
@@ -484,6 +660,12 @@ func (a *App) cardDoc(c *ui.Context, s *space.Space, rel, title string, depth in
 	t := c.Theme()
 	chosen := a.doc != nil && a.doc.space == s && a.doc.rel == rel
 	row := a.cardRow(c, "doc:"+rel, title, depth).Role(ui.RoleTreeItem).Selected(chosen)
+	if a.library.move == nil {
+		row.Drag(cardDragged{space: s.ID, rel: rel})
+		if row.Dragging() {
+			row.Opacity(0.4)
+		}
+	}
 	if chosen {
 		row.Background(glass(t)).Shadow(0, 1, 3, 0, black.Alpha(0.07))
 	}

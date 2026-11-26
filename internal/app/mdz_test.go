@@ -692,6 +692,35 @@ func TestMDZBugFixes(t *testing.T) {
 			t.Fatalf("saveAsTemplate created a template from MDZ")
 		}
 	})
+
+	t.Run("exportMDZ_includes_unsaved_source_mode_edits", func(t *testing.T) {
+		a, tt := newTestApp(t)
+		sp := a.state.ActiveSpace()
+		if err := os.WriteFile(filepath.Join(sp.Root, "SourceNote.md"), []byte("# Initial\n\nOld text.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("SourceNote.md")
+		settle(tt)
+		a.toggleSource()
+		settle(tt)
+		if !a.doc.source {
+			t.Fatal("expected document to enter source mode")
+		}
+		a.doc.preview = "# Source Edited\n\nLive source content 0.5.0.\n"
+		a.doc.noteSourceText()
+
+		a.exportMDZ()
+		arc, err := mdz.Open(filepath.Join(sp.Root, "SourceNote.mdz"))
+		if err != nil {
+			t.Fatalf("mdz.Open(SourceNote.mdz): %v", err)
+		}
+		defer func() { _ = arc.Close() }()
+		md, err := arc.ReadMarkdown("index.md")
+		if err != nil || !strings.Contains(md, "Live source content 0.5.0.") {
+			t.Fatalf("expected exported .mdz to contain unsaved source edits, got %q (err=%v)", md, err)
+		}
+	})
 }
 
 func TestMDZSnapshot(t *testing.T) {

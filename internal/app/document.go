@@ -85,6 +85,34 @@ type document struct {
 	previewCaret        int
 	previewCaretPending bool
 	previewEnteredY     float32
+	sourceInit          bool
+	sourceSynced        string
+	sourceObserved      string
+	sourceSavedText     string
+	sourceSavedKnown    bool
+	sourceBaselineStale bool
+	sourceVersion       uint64
+	sourceComposing     bool
+	sourceFocusPending  bool
+	sourceCaret         int
+	sourceSelStart      int
+	sourceSelEnd        int
+	sourceCaretMoved    bool
+	sourceLines         ui.TextLines
+	sourcePlain         string
+	sourcePlainVer      uint64
+	sourcePlainKnown    bool
+	sourceTabOp         int
+	sourceFind          sourceFindState
+	sourceHighlight     *editor.SourceHighlightCache
+	sourceSplit         bool
+	sourceSplitFrac     float32
+	sourceSplitVFrac    float32
+	sourcePreviewEd     *editor.Editor
+	sourcePreviewText   string
+	sourcePreviewAt     time.Time
+	sourcePreviewDirty  bool
+	sourcePreviewLine   int
 	modeSwitchPending   bool
 	modeAt              time.Time
 	// conflict is set when the file changed elsewhere while the document
@@ -167,10 +195,11 @@ func openDocument(sp *space.Space, rel, text string, preferSource bool) *documen
 	d.ed = editor.FromOwnedDocument(doc)
 	d.initLazyBaseline()
 	if preferSource {
-		d.preview = editor.ExportMarkdown(d.ed.Doc)
+		d.initSourceBuffer(text, false)
 	}
 	return d
 }
+func (d *document) isArcmd() bool { return strings.EqualFold(path.Ext(d.rel), ".arcmd") }
 func (d *document) title() string { return vault.Title(d.rel) }
 func (d *document) text() string {
 	if d.isPDF() || d.isBook() || d.isMDZ() {
@@ -184,7 +213,136 @@ func (d *document) text() string {
 		s, _ := d.dbView.Store.EncodeMarkdown(time.Now())
 		return s
 	}
+	if d.source && d.sourceInit {
+		d.noteSourceText()
+		return d.preview
+	}
 	return editor.ExportMarkdown(d.ed.Committed())
+}
+
+func (d *document) initSourceBuffer(rawDisk string, richDirty bool) {
+	if !richDirty && !d.isArcmd() {
+		d.preview = rawDisk
+	} else {
+		d.preview = editor.ExportMarkdown(d.ed.Committed())
+	}
+	d.sourceInit = true
+	d.sourceSynced = d.preview
+	d.sourceObserved = d.preview
+	d.sourceSavedText = d.preview
+	d.sourceSavedKnown = !richDirty
+	d.sourceBaselineStale = false
+	d.sourceCaretMoved = false
+	d.sourcePlainKnown = false
+}
+
+func (d *document) ensureSourceInit() {
+	if !d.source || d.sourceInit || d.isWhiteboard() || d.isPDF() || d.isBook() || d.isMDZ() || d.isDatabase() || d.ed == nil {
+		return
+	}
+	d.initSourceBuffer(d.diskText, d.modelDirty())
+}
+
+func (d *document) noteSourceText() {
+	if !d.source || !d.sourceInit || d.preview == d.sourceObserved {
+		return
+	}
+	d.sourceObserved = d.preview
+	d.sourceVersion++
+	d.sourcePlainKnown = false
+}
+
+func (d *document) sourceHasPendingEdits() bool {
+	if !d.source || !d.sourceInit {
+		return false
+	}
+	d.noteSourceText()
+	return d.preview != d.sourceSynced
+}
+
+func (d *document) committedForRead() *model.Document {
+	if d == nil || d.ed == nil {
+		return nil
+	}
+	if d.sourceHasPendingEdits() {
+		return editor.ImportMarkdown(d.preview)
+	}
+	return d.ed.Committed()
+}
+
+func (d *document) sourceUsesDirectSave() bool {
+	if !d.source || !d.sourceInit {
+		return false
+	}
+	d.noteSourceText()
+	return d.preview != d.sourceSynced || d.sourceBaselineStale
+}
+
+func (d *document) sourceDirty() bool {
+	d.noteSourceText()
+	if d.isArcmd() {
+		return !d.sourceSavedKnown || d.preview != d.sourceSavedText
+	}
+	return d.preview != d.diskText
+}
+
+// syncSourceToModel commits edits made in Markdown source mode into d.ed as
+// one undoable Engine.ReplaceDocument step and reconciles the saved baseline.
+// It returns whether the rich model changed.
+func (d *document) syncSourceToModel() bool {
+	if !d.source || !d.sourceInit || d.ed == nil {
+		return false
+	}
+	d.waitAsyncSave()
+	d.noteSourceText()
+	changed := d.preview != d.sourceSynced
+	matchesSaved := (!d.isArcmd() && d.preview == d.diskText) || (d.isArcmd() && d.sourceSavedKnown && d.preview == d.sourceSavedText)
+	if changed {
+		wasRO := d.ed.ReadOnly
+		d.ed.ReadOnly = false
+		nextDoc := editor.ImportMarkdown(d.preview)
+		d.ed.Engine.ReplaceDocument(nextDoc)
+		d.ed.ReadOnly = wasRO
+		d.sourceSynced = d.preview
+	}
+	if changed || d.sourceBaselineStale {
+		if matchesSaved {
+			committed := d.ed.Committed()
+			d.baseline, _ = committed.Digest()
+			d.rememberBaseline(committed)
+		} else {
+			if d.sourceBaselineStale {
+				d.baselinePending = false
+				d.ed.Engine.OnBeforeChange = nil
+				d.ed.Engine.OnBeforeLeafChange = nil
+				d.baseline = [32]byte{}
+			}
+			d.dirtyKnown = false
+			d.textDirtyKnown = false
+			d.skeletonDirty = false
+		}
+		d.sourceBaselineStale = false
+	}
+	return changed
+}
+
+// refreshSourceFromModel updates the source editor buffer after an operation
+// mutates d.ed directly (e.g., version restore, three-way merge, global replace).
+func (d *document) refreshSourceFromModel() {
+	if !d.source || d.ed == nil {
+		return
+	}
+	d.preview = editor.ExportMarkdown(d.ed.Committed())
+	d.sourceInit = true
+	d.sourceSynced = d.preview
+	d.sourceObserved = d.preview
+	d.sourceVersion++
+	d.sourcePlainKnown = false
+	if !d.modelDirty() {
+		d.sourceSavedText = d.preview
+		d.sourceSavedKnown = true
+		d.sourceBaselineStale = false
+	}
 }
 
 // ensureBodyParagraph gives a newly created heading-only Markdown page an
@@ -220,6 +378,15 @@ func (d *document) dirty() bool {
 		}
 		return d.dirtyNow
 	}
+	if d.source && d.sourceInit {
+		if d.sourceUsesDirectSave() {
+			return d.sourceDirty()
+		}
+	}
+	return d.modelDirty()
+}
+
+func (d *document) modelDirty() bool {
 	if rev := d.ed.Revision(); !d.dirtyKnown || rev != d.dirtyRev {
 		// Preedit revisions update display indexes but leave committed content
 		// unchanged. In particular, saving during composition establishes a
@@ -436,6 +603,8 @@ type asyncSaveResult struct {
 	arcmd            bool
 	board            bool
 	db               bool
+	source           bool
+	sourceText       string
 	historyRecorded  bool
 	missing          bool
 	conflict         bool
@@ -464,6 +633,9 @@ func (d *document) changed() bool {
 	if d.isDatabase() {
 		return d.databaseDirty()
 	}
+	if d.sourceUsesDirectSave() {
+		return d.sourceDirty()
+	}
 	if d.baselinePending && len(d.baselineOrigRuns) == 0 {
 		return false
 	}
@@ -481,17 +653,38 @@ func (d *document) toggleMode() {
 	d.modeAt = time.Time{}
 	if !d.source {
 		targetID := d.ed.ActiveOrTopBlockID()
+		richDirty := d.dirty()
 		doc := d.ed.Committed()
-		d.preview = editor.ExportMarkdown(doc)
+		d.initSourceBuffer(d.diskText, richDirty)
 		d.previewCaret = markdownBlockRuneOffset(doc, d.preview, targetID)
+		d.sourceCaret = d.previewCaret
+		d.sourceSelStart, d.sourceSelEnd = d.previewCaret, d.previewCaret
 		d.previewCaretPending = true
+		d.sourceFocusPending = true
 		d.previewEnteredY = -1
 		d.source = true
 		return
 	}
-	if d.previewScroll.MaxY > 0 && (d.previewEnteredY < 0 || abs32Doc(d.previewScroll.Y-d.previewEnteredY) > 4) {
+	d.ensureSourceInit()
+	caret := d.sourceCaret
+	caretMoved := d.sourceCaretMoved
+	changed := d.syncSourceToModel()
+	d.sourceFind.open = false
+	d.sourceComposing = false
+	d.releaseSourcePreview()
+	doc := d.ed.Committed()
+	if caretMoved || changed {
+		if id := markdownBlockAtRuneOffset(doc, d.preview, caret); id != "" {
+			d.ed.ScrollToBlock(id)
+			if changed {
+				if leaf, ok := d.ed.Engine.LeafByID(id); ok {
+					d.ed.SetSelection(leaf.Start, leaf.Start)
+				}
+			}
+		}
+	} else if d.previewScroll.MaxY > 0 && (d.previewEnteredY < 0 || abs32Doc(d.previewScroll.Y-d.previewEnteredY) > 4) {
 		frac := min(max(d.previewScroll.Y/d.previewScroll.MaxY, 0), 1)
-		if id := markdownBlockAtFraction(d.ed.Committed(), d.preview, frac); id != "" {
+		if id := markdownBlockAtFraction(doc, d.preview, frac); id != "" {
 			d.ed.ScrollToBlock(id)
 		}
 	}
@@ -549,23 +742,35 @@ func markdownBlockRuneOffset(doc *model.Document, md, blockID string) int {
 }
 
 func markdownBlockAtFraction(doc *model.Document, md string, frac float32) string {
+	totalRunes := utf8.RuneCountInString(md)
+	return markdownBlockAtRuneOffset(doc, md, int(float32(totalRunes)*frac))
+}
+
+func markdownBlockAtRuneOffset(doc *model.Document, md string, targetRune int) string {
+	id, _ := markdownBlockAtRuneOffsetWithFirst(doc, md, targetRune)
+	return id
+}
+
+func markdownBlockAtRuneOffsetWithFirst(doc *model.Document, md string, targetRune int) (blockID string, atOrBeforeFirst bool) {
 	if doc == nil || len(doc.Blocks) == 0 {
-		return ""
+		return "", true
 	}
 	parts := editor.ExportMarkdownParts(doc)
 	if len(parts) == 0 {
-		return ""
+		return "", true
 	}
-	totalRunes := utf8.RuneCountInString(md)
-	targetRune := int(float32(totalRunes) * frac)
 	byteAt := 0
 	chosen := parts[0].Block
-	for _, p := range parts {
+	beforeFirst := true
+	for i, p := range parts {
 		pos := strings.Index(md[byteAt:], p.Text)
 		if pos < 0 {
 			continue
 		}
 		startRune := utf8.RuneCountInString(md[:byteAt+pos])
+		if i == 0 && targetRune >= startRune {
+			beforeFirst = false
+		}
 		if startRune <= targetRune {
 			chosen = p.Block
 		} else {
@@ -573,7 +778,7 @@ func markdownBlockAtFraction(doc *model.Document, md string, frac float32) strin
 		}
 		byteAt += pos + len(p.Text)
 	}
-	return chosen
+	return chosen, beforeFirst
 }
 
 func (d *document) pollAsyncSave() {
@@ -601,6 +806,9 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 	switch {
 	case res.unchanged:
 		d.saveErr = nil
+		if res.source {
+			return
+		}
 		if res.db {
 			if d.isDatabase() && d.dbView.Version() == res.version && d.dbView.Store.Revision() == res.revision {
 				d.dirtyRev, d.dirtyKnown, d.dirtyNow = d.dbView.Store.Revision(), true, false
@@ -640,6 +848,21 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 		d.saveErr = res.err
 		d.failedVersion = res.version
 	default:
+		if res.source {
+			d.diskText, d.saveErr = res.text, nil
+			d.savedWrites++
+			if res.historyRecorded {
+				d.historyStarted = true
+			}
+			d.conflict, d.missing, d.diskNow = false, false, ""
+			d.sourceBaselineStale = true
+			if res.arcmd {
+				d.sourceSavedText = res.sourceText
+				d.sourceSavedKnown = true
+			}
+			d.justSaved = true
+			return
+		}
 		if res.db {
 			d.diskText, d.dbBaseline, d.saveErr = res.text, res.baseline, nil
 			if res.historyRecorded {
@@ -698,8 +921,16 @@ func (d *document) applyAsyncSave(res asyncSaveResult) {
 			d.textDirtyKnown = false
 			d.skeletonDirty = false
 		}
-		if d.source {
-			d.preview = d.text()
+		if d.source && d.sourceInit && !d.sourceHasPendingEdits() {
+			if !res.arcmd {
+				d.preview = res.text
+			} else {
+				d.preview = d.text()
+			}
+			d.sourceSynced = d.preview
+			d.sourceObserved = d.preview
+			d.sourceSavedText = d.preview
+			d.sourceSavedKnown = true
 		}
 		d.justSaved = true
 	}
@@ -745,6 +976,9 @@ func (d *document) write(force bool) error {
 	}
 	if d.isDatabase() {
 		return d.writeDatabase(force)
+	}
+	if d.sourceUsesDirectSave() {
+		return d.writeSource(force)
 	}
 	var baseline [32]byte
 	if dirty, known := d.pendingDirtyState(); known {
@@ -811,12 +1045,70 @@ func (d *document) write(force bool) error {
 	}
 	d.diskText, d.baseline, d.saveErr = text, baseline, nil
 	d.savedWrites++
-	if d.source {
-		d.preview = d.text()
+	if d.source && d.sourceInit && !d.sourceHasPendingEdits() {
+		if !arcmd {
+			d.preview = text
+		} else {
+			d.preview = d.text()
+		}
+		d.sourceSynced = d.preview
+		d.sourceObserved = d.preview
+		d.sourceSavedText = d.preview
+		d.sourceSavedKnown = true
 	}
 	d.recordVersion(before)
 	d.conflict, d.missing, d.diskNow = false, false, ""
 	d.rememberBaseline(committed)
+	d.justSaved = true
+	return nil
+}
+
+func (d *document) writeSource(force bool) error {
+	if !force && !d.sourceDirty() {
+		d.saveErr = nil
+		return nil
+	}
+	if !force {
+		disk, err := readFile(d.space, d.rel)
+		switch {
+		case isMissingDocFile(d.space, d.rel, err):
+			d.missing = true
+			return errMissing
+		case err != nil:
+			d.saveErr = err
+			return err
+		case disk != d.diskText:
+			d.conflict, d.diskNow = true, disk
+			return errConflict
+		}
+	}
+	rawSource := d.preview
+	arcmd := d.isArcmd()
+	var text string
+	var err error
+	if arcmd {
+		parsed := editor.ImportMarkdown(rawSource)
+		text, err = parsed.Encode()
+	} else {
+		text = rawSource
+	}
+	if err == nil {
+		err = writeFile(d.space, d.rel, text)
+	}
+	if err != nil {
+		d.saveErr = err
+		return err
+	}
+	before := d.diskText
+	d.diskText, d.saveErr = text, nil
+	d.savedWrites++
+	d.sourceBaselineStale = true
+	if arcmd {
+		d.sourceSavedText = rawSource
+		d.sourceSavedKnown = true
+	}
+	d.recordVersion(before)
+	d.conflict, d.missing, d.diskNow = false, false, ""
 	d.justSaved = true
 	return nil
 }
@@ -889,7 +1181,8 @@ func (d *document) autosaveWith(c *ui.Context, post func(func())) {
 		return
 	}
 	d.pollAsyncSave()
-	ver := d.ed.Version()
+	d.noteSourceText()
+	ver := d.ed.Version() + d.sourceVersion
 	if d.isWhiteboard() {
 		ver = d.board.Version()
 	}
@@ -899,7 +1192,7 @@ func (d *document) autosaveWith(c *ui.Context, post func(func())) {
 	if ver != d.version {
 		d.version, d.edited = ver, c.Now()
 	}
-	if d.saving || d.conflict || d.missing || !d.dirty() || d.saveErr != nil && d.version == d.failedVersion {
+	if d.saving || d.conflict || d.missing || (d.source && d.sourceComposing) || !d.dirty() || d.saveErr != nil && d.version == d.failedVersion {
 		return
 	}
 	if wait := autosaveDelay - c.Now().Sub(d.edited); wait > 0 {
@@ -925,6 +1218,10 @@ func (d *document) startAsyncAutosave(post func(func())) {
 	}
 	if d.isDatabase() {
 		d.startAsyncDatabaseAutosave(post)
+		return
+	}
+	if d.sourceUsesDirectSave() {
+		d.startAsyncSourceAutosave(post)
 		return
 	}
 	committed := d.ed.Committed()
@@ -1022,6 +1319,87 @@ func (d *document) startAsyncAutosave(post func(func())) {
 					_ = history.Record(spClone.Root, rel, outText, time.Now(), false)
 					res.historyRecorded = true
 				}
+			}
+		}
+		ch <- res
+		post(func() { d.pollAsyncSave() })
+	}()
+}
+
+func (d *document) startAsyncSourceAutosave(post func(func())) {
+	rawSource := d.preview
+	arcmd := d.isArcmd()
+	savedText := d.sourceSavedText
+	savedKnown := d.sourceSavedKnown
+
+	spClone := *d.space
+	if d.space.ExternalFiles != nil {
+		spClone.ExternalFiles = make(map[string]string, len(d.space.ExternalFiles))
+		for k, v := range d.space.ExternalFiles {
+			spClone.ExternalFiles[k] = v
+		}
+	}
+	rel := d.rel
+	expectedDisk := d.diskText
+	historyOff := d.historyOff
+	needInitialHistory := !d.historyOff && !d.historyStarted && expectedDisk != ""
+	fullPath := d.fullPath()
+	ver := d.version
+	ch := make(chan asyncSaveResult, 1)
+	d.saving = true
+	d.saveDone = ch
+
+	go func() {
+		if (!arcmd && rawSource == expectedDisk) || (arcmd && savedKnown && rawSource == savedText) {
+			ch <- asyncSaveResult{unchanged: true, source: true, arcmd: arcmd, version: ver}
+			post(func() { d.pollAsyncSave() })
+			return
+		}
+		var outText string
+		var prepErr error
+		if arcmd {
+			parsed := editor.ImportMarkdown(rawSource)
+			outText, prepErr = parsed.Encode()
+		} else {
+			outText = rawSource
+		}
+		res := asyncSaveResult{
+			text:       outText,
+			source:     true,
+			sourceText: rawSource,
+			arcmd:      arcmd,
+			version:    ver,
+		}
+		if prepErr != nil {
+			res.err = prepErr
+			ch <- res
+			post(func() { d.pollAsyncSave() })
+			return
+		}
+		disk, err := readFile(&spClone, rel)
+		switch {
+		case isMissingDocFile(&spClone, rel, err):
+			res.missing = true
+		case err != nil:
+			res.err = err
+		case disk != expectedDisk:
+			res.conflict, res.diskNow = true, disk
+		default:
+			var initialAt time.Time
+			if needInitialHistory {
+				initialAt = time.Now().Add(-time.Second)
+				if info, stErr := os.Stat(fullPath); stErr == nil && info.ModTime().Before(initialAt) {
+					initialAt = info.ModTime()
+				}
+			}
+			if wErr := writeFile(&spClone, rel, outText); wErr != nil {
+				res.err = wErr
+			} else if !historyOff {
+				if needInitialHistory {
+					_ = history.Record(spClone.Root, rel, expectedDisk, initialAt, true)
+				}
+				_ = history.Record(spClone.Root, rel, outText, time.Now(), false)
+				res.historyRecorded = true
 			}
 		}
 		ch <- res
@@ -1217,6 +1595,21 @@ func (d *document) close() {
 	if d.ed != nil {
 		d.ed.ClearImages()
 	}
+	d.releaseSourcePreview()
+}
+
+func (d *document) releaseSourcePreview() {
+	if d == nil {
+		return
+	}
+	if d.sourcePreviewEd != nil {
+		d.sourcePreviewEd.ClearImages()
+		d.sourcePreviewEd = nil
+	}
+	d.sourcePreviewText = ""
+	d.sourcePreviewDirty = false
+	d.sourcePreviewAt = time.Time{}
+	d.sourcePreviewLine = 0
 }
 
 // releaseShownImagePixels drops retained CPU RGBA buffers once GPU upload has

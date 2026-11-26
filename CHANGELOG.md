@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0
+
+本版本正式推出 **MDZip（`.mdz`）v1.2.0 单文件打包导出与原地只读阅读**（[#79](https://github.com/Ciao1019/ArcMD/issues/79)、[#85](https://github.com/Ciao1019/ArcMD/pull/85)，感谢 `@tajiaoyezi`）、**原生 Markdown 源码编辑模式（带语法高亮、查找替换与分栏实时预览）**（[#37](https://github.com/Ciao1019/ArcMD/issues/37)）、**YAML Frontmatter 元数据头可视化卡片**（[#83](https://github.com/Ciao1019/ArcMD/issues/83)）以及 **资料库点击切换空间与跨空间拖拽移动**（[#81](https://github.com/Ciao1019/ArcMD/issues/81)）；同时扩展了 **LaTeX 数学公式语法兼容与大纲标题公式渲染**（[#78](https://github.com/Ciao1019/ArcMD/issues/78)），并修复了 **超 800 块长文档目录跳转闪退**（[#76](https://github.com/Ciao1019/ArcMD/issues/76)）、**菜单弹窗鼠标悬停穿透编辑区**（[#77](https://github.com/Ciao1019/ArcMD/issues/77)）与 **macOS 视图菜单快捷键拦截缩放/重载** 等核心体验问题。
+
+### 新功能与桌面体验
+
+- **MDZip（`.mdz`）导出打包、原地只读阅读与一键解包（`internal/mdz`、`internal/app/mdz.go`、`mygo.json`）**：纯 Go（零 cgo、零磁盘临时解压）实现 MDZip v1.2.0 规范编解码。支持通过「⋯ › 导出 › 导出 MDZip (.mdz)」或命令栏将当前文档连同封面、本地图片、内嵌白板/PDF/书籍及本地非 Markdown 附件打包为单个 `.mdz` 文件（同目录 `assets/` 保持原相对路径，自定义附件目录自动归并至 `assets/` 并仅在导出副本重写链接，自动编号永不覆盖）；支持直接原地只读打开 `.mdz`、多页 `project` 模式折叠式包内文件栏与页内相对链接/锚点跳转、无入口歧义选择器、损坏/加密归档提示卡以及右上角一键「解包另存为文档」；完整接入系统文件关联、外部拖放导入、悬停预览、空间全文检索、空间问答 Agent 与本地 MCP/CLI `doc_read`（[#79](https://github.com/Ciao1019/ArcMD/issues/79)、[#85](https://github.com/Ciao1019/ArcMD/pull/85)，感谢 `@tajiaoyezi`）。
+- **Markdown 源码编辑模式、语法高亮与分栏实时预览（`internal/app/source.go`、`internal/editor/source_highlight.go`、`internal/app/document.go`）**：将原有只读导出预览升级为可编辑的 Markdown 源码模式（`⇧⌘M` / 「⋯」菜单 / 命令栏），支持原生 Markdown 语法高亮、页内查找与替换、Tab 缩进/反缩进、可拖拽比例且支持左右对调的「源码 + 富文本实时预览」分栏，以及原始 Markdown 文本直接保存（修改不兼容语法时不被富文本重排改写）；与专注模式、独立窗口、自动保存、全文搜索、空间问答及 `.mdz` 导出无缝同步（[#37](https://github.com/Ciao1019/ArcMD/issues/37)）。
+- **YAML Frontmatter 元数据头可视化卡片（`internal/editor/frontmatter.go`、`internal/editor/header.go`）**：为带 YAML Frontmatter 的普通 Markdown 文档在正文顶部呈现可折叠、带 YAML 语法高亮的元数据卡片，支持一键复制、点击或命令栏内联编辑、新增与移除元数据并纳入撤销/重做栈；数据库关联记录页自动隐藏以避免与属性栏重复，只读模式与 `.mdz` 归档保持只读查看与复制（[#83](https://github.com/Ciao1019/ArcMD/issues/83)）。
+- **资料库点击切换空间与跨空间拖拽整理（`internal/app/library.go`）**：在资料库空间总览中支持直接点击任意非当前空间卡片切换空间；支持在卡片内拖拽文件/文件夹调整目录、悬停折叠文件夹自动弹簧展开，以及跨空间直接拖拽移动文件或文件夹并附带一键撤销（[#81](https://github.com/Ciao1019/ArcMD/issues/81)）。
+- **LaTeX 数学公式兼容扩展与大纲标题公式渲染（`internal/tex`、`internal/editor/outline.go`）**：支持 `\\[8pt]` 等多行环境换行间距参数、独立使用的 `\lvert` / `\rvert` / `\lVert` / `\rVert`、`\not` 否定关系符与多组长箭头/集合/逻辑符号；左侧文档大纲支持直接原生渲染标题中的行内公式（[#78](https://github.com/Ciao1019/ArcMD/issues/78)）。
+
+### 关键修复与稳定性优化
+
+- **修复超 800 块长文档点击目录跳转闪退（`internal/editor/virtualize.go`、`internal/editor/outline.go`）**：将 `materializeViewport` 与 `ensureVisibleShaped` 的单轮延迟排版改为多轮收敛循环，杜绝跳转后因高度变化导致视口内出现未排版行（`r.layout == nil`）而引发空指针崩溃；目录跳转动画实时追踪排版后目标位置（[#76](https://github.com/Ciao1019/ArcMD/issues/76)）。
+- **修复浮层菜单鼠标悬停穿透编辑区（`internal/editor/view.go`）**：当右侧「更多」菜单或任意上层浮层覆盖指针时正确阻断底层编辑区 `hoverID` 更新，避免底层段落同步浮现 `+ ⋮⋮ ▾` 块级操作手柄，同时保持页眉操作按钮正常悬停不闪烁（[#77](https://github.com/Ciao1019/ArcMD/issues/77)）。
+- **修复 macOS 视图菜单快捷键拦截与 MDZ 边界问题（`internal/app/app.go`、`internal/app/mdz.go`、`internal/app/focus.go`、`internal/app/agentctl_space_doc.go`、`internal/app/bookmarks.go`、`internal/app/filedrop.go`）**：自定义 `viewMenu` 避开系统 `NSMenu` 对缩放（`⌘=` / `⌘-` / `⌘0`）和重载（`⌘R`）快捷键的抢占；修复 `.mdz` 归档在 MCP `doc_read`、多页目录栏互斥切换、子目录封面路径解析、内嵌 HTML 相对图片、只读页书签/模板防护、同名 `assets` 文件导出防冲突与拖放导入等边界问题。
+
+### 贡献者
+
+- 特别感谢 **`@tajiaoyezi`**（[#85](https://github.com/Ciao1019/ArcMD/pull/85)）对本版本的贡献！
+
+### 下载说明
+
+提供 macOS（Apple Silicon / Intel）、Windows x64 与 Linux（x64 `.deb` / `.tar.gz` / Arch Linux `.pkg.tar.zst`，ARM64 `.deb` / `.tar.gz`）原生安装包，可使用 `SHA256SUMS.txt` 校验完整性，已安装版本支持应用内签名自动更新。官方插件可在应用「设置 › 插件」按需从 [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) 下载或更新。
+
 ## 0.4.0
 
 本版本正式推出 **本地编码 Agent 协同体系（`arcmd mcp` 原生 MCP 服务、全功能 CLI 控制子命令、活动窗口实时 IPC 桥接与一键安装 `SKILL.md`）**，让 Claude Code、Codex、Gemini CLI、Cursor、Antigravity 等本机 Agent 直接协同读写空间、富文本笔记、手绘白板与多维数据库，并在桌面窗口中实时同步且完整保留 `⌘Z` 撤销栈；同时合入 **整页等比缩放（`50%–200%`）**（[#12](https://github.com/Ciao1019/ArcMD/issues/12)、[#74](https://github.com/Ciao1019/ArcMD/pull/74)，感谢 `@tajiaoyezi`）与 **一键清除样式（`⇧⌘\`）**（[#69](https://github.com/Ciao1019/ArcMD/issues/69)、[#72](https://github.com/Ciao1019/ArcMD/pull/72)，感谢 `@tajiaoyezi`），带来 **侧边栏三档行高密度、安静单色文件类型图标、看板 120 Hz 弹簧拖拽重构与 EPUB 键盘翻章滚动**，并集中完成了 **120 Hz 帧循环零磁盘阻塞、数据库封面纹理缓存、跨平台句柄释放与 WASM 插件沙箱加固** 等 30 余项稳定性优化。

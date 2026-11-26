@@ -173,6 +173,9 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 	if a.pressed(c, "save") {
 		a.withDocument(d, func() { a.flushCurrent() })
 	}
+	if a.pressed(c, "source") {
+		a.withDocument(d, a.toggleSource)
+	}
 	if a.pressed(c, "full-width") && a.canAdjustPageWidth(d) {
 		a.withDocument(d, a.toggleFullWidth)
 	}
@@ -228,6 +231,11 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 		if d.isDatabase() {
 			width, _ := c.Size()
 			a.databaseWorkspace(c, d, width)
+			return
+		}
+		if d.source {
+			width, _ := c.Size()
+			a.sourceView(c, d, width)
 			return
 		}
 		width, _ := c.Size()

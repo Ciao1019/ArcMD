@@ -45,7 +45,7 @@ func (e *Engine) ReplaceDocument(doc *Document) {
 	fresh := doc.Clone()
 	e.Edit(func() {
 		e.Doc.Blocks, e.Doc.Icon, e.Doc.Cover, e.Doc.CoverY = fresh.Blocks, fresh.Icon, fresh.Cover, fresh.CoverY
-		e.Doc.Goal, e.Doc.Frontmatter = fresh.Goal, fresh.Frontmatter
+		e.Doc.Goal, e.Doc.Frontmatter, e.Doc.ImportSource = fresh.Goal, fresh.Frontmatter, fresh.ImportSource
 		if len(e.Doc.Blocks) == 0 {
 			e.Doc.Blocks = []*Block{NewBlock("paragraph", "")}
 		}

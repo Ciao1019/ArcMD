@@ -1433,7 +1433,7 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 	if !quiet && cmdID == "sync-now" {
 		// Save cleanable edits before a manual sync so local changes go up immediately.
 		for _, d := range a.residentDocuments() {
-			if d.loadErr == nil && d.dirty() && !d.conflict && !d.missing && !d.ed.Composing() {
+			if d.loadErr == nil && d.dirty() && !d.conflict && !d.missing && !d.ed.Composing() && !(d.source && d.sourceComposing) {
 				a.withDocument(d, func() { _ = d.save() })
 			}
 		}
@@ -1480,7 +1480,7 @@ func (a *App) runPluginCommand(p *plugin.Installed, cmdID string, args map[strin
 		if d.space == nil || d.space.IsExternal() {
 			continue
 		}
-		if d.dirty() || d.saving || d.conflict || d.missing || (!d.isWhiteboard() && !d.isDatabase() && d.ed != nil && d.ed.Composing()) {
+		if d.dirty() || d.saving || d.conflict || d.missing || (!d.isWhiteboard() && !d.isDatabase() && d.ed != nil && (d.ed.Composing() || (d.source && d.sourceComposing))) {
 			dirty[plugin.SpaceFileKey{SpaceID: d.space.ID, Path: d.rel}] = true
 		}
 	}

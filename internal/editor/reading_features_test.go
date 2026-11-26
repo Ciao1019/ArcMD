@@ -432,3 +432,67 @@ func TestReadOnlyDirectLinksAndCustomNotice(t *testing.T) {
 		t.Fatalf("readOnlyNotice = %q", e.readOnlyNotice)
 	}
 }
+
+func TestOverlayBlocksEditorHover(t *testing.T) {
+	e := New("# Heading\n\nFirst paragraph\n\nSecond paragraph")
+	overlayOpen := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, e, Options{Width: 800, Theme: c.Theme()})
+		if overlayOpen {
+			ui.Overlay(c, func() {
+				ui.Box(c.Key("test-overlay")).Absolute().Left(500).Top(0).Size(260, 400).
+					Background(c.Theme().Surface).Children(func() {
+					ui.Text(c, "Overlay Menu")
+				})
+			})
+		}
+	}, 800, 600)
+	tt.Frame()
+
+	b, ok := tt.Find("文档")
+	if !ok {
+		t.Fatal("missing editor surface")
+	}
+	targetLeaf := e.Doc.Leaves()[2]
+	r, _, ok := e.BoundsForRange(ui.TextInputRange{Start: targetLeaf.Start, End: targetLeaf.Start})
+	if !ok {
+		t.Fatal("missing bounds for target paragraph")
+	}
+	px := b.X + 560
+	py := b.Y + r.Y + r.H/2
+
+	// Unoccluded hover over the paragraph updates pointerInside and hoverID.
+	tt.Move(px, py)
+	tt.Frame()
+	if !e.pointerInside || e.hoverID != targetLeaf.Owner {
+		t.Fatalf("expected hover on %q, got inside=%v hoverID=%q", targetLeaf.Owner, e.pointerInside, e.hoverID)
+	}
+
+	// Opening an overlay covering the pointer at the same Y blocks editor hover.
+	overlayOpen = true
+	tt.Frame()
+	tt.Move(px+4, py)
+	tt.Frame()
+	if e.pointerInside || e.hoverID != "" {
+		t.Fatalf("overlay failed to block editor hover: inside=%v hoverID=%q", e.pointerInside, e.hoverID)
+	}
+
+	// Moving onto the sibling "添加图标" header button keeps pointerInside true
+	// and does not flicker/unmount the button.
+	overlayOpen = false
+	tt.Frame()
+	tt.Move(b.X+e.padding+10, b.Y+16)
+	tt.Frame()
+	addIcon, ok := tt.Find("添加图标")
+	if !ok {
+		t.Fatal("expected 添加图标 button when pointer is near top of page")
+	}
+	tt.Move(addIcon.X+addIcon.W/2, addIcon.Y+addIcon.H/2)
+	tt.Frame()
+	if !e.pointerInside {
+		t.Fatal("pointerInside became false when hovering sibling header button")
+	}
+	if _, ok := tt.Find("添加图标"); !ok {
+		t.Fatal("添加图标 button unmounted while hovered")
+	}
+}

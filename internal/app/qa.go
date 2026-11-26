@@ -530,7 +530,7 @@ func (a *App) qaSpace(spaceID string) *spacefs.FS {
 			if d.isWhiteboard() {
 				live[d.rel] = pageOfWhiteboard(d.rel, d.board.Scene)
 			} else {
-				live[d.rel] = pageOfDocument(d.rel, d.ed.Doc)
+				live[d.rel] = pageOfDocument(d.rel, d.committedForRead())
 			}
 		}
 	}

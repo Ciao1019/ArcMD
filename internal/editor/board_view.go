@@ -724,6 +724,7 @@ func cursorForHandle(h whiteboard.HandleKind) ui.Cursor {
 
 func (b *Board) cursorFor(canvas ui.Element) ui.Cursor {
 	lx, ly, inside := canvas.PointerPosition()
+	inside = inside && canvas.Hovered()
 	var sx, sy float32
 	if inside {
 		sx, sy = b.localToScene(lx, ly)

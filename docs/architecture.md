@@ -54,7 +54,7 @@ cannot show the compositor's decorations.
 | `openfile.go` | System file-open routing and external-folder spaces |
 | `relocate.go` | Document moves with attachments, undo states and snapshots |
 | `pdfexport.go` | Cancellable, page-by-page PDF export and printing |
-| `document.go` | The open rich document and read-only export preview: dirty tracking, autosave, images, links |
+| `document.go`, `source.go` | The open rich document and editable Markdown source mode: dirty tracking, autosave, syntax highlighting, find/replace, images, links |
 | `split.go`, `splitview.go`, `splitstore.go` | Document pane lifecycle, native split cards and dividers, saved layout |
 | `database.go`, `newmodal.go` | Database workspace host, side/center peek drawers, sidebar view tree, unified new-item modal |
 | `agentctl*.go` | Local CLI/MCP loopback IPC server and live/headless Space, Markdown, whiteboard & database controllers |

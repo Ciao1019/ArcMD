@@ -306,6 +306,9 @@ func (a *App) replaceDoc(text string) {
 		}
 	} else {
 		d.ed.Scroll = old.ed.Scroll
+		if old.source {
+			d.previewScroll = old.previewScroll
+		}
 	}
 	a.search.writeSeq++
 	d.savedSeq = a.search.writeSeq

@@ -379,3 +379,100 @@ func TestVirtualizedFenwickShiftMatchesFullLayout(t *testing.T) {
 	}
 	runtime.KeepAlive(tt)
 }
+
+func TestVirtualizedOutlineJumpInlineLaTeXNoCrashAndLands(t *testing.T) {
+	var b strings.Builder
+	const sections = 20
+	const parasPerSection = 44
+	for s := 1; s <= sections; s++ {
+		fmt.Fprintf(&b, "## Section %d\n\n", s)
+		for p := 1; p <= parasPerSection; p++ {
+			fmt.Fprintf(&b,
+				"Consider matrix trace $\\operatorname{tr}(A_%d^\\top B_%d) + \\sum_{i=1}^{n} \\frac{\\alpha_i}{\\sqrt{\\beta_i^2 + \\gamma_i^2}}$ and $\\begin{pmatrix} a_{11} & a_{12} & a_{13} \\\\ a_{21} & a_{22} & a_{23} \\end{pmatrix}$ in step %d.\n\n",
+				s, p, p,
+			)
+		}
+	}
+
+	e := New(b.String())
+	if e.Engine.LeafCount() <= virtualizeLeafThreshold {
+		t.Fatalf("expected leaf count > %d, got %d", virtualizeLeafThreshold, e.Engine.LeafCount())
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		w, _ := c.Size()
+		View(c, e, Options{Width: w, Theme: c.Theme(), Outline: true, SetOutline: func(bool) {}})
+	}, 1100, 700)
+	tt.Frame()
+
+	if !e.shouldVirtualize() {
+		t.Fatal("expected virtualization to be enabled")
+	}
+	if e.rows[len(e.rows)-1].layout != nil {
+		t.Fatal("expected tail row to start unshaped")
+	}
+	initialHeight := e.height
+
+	assertVisibleShaped := func(phase string) {
+		t.Helper()
+		for vi := range e.visibleRows(40) {
+			if e.indexedRow(vi).layout == nil {
+				t.Fatalf("%s: visible row %d has nil layout (scrollY=%.1f)", phase, vi, e.Scroll.Y)
+			}
+		}
+	}
+
+	// Scenario A: immediate jump into a deep unshaped section with overestimated LaTeX heights.
+	secA := e.outline[len(e.outline)*3/4]
+	e.ScrollToBlock(secA.id)
+	tt.Frame()
+	tt.Frame()
+	if e.height >= initialHeight {
+		t.Fatalf("expected inline LaTeX height estimation to shrink after materialization: before=%.1f after=%.1f", initialHeight, e.height)
+	}
+	assertVisibleShaped("instant ScrollToBlock")
+
+	// Scenario B: animated outline click from top into the tail without premature cancellation.
+	e.Scroll.Y = 0
+	tt.Frame()
+	secB := e.outline[len(e.outline)-4]
+	if err := tt.Click("跳到 " + secB.text); err != nil {
+		t.Fatalf("click outline item %q: %v", secB.text, err)
+	}
+	for step := range 20 {
+		tt.Advance(25 * time.Millisecond)
+		assertVisibleShaped(fmt.Sprintf("animated jump step %d", step))
+		if step < 10 && e.outlineState.jump.id == "" {
+			t.Fatalf("outline jump was cancelled early at step %d (scrollY=%.1f)", step, e.Scroll.Y)
+		}
+	}
+	if e.outlineState.jump.id != "" {
+		t.Fatalf("outline jump did not finish: %+v", e.outlineState.jump)
+	}
+	hi, ok := e.handleIDs[secB.id]
+	if !ok {
+		t.Fatalf("missing handle for %s", secB.id)
+	}
+	wantY := min(max(0, e.indexedHandle(hi).top-24), e.outlineState.scrollMax)
+	if diff := abs32(e.Scroll.Y - wantY); diff > 32 {
+		t.Fatalf("outline jump landed far from target: got %.1f, want %.1f (diff=%.1f)", e.Scroll.Y, wantY, diff)
+	}
+
+	// Scenario C: manual scroll still cancels an in-progress outline jump.
+	e.Scroll.Y = 0
+	tt.Frame()
+	secC := e.outline[len(e.outline)-6]
+	if err := tt.Click("跳到 " + secC.text); err != nil {
+		t.Fatalf("click outline item %q: %v", secC.text, err)
+	}
+	tt.Advance(30 * time.Millisecond)
+	if e.outlineState.jump.id != secC.id {
+		t.Fatalf("expected active outline jump %q, got %q", secC.id, e.outlineState.jump.id)
+	}
+	e.Scroll.Y += 120
+	tt.Frame()
+	if e.outlineState.jump.id != "" {
+		t.Fatalf("expected manual scroll to cancel outline jump, still %+v", e.outlineState.jump)
+	}
+	runtime.KeepAlive(tt)
+}

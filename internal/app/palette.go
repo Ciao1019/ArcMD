@@ -545,11 +545,22 @@ func (a *App) actions() []action {
 				})
 			}
 		} else {
-			mode := i18n.T("预览 Markdown 导出")
+			mode := i18n.T("Markdown 源码模式")
 			if a.doc.source {
 				mode = i18n.T("返回富文本编辑")
 			}
 			cmd(mode, a.keyLabel("source"), a.toggleSource)
+			if a.doc.source {
+				splitCmd := i18n.T("源码模式：开启分栏预览")
+				if a.doc.sourceSplit {
+					splitCmd = i18n.T("源码模式：关闭分栏预览")
+				}
+				docRef := a.doc
+				cmd(splitCmd, "", func() { a.toggleSourceSplit(docRef) })
+				if a.doc.sourceSplit {
+					cmd(i18n.T("源码模式：对调左右分栏"), "", a.swapSourceSplit)
+				}
+			}
 		}
 		if !a.doc.isPDF() && !a.doc.isBook() && !a.doc.isMDZ() {
 			cmd(i18n.T("版本历史…"), a.keyLabel("history"), a.openVersions)
@@ -927,6 +938,19 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	} else {
 		cmd(i18n.T("更换封面"), "", ed.EditCover)
 		cmd(i18n.T("移除封面"), "", after(func() { ed.Engine.SetCover("") }))
+	}
+	hasDB := false
+	if a.doc != nil {
+		store, _, _, _ := a.owningDatabaseFor(a.doc)
+		hasDB = store != nil
+	}
+	if !hasDB {
+		if strings.TrimSpace(ed.Doc.Frontmatter) == "" {
+			cmd(i18n.T("添加元数据"), "", ed.EditFrontmatter)
+		} else {
+			cmd(i18n.T("编辑元数据"), "", ed.EditFrontmatter)
+			cmd(i18n.T("移除元数据"), "", after(func() { ed.Engine.SetFrontmatter("") }))
+		}
 	}
 	cmd(i18n.T("章节上移"), "", after(func() { ed.MoveSectionAtCaret(-1) }))
 	cmd(i18n.T("章节下移"), "", after(func() { ed.MoveSectionAtCaret(1) }))

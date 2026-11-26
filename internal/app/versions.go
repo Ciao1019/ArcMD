@@ -132,7 +132,7 @@ func (a *App) selectVersion(i int) {
 			v.err = err
 			return
 		}
-		nowText = v.for_.ed.Committed().PlainText()
+		nowText = v.for_.committedForRead().PlainText()
 		thenText = v.doc.PlainText()
 	}
 	now := strings.Split(nowText, "\n")
@@ -181,7 +181,12 @@ func (a *App) restoreVersion() {
 		return
 	}
 	a.doc.ed.Engine.ReplaceDocument(v.doc)
-	a.doc.ed.RequestFocus = true
+	if a.doc.source {
+		a.doc.refreshSourceFromModel()
+		a.doc.sourceFocusPending = true
+	} else {
+		a.doc.ed.RequestFocus = true
+	}
 	v.open = false
 	a.notify("已恢复到 %s 的版本，可用 ⌘Z 撤销。", versionTime(at, time.Now()))
 }

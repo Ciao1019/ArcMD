@@ -50,7 +50,7 @@ var bindings = []binding{
 	{id: "sidebar", label: "收起/展开侧边栏", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyBackslash)}},
 	{id: "focus", label: "专注模式", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyF)}},
 	{id: "settings", label: "设置", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyComma)}},
-	{id: "source", label: "富文本 ⇄ Markdown 导出预览", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyM)}},
+	{id: "source", label: "富文本 ⇄ Markdown 源码", defaults: []editor.Combo{combo(ui.Cmd|ui.Shift, ui.KeyM)}},
 	{id: "back", label: "后退", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyBracketLeft)}},
 	{id: "forward", label: "前进", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyBracketRight)}},
 	{id: "reload", label: "从磁盘重新载入", defaults: []editor.Combo{combo(ui.Cmd, ui.KeyR)}},

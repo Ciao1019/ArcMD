@@ -6,14 +6,15 @@
 
 [简体中文](README.md) · English
 
-<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.4.0-F21158" alt="Version 0.4.0"></a>
+<a href="mygo.json"><img src="https://img.shields.io/badge/version-0.5.0-F21158" alt="Version 0.5.0"></a>
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11" alt="macOS, Windows and Linux">
 <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&amp;logoColor=white" alt="Built natively with Go and MyGo"></a>
 <a href=".github/workflows/build.yml"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&amp;logoColor=white" alt="CI workflow configuration"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C912D6" alt="MIT License"></a>
-<img src="https://img.shields.io/badge/status-preview-F2410F" alt="Preview">
 
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/arcmd)
+
+<a href="https://trendshift.io/repositories/347199?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-347199" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/347199/daily?language=Go" alt="Ciao1019%2FArcMD | Trendshift" width="250" height="55"/></a>
 
 <br>
 
@@ -25,11 +26,11 @@
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-windows-en.svg" height="56" alt="Download ArcMD for Windows — x64 installer and ZIP"></a>
 <a href="https://github.com/Ciao1019/ArcMD/releases"><img src="docs/images/download-linux-en.svg" height="56" alt="Download ArcMD for Linux — x64 and ARM64, DEB and TAR.GZ"></a>
 
-<sub>The current preview version is 0.4.0. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
+<sub>The current version is 0.5.0. The buttons open the releases page, or you can <a href="#build-from-source">build from source</a>.</sub>
 
 <br><br>
 
-[Writing Flow](#writing-in-flow) · [Spaces & Reading](#spaces--reading-highlights) · [Native Markdown](#native-markdown-yours-forever) · [Features](#features-at-a-glance) · [Shortcuts](#essential-shortcuts) · [Performance](#performance) · [Build from source](#build-from-source) · [Contributing](#contributing)
+[Writing Flow](#writing-in-flow) · [Spaces & Reading](#spaces--reading-highlights) · [Native Markdown](#native-markdown-yours-forever) · [Features](#features-at-a-glance) · [Shortcuts](#essential-shortcuts) · [Performance](#performance) · [Build from source](#build-from-source) · [Contributing](#contributing) · [Roadmap](https://github.com/Ciao1019/ArcMD/issues/80)
 
 </div>
 
@@ -45,9 +46,6 @@ ArcMD brings Markdown's familiar writing flow onto a calm, expressive native can
 > **Tribute & Origin**
 >
 > The day The Browser Company announced Arc was entering maintenance mode, countless voices on X mourned the twilight of software crafted with so much taste, tactile delight, and soul. As a longtime devotee of Arc, I couldn't bear to let go of the vertical sidebar, vibrant Spaces, effortless Favorites, and that calm, breathing canvas. Since Arc paused its journey, we chose to carry its spirit forward into document editing with pure Go and Native UI — dedicated to every creator who still believes software should have craft, feel, and soul.
-
-> [!NOTE]
-> **ArcMD is an early preview**, and we're refining details one step at a time. Share bugs and ideas in [Issues](https://github.com/Ciao1019/ArcMD/issues) or send a pull request — we'd love to build it together.
 
 ---
 
@@ -199,7 +197,7 @@ CGO_ENABLED=0 go run github.com/egoist/mygo/cmd/mygo@v0.10.0 build
 
 ## Contributing
 
-Bug reports, ideas, and pull requests are welcome via [GitHub Issues](https://github.com/Ciao1019/ArcMD/issues). Start with the [architecture guide](docs/architecture.md) and [contributor conventions](AGENTS.md).
+Explore upcoming plans and vote on priorities in the [Roadmap (#80)](https://github.com/Ciao1019/ArcMD/issues/80). Bug reports, ideas, and pull requests are welcome via [GitHub Issues](https://github.com/Ciao1019/ArcMD/issues). Start with the [architecture guide](docs/architecture.md) and [contributor conventions](AGENTS.md).
 
 Before submitting changes, run:
 

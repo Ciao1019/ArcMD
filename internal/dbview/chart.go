@@ -145,6 +145,7 @@ func chartView(
 						Enter:    &ui.Motion{Y: 5, Opacity: 0.78},
 					})
 				px, py, hasPtr := canvas.PointerPosition()
+				hasPtr = hasPtr && canvas.Hovered()
 				canvas.Draw(func(p *ui.Painter, r ui.Rect) {
 					switch cfg.Kind {
 					case "hbar":

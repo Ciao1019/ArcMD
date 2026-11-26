@@ -77,6 +77,8 @@ func (a *App) toggleFocus() {
 			a.doc.mdz.requestFocus = true
 		} else if a.doc.isDatabase() {
 			a.doc.dbView.RequestFocus = true
+		} else if a.doc.source {
+			a.doc.sourceFocusPending = true
 		} else {
 			a.doc.ed.RequestFocus = true
 		}
@@ -192,13 +194,18 @@ func (a *App) focusView(c *ui.Context) {
 		card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
 			Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
 		card.Children(func() {
-			if a.doc == nil || a.doc.loadErr != nil || a.doc.source {
+			if a.doc == nil || a.doc.loadErr != nil {
 				ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
 					ui.Text(c, i18n.T("专注模式下没有可编辑的文档。")).TextColor(c.Theme().TextMuted)
 					if ui.Button(c.Key("focus-leave"), i18n.T("退出专注模式")).Clicked() {
 						a.toggleFocus()
 					}
 				})
+				return
+			}
+			if a.doc.source {
+				w, _ := c.Size()
+				a.sourceView(c, a.doc, w-18)
 				return
 			}
 			w, _ := c.Size()
@@ -248,8 +255,11 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		}
 	}
 	docTitle := ""
+	hasDB := false
 	if d != nil {
 		docTitle = d.title()
+		store, _, _, _ := a.owningDatabaseFor(d)
+		hasDB = store != nil
 	}
 	var htmlWVFn func(url, slot string, scrollToContainer bool) editor.HTMLWebView
 	if a.hostWindowFor(d) != nil || a.makeHTMLWebView != nil {
@@ -265,6 +275,7 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		OnZoom:                a.setPageZoom,
 		FontFamily:            a.prefs.BodyFamily(),
 		DocTitle:              docTitle,
+		HideFrontmatter:       hasDB,
 		Column:                a.prefs.Column(),
 		FullWidth:             a.prefs.FullWidth(),
 		NoAutoPair:            a.prefs.NoAutoPair,

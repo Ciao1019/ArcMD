@@ -68,6 +68,13 @@ func class(n *node) string {
 	switch n.kind {
 	case "bin", "rel", "open", "close", "punct":
 		return n.kind
+	case "xarrow":
+		return "rel"
+	case "not":
+		if len(n.args) > 0 && len(n.args[0]) == 1 {
+			return class(n.args[0][0])
+		}
+		return "rel"
 	case "big", "func":
 		return "op"
 	case "space":
@@ -280,6 +287,16 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		base = l.delimited(inner, n.open, n.close, size)
 	case "matrix":
 		base = l.matrixWithWidth(n, size, 0, display)
+	case "not":
+		base = l.list(n.args[0], size, display)
+		th := max(1, size*0.055)
+		base.Ops = append(base.Ops, Op{
+			Kind:   "path",
+			Width:  th,
+			Points: [][2]float32{{base.W * 0.18, base.Descent * 0.5}, {base.W * 0.82, -base.Ascent * 0.82}},
+		})
+	case "xarrow":
+		base = l.xarrow(n, size)
 	case "tag":
 		tb := l.list(n.args[0], size, false)
 		base.place(tb, size*0.8, 0)
@@ -320,6 +337,50 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		correction = size * .22
 	}
 	return l.scripts(base, sup, sub, size, correction)
+}
+
+func (l *layouter) xarrow(n *node, size float32) Box {
+	ss := smaller(size, scriptScale)
+	var above, below Box
+	if len(n.args[0]) > 0 {
+		above = l.list(n.args[0], ss, false)
+	}
+	if len(n.args[1]) > 0 {
+		below = l.list(n.args[1], ss, false)
+	}
+	hasLeft := n.text == "xleftarrow" || n.text == "xleftrightarrow"
+	hasRight := n.text == "xrightarrow" || n.text == "xleftrightarrow"
+	axisY := -size * axisHeight
+	th := max(1, size*0.055)
+	head := size * 0.22
+	padL, padR := size*0.22, size*0.22
+	if hasLeft {
+		padL += head
+	}
+	if hasRight {
+		padR += head
+	}
+	w := max(size*1.4, max(above.W, below.W)+padL+padR)
+	out := Box{}
+	out.Ops = append(out.Ops, Op{Kind: "path", Width: th, Points: [][2]float32{{0, axisY}, {w, axisY}}})
+	if hasRight {
+		out.Ops = append(out.Ops, Op{Kind: "path", Width: th, Points: [][2]float32{{w - head, axisY - head*0.7}, {w, axisY}, {w - head, axisY + head*0.7}}})
+	}
+	if hasLeft {
+		out.Ops = append(out.Ops, Op{Kind: "path", Width: th, Points: [][2]float32{{head, axisY - head*0.7}, {0, axisY}, {head, axisY + head*0.7}}})
+	}
+	gap := size * 0.14
+	midX := padL + (w-padL-padR)/2
+	if len(n.args[0]) > 0 {
+		out.place(above, midX-above.W/2, axisY-gap-above.Descent*0.75)
+	}
+	if len(n.args[1]) > 0 {
+		out.place(below, midX-below.W/2, axisY+gap+below.Ascent*0.85)
+	}
+	out.Ascent = max(out.Ascent, -axisY+head*0.7)
+	out.Descent = max(out.Descent, max(0, axisY+head*0.7)+size*0.1)
+	out.W = w
+	return out
 }
 
 // scripts sets a superscript and a subscript beside a base.
@@ -600,9 +661,9 @@ func tagLineColumns(mathW, tagW, size, lineWidth float32, display bool) (totalW,
 }
 
 // lines lays out top-level lines separated by \\, placing any \tag flush right.
-func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bool) Box {
+func (l *layouter) lines(rawLines []parsedLine, size, lineWidth float32, display bool) Box {
 	if len(rawLines) == 1 {
-		clean0, tag0 := extractTags(rawLines[0])
+		clean0, tag0 := extractTags(rawLines[0].nodes)
 		if len(tag0) == 0 && len(clean0) == 1 && clean0[0].kind == "matrix" && !clean0[0].hasSup && !clean0[0].hasSub {
 			return l.matrixWithWidth(clean0[0], size, lineWidth, display)
 		}
@@ -610,10 +671,12 @@ func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bo
 
 	mathBoxes := make([]Box, len(rawLines))
 	tagBoxes := make([]Box, len(rawLines))
+	gaps := make([]float32, len(rawLines))
 	hasTags := make([]bool, len(rawLines))
 	anyTag := false
 	for i, line := range rawLines {
-		clean, tagNodes := extractTags(line)
+		gaps[i] = line.gapAfter
+		clean, tagNodes := extractTags(line.nodes)
 		avail := lineWidth
 		if len(tagNodes) > 0 {
 			tagBoxes[i] = l.list(tagNodes, size, false)
@@ -626,7 +689,7 @@ func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bo
 		mathBoxes[i] = l.listWrapped(clean, size, avail, display)
 	}
 	if !anyTag {
-		return l.stack(mathBoxes, size, alignCenter)
+		return l.stack(mathBoxes, gaps, size, alignCenter)
 	}
 
 	maxMathW, maxTagW := float32(0), float32(0)
@@ -648,7 +711,7 @@ func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bo
 			curD = max(curD, tagBoxes[i].Descent)
 		}
 		if i > 0 {
-			y += prevD + size*0.3 + curA
+			y += max(0, prevD+size*0.3+gaps[i-1]*size+curA)
 		}
 		out.place(mb, blockX+(maxMathW-mb.W)/2, y)
 		if hasTags[i] {
@@ -662,7 +725,7 @@ func (l *layouter) lines(rawLines [][]*node, size, lineWidth float32, display bo
 }
 
 // stack sets lines one above the other, baseline of the box the first's.
-func (l *layouter) stack(lines []Box, size float32, align alignment) Box {
+func (l *layouter) stack(lines []Box, gaps []float32, size float32, align alignment) Box {
 	if len(lines) == 1 {
 		return lines[0]
 	}
@@ -674,7 +737,11 @@ func (l *layouter) stack(lines []Box, size float32, align alignment) Box {
 	y := float32(0)
 	for i, b := range lines {
 		if i > 0 {
-			y += lines[i-1].Descent + size*0.3 + b.Ascent
+			extra := float32(0)
+			if i-1 < len(gaps) {
+				extra = gaps[i-1] * size
+			}
+			y += max(0, lines[i-1].Descent+size*0.3+extra+b.Ascent)
 		}
 		x := (w - b.W) / 2
 		switch align {
@@ -771,7 +838,11 @@ func (l *layouter) matrixWithWidth(n *node, size, lineWidth float32, display boo
 			d = max(d, rowTags[i].Descent)
 		}
 		if i > 0 {
-			y += a + size*0.25
+			extra := float32(0)
+			if i-1 < len(n.rowGaps) {
+				extra = n.rowGaps[i-1] * size
+			}
+			y += max(0, a+size*0.25+extra)
 		}
 		x := gridX
 		for j, b := range row {

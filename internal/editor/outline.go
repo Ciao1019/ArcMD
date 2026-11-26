@@ -3,10 +3,12 @@ package editor
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -71,6 +73,25 @@ type outlineState struct {
 	headingsRev   uint64
 	headingsKnown bool
 	headingsHas   bool
+	mathCache     map[outlineMathKey]*outlineMathLayout
+}
+
+type outlineMathKey struct {
+	text   string
+	weight int
+	mask   uint64
+}
+
+type outlineMathObj struct {
+	index int
+	box   tex.Box
+	rect  ui.Rect
+	scale float32
+}
+
+type outlineMathLayout struct {
+	layout  *ui.TextLayout
+	objects []outlineMathObj
 }
 
 // outlineSlideState moves the outline's room from one width to another.
@@ -239,6 +260,10 @@ func (e *Editor) stepJump(c *ui.Context) {
 		j.id = ""
 		return
 	}
+	if hi, ok := e.handleIDs[j.id]; ok {
+		h := *e.indexedHandle(hi)
+		j.to = min(max(0, h.top-24), e.outlineState.scrollMax)
+	}
 	t := float32(c.Now().Sub(j.start)) / float32(jumpDuration)
 	if t >= 1 {
 		e.Scroll.Y = j.to
@@ -405,7 +430,12 @@ func (e *Editor) outlineList(c *ui.Context) {
 							Transition(ui.ElementTransition{Duration: 120 * time.Millisecond, Match: outlineBarMatch{e}})
 					}
 					ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
+						if om := e.outlineMathRow(item, weight); om != nil {
+							ui.Box(c.Key("outline-math:" + item.id)).Height(outlineRow).MinWidth(0).Shrink(1).Grow(1).
+								Draw(func(p *ui.Painter, r ui.Rect) { e.paintOutlineMath(p, r, om, color, weight, t) })
+						} else {
+							ui.Text(c, item.text).FontSize(14).FontWeight(weight).TextColor(color).SingleLine().MinWidth(0).Shrink(1)
+						}
 					})
 				})
 				if row.Clicked() {
@@ -438,4 +468,130 @@ func (e *Editor) outlineList(c *ui.Context) {
 		e.bookmarkSection(c)
 	})
 	s.dragging = dragging
+}
+
+func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout {
+	if !strings.ContainsRune(item.text, '$') {
+		return nil
+	}
+	all := inlineTokens(item.text)
+	if len(all) == 0 {
+		return nil
+	}
+	leaf, hasLeaf := e.Engine.LeafByID(item.id)
+	var tokens []inlineToken
+	var mask uint64
+	cand := 0
+	for _, tok := range all {
+		if tok.note != "" {
+			continue
+		}
+		allowed := true
+		if hasLeaf {
+			allowed = tokenAllowed(leaf.Block, document.Len(item.text[:tok.start]), document.Len(item.text[:tok.end]))
+		}
+		if allowed {
+			tokens = append(tokens, tok)
+			if cand < 64 {
+				mask |= 1 << cand
+			}
+		}
+		cand++
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	useCache := cand <= 64
+	key := outlineMathKey{text: item.text, weight: weight, mask: mask}
+	if useCache {
+		if cached, ok := e.outlineState.mathCache[key]; ok {
+			return cached
+		}
+	}
+
+	font := ui.Font{Family: "system-ui", Size: 14, Weight: weight}
+	mathFontSize := float32(14 * 1.05)
+	maxMathH := float32(outlineRow - 4)
+
+	var spans []ui.Span
+	var objs []outlineMathObj
+	pos, visIdx := 0, 0
+	for _, tok := range tokens {
+		box, err := tex.LayoutInline(tok.source, mathFontSize, e.measureMath)
+		if err != nil {
+			continue
+		}
+		if tok.start > pos {
+			seg := item.text[pos:tok.start]
+			spans = append(spans, ui.Span{Text: seg})
+			visIdx += document.Len(seg)
+		}
+		scale := float32(1)
+		if h := box.Ascent + box.Descent; h > maxMathH && h > 0 {
+			scale = maxMathH / h
+		}
+		spans = append(spans, ui.Span{
+			Text:          "\ufffc",
+			ObjectWidth:   box.W*scale + 3,
+			ObjectHeight:  box.Ascent * scale,
+			ObjectDescent: box.Descent * scale,
+		})
+		objs = append(objs, outlineMathObj{index: visIdx, box: box, scale: scale})
+		visIdx++
+		pos = tok.end
+	}
+	var out *outlineMathLayout
+	if len(objs) > 0 {
+		if pos < len(item.text) {
+			spans = append(spans, ui.Span{Text: item.text[pos:]})
+		}
+		tl := ui.ShapeRichText(spans, font, 0)
+		for _, ro := range tl.Objects() {
+			for i := range objs {
+				if ro.Index == objs[i].index {
+					objs[i].rect = ro.Rect
+					break
+				}
+			}
+		}
+		out = &outlineMathLayout{layout: tl, objects: objs}
+	}
+	if useCache {
+		if e.outlineState.mathCache == nil {
+			e.outlineState.mathCache = map[outlineMathKey]*outlineMathLayout{}
+		} else if len(e.outlineState.mathCache) >= 256 {
+			clear(e.outlineState.mathCache)
+		}
+		e.outlineState.mathCache[key] = out
+	}
+	return out
+}
+
+func (e *Editor) paintOutlineMath(p *ui.Painter, r ui.Rect, om *outlineMathLayout, color ui.Color, weight int, theme *ui.Theme) {
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	tw, th := om.layout.Size()
+	y := r.Y + (r.H-th)/2
+	clip := r
+	var ellipsis *ui.TextLayout
+	if tw > r.W {
+		ellipsis = ui.ShapeText("…", ui.Font{Family: "system-ui", Size: 14, Weight: weight}, 0)
+		ew, _ := ellipsis.Size()
+		clip.W = max(0, r.W-ew-2)
+	}
+	p.Clip(clip, 0, func() {
+		p.TextLayout(om.layout, r.X, y, color)
+		ft := *theme
+		ft.Text = color
+		for _, o := range om.objects {
+			e.paintFormulaScaled(p, o.box, r.X+o.rect.X+1.5, y+o.rect.Y+o.box.Ascent*o.scale, o.scale, &ft)
+		}
+	})
+	if ellipsis != nil {
+		ew, eh := ellipsis.Size()
+		p.Clip(r, 0, func() {
+			p.TextLayout(ellipsis, r.X+r.W-ew, r.Y+(r.H-eh)/2, color)
+		})
+	}
 }

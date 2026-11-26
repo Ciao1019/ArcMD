@@ -789,6 +789,9 @@ func (a *App) commitThreeWayMerge() {
 		if !d.isWhiteboard() && !d.isDatabase() && d.ed != nil {
 			doc := editor.ImportMarkdown(mergedText)
 			d.ed.Engine.ReplaceDocument(doc)
+			if d.source {
+				d.refreshSourceFromModel()
+			}
 		} else if d.isDatabase() {
 			reloaded := openDatabaseDocument(d.space, d.rel, mergedText)
 			d.dbView = reloaded.dbView
@@ -834,6 +837,9 @@ func (a *App) commitThreeWayMerge() {
 			} else {
 				doc := editor.ImportMarkdown(mergedText)
 				openTarget.ed.Engine.ReplaceDocument(doc)
+				if openTarget.source {
+					openTarget.refreshSourceFromModel()
+				}
 				_ = openTarget.write(true)
 			}
 		})

@@ -137,6 +137,7 @@ type Editor struct {
 	laidBlank                 bool
 	dropFiles                 func([]string, int)
 	fileOver                  float32
+	fileDragInside            bool
 	slashOpen                 bool
 	slashQuery                string
 	slashIndex                int
@@ -166,6 +167,8 @@ type Editor struct {
 	disableFind               bool
 	hideReadOnlyNotice        bool
 	readOnlyNotice            string
+	hideFrontmatter           bool
+	laidFM                    frontmatterLayoutKey
 	outline                   []outlineItem
 	outlineState              outlineState
 	pointer                   ui.Point
@@ -756,6 +759,7 @@ type Options struct {
 	DisableFind        bool
 	HideReadOnlyNotice bool
 	ReadOnlyNotice     string
+	HideFrontmatter    bool
 	CompactMargins     bool
 	// Database Linked View embed integration callbacks.
 	LoadDatabase     func(target string) (*database.Store, dbview.Options, uint64, error)
@@ -876,7 +880,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.openReveal = openReveal{checked: true, pending: o.DrawAnnotations && hasAnnotations(e.Doc.Blocks)}
 	}
 	e.openWiki, e.openTag, e.openLink = o.OpenWiki, o.OpenTag, o.OpenLink
-	e.directLinks, e.disableFind, e.hideReadOnlyNotice = o.DirectLinks, o.DisableFind, o.HideReadOnlyNotice
+	e.directLinks, e.disableFind, e.hideReadOnlyNotice, e.hideFrontmatter = o.DirectLinks, o.DisableFind, o.HideReadOnlyNotice, o.HideFrontmatter
 	e.readOnlyNotice = o.ReadOnlyNotice
 	e.loadWhiteboard = o.LoadWhiteboard
 	e.createWhiteboard = o.CreateWhiteboard
@@ -934,6 +938,10 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.watchComplete(c.Now(), o.EmojiSuggest, o.WikiSuggest)
 	var surface ui.Element
 	pane.Children(func() {
+		if e.viewport > 0 {
+			height := e.scrollContentHeight(o.Footer != nil)
+			e.outlineState.scrollMax = max(0, max(height, e.viewport)-e.viewport)
+		}
 		e.stepJump(c)
 		e.stepScrollGlide(c)
 		if e.revealAt != nil && e.viewport > 0 {
@@ -984,17 +992,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.stepSelectionDrag(c, scroll, reserve)
 		scroll.TrackScroll(&e.Scroll)
 		scroll.Children(func() {
-			height := e.height
-			if o.Footer != nil {
-				height = max(height, e.footerTop()+e.footerH+pageBottom)
-			}
-			if e.typewriter {
-				// Room for the last line to come to the middle.
-				height += e.viewport / 2
-			}
-			// The trailing space has no ink. Whole-DIP bounds keep full and
-			// incremental layouts from clamping scroll at different float tails.
-			height = float32(math.Round(float64(height)))
+			height := e.scrollContentHeight(o.Footer != nil)
 			// The surface and what is placed over it scroll together in one
 			// box: placed elements stay where the scroll's content was laid
 			// out, not where it scrolled to.
@@ -1025,15 +1023,18 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					e.RequestFocus = false
 				}
 				e.focused = surface.Focused()
-				px, py, inside := surface.PointerPosition()
+				px, py, geomInside := surface.PointerPosition()
+				inside := geomInside && content.Hovered()
 				e.pointer, e.pointerInside = ui.Point{X: px, Y: py}, inside
 				e.fileOver = -1
+				e.fileDragInside = false
 				if o.DropFiles != nil {
 					// A file drag keeps the pointer's position up to date, so
 					// the frame after the drop still has where it landed.
 					at, line := e.fileDropAt(py)
 					if surface.FileDragOver() {
 						e.fileOver = line
+						e.fileDragInside = geomInside
 					}
 					if files := surface.DroppedFiles(); len(files) > 0 {
 						o.DropFiles(files, at)
@@ -1077,6 +1078,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					e.starter(c)
 					e.headerControls(c)
 				}
+				e.frontmatterControls(c)
 				e.imageControls(c, o)
 				e.boardControls(c, o)
 				e.pdfControls(c, o)
@@ -1281,7 +1283,8 @@ func (e *Editor) layout(o Options) {
 			}
 		}
 	}
-	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidPDF == e.pdfBrowsing && e.laidModalPDF == e.pdfModalID && e.laidBook == e.bookBrowsing && e.laidModalBook == e.bookModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
+	fmKey := e.frontmatterLayoutState(o)
+	same := !finishResize && !refreshResize && !embedStale && e.ready && e.width == o.Width && e.cacheTheme == *o.Theme && pageSame && e.laidFM == fmKey && e.laidMath == e.mathEditing && e.laidMermaid == e.mermaidEditing && e.laidBoard == e.boardEditing && e.laidModalBoard == e.boardModalID && e.laidPDF == e.pdfBrowsing && e.laidModalPDF == e.pdfModalID && e.laidBook == e.bookBrowsing && e.laidModalBook == e.bookModalID && e.laidFindKey == findKey && e.laidInline == e.inlineEditing
 	if same && e.cacheRevision == e.Revision() {
 		return
 	}
@@ -1312,6 +1315,7 @@ func (e *Editor) layout(o Options) {
 	e.resizePending = false
 	e.resizeScroll = e.Scroll.Y
 	e.ready, e.width, e.cacheRevision, e.cacheTheme, e.laidPage = true, o.Width, e.Revision(), *o.Theme, pageKey
+	e.laidFM = fmKey
 	e.laidMath = e.mathEditing
 	e.laidMermaid = e.mermaidEditing
 	e.laidBoard = e.boardEditing
@@ -1853,6 +1857,20 @@ func (e *Editor) decorationOffset(d decoration) (dx, dy float32) {
 	return dx, dy
 }
 
+func (e *Editor) scrollContentHeight(hasFooter bool) float32 {
+	height := e.height
+	if hasFooter {
+		height = max(height, e.footerTop()+e.footerH+pageBottom)
+	}
+	if e.typewriter {
+		// Room for the last line to come to the middle.
+		height += e.viewport / 2
+	}
+	// The trailing space has no ink. Whole-DIP bounds keep full and
+	// incremental layouts from clamping scroll at different float tails.
+	return float32(math.Round(float64(height)))
+}
+
 func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	if !e.printing {
 		e.stepMotion(p.Now())
@@ -2003,6 +2021,12 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				continue
 			}
 			if plan.active && e.isDraggedOwner(r.leaf.Owner, plan) != draggedOnly {
+				continue
+			}
+			if r.layout == nil {
+				if !e.printing {
+					p.AnimationFrame()
+				}
 				continue
 			}
 			dx, dy := e.visualOffset(r)
@@ -2181,7 +2205,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	}
 	if len(e.Doc.Blocks) == 1 && e.Doc.Blocks[0].Kind == "paragraph" && e.Len() == 0 && !e.focused {
 		// The starter below says the rest.
-		p.Text(bounds.X+e.padding, bounds.Y+pageTop+4, i18n.T("开始写作"), 16*e.zoomFactor(), t.TextMuted.Alpha(.8))
+		p.Text(bounds.X+e.padding, bounds.Y+e.header.titleTop+4, i18n.T("开始写作"), 16*e.zoomFactor(), t.TextMuted.Alpha(.8))
 	}
 	inlineCaretDoc, hasInlineCaret := e.paintInlineMathPopover(p, bounds, t)
 	caretMoving := false
@@ -2495,6 +2519,9 @@ func (e *Editor) paintLineNumbers(p *ui.Painter, bounds ui.Rect, d decoration) {
 		return
 	}
 	r := e.ensureRow(idx)
+	if r.layout == nil {
+		return
+	}
 	text := r.leaf.Block.Text()
 	clip := !e.printing && e.viewport > 0
 	visTop := e.Scroll.Y - 40
@@ -2640,6 +2667,7 @@ func (e *Editor) structuralPointer(ev ui.InputEvent) bool {
 		return false
 	}
 	if ev.Kind == ui.InputPointerDown && ev.Button == 0 {
+		e.commitFrontmatterEdit()
 		e.closeHeader()
 		if e.hoverControl(ev.X, ev.Y) {
 			return true

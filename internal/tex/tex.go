@@ -10,6 +10,7 @@ package tex
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -107,18 +108,26 @@ type node struct {
 	hasSup, hasSub bool
 	// limits puts a big operator's scripts above and below it.
 	limits bool
-	// rows are a matrix's cells; env its environment.
-	rows [][][]*node
-	env  string
+	// rows are a matrix's cells; rowGaps is extra spacing (in em) after each row;
+	// env its environment.
+	rows    [][][]*node
+	rowGaps []float32
+	env     string
 	// open and close are a delimited list's delimiters; space a space's
 	// width in em.
 	open, close string
 	space       float32
 }
 
+type parsedLine struct {
+	nodes    []*node
+	gapAfter float32
+}
+
 type parser struct {
-	src string
-	pos int
+	src       string
+	pos       int
+	lastBreak float32
 }
 
 func (p *parser) peek() byte {
@@ -150,14 +159,18 @@ func (p *parser) command() string {
 
 // lines reads lists separated by \\ until the end, a closing brace, \right
 // or \end, which stop is set to.
-func (p *parser) lines(stop *string) ([][]*node, error) {
-	var out [][]*node
+func (p *parser) lines(stop *string) ([]parsedLine, error) {
+	var out []parsedLine
 	for {
 		list, end, err := p.list()
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, list)
+		gap := float32(0)
+		if end == `\\` {
+			gap = p.lastBreak
+		}
+		out = append(out, parsedLine{nodes: list, gapAfter: gap})
 		if end != `\\` {
 			if stop != nil {
 				*stop = end
@@ -169,10 +182,108 @@ func (p *parser) lines(stop *string) ([][]*node, error) {
 	}
 }
 
+func (p *parser) lineBreakSpace() float32 {
+	p.skipSpace()
+	if p.peek() == '*' {
+		p.pos++
+	}
+	bracketSave := p.pos
+	p.skipSpace()
+	if p.peek() != '[' {
+		p.pos = bracketSave
+		return 0
+	}
+	rest := p.src[p.pos+1:]
+	end := strings.IndexByte(rest, ']')
+	if end < 0 {
+		p.pos = bracketSave
+		return 0
+	}
+	inner := rest[:end]
+	if strings.ContainsRune(inner, '\n') {
+		p.pos = bracketSave
+		return 0
+	}
+	em, ok := parseDimenEm(inner)
+	if !ok {
+		p.pos = bracketSave
+		return 0
+	}
+	p.pos += 1 + end + 1
+	if em < -1.0 {
+		em = -1.0
+	} else if em > 6.0 {
+		em = 6.0
+	}
+	return em
+}
+
+func parseDimenEm(s string) (float32, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	i := 0
+	if s[i] == '+' || s[i] == '-' {
+		i++
+	}
+	digits := false
+	dot := false
+	for i < len(s) {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			digits = true
+			i++
+			continue
+		}
+		if c == '.' && !dot {
+			dot = true
+			i++
+			continue
+		}
+		break
+	}
+	if !digits {
+		return 0, false
+	}
+	val, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil {
+		return 0, false
+	}
+	unit := strings.ToLower(strings.TrimSpace(s[i:]))
+	var scale float64
+	switch unit {
+	case "em":
+		scale = 1
+	case "pt":
+		scale = 0.1
+	case "ex":
+		scale = 0.45
+	case "px":
+		scale = 0.075
+	case "bp":
+		scale = 0.1
+	case "pc":
+		scale = 1.2
+	case "mm":
+		scale = 0.2845
+	case "cm":
+		scale = 2.845
+	case "in":
+		scale = 7.227
+	case "mu":
+		scale = 1.0 / 18.0
+	default:
+		return 0, false
+	}
+	return float32(val * scale), true
+}
+
 // list reads atoms until the end of the source or a terminator: "}",
 // "&", `\\`, `\right`, `\end`, which it returns (consumed but for \right
 // and \end, whose arguments the caller reads).
 func (p *parser) list() ([]*node, string, error) {
+	p.lastBreak = 0
 	var out []*node
 	for {
 		p.skipSpace()
@@ -207,6 +318,7 @@ func (p *parser) list() ([]*node, string, error) {
 			name := p.command()
 			switch name {
 			case `\`:
+				p.lastBreak = p.lineBreakSpace()
 				return out, `\\`, nil
 			case "right", "end":
 				p.pos = save
@@ -329,7 +441,8 @@ func (p *parser) delimiter() (string, error) {
 
 var delimiters = map[string]string{
 	"{": "{", "}": "}", "|": "‖", "langle": "⟨", "rangle": "⟩", "lfloor": "⌊", "rfloor": "⌋",
-	"lceil": "⌈", "rceil": "⌉", "vert": "|", "Vert": "‖", "lbrace": "{", "rbrace": "}", "lvert": "|", "rvert": "|",
+	"lceil": "⌈", "rceil": "⌉", "vert": "|", "Vert": "‖", "lbrace": "{", "rbrace": "}",
+	"lvert": "|", "rvert": "|", "lVert": "‖", "rVert": "‖",
 }
 
 func charNode(r rune) *node {
@@ -467,11 +580,33 @@ func (p *parser) commandNode(name string) (*node, error) {
 		}
 		n := &node{kind: "delim", open: open, close: closing}
 		if len(inner) == 1 {
-			n.args = [][]*node{inner[0]}
+			n.args = [][]*node{inner[0].nodes}
 		} else {
-			n.args = [][]*node{{&node{kind: "matrix", env: "lines", rows: linesToRows(inner)}}}
+			rows, rowGaps := linesToRows(inner)
+			n.args = [][]*node{{&node{kind: "matrix", env: "lines", rows: rows, rowGaps: rowGaps}}}
 		}
 		return n, nil
+	case "not":
+		arg, err := p.argument()
+		if err != nil {
+			return nil, err
+		}
+		if len(arg) == 1 && !arg[0].hasSup && !arg[0].hasSub {
+			if neg, ok := negatedSymbols[arg[0].text]; ok {
+				return &node{kind: arg[0].kind, text: neg, italic: false}, nil
+			}
+		}
+		return &node{kind: "not", args: [][]*node{arg}}, nil
+	case "xrightarrow", "xleftarrow", "xleftrightarrow":
+		below, _, err := p.optionalBracketArg()
+		if err != nil {
+			return nil, err
+		}
+		above, err := p.argument()
+		if err != nil {
+			return nil, err
+		}
+		return &node{kind: "xarrow", text: name, args: [][]*node{above, below}}, nil
 	case "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr":
 		d, err := p.delimiter()
 		if err != nil {
@@ -489,6 +624,7 @@ func (p *parser) commandNode(name string) (*node, error) {
 			}
 		}
 		var rows [][][]*node
+		var rowGaps []float32
 		var row [][]*node
 		for {
 			cell, end, err := p.list()
@@ -502,8 +638,10 @@ func (p *parser) commandNode(name string) (*node, error) {
 			rows = append(rows, row)
 			row = nil
 			if end == `\\` {
+				rowGaps = append(rowGaps, p.lastBreak)
 				continue
 			}
+			rowGaps = append(rowGaps, 0)
 			if end != `\end` {
 				return nil, fmt.Errorf(`tex: \begin{%s} without \end`, env)
 			}
@@ -516,18 +654,75 @@ func (p *parser) commandNode(name string) (*node, error) {
 		// A trailing \\ leaves an empty last row.
 		if last := rows[len(rows)-1]; len(rows) > 1 && len(last) == 1 && len(last[0]) == 0 {
 			rows = rows[:len(rows)-1]
+			rowGaps = rowGaps[:len(rows)]
 		}
-		return &node{kind: "matrix", env: env, rows: rows}, nil
+		return &node{kind: "matrix", env: env, rows: rows, rowGaps: rowGaps}, nil
 	}
 	return &node{kind: "error", text: `\` + name}, nil
 }
 
-func linesToRows(lines [][]*node) [][][]*node {
-	var rows [][][]*node
-	for _, l := range lines {
-		rows = append(rows, [][]*node{l})
+func (p *parser) optionalBracketArg() ([]*node, bool, error) {
+	p.skipSpace()
+	if p.peek() != '[' {
+		return nil, false, nil
 	}
-	return rows
+	p.pos++
+	start := p.pos
+	depth, brace := 0, 0
+	for p.pos < len(p.src) {
+		switch p.src[p.pos] {
+		case '\\':
+			p.pos++
+			if p.pos < len(p.src) {
+				_, n := utf8.DecodeRuneInString(p.src[p.pos:])
+				p.pos += n
+			}
+		case '{':
+			brace++
+			p.pos++
+		case '}':
+			if brace > 0 {
+				brace--
+			}
+			p.pos++
+		case '[':
+			if brace == 0 {
+				depth++
+			}
+			p.pos++
+		case ']':
+			if brace == 0 {
+				if depth == 0 {
+					inner := p.src[start:p.pos]
+					p.pos++
+					sub := &parser{src: inner}
+					nodes, end, err := sub.list()
+					if err != nil {
+						return nil, false, err
+					}
+					if end != "" || sub.pos < len(sub.src) {
+						return nil, false, fmt.Errorf("tex: unexpected %q", end)
+					}
+					return nodes, true, nil
+				}
+				depth--
+			}
+			p.pos++
+		default:
+			p.pos++
+		}
+	}
+	return nil, false, errors.New("tex: unclosed [")
+}
+
+func linesToRows(lines []parsedLine) ([][][]*node, []float32) {
+	var rows [][][]*node
+	var gaps []float32
+	for _, l := range lines {
+		rows = append(rows, [][]*node{l.nodes})
+		gaps = append(gaps, l.gapAfter)
+	}
+	return rows, gaps
 }
 
 func mapRunes(s string, table map[rune]rune) string {

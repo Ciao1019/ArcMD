@@ -1192,6 +1192,7 @@ func (a *App) databasePeekContent(c *ui.Context, dbDoc *document, width float32)
 		edOpts.Outline = false
 		edOpts.SetOutline = nil
 		edOpts.FullWidth = true
+		edOpts.HideFrontmatter = true
 		edOpts.Column = max(float32(220), width-36)
 		ui.Column(c.Key("peek-body")).Grow(1).MinWidth(0).MinHeight(0).Clip().Children(func() {
 			editor.View(c.Key(pd.viewKey()+":peek"), pd.ed, edOpts)
@@ -1891,7 +1892,7 @@ func (a *App) documentForExport(d *document) *model.Document {
 	if d == nil || d.ed == nil {
 		return nil
 	}
-	doc := d.ed.Committed()
+	doc := d.committedForRead()
 	if doc == nil {
 		return nil
 	}

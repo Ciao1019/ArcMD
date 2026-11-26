@@ -39,6 +39,16 @@ func (e *Editor) EditCover() {
 	e.header.coverOpen, e.header.iconOpen = true, false
 }
 
+// EditFrontmatter opens the inline YAML frontmatter editor at the top of the page.
+func (e *Editor) EditFrontmatter() {
+	if e.ReadOnly || e.hideFrontmatter {
+		return
+	}
+	e.closeHeader()
+	e.startFrontmatterEdit()
+	e.Scroll.Y = 0
+}
+
 // sectionHeadings are the indexes of the top-level headings of the
 // section level of the heading holding the caret: the caret's section
 // heading, and its siblings.

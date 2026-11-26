@@ -193,7 +193,7 @@ func TestToolbarCorner(t *testing.T) {
 	if !ok || r.Y > 46 {
 		t.Fatalf("format menu at %v, found %v", r, ok)
 	}
-	if _, ok := tt.Find("预览 Markdown 导出 (⇧⌘M)"); ok {
+	if _, ok := tt.Find("Markdown 源码模式 (⇧⌘M)"); ok {
 		t.Fatal("the source toggle is still in the toolbar")
 	}
 	if err := tt.Click("更多格式"); err != nil {
@@ -285,5 +285,38 @@ func TestCompactBlockMaxHeightSettings(t *testing.T) {
 	tt.Frame()
 	if !a.doc.ed.IsCodeCompact(codeBlockID) {
 		t.Fatal("expected live editor code block to compact after setting CodeMaxHeight=220")
+	}
+}
+
+func TestMoreMenuHoverDoesNotLeakToEditor(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.Frame()
+	bookmarkDoc(t, a, tt, "MenuHover.arcmd", "# Heading\n\nLine 1\n\nLine 2\n\nLine 3\n\nLine 4\n\nLine 5\n\nLine 6")
+
+	if err := tt.Click("更多"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	item, ok := tt.Find("添加分屏")
+	if !ok {
+		t.Fatal("expected 添加分屏 item in more menu")
+	}
+	tt.Move(item.X+item.W/2, item.Y+item.H/2)
+	tt.Frame()
+	if _, leaked := tt.Find("添加书签"); leaked {
+		t.Fatal("hovering over more menu leaked to underlying editor block")
+	}
+
+	tt.CloseMenu()
+	tt.Frame()
+	docRect, ok := tt.Find("文档")
+	if !ok {
+		t.Fatal("missing editor surface")
+	}
+	tt.Move(docRect.X+docRect.W/2, item.Y+item.H/2)
+	tt.Frame()
+	if _, ok := tt.Find("添加书签"); !ok {
+		t.Fatal("expected editor hover to resume after closing more menu")
 	}
 }

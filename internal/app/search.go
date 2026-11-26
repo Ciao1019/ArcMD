@@ -270,6 +270,13 @@ func (d *document) plainText() string {
 		}
 		return d.plain
 	}
+	if d.sourceHasPendingEdits() {
+		if !d.sourcePlainKnown || d.sourcePlainVer != d.sourceVersion {
+			text, _ := editor.ExtractMarkdownText(d.preview)
+			d.sourcePlain, d.sourcePlainVer, d.sourcePlainKnown = text, d.sourceVersion, true
+		}
+		return d.sourcePlain
+	}
 	if rev := d.ed.Revision(); !d.plainKnown || rev != d.plainRev {
 		d.plain, d.plainRev, d.plainKnown = d.ed.Text(), rev, true
 	}
@@ -477,7 +484,7 @@ func docSearchRevision(d *document) uint64 {
 	if d.isWhiteboard() {
 		return d.board.Revision()
 	}
-	return d.ed.Revision()
+	return d.ed.Revision() + d.sourceVersion
 }
 
 func extractDatabaseSearchText(name, content string) search.Extracted {

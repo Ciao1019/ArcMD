@@ -24,7 +24,7 @@ func init() {
 		"nexists": "∄", "neg": "¬", "lnot": "¬", "ldots": "…", "cdots": "⋯", "vdots": "⋮", "ddots": "⋱", "dots": "…",
 		"prime": "′", "angle": "∠", "degree": "°", "hbar": "ℏ", "ell": "ℓ", "Re": "ℜ", "Im": "ℑ", "aleph": "ℵ",
 		"top": "⊤", "bot": "⊥", "triangle": "△", "square": "□", "checkmark": "✓", "star": "⋆", "dagger": "†",
-		"#": "#", "$": "$", "%": "%", "_": "_", "&": "&", "|": "‖",
+		"#": "#", "$": "$", "%": "%", "_": "_", "&": "&", "|": "‖", "vert": "|", "Vert": "‖",
 	} {
 		symbols[name] = symbol{"ord", s, false}
 	}
@@ -39,18 +39,34 @@ func init() {
 		"leq": "≤", "le": "≤", "geq": "≥", "ge": "≥", "neq": "≠", "ne": "≠", "approx": "≈", "equiv": "≡", "sim": "∼",
 		"simeq": "≃", "cong": "≅", "propto": "∝", "ll": "≪", "gg": "≫", "to": "→", "rightarrow": "→", "leftarrow": "←",
 		"gets": "←", "Rightarrow": "⇒", "Leftarrow": "⇐", "leftrightarrow": "↔", "Leftrightarrow": "⇔", "iff": "⟺",
-		"implies": "⟹", "mapsto": "↦", "longrightarrow": "⟶", "longleftarrow": "⟵", "uparrow": "↑", "downarrow": "↓",
+		"implies": "⟹", "impliedby": "⟸", "mapsto": "↦", "longrightarrow": "⟶", "longleftarrow": "⟵",
+		"Longleftarrow": "⟸", "Longrightarrow": "⟹", "Longleftrightarrow": "⟺", "longleftrightarrow": "⟷",
+		"longmapsto": "⟼", "hookrightarrow": "↪", "hookleftarrow": "↩",
+		"uparrow": "↑", "downarrow": "↓",
+		"nRightarrow": "⇏", "nLeftarrow": "⇍", "nLeftrightarrow": "⇎",
+		"nrightarrow": "↛", "nleftarrow": "↚", "nleftrightarrow": "↮",
+		"nmid": "∤", "nparallel": "∦", "nsubseteq": "⊈", "nsupseteq": "⊉",
+		"subsetneq": "⊊", "supsetneq": "⊋", "nless": "≮", "ngtr": "≯",
+		"nleq": "≰", "ngeq": "≱", "nsim": "≁", "ncong": "≇",
+		"nvdash": "⊬", "nvDash": "⊭", "nVdash": "⊮",
 		"in": "∈", "notin": "∉", "ni": "∋", "subset": "⊂", "subseteq": "⊆", "supset": "⊃", "supseteq": "⊇",
 		"perp": "⊥", "parallel": "∥", "mid": "∣", "vdash": "⊢", "models": "⊨",
 	} {
 		symbols[name] = symbol{"rel", s, false}
 	}
-	for name, s := range map[string]string{"{": "{", "lbrace": "{", "langle": "⟨", "lfloor": "⌊", "lceil": "⌈"} {
+	for name, s := range map[string]string{"{": "{", "lbrace": "{", "langle": "⟨", "lfloor": "⌊", "lceil": "⌈", "lvert": "|", "lVert": "‖"} {
 		symbols[name] = symbol{"open", s, false}
 	}
-	for name, s := range map[string]string{"}": "}", "rbrace": "}", "rangle": "⟩", "rfloor": "⌋", "rceil": "⌉"} {
+	for name, s := range map[string]string{"}": "}", "rbrace": "}", "rangle": "⟩", "rfloor": "⌋", "rceil": "⌉", "rvert": "|", "rVert": "‖"} {
 		symbols[name] = symbol{"close", s, false}
 	}
+}
+
+var negatedSymbols = map[string]string{
+	"=": "≠", "<": "≮", ">": "≯", "≤": "≰", "≥": "≱", "≡": "≢", "≈": "≉", "∼": "≁", "≃": "≄", "≅": "≇",
+	"∈": "∉", "∋": "∌", "⊂": "⊄", "⊃": "⊅", "⊆": "⊈", "⊇": "⊉",
+	"→": "↛", "←": "↚", "↔": "↮", "⇒": "⇏", "⇐": "⇍", "⇔": "⇎",
+	"∣": "∤", "∥": "∦", "⊢": "⊬", "⊨": "⊭", "∃": "∄",
 }
 
 // bigOps are the operators drawn larger in display math, with limits above

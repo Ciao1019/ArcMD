@@ -47,6 +47,9 @@ func (a *App) discardEdits(d *document) {
 		}
 	} else {
 		clean.ed.Scroll = d.ed.Scroll
+		if d.source {
+			clean.previewScroll = d.previewScroll
+		}
 	}
 	a.replaceReferences(d, clean)
 	d.close()

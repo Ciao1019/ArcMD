@@ -48,7 +48,7 @@ func (a *App) moreMenu(c *ui.Context) {
 			a.toggleOutline()
 		}
 
-		mode := i18n.T("预览 Markdown 导出")
+		mode := i18n.T("Markdown 源码模式")
 		if a.doc != nil && a.doc.source {
 			mode = i18n.T("返回富文本编辑")
 		}

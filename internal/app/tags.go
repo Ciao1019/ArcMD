@@ -74,12 +74,18 @@ func (a *App) renameTag(from, to string) {
 			continue
 		}
 		if d.ed.ReadOnly {
-			if strings.Contains(strings.ToLower(d.ed.Doc.PlainText()), "#"+strings.ToLower(from)) {
+			if strings.Contains(strings.ToLower(d.plainText()), "#"+strings.ToLower(from)) {
 				skipped++
 			}
 			continue
 		}
+		if d.sourceHasPendingEdits() {
+			d.syncSourceToModel()
+		}
 		if d.ed.Engine.MapProse(change) {
+			if d.source {
+				d.refreshSourceFromModel()
+			}
 			edited = append(edited, d)
 		}
 	}

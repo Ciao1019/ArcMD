@@ -9,6 +9,7 @@ import (
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
 	"github.com/Ciao1019/ArcMD/internal/prefs"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -25,16 +26,28 @@ func TestPageZoomShortcutsPillMenuAndPersistence(t *testing.T) {
 		t.Fatal("page zoom pill should be hidden at 100%")
 	}
 
+	// Focus the editor to verify zoom shortcuts work while actively editing.
+	a.doc.ed.RequestFocus = true
+	tt.Frame()
+	if !tt.Focused("文档") {
+		t.Fatal("editor did not receive focus")
+	}
+
 	// Cmd+= steps up to 110% and reveals the corner pill.
 	tt.Key(ui.Cmd, ui.KeyEqual)
 	tt.Frame()
 	if a.pageZoom() != 1.1 || !tt.HasText("110%") {
 		t.Fatalf("after Cmd+= zoom=%v texts=%q", a.pageZoom(), tt.Texts())
 	}
-	tt.Key(ui.Cmd, ui.KeyEqual)
+	// On macOS, Cmd+Shift+= (Cmd++) also steps zoom up without conflicting with split-add.
+	if ui.Cmd == ui.Super {
+		tt.Key(ui.Cmd|ui.Shift, ui.KeyEqual)
+	} else {
+		tt.Key(ui.Cmd, ui.KeyEqual)
+	}
 	tt.Frame()
 	if a.pageZoom() != 1.2 || !tt.HasText("120%") {
-		t.Fatalf("after second Cmd+= zoom=%v", a.pageZoom())
+		t.Fatalf("after second zoom-in zoom=%v", a.pageZoom())
 	}
 
 	// Ctrl+Shift+= must still add a split pane without changing zoom.
@@ -298,6 +311,39 @@ func TestPageZoomShortcutRebindAndEnglishUI(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("Zoom In") || !tt.HasText("Zoom Out") || !tt.HasText("Reset Page Zoom") {
 		t.Fatalf("English shortcuts list missing zoom items: %q", tt.Texts())
+	}
+}
+
+func TestViewMenuDoesNotInterceptPageZoomOrReload(t *testing.T) {
+	a, _ := newTestApp(t)
+	menu := mygo.NewMenu([]*mygo.MenuItem{a.viewMenu()})
+	items := menu.Items()
+	if len(items) != 1 || items[0].Role != mygo.RoleViewMenu || items[0].Label == "" {
+		t.Fatalf("unexpected view menu root: %+v", items)
+	}
+	sub := items[0].Submenu
+	if len(sub) != 3 ||
+		sub[0].Role != mygo.RoleToggleDevTools ||
+		sub[1].Type != mygo.MenuItemSeparator ||
+		sub[2].Role != mygo.RoleToggleFullScreen {
+		t.Fatalf("unexpected view submenu: %+v", sub)
+	}
+	blocked := map[string]bool{
+		"CmdOrCtrl+Plus":    true,
+		"CmdOrCtrl+=":       true,
+		"CmdOrCtrl+-":       true,
+		"CmdOrCtrl+0":       true,
+		"CmdOrCtrl+R":       true,
+		"Shift+CmdOrCtrl+R": true,
+	}
+	for _, it := range sub {
+		if it.Role == mygo.RoleZoomIn || it.Role == mygo.RoleZoomOut || it.Role == mygo.RoleResetZoom ||
+			it.Role == mygo.RoleReload || it.Role == mygo.RoleForceReload {
+			t.Fatalf("view submenu includes webview-only role %q", it.Role)
+		}
+		if blocked[it.Accelerator] {
+			t.Fatalf("view submenu item %q intercepts app shortcut %q", it.Role, it.Accelerator)
+		}
 	}
 }
 

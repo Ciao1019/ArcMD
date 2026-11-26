@@ -448,25 +448,8 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 		}
 	}
 	if d.source {
-		box := ui.Column(c.Key("source-page")).Grow(1).Padding(24).Gap(12)
+		box := a.sourceView(c, d, cardWidth)
 		applyModeFade(box)
-		box.Children(func() {
-			ui.Row(c).Gap(12).Children(func() {
-				ui.Text(c, i18n.T("Markdown 导出预览")).Grow(1)
-				if ui.Button(c, i18n.T("导出 Markdown 文件")).Clicked() {
-					a.activateDocument(d)
-					a.exportMarkdown()
-				}
-			})
-			ta := ui.TextArea(c.Key("export-preview"), &d.preview).Grow(1).ReadOnly(true).
-				TrackScroll(&d.previewScroll).Label(i18n.T("Markdown 导出预览"))
-			if d.previewCaretPending {
-				d.previewCaretPending = false
-				ta.SetTextSelection(d.previewCaret, d.previewCaret)
-			} else if d.previewEnteredY < 0 {
-				d.previewEnteredY = d.previewScroll.Y
-			}
-		})
 		return
 	}
 	// One column always, so that the bar coming and going keeps the

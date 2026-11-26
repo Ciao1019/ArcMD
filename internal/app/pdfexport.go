@@ -74,7 +74,7 @@ func (a *App) startPDF(printing bool) {
 		w.RegisterFontData(pdf.FontMathItalic, false, true, it)
 		w.RegisterFontData(pdf.FontMathItalic, true, true, boldIt)
 	}
-	a.pdfExport = &pdfExport{source: source, title: d.title(), ed: editor.FromDocument(d.ed.Committed()), file: file,
+	a.pdfExport = &pdfExport{source: source, title: d.title(), ed: editor.FromDocument(d.committedForRead()), file: file,
 		writer: w, open: true, printing: printing, next: a.now.Add(time.Millisecond)}
 }
 
