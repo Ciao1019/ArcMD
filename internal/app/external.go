@@ -126,8 +126,9 @@ func (a *App) chooseExternalFiles() {
 	go func() {
 		files, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: i18n.T("打开文件…"), Multiple: true,
 			Filters: []mygo.FileFilter{
-				{Name: i18n.T("支持的文档"), Extensions: []string{"md", "markdown", "mdx", "arcmd", "pdf", "epub", "html", "htm", "svg", "excalidraw"}},
+				{Name: i18n.T("支持的文档"), Extensions: []string{"md", "markdown", "mdx", "arcmd", "mdz", "pdf", "epub", "html", "htm", "svg", "excalidraw"}},
 				{Name: "Markdown", Extensions: []string{"md", "markdown", "mdx", "arcmd"}},
+				{Name: "MDZip", Extensions: []string{"mdz"}},
 				{Name: "PDF", Extensions: []string{"pdf"}},
 				{Name: "EPUB / HTML", Extensions: []string{"epub", "html", "htm"}},
 			}})
