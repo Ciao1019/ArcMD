@@ -677,6 +677,200 @@ func TestExternalOpenMissingRefreshesTreeAndBar(t *testing.T) {
 	}
 }
 
+func TestExternalCleanMissingMarksDirtyDocAndSkipsInFlightSave(t *testing.T) {
+	a, tt := newTestApp(t)
+	dirtyFile := externalFile(t, "Dirty.md", "# Dirty")
+	savingFile := externalFile(t, "Saving.md", "# Saving")
+
+	if !a.openSystemFile(savingFile) || !a.openSystemFile(dirtyFile) {
+		t.Fatal("open external files")
+	}
+	sp := a.state.Get(space.ExternalID)
+	a.togglePin(sp, "Saving.md")
+	savingDoc := a.residentDocument(sp.ID, "Saving.md")
+	if savingDoc == nil {
+		// Pinning after leaving won't keep it open; re-open once to keep it resident.
+		a.open("Saving.md")
+		a.open("Dirty.md")
+		savingDoc = a.residentDocument(sp.ID, "Saving.md")
+	}
+	if savingDoc == nil {
+		t.Fatal("expected resident Saving.md")
+	}
+	savingDoc.saving = true
+	savingDoc.saveDone = make(chan asyncSaveResult, 1)
+
+	a.doc.ed.ReplaceText(nil, "Unsaved ")
+	if err := os.Remove(dirtyFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(savingFile); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+
+	removed, skipped := a.cleanMissingExternal(sp)
+	if removed != 0 || skipped != 2 {
+		t.Fatalf("cleanMissingExternal = (%d, %d), want (0, 2)", removed, skipped)
+	}
+	if !a.doc.missing || a.doc.conflict {
+		t.Fatalf("expected dirty doc marked missing, got missing=%v conflict=%v", a.doc.missing, a.doc.conflict)
+	}
+	if savingDoc.missing {
+		t.Fatal("in-flight saving doc should not have missing mutated mid-save")
+	}
+	if _, ok := sp.ExternalFiles["Saving.md"]; !ok {
+		t.Fatal("in-flight saving doc was evicted")
+	}
+	tt.Frame()
+	if !tt.HasText("重新保存到原位置") {
+		t.Fatalf("expected conflictBar recovery action after skipped clean: %v", tt.Texts())
+	}
+
+	// Restoring the missing external doc via keepMine should also refresh an open Library card.
+	a.openLibrary(libSpaces)
+	tt.Frame()
+	if got := a.cachedMissingExternal(sp); got != 2 {
+		t.Fatalf("cachedMissingExternal before keepMine = %d, want 2", got)
+	}
+	a.keepMine()
+	if a.doc.missing {
+		t.Fatal("keepMine did not clear missing flag")
+	}
+	if got := countMissingNodes(a.library.trees[sp.ID]); got != 1 {
+		t.Fatalf("library missing count after keepMine = %d, want 1", got)
+	}
+}
+
+func TestExternalCachedMissingPrefersLibraryAndWatcherRefreshesLibrary(t *testing.T) {
+	a, tt := newTestApp(t)
+	normalSpace := a.state.ActiveSpace()
+	kept := externalFile(t, "Keep.md", "# Keep")
+	gone1 := externalFile(t, "Gone1.md", "# Gone 1")
+	gone2 := externalFile(t, "Gone2.md", "# Gone 2")
+
+	for _, f := range []string{kept, gone1, gone2} {
+		if !a.openSystemFile(f) {
+			t.Fatalf("open %s", f)
+		}
+	}
+	sp := a.state.Get(space.ExternalID)
+	a.openSystemFile(kept)
+
+	// Switch to normal space and seed a stale pageTrees cache (0 missing),
+	// mirroring a space swipe before files vanish on disk.
+	a.switchSpace(normalSpace.ID)
+	if _, err := a.treeOf(sp); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMissingNodes(a.pageTrees[sp.ID].nodes); got != 0 {
+		t.Fatalf("expected stale pageTree with 0 missing, got %d", got)
+	}
+
+	if err := os.Remove(gone1); err != nil {
+		t.Fatal(err)
+	}
+	a.openLibrary(libSpaces)
+	tt.Frame()
+	if got := a.cachedMissingExternal(sp); got != 1 {
+		t.Fatalf("cachedMissingExternal = %d, want 1 (should prefer library.trees over stale pageTrees)", got)
+	}
+	if got := a.externalCleanMenuLabel(sp); got != "清理不存在的文件 (1)" {
+		t.Fatalf("externalCleanMenuLabel = %q, want %q", got, "清理不存在的文件 (1)")
+	}
+
+	// Watcher event while Library is open should update library.trees immediately.
+	if err := os.Remove(gone2); err != nil {
+		t.Fatal(err)
+	}
+	a.externalChanged(sp, "Gone2.md", gone2, []mygo.FileEvent{{Op: mygo.FileRemove, Path: "Gone2.md"}})
+	if got := countMissingNodes(a.library.trees[sp.ID]); got != 2 {
+		t.Fatalf("library missing count after externalChanged = %d, want 2", got)
+	}
+	if got := a.cachedMissingExternal(sp); got != 2 {
+		t.Fatalf("cachedMissingExternal after externalChanged = %d, want 2", got)
+	}
+}
+
+func TestExternalMissingSplitWindowDirCheckDiskAndSettleDim(t *testing.T) {
+	a, tt := newTestApp(t)
+	kept := externalFile(t, "Keep.md", "# Keep")
+	goneSplit := externalFile(t, "GoneSplit.md", "# Split")
+	goneWin := externalFile(t, "GoneWin.md", "# Win")
+	replacedMD := externalFile(t, "Replaced.md", "# Replaced")
+
+	for _, f := range []string{kept, goneSplit, goneWin, replacedMD} {
+		if !a.openSystemFile(f) {
+			t.Fatalf("open %s", f)
+		}
+	}
+	sp := a.state.Get(space.ExternalID)
+	a.openSystemFile(kept)
+	a.refreshTree()
+
+	if err := os.Remove(goneSplit); err != nil {
+		t.Fatal(err)
+	}
+	a.notices = nil
+	a.openSplit(sp, "GoneSplit.md", false, false)
+	if a.split != nil {
+		t.Fatal("openSplit should not open missing external file")
+	}
+	if len(a.notices) == 0 || !strings.Contains(a.notices[len(a.notices)-1], "文件已被移动或删除：") {
+		t.Fatalf("expected missing notice from openSplit, got %v", a.notices)
+	}
+	if got := countMissingNodes(a.tree); got != 1 {
+		t.Fatalf("missing count after openSplit = %d, want 1", got)
+	}
+
+	if err := os.Remove(goneWin); err != nil {
+		t.Fatal(err)
+	}
+	a.notices = nil
+	a.openInWindow(sp, "GoneWin.md")
+	if len(a.windows) != 0 {
+		t.Fatal("openInWindow should not open missing external file")
+	}
+	if len(a.notices) == 0 || !strings.Contains(a.notices[len(a.notices)-1], "文件已被移动或删除：") {
+		t.Fatalf("expected missing notice from openInWindow, got %v", a.notices)
+	}
+	if got := countMissingNodes(a.tree); got != 2 {
+		t.Fatalf("missing count after openInWindow = %d, want 2", got)
+	}
+
+	// Settling a dragged missing row must keep dim=true rather than flashing bright.
+	tt.Frame()
+	tt.Advance(time.Second)
+	tt.Frame()
+	a.dragSettle = dragSettle{
+		active:  true,
+		space:   sp.ID,
+		rel:     "GoneSplit.md",
+		dim:     true,
+		started: a.now,
+	}
+	tt.Frame()
+	if !a.dragSettle.active || !a.dragSettle.dim {
+		t.Fatalf("expected dragSettle to remain dim for missing row, got active=%v dim=%v", a.dragSettle.active, a.dragSettle.dim)
+	}
+
+	// Replacing an open dirty external Markdown file with a directory should be flagged by checkDisk.
+	if !a.openSystemFile(replacedMD) {
+		t.Fatal("open Replaced.md")
+	}
+	a.doc.ed.ReplaceText(nil, "Local edit ")
+	if err := os.Remove(replacedMD); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(replacedMD, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.checkDisk()
+	if a.doc == nil || !a.doc.missing {
+		t.Fatalf("expected checkDisk to mark dir-replaced dirty external doc as missing, got %+v", a.doc)
+	}
+}
+
 func TestExternalMissingSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT for external missing snapshot")
 	for _, tc := range []struct {

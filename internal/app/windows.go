@@ -76,6 +76,9 @@ func (a *App) openInWindow(sp *space.Space, rel string) {
 	} else {
 		text, err := readDocSource(sp, rel)
 		if err != nil {
+			if a.noteMissingExternal(sp, rel, err) {
+				return
+			}
 			a.notify("无法打开 %s。%v", vault.Title(rel), err)
 			return
 		}

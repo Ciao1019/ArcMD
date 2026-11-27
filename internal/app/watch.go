@@ -145,10 +145,7 @@ func (a *App) externalChanged(sp *space.Space, rel, full string, events []mygo.F
 			a.withDocument(d, a.checkDisk)
 		}
 	}
-	delete(a.pageTrees, sp.ID)
-	if sp == a.state.ActiveSpace() {
-		a.refreshTree()
-	}
+	a.refreshExternalTree(sp)
 }
 
 // filesChanged follows changes to the folder of the space with the ID:
@@ -261,7 +258,7 @@ func (a *App) checkDisk() {
 		return
 	}
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+		if !errors.Is(err, os.ErrNotExist) && !(d.space.IsExternal() && vault.Files(d.space.ExternalFiles).Missing(d.rel)) {
 			return
 		}
 		if d.loadErr != nil || !d.dirty() {
@@ -353,7 +350,11 @@ func (a *App) keepMine() {
 		return
 	}
 	a.syncSavedSearch(d)
-	a.refreshTree()
+	if d.space.IsExternal() {
+		a.refreshExternalTree(d.space)
+	} else {
+		a.refreshTree()
+	}
 }
 
 // conflictBar sits over a document whose file changed or went elsewhere

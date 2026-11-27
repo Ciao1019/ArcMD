@@ -200,6 +200,9 @@ func (a *App) openSplit(sp *space.Space, rel string, leading bool, vertical bool
 	}
 	text, err := readDocSource(sp, rel)
 	if err != nil {
+		if a.noteMissingExternal(sp, rel, err) {
+			return
+		}
 		a.notify("打开 %s 失败。%v", vault.Title(rel), err)
 		return
 	}

@@ -891,7 +891,7 @@ func (a *App) nodeRow(c *ui.Context, sp *space.Space, n *vault.Node, depth int, 
 			a.dragSettle.hasTarget = true
 			a.dragSettle.openFolder = open
 			a.dragSettle.holdsOpen = a.holdsOpen(sp, n.Path)
-			a.dragSettle.dim = pinned && !opened
+			a.dragSettle.dim = dim
 		}
 	}
 

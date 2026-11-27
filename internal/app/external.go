@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,19 +164,34 @@ func countMissingNodes(nodes []*vault.Node) int {
 	return n
 }
 
+func (a *App) noteMissingExternal(sp *space.Space, rel string, err error) bool {
+	if sp == nil || !sp.IsExternal() {
+		return false
+	}
+	if !errors.Is(err, os.ErrNotExist) && !vault.Files(sp.ExternalFiles).Missing(rel) {
+		return false
+	}
+	a.refreshExternalTree(sp)
+	a.notify("文件已被移动或删除：%s", sp.ExternalFiles[rel])
+	return true
+}
+
 func (a *App) cachedMissingExternal(sp *space.Space) int {
 	if sp == nil || !sp.IsExternal() {
 		return 0
 	}
-	var nodes []*vault.Node
-	if sp == a.state.ActiveSpace() {
-		nodes = a.tree
-	} else if pt, ok := a.pageTrees[sp.ID]; ok {
-		nodes = pt.nodes
-	} else if a.library.open && a.library.page == libSpaces {
-		nodes = a.library.trees[sp.ID]
+	if a.library.open && a.library.page == libSpaces {
+		if nodes, ok := a.library.trees[sp.ID]; ok {
+			return countMissingNodes(nodes)
+		}
 	}
-	return countMissingNodes(nodes)
+	if sp == a.state.ActiveSpace() {
+		return countMissingNodes(a.tree)
+	}
+	if pt, ok := a.pageTrees[sp.ID]; ok {
+		return countMissingNodes(pt.nodes)
+	}
+	return 0
 }
 
 func (a *App) externalCleanMenuLabel(sp *space.Space) string {
@@ -234,17 +250,23 @@ func (a *App) cleanMissingExternal(sp *space.Space) (removed, skipped int) {
 	resident := a.residentDocuments()
 	for _, rel := range missing {
 		var docs []*document
-		dirty := false
+		busy := false
 		for _, d := range resident {
 			if d.space == sp && d.rel == rel {
+				d.pollAsyncSave()
+				if d.saving {
+					busy = true
+					continue
+				}
 				if d.dirty() {
-					dirty = true
-					break
+					d.missing, d.conflict = true, false
+					busy = true
+					continue
 				}
 				docs = append(docs, d)
 			}
 		}
-		if dirty {
+		if busy {
 			skipped++
 			continue
 		}

@@ -993,9 +993,7 @@ func (a *App) showIn(sp *space.Space, rel string) bool {
 	restoring := a.doc == nil && sp.LastOpen == rel
 	text, err := readDocSource(sp, rel)
 	if err != nil {
-		if sp.IsExternal() && (errors.Is(err, os.ErrNotExist) || vault.Files(sp.ExternalFiles).Missing(rel)) {
-			a.refreshExternalTree(sp)
-			a.notify("文件已被移动或删除：%s", sp.ExternalFiles[rel])
+		if a.noteMissingExternal(sp, rel, err) {
 			return false
 		}
 		if errors.Is(err, os.ErrNotExist) {
