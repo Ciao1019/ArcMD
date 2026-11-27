@@ -15,6 +15,7 @@
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/arcmd)
 
 <a href="https://trendshift.io/repositories/347199?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-347199" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/347199/daily?language=Go" alt="Ciao1019%2FArcMD | Trendshift" width="250" height="55"/></a>
+<a href="https://hellogithub.com/repository/Ciao1019/ArcMD" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=882a0f4bf23e4cfe90cf8cf3395beaf6&claim_uid=OTFpImdJ2BM4aef" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
 <br>
 
