@@ -252,6 +252,9 @@ func (a *App) actions() []action {
 	}
 	dir := a.currentDir()
 	cmd(i18n.T("打开文件…"), "", a.chooseExternalFiles)
+	if ext := a.state.Get(space.ExternalID); ext != nil && len(ext.ExternalFiles) > 0 {
+		cmd(i18n.T("清理外部空间中不存在的文件"), "", func() { a.cleanMissingExternal(ext) })
+	}
 	cmd(i18n.T("打开 PDF 文件…"), "", a.choosePDFFile)
 	cmd(i18n.T("在所有文档中查找和替换…"), a.keyLabel("replace-all"), a.openReplaceAll)
 	if !active.IsExternal() {

@@ -23,6 +23,9 @@ type Node struct {
 	// Modified is when the file last changed; for a folder, the latest of
 	// what it holds, or the folder's own time when empty.
 	Modified time.Time
+	// Missing reports that an explicitly registered file (such as an entry in
+	// the built-in external space) is no longer present on disk.
+	Missing bool
 }
 
 // Title returns a file's name without its extension, or a folder's name.
