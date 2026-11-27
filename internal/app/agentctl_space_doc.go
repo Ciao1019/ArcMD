@@ -413,8 +413,15 @@ func (a *App) ctlSpaceRemove(raw []byte) (any, error) {
 	}
 	if a.isLiveWindow() {
 		a.refreshTree()
-		if act := a.state.ActiveSpace(); act != nil && (wasActive || a.doc == nil) && act.LastOpen != "" {
-			a.open(act.LastOpen)
+		if act := a.state.ActiveSpace(); act != nil {
+			a.ensureSplitRestored(act)
+			if wasActive || a.doc == nil {
+				if session := a.session(act.ID); session.splitShown && session.split != nil {
+					a.restoreSplit(session.split, session.split.active)
+				} else if act.LastOpen != "" {
+					a.open(act.LastOpen)
+				}
+			}
 		}
 		a.refreshSearch()
 		a.syncWatches()

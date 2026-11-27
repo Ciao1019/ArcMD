@@ -124,7 +124,7 @@ func (e *Editor) tryLiveHTMLCommentClose(l document.Leaf, raw string, lineStartB
 	if hasForbiddenSpan(document.SliceRuns(l.Block.Runs, blockOpenU16, blockCaretU16)) {
 		return false
 	}
-	for _, itok := range inlineTokens(raw) {
+	for _, itok := range inlineTokensInBlock(l.Block, raw) {
 		ta, tz := document.Len(raw[:itok.start]), document.Len(raw[:itok.end])
 		if blockOpenU16 < tz && blockCaretU16 > ta {
 			return false
@@ -388,7 +388,7 @@ func (e *Editor) tryLiveInlineMarkdown(l document.Leaf, raw string, lineStartByt
 			return false
 		}
 	}
-	for _, tok := range inlineTokens(raw) {
+	for _, tok := range inlineTokensInBlock(l.Block, raw) {
 		ta, tz := document.Len(raw[:tok.start]), document.Len(raw[:tok.end])
 		if blockOpenU16 < tz && blockCloseEndU16 > ta {
 			return false
@@ -708,7 +708,7 @@ func (e *Editor) tryLiveHTMLTag(l document.Leaf, raw string, lineStartByte, care
 					return false
 				}
 			}
-			for _, itok := range inlineTokens(raw) {
+			for _, itok := range inlineTokensInBlock(l.Block, raw) {
 				ta, tz := document.Len(raw[:itok.start]), document.Len(raw[:itok.end])
 				if blockTagStartU16 < tz && blockTagEndU16 > ta {
 					return false
@@ -812,7 +812,7 @@ func (e *Editor) compileLiveHTMLPair(l document.Leaf, raw string, openStartByte,
 	if (added.Code || added.Kbd) && hasForbiddenSpan(document.SliceRuns(l.Block.Runs, blockOpenEndU16, blockCloseStartU16)) {
 		return false
 	}
-	for _, itok := range inlineTokens(raw) {
+	for _, itok := range inlineTokensInBlock(l.Block, raw) {
 		ta, tz := document.Len(raw[:itok.start]), document.Len(raw[:itok.end])
 		if blockOpenStartU16 < tz && blockCloseEndU16 > ta {
 			return false

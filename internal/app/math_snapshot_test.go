@@ -197,4 +197,75 @@ func TestIssueFixesSnapshot(t *testing.T) {
 		}
 		savePNG(t, filepath.Join(dir, "mermaid-sequence.png"), tt)
 	}
+
+	// 4. Issue #89: Mermaid stateDiagram-v2 (light & dark themes + rich composite/notes).
+	{
+		issue89MD := "# 状态机\n\n```mermaid\nstateDiagram-v2\n" +
+			"    [*] --> 已捕获原消息\n" +
+			"    已捕获原消息 --> 媒体处理中\n" +
+			"    媒体处理中 --> 已缓存: 校验通过\n" +
+			"    媒体处理中 --> 缓存失败: 下载失败或内容不完整\n" +
+			"    媒体处理中 --> 已撤回等待缓存: 撤回通知先到\n" +
+			"    已撤回等待缓存 --> 单次补发: 缓存完成且连接仍有效\n" +
+			"    已缓存 --> 单次补发: 随后收到撤回\n" +
+			"    单次补发 --> [*]\n" +
+			"    缓存失败 --> [*]\n```\n"
+		for _, dark := range []bool{false, true} {
+			mode := "light"
+			if dark {
+				mode = "dark"
+			}
+			a, tt := newTestApp(t)
+			tt.SetSize(1180, 900)
+			tt.SetDark(dark)
+			if err := vault.Write(root(a), "State.md", issue89MD); err != nil {
+				t.Fatal(err)
+			}
+			a.refreshTree()
+			a.open("State.md")
+			for range 3 {
+				tt.Frame()
+				tt.Advance(200 * time.Millisecond)
+			}
+			savePNG(t, filepath.Join(dir, "mermaid-state-"+mode+".png"), tt)
+		}
+
+		richMD := "# 复合状态与并发区域\n\n```mermaid\nstateDiagram-v2\n" +
+			"    state if_ok <<choice>>\n" +
+			"    state fork_work <<fork>>\n" +
+			"    state join_work <<join>>\n" +
+			"    [*] --> if_ok\n" +
+			"    if_ok --> Active : 条件成立\n" +
+			"    if_ok --> Failed : 校验失败\n" +
+			"    state \"运行阶段\" as Active {\n" +
+			"        [*] --> Running\n" +
+			"        Running --> Paused : 暂停\n" +
+			"        Paused --> Running : 恢复\n" +
+			"        --\n" +
+			"        [*] --> Syncing\n" +
+			"        Syncing --> Synced : 完成\n" +
+			"    }\n" +
+			"    Failed : entry / 记录日志\n" +
+			"    Failed : do / 清理缓存\n" +
+			"    note right of Failed : 终态说明\n" +
+			"    Active --> fork_work\n" +
+			"    fork_work --> WorkerA\n" +
+			"    fork_work --> WorkerB\n" +
+			"    WorkerA --> join_work\n" +
+			"    WorkerB --> join_work\n" +
+			"    join_work --> [*]\n" +
+			"    Failed --> [*]\n```\n"
+		a, tt := newTestApp(t)
+		tt.SetSize(1280, 1020)
+		if err := vault.Write(root(a), "StateRich.md", richMD); err != nil {
+			t.Fatal(err)
+		}
+		a.refreshTree()
+		a.open("StateRich.md")
+		for range 3 {
+			tt.Frame()
+			tt.Advance(200 * time.Millisecond)
+		}
+		savePNG(t, filepath.Join(dir, "mermaid-state-rich.png"), tt)
+	}
 }

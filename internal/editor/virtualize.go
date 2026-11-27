@@ -241,7 +241,7 @@ func (e *Editor) cachedTableNaturalWidths(b *document.Block, padX float32) cache
 		hasDollar := strings.IndexByte(txt, '$') >= 0
 		var tokens []inlineToken
 		if hasDollar {
-			tokens = inlineTokens(txt)
+			tokens = inlineTokensInBlock(cell, txt)
 		}
 		tokIdx := 0
 		lineStart := 0

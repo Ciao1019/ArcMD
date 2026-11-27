@@ -474,11 +474,16 @@ func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout
 	if !strings.ContainsRune(item.text, '$') {
 		return nil
 	}
-	all := inlineTokens(item.text)
+	leaf, hasLeaf := e.Engine.LeafByID(item.id)
+	var all []inlineToken
+	if hasLeaf {
+		all = inlineTokensInBlock(leaf.Block, item.text)
+	} else {
+		all = inlineTokens(item.text)
+	}
 	if len(all) == 0 {
 		return nil
 	}
-	leaf, hasLeaf := e.Engine.LeafByID(item.id)
 	var tokens []inlineToken
 	var mask uint64
 	cand := 0

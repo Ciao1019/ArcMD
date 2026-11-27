@@ -101,6 +101,10 @@ func (a *App) initPlugins() {
 	if a.pluginsUI.runCancel != nil {
 		a.pluginsUI.runCancel()
 	}
+	if a.pluginsUI.host != nil {
+		_ = a.pluginsUI.host.Close()
+		a.pluginsUI.host = nil
+	}
 	a.pluginsUI.runCtx, a.pluginsUI.runCancel = context.WithCancel(context.Background())
 	if a.pluginsUI.defaultClient == nil {
 		a.pluginsUI.defaultClient = &http.Client{Timeout: 90 * time.Second}
@@ -111,6 +115,19 @@ func (a *App) initPlugins() {
 	a.pluginsUI.cachedConfigs = map[string]map[string]any{}
 	a.pluginsUI.status = map[string]*pluginRunState{}
 	a.pluginsUI.enabledBufs = map[string]*bool{}
+}
+
+func (a *App) ensureWASMHost() (*plugin.WASMHost, error) {
+	if a.pluginsUI.host != nil {
+		return a.pluginsUI.host, nil
+	}
+	if a.pluginsUI.runCtx == nil {
+		a.pluginsUI.runCtx, a.pluginsUI.runCancel = context.WithCancel(context.Background())
+	}
+	dataDir := filepath.Join(a.cfg.ConfigDir, "plugins-data")
+	if a.pluginsUI.cfg == nil {
+		a.pluginsUI.cfg = &plugin.ConfigStore{Dir: dataDir}
+	}
 	host, err := plugin.NewWASMHost(a.pluginsUI.runCtx, plugin.HostConfig{
 		DataDir: dataDir,
 		Config:  a.pluginsUI.cfg,
@@ -126,10 +143,10 @@ func (a *App) initPlugins() {
 		},
 	})
 	if err != nil {
-		a.notify("初始化插件运行时失败。%v", err)
-		return
+		return nil, fmt.Errorf(i18n.T("初始化插件运行时失败。%v"), err)
 	}
 	a.pluginsUI.host = host
+	return host, nil
 }
 
 func (a *App) closePlugins() {
@@ -217,10 +234,11 @@ func (a *App) ensurePluginInstance(p *plugin.Installed) (plugin.Instance, error)
 	if a.pluginsUI.startInstance != nil {
 		inst, err = a.pluginsUI.startInstance(p)
 	} else {
-		if a.pluginsUI.host == nil {
-			return nil, errors.New("WASM plugin runtime is unavailable")
+		host, hostErr := a.ensureWASMHost()
+		if hostErr != nil {
+			return nil, hostErr
 		}
-		inst, err = a.pluginsUI.host.Start(context.Background(), p)
+		inst, err = host.Start(context.Background(), p)
 	}
 	if err != nil {
 		return nil, err

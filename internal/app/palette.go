@@ -925,6 +925,7 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("插入行内公式"), "", after(ed.InsertInlineMath))
 	cmd(i18n.T("插入流程图"), "", after(ed.InsertMermaidFlowchart))
 	cmd(i18n.T("插入时序图"), "", after(ed.InsertMermaidSequence))
+	cmd(i18n.T("插入状态图"), "", after(ed.InsertMermaidState))
 	cmd(i18n.T("插入手绘白板"), "", after(ed.InsertWhiteboard))
 	cmd(i18n.T("插入脚注"), "", after(ed.InsertFootnote))
 	cmd(i18n.T("上标"), "", after(func() { ed.SetScript("sup") }))

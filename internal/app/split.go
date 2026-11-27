@@ -608,7 +608,18 @@ func (a *App) grouped(sp *space.Space, rel string) bool {
 	if inPins(sp, rel) {
 		return false
 	}
-	if s := a.session(sp.ID).split; s != nil {
+	session := a.session(sp.ID)
+	if session.splitDeferred {
+		if sp.Split != nil && len(sp.Split.Panes) >= 2 && len(sp.Split.Panes) <= splitLimit {
+			for _, ref := range sp.Split.Panes {
+				if ref.Space == sp.ID && ref.Path == rel {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if s := session.split; s != nil {
 		for _, p := range s.panes {
 			if p.doc != nil && p.doc.space == sp && p.doc.rel == rel {
 				return true

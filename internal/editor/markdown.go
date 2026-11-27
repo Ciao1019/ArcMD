@@ -125,7 +125,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 						continue
 					}
 				}
-				b.Runs, b.Comments = importRunsAndComments(in, document.Style{})
+				b.Runs, b.Comments = importBlockInlines(parsed, index, document.Style{}, "\u2028")
 				if context != "" {
 					b.Kind = context
 				}
@@ -263,7 +263,7 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					tr := &document.Block{ID: nextID(), Kind: "row"}
 					col := 0
 					for cell := range parsed.Children(row) {
-						runs, comments := importRunsAndCommentsWithBreak(parsed.Inlines(cell), document.Style{}, "\n")
+						runs, comments := importBlockInlines(parsed, cell, document.Style{}, "\n")
 						td := &document.Block{
 							ID:       nextID(),
 							Kind:     "cell",
@@ -675,7 +675,7 @@ func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline
 						continue
 					}
 				}
-				runs, comments := importRunsAndComments(cIn, document.Style{})
+				runs, comments := importBlockInlines(sub, cIdx, document.Style{}, "\u2028")
 				b := &document.Block{
 					ID:       nextID(),
 					Kind:     "paragraph",
@@ -814,7 +814,7 @@ func tryImportLeadingCommentParagraph(trimmed string, baseIndent int) (*document
 	if count != 1 || paraIdx < 0 {
 		return nil, false
 	}
-	runs, comments := importRunsAndComments(sub.Inlines(paraIdx), document.Style{})
+	runs, comments := importBlockInlines(sub, paraIdx, document.Style{}, "\u2028")
 	if len(comments) == 0 {
 		return nil, false
 	}
@@ -1202,6 +1202,404 @@ func importRunsAndComments(in []parser.Inline, base document.Style) ([]document.
 	return importRunsAndCommentsWithBreak(in, base, "\u2028")
 }
 
+func needsDollarMathRescue(in []parser.Inline) bool {
+	for _, node := range in {
+		if node.Kind == parser.Text && strings.ContainsRune(node.Text, '$') {
+			return true
+		}
+		if node.Kind == parser.Math && strings.ContainsRune(node.Text, '\n') {
+			return true
+		}
+	}
+	return false
+}
+
+func countLinksAndImages(in []parser.Inline) int {
+	n := 0
+	for _, node := range in {
+		if node.Kind == parser.Link || node.Kind == parser.Image {
+			n++
+		}
+	}
+	return n
+}
+
+func blockInlineSource(parsed *parser.Document, index int) string {
+	raw := strings.TrimSuffix(parsed.Lines(index), "\n")
+	if parsed.Block(index).Kind == parser.TableCell && strings.Contains(raw, `\|`) {
+		raw = strings.ReplaceAll(raw, `\|`, "|")
+	}
+	return raw
+}
+
+// importBlockInlines imports a block's inline AST and reconciles single-dollar
+// math with ArcMD's inlineTokens rules so digit-starting formulas (such as
+// $1$, $0$, $1 \le i \le n$) do not fail or mis-pair with following formulas.
+func importBlockInlines(parsed *parser.Document, index int, base document.Style, hardBreak string) ([]document.Run, []document.InlineComment) {
+	in := parsed.Inlines(index)
+	if !needsDollarMathRescue(in) {
+		return importRunsAndCommentsWithBreak(in, base, hardBreak)
+	}
+	raw := blockInlineSource(parsed, index)
+	if !strings.ContainsRune(raw, '$') {
+		return importRunsAndCommentsWithBreak(in, base, hardBreak)
+	}
+	rewritten, tag, formulas := rewriteInlineDollarMath(raw)
+	if rewritten == raw {
+		return importRunsAndCommentsWithBreak(in, base, hardBreak)
+	}
+	sub := parser.New(arcmdMarkdownExtensions)
+	sub.Set("<span></span>" + rewritten)
+	paraIdx := -1
+	count := 0
+	for idx := range sub.Children(0) {
+		count++
+		if sub.Block(idx).Kind == parser.Paragraph {
+			paraIdx = idx
+		}
+	}
+	if count != 1 || paraIdx < 0 {
+		return importRunsAndCommentsWithBreak(in, base, hardBreak)
+	}
+	subIn := slices.Clone(sub.Inlines(paraIdx))
+	if countLinksAndImages(subIn) < countLinksAndImages(in) {
+		return importRunsAndCommentsWithBreak(in, base, hardBreak)
+	}
+	for i := range subIn {
+		if subIn[i].Kind == parser.Math && strings.HasPrefix(subIn[i].Text, tag) && strings.HasSuffix(subIn[i].Text, "X") {
+			idStr := subIn[i].Text[len(tag) : len(subIn[i].Text)-1]
+			if id, err := strconv.Atoi(idStr); err == nil && id >= 0 && id < len(formulas) {
+				subIn[i].Text = formulas[id]
+			}
+		}
+	}
+	return importRunsAndCommentsWithBreak(subIn, base, hardBreak)
+}
+
+func isMarkdownASCIIPunct(c byte) bool {
+	return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') || (c >= '[' && c <= '`') || (c >= '{' && c <= '~')
+}
+
+func scanMarkdownBackticks(s string, start int) (int, bool) {
+	n := 0
+	for start+n < len(s) && s[start+n] == '`' {
+		n++
+	}
+	for j := start + n; j < len(s); {
+		if s[j] != '`' {
+			j++
+			continue
+		}
+		m := 0
+		for j+m < len(s) && s[j+m] == '`' {
+			m++
+		}
+		if m == n {
+			return j + m, true
+		}
+		j += m
+	}
+	return start + n, false
+}
+
+func scanMarkdownAngleSpan(s string, start int) (int, bool) {
+	if start+2 >= len(s) || s[start] != '<' {
+		return 0, false
+	}
+	if strings.HasPrefix(s[start:], "<!--") {
+		if end := strings.Index(s[start+4:], "-->"); end >= 0 {
+			return start + 4 + end + 3, true
+		}
+		return 0, false
+	}
+	c := s[start+1]
+	isAlpha := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	if !isAlpha && c != '/' && c != '?' && c != '!' {
+		return 0, false
+	}
+	// Autolink: <scheme:...> or <user@host> without whitespace or nested '<'.
+	if isAlpha {
+		hasColonOrAt := false
+		for j := start + 1; j < len(s); j++ {
+			ch := s[j]
+			if ch == '>' {
+				if hasColonOrAt && j > start+2 {
+					return j + 1, true
+				}
+				break
+			}
+			if ch == ' ' || ch == '\t' || ch == '\n' || ch == '<' {
+				break
+			}
+			if ch == ':' || ch == '@' {
+				hasColonOrAt = true
+			}
+		}
+	}
+	// HTML tag: <tag ...> or </tag>, disallowing unquoted '$' or '<'.
+	var quote byte
+	for j := start + 1; j < len(s); j++ {
+		ch := s[j]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '"', '\'':
+			quote = ch
+		case '>', '\n':
+			if ch == '>' {
+				return j + 1, true
+			}
+			return 0, false
+		case '<', '$':
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+func scanMarkdownLinkDest(s string, start int) (int, bool) {
+	if start+2 >= len(s) || s[start] != ']' || s[start+1] != '(' {
+		return 0, false
+	}
+	j := start + 2
+	for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+		j++
+	}
+	if j < len(s) && s[j] == '\n' {
+		j++
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+			j++
+		}
+	}
+	if j >= len(s) {
+		return 0, false
+	}
+	if s[j] == '<' {
+		j++
+		for j < len(s) && s[j] != '>' {
+			if s[j] == '\n' || s[j] == '<' {
+				return 0, false
+			}
+			if s[j] == '\\' && j+1 < len(s) {
+				j += 2
+				continue
+			}
+			j++
+		}
+		if j >= len(s) {
+			return 0, false
+		}
+		j++
+	}
+	depth := 1
+	var quote byte
+	for j < len(s) {
+		ch := s[j]
+		if ch == '\\' && j+1 < len(s) && isMarkdownASCIIPunct(s[j+1]) {
+			j += 2
+			continue
+		}
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			} else if ch == '\n' && j+1 < len(s) && s[j+1] == '\n' {
+				return 0, false
+			}
+			j++
+			continue
+		}
+		switch ch {
+		case '"', '\'':
+			quote = ch
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return j + 1, true
+			}
+		case '\n':
+			if j+1 < len(s) && s[j+1] == '\n' {
+				return 0, false
+			}
+		}
+		j++
+	}
+	return 0, false
+}
+
+func scanMarkdownBareURL(s string, start int) (int, bool) {
+	if start > 0 {
+		pr, _ := utf8.DecodeLastRuneInString(s[:start])
+		if unicode.IsLetter(pr) || unicode.IsDigit(pr) {
+			return 0, false
+		}
+	}
+	if !strings.HasPrefix(s[start:], "https://") && !strings.HasPrefix(s[start:], "http://") && !strings.HasPrefix(s[start:], "www.") {
+		return 0, false
+	}
+	j := start
+	for j < len(s) {
+		r, n := utf8.DecodeRuneInString(s[j:])
+		if unicode.IsSpace(r) || r == '<' || r == '>' || r == '"' || r == '\'' || r == ')' {
+			break
+		}
+		j += n
+	}
+	return j, j > start
+}
+
+func scanMarkdownInlineDollar(s string, open int) (int, bool) {
+	if open < 0 || open+1 >= len(s) || s[open] != '$' || s[open+1] == '$' || (open > 0 && s[open-1] == '$') {
+		return 0, false
+	}
+	first, _ := utf8.DecodeRuneInString(s[open+1:])
+	if unicode.IsSpace(first) {
+		return 0, false
+	}
+	z := open + 1
+	for z < len(s) && s[z] != '\n' {
+		if s[z] == '\\' {
+			_, rn := utf8.DecodeRuneInString(s[min(z+1, len(s)):])
+			z += 1 + rn
+			continue
+		}
+		if s[z] == '$' {
+			break
+		}
+		z++
+	}
+	if z >= len(s) || s[z] != '$' || z == open+1 {
+		return 0, false
+	}
+	last, _ := utf8.DecodeLastRuneInString(s[open+1 : z])
+	if unicode.IsSpace(last) || z+1 < len(s) && (s[z+1] >= '0' && s[z+1] <= '9' || s[z+1] == '$') {
+		return 0, false
+	}
+	return z, true
+}
+
+func rewriteInlineDollarMath(raw string) (rewritten, tag string, formulas []string) {
+	tag = "ARCMDMATH"
+	for strings.Contains(raw, tag) {
+		tag += "X"
+	}
+	var out strings.Builder
+	out.Grow(len(raw) + 16)
+	for i := 0; i < len(raw); {
+		switch raw[i] {
+		case '\\':
+			if i+1 < len(raw) && (raw[i+1] == '(' || raw[i+1] == '[') {
+				endDelim := `\)`
+				if raw[i+1] == '[' {
+					endDelim = `\]`
+				}
+				if k := strings.Index(raw[i+2:], endDelim); k > 0 {
+					end := i + 2 + k + 2
+					out.WriteString(raw[i:end])
+					i = end
+					continue
+				}
+			}
+			if i+1 < len(raw) && isMarkdownASCIIPunct(raw[i+1]) {
+				out.WriteString(raw[i : i+2])
+				i += 2
+				continue
+			}
+			out.WriteByte('\\')
+			i++
+		case '`':
+			end, _ := scanMarkdownBackticks(raw, i)
+			out.WriteString(raw[i:end])
+			i = end
+		case '<':
+			if end, ok := scanMarkdownAngleSpan(raw, i); ok {
+				out.WriteString(raw[i:end])
+				i = end
+				continue
+			}
+			out.WriteByte('<')
+			i++
+		case ']':
+			if end, ok := scanMarkdownLinkDest(raw, i); ok {
+				out.WriteString(raw[i:end])
+				i = end
+				continue
+			}
+			out.WriteByte(']')
+			i++
+		case 'h', 'w':
+			if end, ok := scanMarkdownBareURL(raw, i); ok {
+				out.WriteString(raw[i:end])
+				i = end
+				continue
+			}
+			out.WriteByte(raw[i])
+			i++
+		case '$':
+			if strings.HasPrefix(raw[i:], "$$") {
+				if k := strings.Index(raw[i+2:], "$$"); k >= 0 && strings.Trim(raw[i+2:i+2+k], " \t\n") != "" {
+					end := i + 2 + k + 2
+					out.WriteString(raw[i:end])
+					i = end
+					continue
+				}
+				// Unmatched run of multiple '$': escape so mygo keeps them literal.
+				for i < len(raw) && raw[i] == '$' {
+					out.WriteString(`\$`)
+					i++
+				}
+				continue
+			}
+			if z, ok := scanMarkdownInlineDollar(raw, i); ok {
+				id := len(formulas)
+				formulas = append(formulas, raw[i+1:z])
+				out.WriteByte('$')
+				out.WriteString(tag)
+				out.WriteString(strconv.Itoa(id))
+				out.WriteString("X$")
+				i = z + 1
+				continue
+			}
+			out.WriteString(`\$`)
+			i++
+		default:
+			out.WriteByte(raw[i])
+			i++
+		}
+	}
+	return out.String(), tag, formulas
+}
+
+func addNoMathText(acc *runAccumulator, s string, style document.Style) {
+	if !strings.ContainsRune(s, '$') {
+		style.NoMath = false
+		acc.add(s, style)
+		return
+	}
+	plain := style
+	plain.NoMath = false
+	noMath := style
+	noMath.NoMath = true
+	pos := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '$' {
+			if i > pos {
+				acc.add(s[pos:i], plain)
+			}
+			acc.add("$", noMath)
+			pos = i + 1
+		}
+	}
+	if pos < len(s) {
+		acc.add(s[pos:], plain)
+	}
+}
+
 func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, hardBreak string) ([]document.Run, []document.InlineComment) {
 	if len(in) == 0 {
 		return nil, nil
@@ -1243,8 +1641,6 @@ func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, har
 				if !next.Kbd {
 					next.Code = true
 				}
-			case parser.Text:
-				next.NoMath = strings.Contains(node.Text, "$")
 			}
 			if end > i+1 && node.Kind != parser.Image {
 				walk(i+1, end, next)
@@ -1260,7 +1656,11 @@ func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, har
 				case parser.FootnoteRef:
 					text = "[^" + node.Text + "]"
 				case parser.Math:
-					text = "$" + node.Text + "$"
+					body := strings.TrimSpace(strings.ReplaceAll(node.Text, "\n", " "))
+					if body == "" {
+						body = node.Text
+					}
+					text = "$" + body + "$"
 				case parser.Image:
 					text = "![" + parser.PlainText(in[i+1:end]) + "](" + node.Dest + ")"
 				}
@@ -1283,7 +1683,7 @@ func splitHighlightSyntax(s string, style document.Style) []document.Run {
 
 func writeHighlightSyntax(acc *runAccumulator, s string, style document.Style) {
 	if !strings.Contains(s, "==") {
-		acc.add(s, style)
+		addNoMathText(acc, s, style)
 		return
 	}
 	pos := 0
@@ -1311,24 +1711,19 @@ func writeHighlightSyntax(acc *runAccumulator, s string, style document.Style) {
 			continue
 		}
 		if i > pos {
-			plain := style
-			plain.NoMath = strings.Contains(s[pos:i], "$")
-			acc.add(s[pos:i], plain)
+			addNoMathText(acc, s[pos:i], style)
 		}
 		inner := s[i+2 : closeIdx]
 		hl := style
 		if hl.Highlight == "" {
 			hl.Highlight = "light-yellow"
 		}
-		hl.NoMath = strings.Contains(inner, "$")
-		acc.add(inner, hl)
+		addNoMathText(acc, inner, hl)
 		pos = closeIdx + 2
 		i = closeIdx + 1
 	}
 	if pos < len(s) {
-		plain := style
-		plain.NoMath = strings.Contains(s[pos:], "$")
-		acc.add(s[pos:], plain)
+		addNoMathText(acc, s[pos:], style)
 	}
 }
 

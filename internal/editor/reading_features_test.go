@@ -54,6 +54,136 @@ func TestInlineMathUTF16EditingAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInlineMathDigitStartAndAdjacentLiteralDollarRoundTrip(t *testing.T) {
+	// Issue #91: digit-starting inline formulas ($1$, $0$, $1 \le i \le n$)
+	// followed by $a_i$, plus adjacent escaped/code '$' and spaced \(...\)/$$...$$.
+	cases := []struct {
+		name      string
+		src       string
+		wantCount int
+		wantNoEsc bool
+	}{
+		{
+			name:      "digit-range-then-ai",
+			src:       `设 $1 \le i \le n$，则 $a_i$ 满足条件。`,
+			wantCount: 2,
+			wantNoEsc: true,
+		},
+		{
+			name:      "digit-only-and-ai",
+			src:       `取 $0$、$1$ 与 $a_i$`,
+			wantCount: 3,
+			wantNoEsc: true,
+		},
+		{
+			name:      "digit-coeff",
+			src:       `系数 $2a_i + 1$ 为正`,
+			wantCount: 1,
+			wantNoEsc: true,
+		},
+		{
+			name:      "escaped-dollar-before-ai",
+			src:       `花费 \$5，$a_i$ 成立`,
+			wantCount: 1,
+		},
+		{
+			name:      "code-dollar-before-ai",
+			src:       "符号 `$`，$a_i$ 成立",
+			wantCount: 1,
+		},
+		{
+			name:      "code-backslash-before-ai",
+			src:       "符号 `\\`$a_i$ 成立",
+			wantCount: 1,
+		},
+		{
+			name:      "unclosed-dollar-prev-line-soft",
+			src:       "unclosed $foo\nnext line $a_i$",
+			wantCount: 1,
+		},
+		{
+			name:      "unclosed-dollar-prev-line-hard",
+			src:       "unclosed $foo  \nnext line $a_i$",
+			wantCount: 1,
+		},
+		{
+			name:      "spaced-paren-and-inline-double-dollar",
+			src:       `前缀 \( a_i \) 与 $$ b_j $$ 后缀`,
+			wantCount: 2,
+		},
+		{
+			name:      "heading-digit-and-ai",
+			src:       `## $1 \le i \le n$ 与 $a_i$`,
+			wantCount: 2,
+			wantNoEsc: true,
+		},
+	}
+
+	countObjects := func(ed *Editor) int {
+		total := 0
+		for _, r := range ed.rows {
+			if r.layout != nil {
+				total += len(r.layout.objects)
+			}
+		}
+		return total
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := newTester(tc.src)
+			if got := countObjects(e); got != tc.wantCount {
+				t.Fatalf("initial render objects = %d, want %d; runs=%+v", got, tc.wantCount, e.Doc.Blocks[0].Runs)
+			}
+			// Edit end of paragraph to force re-serialization (not raw ImportSource reuse),
+			// then re-import and verify formulas still render without corrupting into $a_i\$.
+			e.SetSelection(e.Len(), e.Len())
+			e.ReplaceText(nil, "!")
+			exported := ExportMarkdown(e.Doc)
+			if strings.Contains(exported, `$a_i\$`) || strings.Contains(exported, `a_i\$`) {
+				t.Fatalf("exported Markdown corrupted closing dollar into \\$: %q", exported)
+			}
+			if tc.wantNoEsc && strings.Contains(exported, `\$`) {
+				t.Fatalf("unexpected escaped dollar in exported Markdown: %q", exported)
+			}
+			reopened, _ := newTester(exported)
+			if got := countObjects(reopened); got != tc.wantCount {
+				t.Fatalf("reopened render objects = %d, want %d; exported=%q runs=%+v", got, tc.wantCount, exported, reopened.Doc.Blocks[0].Runs)
+			}
+		})
+	}
+
+	// Link URL containing '$' must stay untouched while math in link/prose still works.
+	linkSrc := `见 [链接](https://example.com/$a$/$b$) 与 $1 \le i \le n$ 和 $a_i$`
+	e, _ := newTester(linkSrc)
+	if got := len(e.rows[0].layout.objects); got != 2 {
+		t.Fatalf("link case objects = %d, want 2; runs=%+v", got, e.Doc.Blocks[0].Runs)
+	}
+	foundLink := false
+	for _, r := range e.Doc.Blocks[0].Runs {
+		if r.Style.Link == "https://example.com/$a$/$b$" {
+			foundLink = true
+			break
+		}
+	}
+	if !foundLink {
+		t.Fatalf("link destination corrupted: %+v", e.Doc.Blocks[0].Runs)
+	}
+
+	// GFM table cells with digit-starting math and $a_i$.
+	tableSrc := "| 序号 | 公式 |\n| --- | --- |\n| $1$ | $1 \\le i \\le n$，$a_i$ |\n"
+	te, _ := newTester(tableSrc)
+	row := te.Doc.Blocks[0].Children[1]
+	c0 := row.Children[0]
+	c1 := row.Children[1]
+	if got := len(inlineTokensInBlock(c0, c0.Text())); got != 1 {
+		t.Fatalf("table cell 0 tokens = %d, want 1; runs=%+v", got, c0.Runs)
+	}
+	if got := len(inlineTokensInBlock(c1, c1.Text())); got != 2 {
+		t.Fatalf("table cell 1 tokens = %d, want 2; runs=%+v", got, c1.Runs)
+	}
+}
+
 func TestClipboardMarkdownHTMLAndLiteralPaste(t *testing.T) {
 	for _, source := range []string{"# Title", "- one\n- two", "| a | b |\n|---|---|\n| 1 | 2 |", "```go\nx := 1\n```"} {
 		e, tt := newTester("")

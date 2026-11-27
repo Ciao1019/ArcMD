@@ -73,11 +73,21 @@ func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 	next := &Index{entries: map[key]*entry{}}
 	changed := false
 	for _, r := range roots {
-		var docs []vault.Doc
+		var docs []vault.DocStat
 		if r.Files != nil {
-			docs = r.Files.List()
+			for _, d := range r.Files.List() {
+				full, err := r.Files.Resolve(d.Path)
+				if err != nil {
+					continue
+				}
+				info, err := os.Stat(full)
+				if err != nil {
+					continue
+				}
+				docs = append(docs, vault.DocStat{Doc: d, Size: info.Size(), Modified: info.ModTime()})
+			}
 		} else {
-			docs, _ = vault.List(r.Path)
+			docs, _ = vault.ListStat(r.Path)
 		}
 		for _, d := range docs {
 			k := key{r.Space, d.Path}
@@ -90,12 +100,8 @@ func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 				root, rel = filepath.Dir(full), filepath.Base(full)
 			}
 			fullFile := filepath.Join(root, filepath.FromSlash(rel))
-			info, err := os.Stat(fullFile)
-			if err != nil {
-				continue
-			}
 			if prev != nil {
-				if e, ok := prev.entries[k]; ok && e.file == fullFile && e.size == info.Size() && e.mod.Equal(info.ModTime()) {
+				if e, ok := prev.entries[k]; ok && e.file == fullFile && e.size == d.Size && e.mod.Equal(d.Modified) {
 					next.entries[k] = e
 					next.order = append(next.order, k)
 					continue
@@ -103,12 +109,12 @@ func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 			}
 			// Huge PDFs, EPUBs, and HTML files remain discoverable by title without
 			// loading tens of megabytes into memory during background indexing.
-			if (vault.IsPDF(d.Path) && info.Size() > 32<<20) ||
-				(vault.IsEPUB(d.Path) && info.Size() > 32<<20) ||
-				(vault.IsMDZ(d.Path) && info.Size() > 32<<20) ||
-				(vault.IsHTML(d.Path) && info.Size() > 16<<20) {
+			if (vault.IsPDF(d.Path) && d.Size > 32<<20) ||
+				(vault.IsEPUB(d.Path) && d.Size > 32<<20) ||
+				(vault.IsMDZ(d.Path) && d.Size > 32<<20) ||
+				(vault.IsHTML(d.Path) && d.Size > 16<<20) {
 				changed = true
-				next.entries[k] = &entry{file: fullFile, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
+				next.entries[k] = &entry{file: fullFile, size: d.Size, mod: d.Modified, space: r.Space, path: d.Path}
 				next.order = append(next.order, k)
 				continue
 			}
@@ -121,7 +127,7 @@ func RefreshChanged(prev *Index, roots []Root, extract Extract) (*Index, bool) {
 				continue
 			}
 			changed = true
-			next.entries[k] = &entry{file: fullFile, text: ex.Text, icon: ex.Icon, size: info.Size(), mod: info.ModTime(), space: r.Space, path: d.Path}
+			next.entries[k] = &entry{file: fullFile, text: ex.Text, icon: ex.Icon, size: d.Size, mod: d.Modified, space: r.Space, path: d.Path}
 			next.order = append(next.order, k)
 		}
 	}

@@ -631,3 +631,48 @@ func TestAppHTMLEndToEndWorkflow(t *testing.T) {
 		t.Fatal("expected v9 milestone version entry")
 	}
 }
+
+func TestAppSideMarginClickBlursEditor(t *testing.T) {
+	a, tt := newTestApp(t)
+	tt.SetSize(1600, 800)
+	tt.Frame()
+	focusDocument(a, tt)
+	if !tt.Focused("文档") || !a.doc.ed.Focused() {
+		t.Fatal("document should start focused")
+	}
+	r, ok := tt.Find("文档")
+	if !ok {
+		t.Fatal("missing writing surface")
+	}
+	pad := a.doc.ed.Padding()
+	bodyW := a.doc.ed.BodyWidth()
+	if pad <= 60 || r.W-(pad+bodyW) <= 40 {
+		t.Fatalf("expected visible side margins in wide app window: rect=%+v pad=%v bodyW=%v", r, pad, bodyW)
+	}
+
+	// Clicking right margin blurs the editor and prevents accidental typing.
+	before := a.doc.ed.Text()
+	tt.ClickAt(r.X+pad+bodyW+24, r.Y+120)
+	tt.Frame()
+	tt.Frame()
+	if tt.Focused("文档") || a.doc.ed.Focused() {
+		t.Fatalf("right margin click did not blur app editor: tt.Focused=%v ed.Focused=%v", tt.Focused("文档"), a.doc.ed.Focused())
+	}
+	tt.Type("accidental")
+	if a.doc.ed.Text() != before || a.doc.dirty() {
+		t.Fatal("typing after right margin blur unexpectedly modified document")
+	}
+
+	// Re-focus in prose column, then click left margin between outline and prose.
+	tt.ClickAt(r.X+pad+24, r.Y+120)
+	tt.Frame()
+	if !tt.Focused("文档") || !a.doc.ed.Focused() {
+		t.Fatal("clicking prose column did not restore focus")
+	}
+	tt.ClickAt(r.X+pad-70, r.Y+120)
+	tt.Frame()
+	tt.Frame()
+	if tt.Focused("文档") || a.doc.ed.Focused() || len(a.doc.ed.BlockSelection()) != 0 {
+		t.Fatalf("left margin click did not blur cleanly: tt.Focused=%v ed.Focused=%v blocks=%v", tt.Focused("文档"), a.doc.ed.Focused(), a.doc.ed.BlockSelection())
+	}
+}

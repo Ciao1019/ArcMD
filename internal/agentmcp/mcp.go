@@ -75,7 +75,7 @@ func Tools() []Tool {
 			Description: "Create a new Space in ArcMD with optional folder path, emoji icon or Lucide symbol, theme colors, appearance (auto/light/dark), and switch to it.",
 			InputSchema: objSchema(map[string]any{
 				"name":       strProp("Display name of the new Space."),
-				"root":       strProp("Optional folder path on disk (defaults to ~/Documents/ArcMD/<name>)."),
+				"root":       strProp("Optional folder path on disk (defaults to ~/.arcmd/spaces/<name>)."),
 				"icon":       strProp("Optional emoji glyph, e.g. '🚀'."),
 				"symbol":     strProp("Optional Lucide symbol name (mutually exclusive with icon)."),
 				"colors":     arrStrProp("Optional 1-3 hex colors (#RRGGBB) for the Space theme."),
@@ -327,7 +327,7 @@ type rpcError struct {
 // and Content-Length header framing.
 func Serve(ctx context.Context, in io.Reader, out io.Writer, version string, caller ToolCaller) error {
 	if version == "" {
-		version = "0.5.0"
+		version = "0.5.1"
 	}
 	br := bufio.NewReaderSize(in, 64*1024)
 	var writeMu sync.Mutex

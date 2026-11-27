@@ -61,7 +61,7 @@ func ConvertMermaidToWhiteboard(src string, cx, cy float32) ([]*whiteboard.Eleme
 			kind = whiteboard.KindParallelogram
 		case sh.Kind == mermaid.ShapeStadium:
 			kind = whiteboard.KindStadium
-		case sh.Kind == mermaid.ShapeCircle:
+		case sh.Kind == mermaid.ShapeCircle || sh.Kind == mermaid.ShapeStartState || sh.Kind == mermaid.ShapeEndState:
 			kind = whiteboard.KindEllipse
 		case sh.Kind == mermaid.ShapeActor:
 			kind = whiteboard.KindActor
@@ -83,6 +83,16 @@ func ConvertMermaidToWhiteboard(src string, cx, cy float32) ([]*whiteboard.Eleme
 			nodeElems = append(nodeElems, el)
 		} else if kind == whiteboard.KindActor {
 			el.StrokeColor = "ink"
+			nodeElems = append(nodeElems, el)
+		} else if sh.Kind == mermaid.ShapeStartState || sh.Kind == mermaid.ShapeEndState || sh.Kind == mermaid.ShapeBar {
+			el.StrokeColor = "ink"
+			el.FillColor = "ink"
+			el.FillStyle = whiteboard.FillSolid
+			if sh.Kind == mermaid.ShapeEndState {
+				el.FillColor = "gray"
+			}
+			el.Roughness = 0
+			el.Roundness = sh.Kind == mermaid.ShapeBar
 			nodeElems = append(nodeElems, el)
 		} else {
 			col := palette[colorIdx%len(palette)]
@@ -197,7 +207,7 @@ func ConvertMermaidToWhiteboard(src string, cx, cy float32) ([]*whiteboard.Eleme
 		case mermaid.EdgeThick:
 			el.StrokeWidth = 3.2
 		}
-		if diag.Kind == "flowchart" {
+		if diag.Kind == "flowchart" || diag.Kind == "state" {
 			startAbs := path.Points[0]
 			endAbs := path.Points[len(path.Points)-1]
 			if target := whiteboard.FindBindTarget(temp, el.ID, startAbs[0], startAbs[1], 18); target != nil {

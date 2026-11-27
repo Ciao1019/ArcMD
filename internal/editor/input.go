@@ -84,7 +84,7 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 	switch ev.Kind {
 	case ui.InputPointerDown:
 		if ev.Button == 1 {
-			if e.Anchor == e.Caret && len(e.blocks.ids) == 0 {
+			if e.Anchor == e.Caret && len(e.blocks.ids) == 0 && !e.inSideMargin(ev.X, ev.Y) {
 				if at, ok := e.IndexForPoint(ui.Point{X: ev.X, Y: ev.Y}); ok {
 					e.UnmarkText()
 					e.SetSelection(at, at)
@@ -96,6 +96,25 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if ev.Button != 0 {
 			return false
 		}
+		if left, right := e.contentSpanAt(ev.Y); ev.X < left || ev.X > right {
+			if e.clickInlineMathPopover(ev.X, ev.Y) {
+				e.blurStage = blurIdle
+				return true
+			}
+			if e.clickNumberedMarker(ev.X, ev.Y) {
+				e.blurStage = blurIdle
+				return true
+			}
+			if ev.X < left && ev.Mods == 0 && len(e.handles) > 0 && ev.Y >= e.indexedHandle(0).top-8 && ev.Y <= e.contentEnd {
+				e.blocks.marqueeArm = true
+				e.blocks.marquee = false
+				e.blocks.x0, e.blocks.y0 = ev.X, ev.Y
+				return true
+			}
+			e.blur()
+			return true
+		}
+		e.blurStage = blurIdle
 		e.pendingLink = linkSpan{}
 		e.UnmarkText()
 		e.clearBlocks()

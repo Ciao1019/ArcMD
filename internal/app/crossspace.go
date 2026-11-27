@@ -175,6 +175,8 @@ func (a *App) followTo(sp *space.Space) {
 		a.session(cur.ID).doc = nil
 	}
 	a.state.SetActive(sp.ID)
+	a.ensureSplitRestored(sp)
+	a.session(sp.ID).splitShown = false
 	sp.LastOpen = a.doc.rel
 	a.saveState()
 	a.renaming = ""

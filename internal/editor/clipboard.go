@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -113,8 +114,19 @@ func (e *Editor) pasteSelection(read func() string) {
 	}
 	kind := e.Engine.LeafAt(e.Caret).Block.Kind
 	inLiteral := kind == "code" || kind == "raw" || kind == "math"
-	clipboard := e.services.ReadClipboardData(fragmentFormat, transfer.FileList, transfer.PNG, transfer.HTML, transfer.Markdown, transfer.Text)
-	if data, err := clipboard.Read(fragmentFormat); err == nil && len(data) < 16<<20 {
+	offered := e.services.ClipboardFormats()
+	hasFormat := func(f transfer.Format) bool {
+		return len(offered) == 0 || slices.Contains(offered, f)
+	}
+	readFormat := func(f transfer.Format) ([]byte, bool) {
+		if !hasFormat(f) {
+			return nil, false
+		}
+		b, err := e.services.ReadClipboardData(f).Read(f)
+		return b, err == nil && len(b) > 0
+	}
+
+	if data, ok := readFormat(fragmentFormat); ok && len(data) < 16<<20 {
 		if doc, err := document.Decode(string(data)); err == nil {
 			if inLiteral {
 				e.Buffer.ReplaceText(nil, doc.PlainText())
@@ -126,27 +138,41 @@ func (e *Editor) pasteSelection(read func() string) {
 			return
 		}
 	}
-	// Files copied in Finder go in as dropped at the caret; a picture
-	// copied from an app or a screenshot is PNG. Both come with text (the
-	// files' names), which is pasted only when the host takes neither.
-	if e.dropFiles != nil {
-		if files, err := clipboard.Files(); err == nil && len(files) > 0 {
+	// Files copied in Finder go in as dropped at the caret.
+	if e.dropFiles != nil && hasFormat(transfer.FileList) {
+		if files, err := e.services.ReadClipboardData(transfer.FileList).Files(); err == nil && len(files) > 0 {
 			e.UnmarkText()
 			e.dropFiles(files, -1)
 			return
 		}
 	}
-	if e.pasteImage != nil {
-		if png, err := clipboard.Read(transfer.PNG); err == nil && len(png) > 0 {
+
+	// Read structured text formats before deciding whether a clipboard PNG is
+	// an actual picture (screenshot, browser "Copy Image", chat image, Excel
+	// chart) or a fallback bitmap snapshot attached alongside spreadsheet or
+	// office content (Excel, WPS, Numbers, LibreOffice Calc, Word).
+	var htmlStr string
+	htmlSubstantive := false
+	if data, ok := readFormat(transfer.HTML); ok && len(data) < 8<<20 {
+		htmlStr = string(data)
+		htmlSubstantive = htmlHasNonImageContent(htmlStr)
+	}
+	mdBytes, hasMD := readFormat(transfer.Markdown)
+	if hasMD && len(mdBytes) >= 8<<20 {
+		mdBytes, hasMD = nil, false
+	}
+	text := read()
+	hasPNG := e.pasteImage != nil && hasFormat(transfer.PNG)
+	if hasPNG && !htmlSubstantive && !hasMD && !isSpreadsheetPlainText(text) {
+		if png, ok := readFormat(transfer.PNG); ok {
 			e.UnmarkText()
 			e.pasteImage(png)
 			return
 		}
 	}
-	text := read()
 	if kind != "code" && kind != "raw" && kind != "cell" && !e.Engine.CurrentStyle().Code && !e.Engine.CurrentStyle().Kbd {
-		if md, err := clipboard.Read(transfer.Markdown); err == nil && len(md) < 8<<20 && len(md) > 0 {
-			text = string(md)
+		if hasMD {
+			text = string(mdBytes)
 		}
 	}
 	// A complete display formula copied from a chat or Markdown document
@@ -166,12 +192,18 @@ func (e *Editor) pasteSelection(read func() string) {
 			return
 		}
 	}
-	// Rich text from a browser or another editor keeps its structure;
-	// HTML that holds only plain text pastes as the text. Inside a code block,
-	// if plain text lost leading indentation, recover it from HTML code blocks.
-	if data, err := clipboard.Read(transfer.HTML); err == nil && len(data) > 0 && len(data) < 8<<20 {
-		doc := ImportHTML(string(data))
+	// Rich text from a browser, spreadsheet or another editor keeps its
+	// structure; HTML that holds only plain text pastes as the text. Inside a
+	// code block, if plain text lost leading indentation, recover it from HTML.
+	if htmlStr != "" {
+		doc := ImportHTML(htmlStr)
 		if !inLiteral {
+			if singleCell, ok := unwrapSingleCellTable(doc); ok {
+				e.UnmarkText()
+				e.Engine.Paste(singleCell)
+				e.sync()
+				return
+			}
 			if rich(doc) {
 				e.UnmarkText()
 				e.Engine.Paste(doc)
@@ -196,6 +228,14 @@ func (e *Editor) pasteSelection(read func() string) {
 			e.sync()
 			return
 		}
+		if hasPNG {
+			if doc := singleRowTabTable(text); doc != nil {
+				e.UnmarkText()
+				e.Engine.Paste(doc)
+				e.sync()
+				return
+			}
+		}
 		if doc := ImportMarkdown(text); rich(doc) {
 			e.UnmarkText()
 			e.Engine.Paste(doc)
@@ -204,6 +244,31 @@ func (e *Editor) pasteSelection(read func() string) {
 		}
 	}
 	e.Buffer.ReplaceText(nil, text)
+}
+
+func isSpreadsheetPlainText(text string) bool {
+	return tabTable(text) != nil || singleRowTabTable(text) != nil
+}
+
+// unwrapSingleCellTable turns a pasted 1x1 HTML table (such as a single cell
+// copied from Excel) into a paragraph with that cell's runs so pasting a single
+// value into prose or another cell does not insert a 1x1 table or stray newline.
+func unwrapSingleCellTable(doc *document.Document) (*document.Document, bool) {
+	if doc == nil || len(doc.Blocks) != 1 || doc.Blocks[0].Kind != "table" {
+		return nil, false
+	}
+	t := doc.Blocks[0]
+	if len(t.Children) != 1 || len(t.Children[0].Children) != 1 {
+		return nil, false
+	}
+	cell := t.Children[0].Children[0]
+	p := document.NewBlock("paragraph", "")
+	if len(cell.Runs) > 0 {
+		p.Runs = document.Compact(cell.Runs)
+	}
+	out := document.New()
+	out.Blocks = []*document.Block{p}
+	return out, true
 }
 
 // pastedMath only opts plain clipboard text into Markdown import when a

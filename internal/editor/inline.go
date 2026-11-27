@@ -48,8 +48,50 @@ type textLayout struct {
 }
 
 func inlineTokens(s string) []inlineToken {
+	return scanInlineTokens(s, nil)
+}
+
+func runDisallowsInlineToken(st document.Style) bool {
+	return st.Code || st.Kbd || st.Link != "" || st.NoMath
+}
+
+func inlineTokensInBlock(b *document.Block, s string) []inlineToken {
+	if b == nil || literalBlock(b.Kind) {
+		return nil
+	}
+	var forbid [][2]int
+	off := 0
+	for _, r := range b.Runs {
+		n := len(r.Text)
+		if n > 0 && runDisallowsInlineToken(r.Style) {
+			if len(forbid) > 0 && forbid[len(forbid)-1][1] == off {
+				forbid[len(forbid)-1][1] = off + n
+			} else {
+				forbid = append(forbid, [2]int{off, off + n})
+			}
+		}
+		off += n
+	}
+	if len(forbid) == 0 {
+		return scanInlineTokens(s, nil)
+	}
+	return scanInlineTokens(s, func(byteOff int) bool {
+		idx := sort.Search(len(forbid), func(i int) bool { return forbid[i][1] > byteOff })
+		return idx < len(forbid) && byteOff >= forbid[idx][0]
+	})
+}
+
+func isLineBreakAt(s string, i int) bool {
+	return s[i] == '\n' || strings.HasPrefix(s[i:], "\u2028")
+}
+
+func scanInlineTokens(s string, disallowed func(int) bool) []inlineToken {
 	var out []inlineToken
 	for i := 0; i < len(s); {
+		if disallowed != nil && disallowed(i) {
+			i++
+			continue
+		}
 		if s[i] == '\\' {
 			_, n := utf8.DecodeRuneInString(s[min(i+1, len(s)):])
 			i += 1 + n
@@ -60,9 +102,20 @@ func inlineTokens(s string) []inlineToken {
 				z := i + 2 + n + 1
 				label := s[i+2 : z-1]
 				if !strings.ContainsAny(label, " \t\r\n[") {
-					out = append(out, inlineToken{i, z, "", label})
-					i = z
-					continue
+					ok := true
+					if disallowed != nil {
+						for k := i; k < z; k++ {
+							if disallowed(k) {
+								ok = false
+								break
+							}
+						}
+					}
+					if ok {
+						out = append(out, inlineToken{i, z, "", label})
+						i = z
+						continue
+					}
 				}
 			}
 		}
@@ -76,9 +129,15 @@ func inlineTokens(s string) []inlineToken {
 			continue
 		}
 		z := i + 1
-		for z < len(s) && s[z] != '\n' {
+		blocked := false
+		for z < len(s) && !isLineBreakAt(s, z) {
+			if disallowed != nil && disallowed(z) {
+				blocked = true
+				break
+			}
 			if s[z] == '\\' {
-				z += min(2, len(s)-z)
+				_, rn := utf8.DecodeRuneInString(s[min(z+1, len(s)):])
+				z += 1 + rn
 				continue
 			}
 			if s[z] == '$' {
@@ -86,7 +145,7 @@ func inlineTokens(s string) []inlineToken {
 			}
 			z++
 		}
-		if z >= len(s) || s[z] != '$' {
+		if blocked || z >= len(s) || s[z] != '$' {
 			i++
 			continue
 		}
@@ -125,9 +184,10 @@ func scanDollarSpan(s string, openByte int) (closeByte int, ok bool) {
 		return 0, false
 	}
 	z := openByte + 1
-	for z < len(s) && s[z] != '\n' {
+	for z < len(s) && !isLineBreakAt(s, z) {
 		if s[z] == '\\' {
-			z += min(2, len(s)-z)
+			_, rn := utf8.DecodeRuneInString(s[min(z+1, len(s)):])
+			z += 1 + rn
 			continue
 		}
 		if s[z] == '$' {
@@ -160,7 +220,7 @@ func (e *Editor) watchInline() {
 		e.inlineMath = inlineMathEdit{blockID: l.Block.ID, start: a, end: z, source: src}
 		e.inlineEditing = fmt.Sprintf("%s:%d:%d:%s", l.Block.ID, a, z, src)
 	}
-	for _, t := range inlineTokens(s) {
+	for _, t := range inlineTokensInBlock(l.Block, s) {
 		a, z := document.Len(s[:t.start]), document.Len(s[:t.end])
 		if t.note == "" && atLo > a && atHi < z && tokenAllowed(l.Block, a, z) {
 			activate(a, z, t.source)
@@ -272,7 +332,7 @@ func (e *Editor) shapeInline(b *document.Block, spans []ui.Span, font ui.Font, s
 	if hasEdit {
 		l.objects = append(l.objects, editObj)
 	}
-	for _, token := range inlineTokens(text) {
+	for _, token := range inlineTokensInBlock(b, text) {
 		a, z := document.Len(text[:token.start]), document.Len(text[:token.end])
 		if !tokenAllowed(b, a, z) {
 			continue
@@ -820,7 +880,7 @@ func referencedNotes(b *document.Block, text string) []string {
 		return nil
 	}
 	var labels []string
-	for _, token := range inlineTokens(text) {
+	for _, token := range inlineTokensInBlock(b, text) {
 		if token.note != "" && tokenAllowed(b, document.Len(text[:token.start]), document.Len(text[:token.end])) {
 			labels = append(labels, token.note)
 		}
@@ -939,7 +999,7 @@ func (e *Editor) FollowFootnote() bool {
 		return e.ReturnFootnote()
 	}
 	s := l.Block.Text()
-	for _, t := range inlineTokens(s) {
+	for _, t := range inlineTokensInBlock(l.Block, s) {
 		a, z := l.Start+document.Len(s[:t.start]), l.Start+document.Len(s[:t.end])
 		if t.note != "" && e.Caret >= a && e.Caret <= z {
 			if n, ok := e.notes[t.note]; ok {
@@ -963,7 +1023,7 @@ func (e *Editor) ReturnFootnote() bool {
 		}
 		for _, leaf := range e.Doc.Leaves() {
 			s := leaf.Block.Text()
-			for _, token := range inlineTokens(s) {
+			for _, token := range inlineTokensInBlock(leaf.Block, s) {
 				if token.note == label && tokenAllowed(leaf.Block, document.Len(s[:token.start]), document.Len(s[:token.end])) {
 					e.noteReturn = leaf.Start + document.Len(s[:token.start])
 					e.noteHasReturn = true

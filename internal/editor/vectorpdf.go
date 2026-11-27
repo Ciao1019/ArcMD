@@ -680,6 +680,10 @@ func exportMermaidShape(
 		rad := float64(max(s.Radius, 6)) * sc
 		vp.FillRect(x, y, w, h, rad, fc)
 		vp.StrokeRect(x, y, w, h, rad, lw, bc, s.Dashed)
+		if s.DividerY > 0 && s.DividerY < s.H {
+			dy := py(s.Y + s.DividerY)
+			vp.Line(x, dy, x+w, dy, 1*sc, bc, false)
+		}
 	case mermaid.ShapeStadium:
 		rad := min(w, h) / 2
 		vp.FillRect(x, y, w, h, rad, fc)
@@ -769,6 +773,17 @@ func exportMermaidShape(
 		vp.Line(cx-headR*1.5, armY, cx+headR*1.5, armY, lw, bc, false)
 		vp.Line(cx, hipY, cx-headR*1.2, y+h-1*sy, lw, bc, false)
 		vp.Line(cx, hipY, cx+headR*1.2, y+h-1*sy, lw, bc, false)
+	case mermaid.ShapeStartState:
+		rad := min(w, h) / 2
+		vp.DrawCircle(x+w/2, y+h/2, rad, pdfRGBA(t.Text.Alpha(0.85)), [4]uint8{}, 0)
+	case mermaid.ShapeEndState:
+		cx, cy, rad := x+w/2, y+h/2, min(w, h)/2
+		ink := pdfRGBA(t.Text.Alpha(0.85))
+		vp.DrawCircle(cx, cy, rad, pdfRGBA(t.Background), ink, 1.5*sc)
+		vp.DrawCircle(cx, cy, rad*0.52, ink, [4]uint8{}, 0)
+	case mermaid.ShapeBar:
+		rad := float64(min(float32(3), min(s.W, s.H)/2)) * sc
+		vp.FillRect(x, y, w, h, rad, pdfRGBA(t.Text.Alpha(0.85)))
 	}
 }
 

@@ -39,32 +39,52 @@ func (n *Node) Title() string {
 // Tree reads the folders and document files under root, leaving out what
 // List leaves out; empty folders are kept, as the user made them.
 func Tree(root string) ([]*Node, error) {
-	return readDir(root, "")
-}
-
-func readDir(root, rel string) ([]*Node, error) {
-	return readBranch(root, rel, nil)
-}
-
-func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
-	dir := root
-	if rel != "" {
-		var err error
-		dir, err = Resolve(root, rel)
-		if err != nil {
-			return nil, err
-		}
-	}
-	info, err := os.Stat(dir)
+	info, err := os.Stat(root)
 	if err != nil {
 		return nil, err
 	}
-	for _, parent := range ancestors {
-		if os.SameFile(info, parent) {
-			return nil, errors.New("vault: symbolic link cycle")
+	anc := &treeAncestors{
+		paths: []string{root},
+		infos: []os.FileInfo{info},
+	}
+	return readBranch(root, root, "", anc)
+}
+
+type treeAncestors struct {
+	paths []string
+	infos []os.FileInfo
+}
+
+func (a *treeAncestors) hasCycle(info os.FileInfo) bool {
+	for i, p := range a.paths {
+		anc := a.infos[i]
+		if anc == nil {
+			fi, err := os.Stat(p)
+			if err != nil {
+				continue
+			}
+			anc = fi
+			a.infos[i] = fi
+		}
+		if os.SameFile(info, anc) {
+			return true
 		}
 	}
-	ancestors = append(ancestors, info)
+	return false
+}
+
+func (a *treeAncestors) push(dir string, info os.FileInfo) {
+	a.paths = append(a.paths, dir)
+	a.infos = append(a.infos, info)
+}
+
+func (a *treeAncestors) pop() {
+	n := len(a.paths) - 1
+	a.paths = a.paths[:n]
+	a.infos = a.infos[:n]
+}
+
+func readBranch(root, dir, rel string, anc *treeAncestors) ([]*Node, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -73,12 +93,16 @@ func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
 	for _, e := range entries {
 		name := e.Name()
 		p := path.Join(rel, name)
+		isSymlink := e.Type()&fs.ModeSymlink != 0
 		isDir := e.IsDir()
-		if e.Type()&fs.ModeSymlink != 0 {
+		var linkInfo os.FileInfo
+		if isSymlink {
 			if _, err := Resolve(root, p); err != nil {
 				continue
 			}
-			if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			fi, err := os.Stat(filepath.Join(dir, name))
+			if err == nil {
+				linkInfo = fi
 				isDir = fi.IsDir()
 			}
 		}
@@ -87,7 +111,15 @@ func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
 			if skipDir(name) || name == "assets" {
 				continue
 			}
-			kids, err := readBranch(root, p, ancestors)
+			childDir := filepath.Join(dir, name)
+			if isSymlink {
+				if linkInfo == nil || anc.hasCycle(linkInfo) {
+					continue
+				}
+			}
+			anc.push(childDir, linkInfo)
+			kids, err := readBranch(root, childDir, p, anc)
+			anc.pop()
 			if err != nil {
 				continue // unreadable folders are left out
 			}
@@ -103,7 +135,11 @@ func readBranch(root, rel string, ancestors []os.FileInfo) ([]*Node, error) {
 			dirs = append(dirs, n)
 		case !strings.HasPrefix(name, ".") && IsDocument(name):
 			n := &Node{Name: name, Path: p}
-			if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			if isSymlink {
+				if linkInfo != nil {
+					n.Modified = linkInfo.ModTime()
+				}
+			} else if fi, err := e.Info(); err == nil {
 				n.Modified = fi.ModTime()
 			}
 			files = append(files, n)

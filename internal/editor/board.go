@@ -735,7 +735,8 @@ func (b *Board) pasteFromClipboard(readClip func() string, o BoardOptions) bool 
 	} else {
 		tx, ty = b.viewportCenterScene()
 	}
-	if strings.HasPrefix(trimmed, "flowchart ") || strings.HasPrefix(trimmed, "graph ") || strings.HasPrefix(trimmed, "sequenceDiagram") {
+	if strings.HasPrefix(trimmed, "flowchart ") || strings.HasPrefix(trimmed, "graph ") ||
+		strings.HasPrefix(trimmed, "sequenceDiagram") || strings.HasPrefix(trimmed, "stateDiagram") {
 		if mElems, err := ConvertMermaidToWhiteboard(trimmed, tx, ty); err == nil && len(mElems) > 0 {
 			b.appendPastedElements(mElems, o)
 			return true

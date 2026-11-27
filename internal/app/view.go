@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"path"
 	"strings"
 	"time"
@@ -107,6 +108,10 @@ func (a *App) View(c *ui.Context) {
 		c.Toast(n)
 	}
 	a.notices = a.notices[:0]
+	for _, n := range a.deferredNotices {
+		c.Toast(fmt.Sprintf(i18n.T(n.format), n.args...))
+	}
+	a.deferredNotices = a.deferredNotices[:0]
 	for _, u := range a.undos {
 		c.AddToast(u)
 	}

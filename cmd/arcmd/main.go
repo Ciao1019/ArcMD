@@ -30,6 +30,9 @@ func main() {
 			os.Exit(code)
 		}
 	}
+	if !app.AcquireSingleInstance(cfg) {
+		return
+	}
 	a, err := app.New(cfg)
 	if err != nil {
 		log.Fatal(err)

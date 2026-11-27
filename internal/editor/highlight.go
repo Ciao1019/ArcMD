@@ -958,7 +958,7 @@ func lexMarkdownLine(line string, pg Page) []ui.Span {
 	return spans
 }
 
-var mermaidKeywords = wordSet("flowchart graph sequenceDiagram subgraph end direction participant actor autonumber activate deactivate loop alt else opt par and rect Note left right of over as TD TB LR RL BT")
+var mermaidKeywords = wordSet("flowchart graph sequenceDiagram stateDiagram state subgraph end direction participant actor autonumber activate deactivate loop alt else opt par and rect Note note left right of over as choice fork join hide empty description TD TB LR RL BT")
 
 func lexMermaidLine(line string, pg Page) []ui.Span {
 	var spans []ui.Span
@@ -995,6 +995,16 @@ func lexMermaidLine(line string, pg Page) []ui.Span {
 			i = j
 			continue
 		}
+		if strings.HasPrefix(line[i:], "stateDiagram-v2") && (i+15 == n || !isIdentCont(line[i+15])) {
+			emit("stateDiagram-v2", pg.Tokens.Keyword)
+			i += 15
+			continue
+		}
+		if strings.HasPrefix(line[i:], "[*]") {
+			emit("[*]", pg.Tokens.Keyword)
+			i += 3
+			continue
+		}
 		if isIdentStart(line[i]) {
 			j := i + 1
 			for j < n && isIdentCont(line[j]) {
@@ -1009,7 +1019,7 @@ func lexMermaidLine(line string, pg Page) []ui.Span {
 			i = j
 			continue
 		}
-		if strings.HasPrefix(line[i:], "-->") || strings.HasPrefix(line[i:], "-.->") || strings.HasPrefix(line[i:], "==>") ||
+		if strings.HasPrefix(line[i:], "-->") || strings.HasPrefix(line[i:], "->") || strings.HasPrefix(line[i:], "-.->") || strings.HasPrefix(line[i:], "==>") ||
 			strings.HasPrefix(line[i:], "->>") || strings.HasPrefix(line[i:], "-->>") || strings.HasPrefix(line[i:], "<-->") ||
 			strings.HasPrefix(line[i:], "---") {
 			j := i

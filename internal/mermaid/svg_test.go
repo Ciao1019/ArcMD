@@ -138,6 +138,10 @@ func TestExportSVGDrawsEveryShape(t *testing.T) {
 		{"parallelogram", ShapeOp{Kind: ShapeParallelogram}, `L32.80 20.00`},
 		{"pentagon", ShapeOp{Kind: ShapePentagon}, `L40.00 13.00`},
 		{"actor", ShapeOp{Kind: ShapeActor}, `<circle cx="20.00" cy="5.40" r="4.40"`},
+		{"start_state", ShapeOp{Kind: ShapeStartState}, `<circle cx="20.00" cy="10.00" r="10.00" fill="#18181b"`},
+		{"end_state", ShapeOp{Kind: ShapeEndState}, `r="5.20" fill="#18181b"`},
+		{"bar", ShapeOp{Kind: ShapeBar}, `fill="#18181b" fill-opacity="0.85"`},
+		{"round_divider", ShapeOp{Kind: ShapeRound, DividerY: 12}, `<line x1="0.00" y1="12.00" x2="40.00" y2="12.00"`},
 	}
 	for _, tc := range shapes {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,5 +185,26 @@ func TestExportSVGFragmentTint(t *testing.T) {
 	svg := ExportSVG(Diagram{W: 120, H: 70, Shapes: []ShapeOp{s}}, testPalette(), "")
 	if !strings.Contains(svg, `fill="rgba(255,0,0,0.450)"`) || !strings.Contains(svg, `stroke="rgba(255,0,0,0.550)"`) {
 		t.Fatalf("fragment tint is missing:\n%s", svg)
+	}
+}
+
+func TestExportSVGDrawsStateDiagram(t *testing.T) {
+	d, err := ParseAndLayout(issue89StateDiagram, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svg := ExportSVG(d, testPalette(), "State")
+	for _, want := range []string{
+		`aria-label="State"`,
+		`<circle `,
+		`>已捕获原消息</text>`,
+		`>媒体处理中</text>`,
+		`>校验通过</text>`,
+		`>下载失败或内容不完整</text>`,
+		`</svg>`,
+	} {
+		if !strings.Contains(svg, want) {
+			t.Fatalf("state SVG missing %q:\n%s", want, svg)
+		}
 	}
 }

@@ -531,6 +531,7 @@ func TestAgentControlIPCCancelAndTimeoutDoNotDeleteIPCOrSplitBrainWrite(t *testi
 
 	enteredMain := make(chan struct{}, 4)
 	releaseMain := make(chan struct{})
+	unblockedDone := make(chan struct{}, 4)
 	var blockMain sync.Mutex
 	shouldBlock := true
 
@@ -544,6 +545,7 @@ func TestAgentControlIPCCancelAndTimeoutDoNotDeleteIPCOrSplitBrainWrite(t *testi
 			default:
 			}
 			<-releaseMain
+			defer func() { unblockedDone <- struct{}{} }()
 		}
 		return fn()
 	}
@@ -600,6 +602,11 @@ func TestAgentControlIPCCancelAndTimeoutDoNotDeleteIPCOrSplitBrainWrite(t *testi
 	shouldBlock = false
 	blockMain.Unlock()
 	close(releaseMain)
+	select {
+	case <-unblockedDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for unblocked live IPC handler to finish")
+	}
 
 	if _, live := mustControl(t, cfg, "status", nil); !live {
 		t.Fatal("expected live IPC server to remain reachable after timeout")

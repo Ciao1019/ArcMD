@@ -195,4 +195,37 @@ func TestPasteImages(t *testing.T) {
 	if !slices.Contains(blockList(a), "new alpha") {
 		t.Errorf("text paste: %q", blockList(a))
 	}
+
+	// Copying cells from Excel puts a PNG preview alongside HTML/TSV on the
+	// clipboard; Cmd+V pastes a native table instead of saving a PNG asset.
+	ed.SetSelection(ed.Len(), ed.Len())
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	tt.SetClipboardData(transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.PNG, data),
+		transfer.Bytes(transfer.HTML, []byte(`<html><body><table><col width=72><col width=72><tr><td>项目</td><td>数量</td></tr><tr><td>苹果</td><td align=right>5</td></tr></table></body></html>`)),
+		transfer.Bytes(transfer.Text, []byte("项目\t数量\n苹果\t5\n")),
+	)))
+	tt.Key(ui.Cmd, ui.KeyV)
+	tt.Frame()
+	last := ed.Doc.Blocks[len(ed.Doc.Blocks)-1]
+	if last.Kind != "table" || len(last.Children) != 2 || last.Children[1].Children[1].Text() != "5" {
+		t.Fatalf("expected Excel clipboard to paste as table, got blocks=%q last=%+v", blockList(a), last)
+	}
+	if _, err := os.Stat(filepath.Join(root(a), "assets", "粘贴的图片-3.png")); !os.IsNotExist(err) {
+		t.Fatalf("Excel paste unexpectedly wrote a PNG asset: %v", err)
+	}
+
+	// Browser "Copy Image" puts PNG + <img ...> HTML on the clipboard; Cmd+V
+	// still pastes the PNG image rather than turning it into a text link.
+	tt.SetClipboardData(transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.PNG, data),
+		transfer.Bytes(transfer.HTML, []byte(`<meta charset='utf-8'><img src="https://example.com/pic.png" alt="Example"/>`)),
+		transfer.Bytes(transfer.Text, []byte("https://example.com/pic.png")),
+	)))
+	tt.Key(ui.Cmd, ui.KeyV)
+	tt.Frame()
+	if got := blockList(a); got[len(got)-1] != "image:assets/粘贴的图片-3.png" {
+		t.Fatalf("browser Copy Image should still paste PNG, got %q", got)
+	}
 }

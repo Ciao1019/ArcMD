@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Ciao1019/ArcMD/internal/fsutil"
@@ -238,10 +239,37 @@ func skipDir(name string) bool {
 	return strings.HasPrefix(name, ".") || name == "node_modules"
 }
 
+// DocStat pairs a listed document with its size and modification time from the
+// directory walk so callers such as search indexing do not stat every file a
+// second time.
+type DocStat struct {
+	Doc
+	Size     int64
+	Modified time.Time
+}
+
 // List returns the document files under root, sorted by folder then name,
 // case-insensitively, the files of a folder before its subfolders'.
 func List(root string) ([]Doc, error) {
-	var docs []Doc
+	stats, err := listDocs(root, false)
+	if len(stats) == 0 {
+		return nil, err
+	}
+	docs := make([]Doc, len(stats))
+	for i, s := range stats {
+		docs[i] = s.Doc
+	}
+	return docs, err
+}
+
+// ListStat returns the document files under root together with their size and
+// modification time, in the same order as List.
+func ListStat(root string) ([]DocStat, error) {
+	return listDocs(root, true)
+}
+
+func listDocs(root string, wantStat bool) ([]DocStat, error) {
+	var docs []DocStat
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if p == root {
@@ -262,18 +290,28 @@ func List(root string) ([]Doc, error) {
 		if err != nil {
 			return nil
 		}
+		var size int64
+		var mod time.Time
 		if d.Type()&fs.ModeSymlink != 0 {
 			if _, err := Resolve(root, rel); err != nil {
 				return nil
 			}
-			if info, err := os.Stat(p); err != nil || !info.Mode().IsRegular() {
+			info, err := os.Stat(p)
+			if err != nil || !info.Mode().IsRegular() {
 				return nil
 			}
+			size, mod = info.Size(), info.ModTime()
+		} else if wantStat {
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			size, mod = info.Size(), info.ModTime()
 		}
-		docs = append(docs, Doc{Path: filepath.ToSlash(rel)})
+		docs = append(docs, DocStat{Doc: Doc{Path: filepath.ToSlash(rel)}, Size: size, Modified: mod})
 		return nil
 	})
-	slices.SortFunc(docs, func(a, b Doc) int {
+	slices.SortFunc(docs, func(a, b DocStat) int {
 		if c := strings.Compare(strings.ToLower(a.Dir()), strings.ToLower(b.Dir())); c != 0 {
 			return c
 		}

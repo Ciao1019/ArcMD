@@ -105,9 +105,64 @@ func TestMermaidErrorStaysVisibleAndInsertHelpers(t *testing.T) {
 		t.Fatalf("InsertMermaidSequence did not insert and focus block: blocks=%+v editing=%q", e3.Doc.Blocks, e3.mermaidEditing)
 	}
 	for _, it := range turnItems(document.NewBlock("paragraph", "hi")) {
-		if it.kind == "mermaid-flow" || it.kind == "mermaid-seq" {
+		if it.kind == "mermaid-flow" || it.kind == "mermaid-seq" || it.kind == "mermaid-state" {
 			t.Fatalf("mermaid insert item %q leaked into turnItems", it.kind)
 		}
+	}
+
+	e4, tt4 := newTester("")
+	focus(e4, tt4)
+	e4.InsertMermaidState()
+	tt4.Frame()
+	if !isMermaidBlock(e4.Doc.Blocks[0]) || e4.rows[0].mermaid == nil || e4.rows[0].mermaidErr != "" {
+		t.Fatalf("InsertMermaidState did not parse: err=%q", e4.rows[0].mermaidErr)
+	}
+	if e4.rows[0].mermaid.Kind != "state" {
+		t.Fatalf("InsertMermaidState kind = %q, want state", e4.rows[0].mermaid.Kind)
+	}
+}
+
+func TestMermaidStateDiagramPreviewExportAndWhiteboard(t *testing.T) {
+	stateSrc := "stateDiagram-v2\n" +
+		"    [*] --> 已捕获原消息\n" +
+		"    已捕获原消息 --> 媒体处理中\n" +
+		"    媒体处理中 --> 已缓存: 校验通过\n" +
+		"    媒体处理中 --> 缓存失败: 下载失败或内容不完整\n" +
+		"    媒体处理中 --> 已撤回等待缓存: 撤回通知先到\n" +
+		"    已撤回等待缓存 --> 单次补发: 缓存完成且连接仍有效\n" +
+		"    已缓存 --> 单次补发: 随后收到撤回\n" +
+		"    单次补发 --> [*]\n" +
+		"    缓存失败 --> [*]"
+	stateMD := "```mermaid\n" + stateSrc + "\n```"
+
+	e, tt := newTester(stateMD)
+	r := e.rows[0]
+	if r.mermaid == nil || r.mermaidErr != "" || !r.mermaidHidden {
+		t.Fatalf("stateDiagram-v2 failed to lay out cleanly: err=%q hidden=%v", r.mermaidErr, r.mermaidHidden)
+	}
+	if r.mermaid.Kind != "state" {
+		t.Fatalf("mermaid Kind = %q, want state", r.mermaid.Kind)
+	}
+
+	// Open zoom preview modal and verify Chinese title.
+	if !e.openMermaidPreview(r.leaf.Block.ID) {
+		t.Fatal("openMermaidPreview returned false for state diagram")
+	}
+	tt.Frame()
+	if !e.mermaidViewer.open || !tt.HasText("状态图") {
+		t.Fatalf("expected zoom preview modal titled 状态图, open=%v title=%q", e.mermaidViewer.open, e.mermaidViewer.title)
+	}
+
+	// HTML inline SVG export should render stateDiagram-v2 as SVG with 状态图 alt text.
+	svg, ok := mermaidSVG(stateSrc, testHTMLTheme())
+	if !ok || !strings.Contains(svg, `aria-label="状态图"`) || !strings.Contains(svg, `>已捕获原消息</text>`) {
+		t.Fatalf("mermaidSVG failed for stateDiagram-v2: ok=%v", ok)
+	}
+
+	// Whiteboard conversion should create editable nodes and bound arrows.
+	elems, err := ConvertMermaidToWhiteboard(stateSrc, 0, 0)
+	if err != nil || len(elems) < 10 {
+		t.Fatalf("ConvertMermaidToWhiteboard failed for stateDiagram-v2: elems=%d err=%v", len(elems), err)
 	}
 }
 

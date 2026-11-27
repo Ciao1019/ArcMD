@@ -387,3 +387,76 @@ func TestSanitizeName(t *testing.T) {
 		}
 	}
 }
+
+func TestListStatAndTreeModified(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := Write(outside, "Secret.md", "outside"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(root, "Alpha.md", "hello world"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(root, "Folder/Nested.arcmd", `{"version":1}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "Empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hasLinks := true
+	if err := os.Symlink(filepath.Join(root, "Alpha.md"), filepath.Join(root, "Alias.md")); err != nil {
+		hasLinks = false
+	} else {
+		_ = os.Symlink(outside, filepath.Join(root, "EscapeDir"))
+		_ = os.Symlink(filepath.Join(outside, "Secret.md"), filepath.Join(root, "Escape.md"))
+	}
+
+	stats, err := ListStat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]DocStat{}
+	for _, s := range stats {
+		byPath[s.Path] = s
+		full := filepath.Join(root, filepath.FromSlash(s.Path))
+		fi, err := os.Stat(full)
+		if err != nil {
+			t.Fatalf("Stat(%s): %v", s.Path, err)
+		}
+		if s.Size != fi.Size() || !s.Modified.Equal(fi.ModTime()) {
+			t.Fatalf("ListStat(%s) = (size=%d, mod=%v), want (size=%d, mod=%v)", s.Path, s.Size, s.Modified, fi.Size(), fi.ModTime())
+		}
+	}
+	if _, ok := byPath["Alpha.md"]; !ok {
+		t.Fatal("ListStat missed Alpha.md")
+	}
+	if _, ok := byPath["Folder/Nested.arcmd"]; !ok {
+		t.Fatal("ListStat missed Folder/Nested.arcmd")
+	}
+	if _, ok := byPath["Escape.md"]; ok {
+		t.Fatal("ListStat exposed outside symlink")
+	}
+	if hasLinks {
+		if _, ok := byPath["Alias.md"]; !ok {
+			t.Fatal("ListStat missed internal symlink Alias.md")
+		}
+	}
+
+	nodes, err := Tree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaNode := Find(nodes, "Alpha.md")
+	nestedNode := Find(nodes, "Folder/Nested.arcmd")
+	folderNode := Find(nodes, "Folder")
+	emptyNode := Find(nodes, "Empty")
+	if alphaNode == nil || nestedNode == nil || folderNode == nil || emptyNode == nil {
+		t.Fatalf("Tree missing expected nodes: %+v", nodes)
+	}
+	if alphaNode.Modified.IsZero() || nestedNode.Modified.IsZero() || folderNode.Modified.IsZero() || emptyNode.Modified.IsZero() {
+		t.Fatalf("Tree left zero Modified times: alpha=%v nested=%v folder=%v empty=%v",
+			alphaNode.Modified, nestedNode.Modified, folderNode.Modified, emptyNode.Modified)
+	}
+	if folderNode.Modified.Before(nestedNode.Modified) {
+		t.Fatalf("folder Modified %v older than child %v", folderNode.Modified, nestedNode.Modified)
+	}
+}

@@ -41,6 +41,8 @@ func (e *Editor) insertItemAfter(prepare func(), item insertion) {
 			e.InsertMermaidFlowchart()
 		case "mermaid-seq":
 			e.InsertMermaidSequence()
+		case "mermaid-state":
+			e.InsertMermaidState()
 		case "whiteboard":
 			e.InsertWhiteboard()
 		case "toggle":
@@ -152,6 +154,7 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 			menuAction(sub, i18n.T("行内公式"), e.InsertInlineMath)
 			menuAction(sub, i18n.T("流程图"), e.InsertMermaidFlowchart)
 			menuAction(sub, i18n.T("时序图"), e.InsertMermaidSequence)
+			menuAction(sub, i18n.T("状态图"), e.InsertMermaidState)
 			menuAction(sub, i18n.T("脚注"), func() { e.InsertFootnote(); e.RequestFocus, e.reveal = true, true })
 			sub.Separator()
 			menuAction(sub, i18n.T("跳转脚注 / 返回正文"), func() { e.FollowFootnote() })

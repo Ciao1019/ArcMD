@@ -14,14 +14,20 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// marqueeDragThreshold is the pointer travel in DIPs required before a press
+// in the left margin turns into a block-selection marquee instead of a blur click.
+const marqueeDragThreshold float32 = 4
+
 // blockSelection is the selected top-level blocks, in page order, and the
 // block a range grows from.
 type blockSelection struct {
 	ids    []string
 	anchor string
-	// marquee is a drag down the left margin, from y0.
-	marquee bool
-	y0      float32
+	// marquee is a drag down the left margin, from (x0, y0); marqueeArm holds
+	// a left-margin press until travel exceeds marqueeDragThreshold.
+	marquee    bool
+	marqueeArm bool
+	x0, y0     float32
 	// pending is a range to select once the next layout has its blocks;
 	// told how many blocks screen readers last heard were selected.
 	pending [2]string
@@ -268,27 +274,30 @@ func (e *Editor) blockPointer(ev ui.InputEvent) bool {
 				}
 			}
 		}
-		// The margin left of the handles, beside the page's blocks.
-		if ev.Mods == 0 && len(e.handles) > 0 && ev.X < e.padding-60 && ev.Y >= e.indexedHandle(0).top-8 && ev.Y <= e.contentEnd {
-			hs, he := e.visibleHandleRange(ev.Y-64, ev.Y+64)
-			for hi := hs; hi < he; hi++ {
-				h := *e.indexedHandle(hi)
-				if h.plus().Contains(ev.X, ev.Y) || h.rect.Contains(ev.X, ev.Y) {
-					return false
-				}
-			}
-			e.blocks.marquee, e.blocks.y0 = true, ev.Y
-			e.marqueeTo(ev.Y)
-			return true
-		}
 	case ui.InputPointerMove:
-		if e.blocks.marquee {
+		if e.blocks.marquee || e.blocks.marqueeArm {
+			if !e.blocks.marquee {
+				dx, dy := ev.X-e.blocks.x0, ev.Y-e.blocks.y0
+				if dx*dx+dy*dy <= marqueeDragThreshold*marqueeDragThreshold {
+					return true
+				}
+				e.blocks.marquee = true
+				e.blurStage = blurIdle
+				e.RequestFocus = true
+			}
 			e.marqueeTo(min(max(ev.Y, e.Scroll.Y), e.Scroll.Y+e.viewport))
 			return true
 		}
 	case ui.InputPointerUp:
 		if e.blocks.marquee {
-			e.blocks.marquee = false
+			e.blocks.marquee, e.blocks.marqueeArm = false, false
+			return true
+		}
+		if e.blocks.marqueeArm {
+			e.blocks.marqueeArm = false
+			if !ev.Canceled {
+				e.blur()
+			}
 			return true
 		}
 	}

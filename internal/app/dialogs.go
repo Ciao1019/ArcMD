@@ -168,8 +168,13 @@ func (a *App) removeSpace(id string) {
 		delete(a.sessions, id)
 		a.saveState()
 		a.refreshTree()
-		if sp := a.state.ActiveSpace(); sp != nil && sp.LastOpen != "" {
-			a.open(sp.LastOpen)
+		if sp := a.state.ActiveSpace(); sp != nil {
+			a.ensureSplitRestored(sp)
+			if session := a.session(sp.ID); a.doc == nil && session.splitShown && session.split != nil {
+				a.restoreSplit(session.split, session.split.active)
+			} else if sp.LastOpen != "" {
+				a.open(sp.LastOpen)
+			}
 		}
 	}
 }

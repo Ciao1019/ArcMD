@@ -61,7 +61,17 @@ func (a *App) isOpen(sp *space.Space, rel string) bool {
 	if a.isShown(sp, rel) {
 		return true
 	}
-	for _, session := range a.sessions {
+	for id, session := range a.sessions {
+		if session.splitDeferred {
+			if other := a.state.Get(id); other != nil && other.Split != nil && len(other.Split.Panes) >= 2 && len(other.Split.Panes) <= splitLimit {
+				for _, ref := range other.Split.Panes {
+					if sp != nil && ref.Space == sp.ID && ref.Path == rel {
+						return true
+					}
+				}
+			}
+			continue
+		}
 		if session.split != nil {
 			for _, p := range session.split.panes {
 				if p.doc != nil && p.doc.space == sp && p.doc.rel == rel {

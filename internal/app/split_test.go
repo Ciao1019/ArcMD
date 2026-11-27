@@ -552,3 +552,58 @@ func TestSplitAddFromMoreMenu(t *testing.T) {
 		t.Fatal("the menu item did not add a split")
 	}
 }
+
+func TestSplitDeferredForInactiveSpacesOnStartup(t *testing.T) {
+	a, tt := splitTestApp(t)
+	spA := a.state.ActiveSpace()
+	secondDir := t.TempDir()
+	spB := a.state.Add("Work", secondDir)
+	if err := writeNative(secondDir, "Main.arcmd", "# Main\n\nActive space doc"); err != nil {
+		t.Fatal(err)
+	}
+	a.switchSpace(spB.ID)
+	a.refreshTree()
+	a.open("Main.arcmd")
+	settle(tt)
+	a.saveState()
+
+	reopened, err := New(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reopened.closePlugins)
+
+	sessA := reopened.sessions[spA.ID]
+	if sessA == nil || !sessA.splitDeferred || sessA.split != nil {
+		t.Fatalf("inactive space split was not deferred on startup: %+v", sessA)
+	}
+	for _, d := range reopened.residentDocuments() {
+		if d.space.ID == spA.ID {
+			t.Fatalf("inactive space document %q was eagerly loaded at startup", d.rel)
+		}
+	}
+	if !reopened.grouped(reopened.state.Get(spA.ID), "Left.arcmd") {
+		t.Fatal("grouped() returned false for deferred split document")
+	}
+
+	// Saving state while spA is still deferred must preserve spA's persisted split,
+	// and renaming/forgetting paths in spA must update its deferred split in place.
+	reopened.state.Renamed(spA.ID, "Left.arcmd", "LeftRenamed.arcmd")
+	if err := os.Rename(filepath.Join(spA.Root, "Left.arcmd"), filepath.Join(spA.Root, "LeftRenamed.arcmd")); err != nil {
+		t.Fatal(err)
+	}
+	reopened.saveState()
+	savedA := reopened.state.Get(spA.ID)
+	if savedA.Split == nil || len(savedA.Split.Panes) != 2 || savedA.Split.Panes[0].Path != "LeftRenamed.arcmd" {
+		t.Fatalf("deferred split lost or failed to follow rename: %+v", savedA.Split)
+	}
+
+	// Switching to spA lazily restores its split panes from disk.
+	reopened.switchSpace(spA.ID)
+	if reopened.sessions[spA.ID].splitDeferred {
+		t.Fatal("splitDeferred remained true after switching to spA")
+	}
+	if reopened.split == nil || len(reopened.split.panes) != 2 || reopened.split.panes[0].doc == nil || reopened.split.panes[0].doc.rel != "LeftRenamed.arcmd" {
+		t.Fatalf("deferred split failed to restore on switchSpace: %+v", reopened.split)
+	}
+}

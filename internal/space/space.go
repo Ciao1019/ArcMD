@@ -349,6 +349,16 @@ func (st *State) Renamed(spaceID, from, to string) {
 		s.Renamed(from, to)
 	}
 	re := renamer(from, to)
+	for _, s := range st.Spaces {
+		if s != nil && s.Split != nil {
+			for i := range s.Split.Panes {
+				p := &s.Split.Panes[i]
+				if p.Space == spaceID {
+					p.Path = re(p.Path)
+				}
+			}
+		}
+	}
 	for i, f := range st.Favorites {
 		if f.Space == spaceID {
 			st.Favorites[i].Path = re(f.Path)
@@ -366,6 +376,16 @@ func (st *State) Renamed(spaceID, from, to string) {
 func (st *State) Forget(spaceID, rel string) {
 	if s := st.Get(spaceID); s != nil {
 		s.Forget(rel)
+	}
+	for _, s := range st.Spaces {
+		if s != nil && s.Split != nil {
+			for i := range s.Split.Panes {
+				p := &s.Split.Panes[i]
+				if p.Space == spaceID && under(p.Path, rel) {
+					p.Space, p.Path = "", ""
+				}
+			}
+		}
 	}
 	st.Favorites = slices.DeleteFunc(st.Favorites, func(f Favorite) bool { return f.Space == spaceID && under(f.Path, rel) })
 	st.Bookmarks = slices.DeleteFunc(st.Bookmarks, func(b Bookmark) bool { return b.Space == spaceID && under(b.Path, rel) })
@@ -400,6 +420,16 @@ func (st *State) MovedAcross(fromID, from, toID, to string) {
 	}
 	if src != nil {
 		src.Forget(from)
+	}
+	for _, s := range st.Spaces {
+		if s != nil && s.Split != nil {
+			for i := range s.Split.Panes {
+				p := &s.Split.Panes[i]
+				if p.Space == fromID && under(p.Path, from) {
+					p.Space, p.Path = toID, re(p.Path)
+				}
+			}
+		}
 	}
 	for i, f := range st.Favorites {
 		if f.Space == fromID && under(f.Path, from) {
@@ -530,6 +560,16 @@ func (st *State) Remove(id string) error {
 		return ErrNotFound
 	}
 	st.Spaces = slices.Delete(st.Spaces, i, i+1)
+	for _, s := range st.Spaces {
+		if s != nil && s.Split != nil {
+			for j := range s.Split.Panes {
+				p := &s.Split.Panes[j]
+				if p.Space == id {
+					p.Space, p.Path = "", ""
+				}
+			}
+		}
+	}
 	st.Favorites = slices.DeleteFunc(st.Favorites, func(f Favorite) bool { return f.Space == id })
 	st.Bookmarks = slices.DeleteFunc(st.Bookmarks, func(b Bookmark) bool { return b.Space == id })
 	if st.Active == id {

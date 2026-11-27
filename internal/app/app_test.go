@@ -46,7 +46,7 @@ func focusDocument(a *App, tt *ui.Tester) {
 	tt.Frame()
 	anchor, caret := a.doc.ed.Positions()
 	if r, ok := tt.Find("文档"); ok {
-		tt.ClickAt(r.X+8, r.Y+8)
+		tt.ClickAt(r.X+a.doc.ed.Padding()+8, r.Y+8)
 	}
 	a.doc.ed.SetSelection(anchor, caret)
 	tt.Frame()

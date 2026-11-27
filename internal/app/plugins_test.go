@@ -1142,3 +1142,36 @@ func TestPluginRegistryRetryOnError(t *testing.T) {
 		t.Fatalf("expected remote catalog plugin after retry, got %q", tt.Texts())
 	}
 }
+
+func TestPluginsDeferWASMHostUntilInvoked(t *testing.T) {
+	a, _ := libraryApp(t)
+	if a.pluginsUI.host != nil {
+		t.Fatal("New() eagerly initialized WASMHost before any plugin ran")
+	}
+	plugDir := filepath.Join(a.plugins.Dir(), cloudSyncPluginID)
+	if err := os.MkdirAll(plugDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugDir, plugin.ManifestFile), []byte(testCloudSyncManifestJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plugDir, "plugin.wasm"), []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadPlugins()
+	if a.pluginsUI.host != nil {
+		t.Fatal("reloadPlugins() eagerly initialized WASMHost")
+	}
+	installed := a.findInstalledPlugin(cloudSyncPluginID)
+	if installed == nil {
+		t.Fatal("installed plugin was not discovered by reloadPlugins()")
+	}
+	_, _ = a.ensurePluginInstance(installed)
+	if a.pluginsUI.host == nil {
+		t.Fatal("ensurePluginInstance() did not lazily initialize WASMHost")
+	}
+	a.closePlugins()
+	if a.pluginsUI.host != nil {
+		t.Fatal("closePlugins() did not release WASMHost")
+	}
+}

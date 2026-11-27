@@ -35,7 +35,7 @@ import (
 )
 
 // Version is ArcMD's version, which plugins' engines are checked against.
-const Version = "0.5.0"
+const Version = "0.5.1"
 
 // Config says where ArcMD keeps its files.
 type Config struct {
@@ -43,10 +43,14 @@ type Config struct {
 	ConfigDir string
 	// DocumentsDir is where the folders of new spaces go by default.
 	DocumentsDir string
+	// LegacyDocumentsDir, when set, is the previous default spaces folder
+	// (~/Documents/ArcMD). On startup, non-external spaces still rooted inside
+	// it are migrated into DocumentsDir.
+	LegacyDocumentsDir string
 }
 
 // DefaultConfig returns the user's usual places: the system's
-// configuration folder and ~/Documents/ArcMD.
+// configuration folder and ~/.arcmd/spaces.
 func DefaultConfig() (Config, error) {
 	cfg, err := os.UserConfigDir()
 	if err != nil {
@@ -57,8 +61,9 @@ func DefaultConfig() (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		ConfigDir:    filepath.Join(cfg, "ArcMD"),
-		DocumentsDir: filepath.Join(home, "Documents", "ArcMD"),
+		ConfigDir:          filepath.Join(cfg, "ArcMD"),
+		DocumentsDir:       filepath.Join(home, ".arcmd", "spaces"),
+		LegacyDocumentsDir: filepath.Join(home, "Documents", "ArcMD"),
 	}, nil
 }
 
@@ -70,10 +75,11 @@ type place struct{ space, rel string }
 type spaceSession struct {
 	// doc is the document the space showed when it was left: its own, or
 	// a favorite of another space, which it shows again on coming back.
-	doc        *document
-	tree       ui.ScrollState
-	split      *splitGroup
-	splitShown bool
+	doc           *document
+	tree          ui.ScrollState
+	split         *splitGroup
+	splitShown    bool
+	splitDeferred bool
 }
 
 // App is ArcMD's state.
@@ -236,6 +242,9 @@ type App struct {
 	revealFile func(path string)
 	// notices are messages for the user, shown as toasts by the next frame.
 	notices []string
+	// deferredNotices are startup messages translated when rendered, after Run
+	// applies the system's preferred language.
+	deferredNotices []deferredNotice
 	// undos are toasts that offer to undo a file operation (undo.go).
 	undos []ui.Toast
 	// replace is the find and replace across documents (replace.go).
@@ -360,6 +369,7 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 	a.state = st
+	a.migrateLegacySpaces()
 	if p := a.searchCachePath(); p != "" {
 		if ix, err := search.LoadCache(p); err == nil {
 			a.search.index = ix
@@ -381,10 +391,21 @@ func New(cfg Config) (*App, error) {
 	a.initPlugins()
 	a.reloadPlugins()
 	a.syncTree()
-	if sp := a.state.ActiveSpace(); sp != nil && sp.LastOpen != "" {
-		a.open(sp.LastOpen)
+	if sp := a.state.ActiveSpace(); sp != nil {
+		if sp.Split != nil && sp.Split.Shown && len(sp.Split.Panes) >= 2 && len(sp.Split.Panes) <= splitLimit {
+			a.restoreSplits()
+			if a.split == nil && sp.LastOpen != "" {
+				a.open(sp.LastOpen)
+			}
+		} else {
+			if sp.LastOpen != "" {
+				a.open(sp.LastOpen)
+			}
+			a.restoreSplits()
+		}
+	} else {
+		a.restoreSplits()
 	}
-	a.restoreSplits()
 	// The tour shows until it was seen once. Preferences that cannot be
 	// saved could not remember that, and would show it at every launch.
 	if !a.prefs.TourSeen && !a.prefsBroken {
@@ -412,6 +433,14 @@ func (a *App) firstRun() error {
 		sp.Expanded = []string{"Journal"}
 	}
 	return a.store.Save(a.state)
+}
+
+// AcquireSingleInstance takes the desktop single-instance lock before App
+// initialization so a second launch exits immediately without racing on
+// spaces.json or legacy space migration.
+func AcquireSingleInstance(cfg Config) bool {
+	mygo.App.SetPath(mygo.PathUserData, cfg.ConfigDir)
+	return mygo.App.RequestSingleInstanceLock()
 }
 
 // Run opens the window and runs the app until it quits.
@@ -686,9 +715,20 @@ func (a *App) viewMenu() *mygo.MenuItem {
 	}
 }
 
+type deferredNotice struct {
+	format string
+	args   []any
+}
+
 // notify queues a message for the user.
 func (a *App) notify(format string, args ...any) {
 	a.notices = append(a.notices, fmt.Sprintf(i18n.T(format), args...))
+}
+
+// notifyDeferred queues a message whose translation is resolved when the UI
+// renders its toast, after Run has detected the OS preferred language.
+func (a *App) notifyDeferred(format string, args ...any) {
+	a.deferredNotices = append(a.deferredNotices, deferredNotice{format: format, args: args})
 }
 
 // savePrefs writes prefs.json, telling the user when it fails.
@@ -1589,6 +1629,7 @@ func (a *App) switchSpaceOnly(id string) bool {
 	a.renaming = ""
 	a.openAfterRename = ""
 	a.syncTree()
+	a.ensureSplitRestored(next)
 	a.pager.swipe = 0
 	a.pagerSettle(a.spaceIndex(id), from)
 	delete(a.pageTrees, id) // the active space reads its own

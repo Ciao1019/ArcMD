@@ -339,8 +339,11 @@ func mermaidSVG(src string, theme HTMLTheme) (string, bool) {
 		return "", false
 	}
 	alt := i18n.T("流程图")
-	if diagram.Kind == "sequence" {
+	switch diagram.Kind {
+	case "sequence":
 		alt = i18n.T("时序图")
+	case "state":
+		alt = i18n.T("状态图")
 	}
 	light := mermaid.ExportSVG(diagram, exportMermaidPalette(theme.Light), alt)
 	dark := mermaid.ExportSVG(diagram, exportMermaidPalette(theme.Dark), alt)

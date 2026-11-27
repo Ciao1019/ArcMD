@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.1
+
+本版本聚焦 **冷启动提速与默认空间目录迁移**（[#82](https://github.com/Ciao1019/ArcMD/issues/82)）、**外部空间失效文件一键清理**（[#84](https://github.com/Ciao1019/ArcMD/issues/84)、[#86](https://github.com/Ciao1019/ArcMD/pull/86)，感谢 `@tajiaoyezi`）与 **Mermaid 状态图（`stateDiagram` / `stateDiagram-v2`）原生渲染**（[#89](https://github.com/Ciao1019/ArcMD/issues/89)）；同时改进了 **电子表格复制粘贴为原生 Markdown 表格** 与 **正文两侧空白区点击失焦**（[#87](https://github.com/Ciao1019/ArcMD/issues/87)），并彻底修复了 **数字开头及紧邻字面 `$` 时的行内公式渲染与保存往返异常**（[#91](https://github.com/Ciao1019/ArcMD/issues/91)）。
+
+### 新功能与桌面体验
+
+- **外部空间失效文件一键清理（`internal/app/external.go`、`sidebar.go`、`library.go`、`palette.go`、`internal/vault/files.go`）**：为外部空间自动探测已被外部删除的引用项，在侧边栏、资料库卡片与命令栏提供失效状态提示及「一键清理」入口，并在清理前后做好资料库缓存同步、拖拽回弹淡显、未保存/正在落盘文档保护以及分屏与独立窗口的失效文档收口（[#84](https://github.com/Ciao1019/ArcMD/issues/84)、[#86](https://github.com/Ciao1019/ArcMD/pull/86)，感谢 `@tajiaoyezi`）。
+- **Mermaid 状态图原生支持（`internal/mermaid/state.go`、`internal/editor/mermaid.go`、`board_mermaid.go`、`menus.go`、`tools.go`、`vectorpdf.go`、`htmlexport.go`）**：纯 Go 原生排版与绘制 `stateDiagram` / `stateDiagram-v2`，支持起止态、状态说明、嵌套复合状态、并发分区、分支/汇合/选择/备注节点及带标签转移边；完整接入编辑器实时预览、转入白板、`/` 菜单、命令栏以及矢量 PDF 与 HTML 导出（[#89](https://github.com/Ciao1019/ArcMD/issues/89)）。
+- **电子表格复制粘贴优先还原原生表格（`internal/editor/clipboard.go`、`csvpaste.go`、`html.go`）**：从 Excel、WPS、Numbers 与 LibreOffice Calc 复制单元格并粘贴进文档时，优先解析剪贴板里的原生 HTML / TSV 表格数据而非回退为截屏图片（单个单元格自动展开为文本），同时保留浏览器「复制图片」直接粘贴原图的行为。
+
+### 关键修复与性能提升
+
+- **冷启动大幅提速与默认空间目录迁移（`cmd/arcmd/main.go`、`internal/app/migrate_spaces.go`、`plugins.go`、`splitstore.go`、`internal/vault`、`internal/search`、`internal/app/assets/ghost/`）**：将默认空间目录从 `~/Documents/ArcMD` 迁至 `~/.arcmd/spaces`，避开 macOS 文稿目录权限检查与 iCloud 同步导致的冷启动卡顿（启动时自动迁移既有非外部空间并给出提示）；延迟初始化 WASM 插件宿主至首次调用插件、延迟恢复非活动空间的分屏会话、消除文件树构建与增量搜索刷新中的重复 `os.Stat`、压缩内嵌动画 PNG 资源，并在初始化应用前先获取单实例锁（[#82](https://github.com/Ciao1019/ArcMD/issues/82)）。
+- **正文两侧空白区点击失焦与框选保护（`internal/editor/view.go`、`input.go`、`blockselect.go`）**：点击编辑区左右空白边距可立即取消正文聚焦与光标选区，同时保留在左侧空白处按住并拖动超过阈值时触发多块框选的原有手感（[#87](https://github.com/Ciao1019/ArcMD/issues/87)）。
+- **修复行内数学公式渲染与保存往返异常（`internal/editor/markdown.go`、`inline.go`、`livecompile.go`、`outline.go`、`virtualize.go`）**：修复以数字开头的行内公式（如 `$1$`、`$0$`、`$1 \le i \le n$`、`$2a_i$`）导入失败并与后继 `$a_i$` 错配为 `$a_i\$` 的问题；按 Run 样式隔离行内代码、键帽、链接与字面转义 `$` 对同段后续公式扫描的干扰，并规范 `\(...\)` 与行内 `$$...$$` 内部首尾空白（[#91](https://github.com/Ciao1019/ArcMD/issues/91)）。
+- **完善安装包构建元数据（`mygo.json`）**：补充版权声明并在打包资源中排除重复图标文件。
+
+### 贡献者
+
+- 特别感谢 **`@tajiaoyezi`**（[#86](https://github.com/Ciao1019/ArcMD/pull/86)）对本版本的贡献！
+
+### 下载说明
+
+提供 macOS（Apple Silicon / Intel）、Windows x64 与 Linux（x64 `.deb` / `.tar.gz` / Arch Linux `.pkg.tar.zst`，ARM64 `.deb` / `.tar.gz`）原生安装包，可使用 `SHA256SUMS.txt` 校验完整性，已安装版本支持应用内签名自动更新。官方插件可在应用「设置 › 插件」按需从 [`Ciao1019/arcmd-plugins`](https://github.com/Ciao1019/arcmd-plugins) 下载或更新。
+
 ## 0.5.0
 
 本版本正式推出 **MDZip（`.mdz`）v1.2.0 单文件打包导出与原地只读阅读**（[#79](https://github.com/Ciao1019/ArcMD/issues/79)、[#85](https://github.com/Ciao1019/ArcMD/pull/85)，感谢 `@tajiaoyezi`）、**原生 Markdown 源码编辑模式（带语法高亮、查找替换与分栏实时预览）**（[#37](https://github.com/Ciao1019/ArcMD/issues/37)）、**YAML Frontmatter 元数据头可视化卡片**（[#83](https://github.com/Ciao1019/ArcMD/issues/83)）以及 **资料库点击切换空间与跨空间拖拽移动**（[#81](https://github.com/Ciao1019/ArcMD/issues/81)）；同时扩展了 **LaTeX 数学公式语法兼容与大纲标题公式渲染**（[#78](https://github.com/Ciao1019/ArcMD/issues/78)），并修复了 **超 800 块长文档目录跳转闪退**（[#76](https://github.com/Ciao1019/ArcMD/issues/76)）、**菜单弹窗鼠标悬停穿透编辑区**（[#77](https://github.com/Ciao1019/ArcMD/issues/77)）与 **macOS 视图菜单快捷键拦截缩放/重载** 等核心体验问题。

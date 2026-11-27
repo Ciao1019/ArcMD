@@ -1,6 +1,6 @@
 // Package mermaid parses and lays out a core subset of Mermaid diagrams
-// (flowchart/graph and sequenceDiagram) into pure vector primitives without
-// any UI toolkit dependency.
+// (flowchart/graph, sequenceDiagram, and stateDiagram/stateDiagram-v2) into
+// pure vector primitives without any UI toolkit dependency.
 package mermaid
 
 import (
@@ -43,6 +43,9 @@ const (
 	ShapeParallelogram
 	ShapeActor
 	ShapePentagon
+	ShapeStartState
+	ShapeEndState
+	ShapeBar
 )
 
 // EdgeKind selects solid, dashed, or thick stroke styling.
@@ -67,15 +70,16 @@ const (
 
 // ShapeOp describes a vector shape in diagram coordinates.
 type ShapeOp struct {
-	Kind   ShapeKind
-	Role   Role
-	X      float32
-	Y      float32
-	W      float32
-	H      float32
-	Radius float32
-	Dashed bool
-	Fill   [4]uint8 // Optional RGBA tint (Fill[3] > 0); zero uses theme role colors.
+	Kind     ShapeKind
+	Role     Role
+	X        float32
+	Y        float32
+	W        float32
+	H        float32
+	Radius   float32
+	DividerY float32 // Optional horizontal divider offset from Y (for titled state boxes).
+	Dashed   bool
+	Fill     [4]uint8 // Optional RGBA tint (Fill[3] > 0); zero uses theme role colors.
 }
 
 // PathOp describes an open polyline or smooth curve with optional endpoints.
@@ -104,7 +108,7 @@ type LabelOp struct {
 
 // Diagram holds the measured size and drawing primitives of a parsed diagram.
 type Diagram struct {
-	Kind   string // "flowchart" or "sequence"
+	Kind   string // "flowchart", "sequence", or "state"
 	W      float32
 	H      float32
 	Shapes []ShapeOp
@@ -132,6 +136,8 @@ func ParseAndLayout(src string, measure MeasureFunc) (Diagram, error) {
 		return layoutFlowchart(lines, measure)
 	case "sequencediagram":
 		return layoutSequence(lines, measure)
+	case "statediagram-v2", "statediagram":
+		return layoutStateDiagram(lines, measure)
 	default:
 		return Diagram{}, fmt.Errorf("unsupported diagram %q", fields[0])
 	}
@@ -155,9 +161,19 @@ func defaultMeasure(text string, size float32, _ bool) (float32, float32) {
 }
 
 func preprocessLines(src string) []string {
-	// Normalize Windows line endings and strip optional %%{init:...}%% blocks.
+	// Normalize Windows line endings, strip optional leading YAML frontmatter,
+	// and strip optional %%{init:...}%% blocks.
 	src = strings.ReplaceAll(src, "\r\n", "\n")
 	src = strings.ReplaceAll(src, "\r", "\n")
+	if trimmed := strings.TrimLeft(src, " \t\n"); strings.HasPrefix(trimmed, "---\n") {
+		rest := trimmed[4:]
+		if end := strings.Index(rest, "\n---"); end >= 0 {
+			after := rest[end+4:]
+			if after == "" || after[0] == '\n' {
+				src = strings.TrimPrefix(after, "\n")
+			}
+		}
+	}
 	for {
 		start := strings.Index(src, "%%{")
 		if start < 0 {

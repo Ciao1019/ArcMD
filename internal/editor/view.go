@@ -51,6 +51,12 @@ func sameLayoutPageKey(a, b layoutPageKey) bool {
 		samePage(a.page, b.page)
 }
 
+const (
+	blurIdle uint8 = iota
+	blurClear
+	blurHold
+)
+
 type Editor struct {
 	notesDoc      *document.Document
 	notesRevision uint64
@@ -68,6 +74,7 @@ type Editor struct {
 	*Buffer
 	Scroll                                         ui.ScrollState
 	RequestFocus                                   bool
+	blurStage                                      uint8
 	handleIDs, decorationIDs                       map[string]int
 	rowIDs                                         map[string]int
 	rowSpace, decorationSpace                      spatialIndex
@@ -1004,6 +1011,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					HandleTextInput(e).Role(ui.RoleTextField).Label(i18n.T("文档")).FocusRing(false)
 				accessTextValue(surface.Access, e.accessText)
 				if e.RequestFocus {
+					e.blurStage = blurIdle
 					if e.boardModalID != "" {
 						e.boardModalFocusPending = true
 					} else if e.boardEditing != "" {
@@ -1022,7 +1030,28 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					}
 					e.RequestFocus = false
 				}
-				e.focused = surface.Focused()
+				switch e.blurStage {
+				case blurHold:
+					if surface.Focused() {
+						// Hold focus on a 0x0 non-text sink for one frame so any
+						// dismissed overlay (selection bar, slash menu, etc.) prunes
+						// without restoreFocus snapping focus back to the surface.
+						ui.Box(c.Key("blur-sink")).Absolute().Size(0, 0).Opacity(0).PassThrough().
+							FocusRing(false).AccessHidden(true).Focus(ui.FocusOptions{PreventScroll: true})
+						e.blurStage = blurClear
+						c.After(0)
+					} else {
+						e.blurStage = blurIdle
+					}
+				case blurClear:
+					ui.Box(c.Key("blur-sink")).Hidden(true)
+					e.blurStage = blurIdle
+				}
+				if e.blocks.marqueeArm && !e.blocks.marquee {
+					e.focused = e.focused && surface.Focused()
+				} else {
+					e.focused = surface.Focused()
+				}
 				px, py, geomInside := surface.PointerPosition()
 				inside := geomInside && content.Hovered()
 				e.pointer, e.pointerInside = ui.Point{X: px, Y: py}, inside
@@ -1040,17 +1069,27 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 						o.DropFiles(files, at)
 					}
 				}
-				if e.resizing != nil || e.hoveredResizer() != nil {
+				hoveredDirectLink := false
+				if e.ReadOnly && e.directLinks && inside {
+					_, hoveredDirectLink = e.linkAtPoint(px, py, false)
+				}
+				_, hoveredGap := e.hoveredGap()
+				switch {
+				case e.dragging:
+					// Keep the text cursor while dragging a text selection across margins.
+				case e.resizing != nil || e.hoveredResizer() != nil:
 					surface.Cursor(ui.CursorResizeEW)
-				} else if e.ReadOnly && e.directLinks {
-					if _, ok := e.linkAtPoint(px, py, false); inside && ok {
-						surface.Cursor(ui.CursorPointer)
-					}
-				} else if !e.ReadOnly && e.hoveredNumberedMarker() != nil {
+				case e.dragID != "" || e.tableDrag.holding || e.tableColDrag.holding || e.blocks.marquee:
+					surface.Cursor(ui.CursorDefault)
+				case hoveredDirectLink:
 					surface.Cursor(ui.CursorPointer)
-				} else if _, ok := e.hoveredGap(); ok {
+				case !e.ReadOnly && e.hoveredNumberedMarker() != nil:
+					surface.Cursor(ui.CursorPointer)
+				case hoveredGap:
 					// A click here adds a paragraph rather than placing the caret.
 					surface.Cursor(ui.CursorPointer)
+				case inside && !e.inInlineMathPopover(px, py) && e.inSideMargin(px, py):
+					surface.Cursor(ui.CursorDefault)
 				}
 				e.hoverID = ""
 				e.boardHoverID = ""
@@ -2210,7 +2249,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	inlineCaretDoc, hasInlineCaret := e.paintInlineMathPopover(p, bounds, t)
 	caretMoving := false
 	caretBlock := e.Engine.LeafAt(e.Caret).Block
-	if !e.ReadOnly && e.focused && len(e.blocks.ids) == 0 && selection.Start == selection.End && (caretBlock.Kind != "image" || e.captionVisible(caretBlock)) && !isAtomicVisualBlock(caretBlock) {
+	if !e.ReadOnly && e.focused && !e.blocks.marqueeArm && len(e.blocks.ids) == 0 && selection.Start == selection.End && (caretBlock.Kind != "image" || e.captionVisible(caretBlock)) && !isAtomicVisualBlock(caretBlock) {
 		var targetDoc ui.Rect
 		hasTarget := false
 		if hasInlineCaret {
@@ -2823,6 +2862,75 @@ func blockLabel(b *document.Block) string {
 }
 
 func (e *Editor) Focused() bool { return e.focused }
+
+// contentSpanAt returns the horizontal bounds of editable content at y in
+// surface coordinates: the standard prose column, widened for any wide table
+// spanning past the column margins at that vertical position.
+func (e *Editor) contentSpanAt(y float32) (left, right float32) {
+	left = e.padding
+	right = e.padding + e.bodyWidth()
+	for i := range e.decorationSpace.between(y-2, y+2) {
+		d := *e.indexedDecoration(i)
+		if d.kind == "table" && y >= d.rect.Y && y <= d.rect.Y+d.rect.H {
+			left = min(left, d.rect.X)
+			right = max(right, d.rect.X+d.rect.W)
+		}
+	}
+	return left, right
+}
+
+// inSideMargin reports whether (x, y) lies in the left or right page margin
+// outside the editable content column at y.
+func (e *Editor) inSideMargin(x, y float32) bool {
+	left, right := e.contentSpanAt(y)
+	return x < left || x > right
+}
+
+// inInlineMathPopover reports whether (x, y) lies inside the active inline
+// math editor popover.
+func (e *Editor) inInlineMathPopover(x, y float32) bool {
+	pop := e.inlinePopRect
+	return e.inlinePopLayout != nil && pop.W > 0 &&
+		x >= pop.X && x <= pop.X+pop.W && y >= pop.Y && y <= pop.Y+pop.H
+}
+
+// blur exits active editing on the writing surface, hiding the caret and
+// dismissing transient block, formula, and menu states.
+func (e *Editor) blur() {
+	e.UnmarkText()
+	if e.Anchor != e.Caret {
+		e.SetSelection(e.Caret, e.Caret)
+	}
+	e.clearBlocks()
+	e.blocks.marquee, e.blocks.marqueeArm = false, false
+	e.dragging = false
+	e.pendingLink = linkSpan{}
+	e.inlineEditing = ""
+	e.inlineMath = inlineMathEdit{}
+	e.inlinePopRect = ui.Rect{}
+	e.inlinePopLayout = nil
+	e.mathEditing = ""
+	e.mermaidEditing = ""
+	e.slashOpen = false
+	e.wiki.open = false
+	e.complete.open = false
+	e.menuOpen, e.menuID, e.menuSub = false, "", ""
+	e.colorOpen, e.langOpen, e.listNumOpen = false, false, false
+	e.linkOpen = false
+	e.markPop = markPopover{}
+	e.annotatePanel = false
+	e.tableSel = tableSelection{}
+	e.cellFillOpen = false
+	e.closeHeader()
+	e.commitFrontmatterEdit()
+	if e.imageCaptionID != "" {
+		e.imageCaptionID = ""
+		e.ready = false
+	}
+	e.focused = false
+	e.RequestFocus = false
+	e.blurStage = blurHold
+}
 
 // listNumber writes n as nested ordered lists count: 1, a, i by depth.
 func listNumber(n, indent int) string {
