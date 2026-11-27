@@ -190,3 +190,16 @@ func TestValidateImage(t *testing.T) {
 		t.Fatal("expected empty image to be rejected")
 	}
 }
+
+func TestBuildManifestRejectsUnresolvableBareCommand(t *testing.T) {
+	if _, err := BuildManifest("arcmd-nonexistent-bare-cmd-xyz", nil); err == nil {
+		t.Fatal("expected error for unresolvable bare command name")
+	}
+	m, err := BuildManifest(t.TempDir()+"/ArcMD", nil)
+	if err != nil {
+		t.Fatalf("BuildManifest absolute path failed: %v", err)
+	}
+	if m.Name != HostName || m.Type != "stdio" || len(m.AllowedOrigins) != 1 {
+		t.Fatalf("unexpected manifest: %+v", m)
+	}
+}

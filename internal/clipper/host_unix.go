@@ -89,6 +89,8 @@ func InstallHost(homeDir, configDir, binPath string, extraExtIDs []string) (Inst
 	}
 	installedCount := 0
 	firstPath := ""
+	var errs []error
+	var warnings []string
 	for i, spec := range specs {
 		if anyDetected && !targets[i].Detected && !targets[i].Installed {
 			continue
@@ -98,12 +100,18 @@ func InstallHost(homeDir, configDir, binPath string, extraExtIDs []string) (Inst
 		}
 		mp := targets[i].ManifestPath
 		if err := fsutil.WriteFileAtomic(mp, raw, 0o644); err != nil {
-			return InstallResult{}, fmt.Errorf("clipper: install %s manifest: %w", spec.name, err)
+			wrapErr := fmt.Errorf("clipper: install %s manifest: %w", spec.name, err)
+			errs = append(errs, wrapErr)
+			warnings = append(warnings, wrapErr.Error())
+			continue
 		}
 		if firstPath == "" {
 			firstPath = mp
 		}
 		installedCount++
+	}
+	if installedCount == 0 && len(errs) > 0 {
+		return InstallResult{}, errors.Join(errs...)
 	}
 	return InstallResult{
 		ManifestPath:   firstPath,
@@ -111,6 +119,7 @@ func InstallHost(homeDir, configDir, binPath string, extraExtIDs []string) (Inst
 		AllowedOrigins: m.AllowedOrigins,
 		Browsers:       DetectBrowsers(homeDir, configDir),
 		InstalledCount: installedCount,
+		Warnings:       warnings,
 	}, nil
 }
 

@@ -35,6 +35,7 @@ type InstallResult struct {
 	AllowedOrigins []string        `json:"allowedOrigins"`
 	Browsers       []BrowserTarget `json:"browsers"`
 	InstalledCount int             `json:"installedCount"`
+	Warnings       []string        `json:"warnings,omitempty"`
 }
 
 // BuildManifest constructs the Chrome Native Messaging manifest pointing to binPath.
@@ -47,6 +48,16 @@ func BuildManifest(binPath string, extraExtIDs []string) (Manifest, error) {
 		if !strings.ContainsAny(binPath, `/\`) {
 			if looked, err := exec.LookPath(binPath); err == nil && looked != "" {
 				binPath = looked
+			} else {
+				abs, absErr := filepath.Abs(binPath)
+				if absErr != nil {
+					return Manifest{}, fmt.Errorf("clipper: resolve binary path %q: %w", binPath, absErr)
+				}
+				info, stErr := os.Stat(abs)
+				if stErr != nil || info.IsDir() {
+					return Manifest{}, fmt.Errorf("clipper: cannot locate absolute executable path for %q (build or install ArcMD to a fixed path first)", binPath)
+				}
+				binPath = abs
 			}
 		}
 		if !filepath.IsAbs(binPath) {

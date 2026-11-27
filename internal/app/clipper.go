@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -69,6 +70,7 @@ type clipDatabaseContext struct {
 	Path       string                `json:"path"`
 	Title      string                `json:"title"`
 	Icon       string                `json:"icon,omitempty"`
+	RecordsDir string                `json:"recordsDir"`
 	Properties []clipDatabasePropDTO `json:"properties"`
 }
 
@@ -174,10 +176,18 @@ func (a *App) ctlClipContext() (any, error) {
 				}
 				props = append(props, dto)
 			}
+			recordsDir := st.ResolveSourceDir()
+			if cur.Source.Type == database.SourceInline {
+				recordsDir = path.Dir(dbRel)
+				if recordsDir == "." {
+					recordsDir = ""
+				}
+			}
 			dbs = append(dbs, clipDatabaseContext{
 				Path:       dbRel,
 				Title:      cur.Title,
 				Icon:       cur.Icon,
+				RecordsDir: recordsDir,
 				Properties: props,
 			})
 		}
@@ -206,6 +216,7 @@ func (a *App) ctlClipContext() (any, error) {
 		"protocol":      clipper.ProtocolVersion,
 		"live":          a.isLiveWindow(),
 		"activeSpaceId": activeID,
+		"dailyDir":      templates.Folder(),
 		"aiReady":       aiReady,
 		"aiModel":       aiModel,
 		"spaces":        spacesOut,
@@ -405,7 +416,21 @@ func (a *App) ctlClipUploadAsset(raw []byte) (any, error) {
 		if rErr != nil {
 			return nil, rErr
 		}
-		if _, stErr := os.Lstat(full); stErr == nil {
+		if fi, stErr := os.Lstat(full); stErr == nil {
+			if fi.Mode().IsRegular() && fi.Size() == int64(len(data)) {
+				if existing, rErr := os.ReadFile(full); rErr == nil && bytes.Equal(existing, data) {
+					relURL := path.Join(urlDir, cand)
+					if folderMode {
+						relURL = docRelativeURL(docDir, path.Join(urlDir, cand))
+					}
+					return map[string]any{
+						"space":      sp.Name,
+						"relUrl":     relURL,
+						"storedPath": storedRel,
+						"bytes":      len(data),
+					}, nil
+				}
+			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -632,6 +657,17 @@ func (a *App) ctlClipSave(raw []byte) (any, error) {
 		rec, cErr := a.createDBRecordForControl(sp, liveDoc, st, title, vals, p.Content)
 		if cErr != nil {
 			return nil, cErr
+		}
+		if rec.Path != "" && (strings.TrimSpace(p.Icon) != "" || strings.TrimSpace(p.Cover) != "") {
+			if rawMD, rErr := vault.Read(sp.Root, rec.Path); rErr == nil {
+				updated := applyMetadataPatch(rawMD, strPtrIfNotEmpty(p.Icon), strPtrIfNotEmpty(p.Cover), nil, nil, nil)
+				if updated != rawMD {
+					if err := a.commitMarkdownForControl(sp, rec.Path, updated); err != nil {
+						return nil, err
+					}
+					_, _ = st.Refresh(a.liveDocsForSpace(sp))
+				}
+			}
 		}
 		if err := a.saveDBStoreForControl(sp, dbRel, st, liveDoc); err != nil {
 			return nil, err

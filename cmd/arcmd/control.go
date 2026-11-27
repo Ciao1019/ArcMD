@@ -180,6 +180,9 @@ func runClipperCLI(args []string, cfg app.Config, stdout, stderr io.Writer) int 
 			return 0
 		}
 		fmt.Fprintf(stdout, "Installed %s for %d browser(s): %s\n", clipper.HostName, res.InstalledCount, res.ManifestPath)
+		for _, w := range res.Warnings {
+			fmt.Fprintln(stderr, "warning:", w)
+		}
 		return 0
 
 	case "uninstall":

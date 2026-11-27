@@ -258,6 +258,166 @@ func TestClipEndToEndContextUploadSaveCheckURLAndAI(t *testing.T) {
 	}
 }
 
+func TestClipAssetPathsDedupAndDatabaseCover(t *testing.T) {
+	a, _ := newTestApp(t)
+	sp := a.state.ActiveSpace()
+
+	if err := os.MkdirAll(filepath.Join(sp.Root, "Reading"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 1. Default SourceFolder database (empty Dir -> Reading/稍后阅读).
+	defaultDB := database.NewDefault("稍后阅读", database.SourceConfig{Type: database.SourceFolder})
+	defaultDBRel := "Reading/稍后阅读.db.md"
+	defaultDBText, err := database.EncodeDatabaseMarkdown(defaultDB, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultDBFull, err := vault.Resolve(sp.Root, defaultDBRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultDBFull, []byte(defaultDBText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Custom SourceFolder database (Dir: Reading/CustomItems).
+	customDB := database.NewDefault("自定义库", database.SourceConfig{Type: database.SourceFolder, Dir: "Reading/CustomItems"})
+	customDBRel := "Reading/自定义库.db.md"
+	customDBText, err := database.EncodeDatabaseMarkdown(customDB, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	customDBFull, err := vault.Resolve(sp.Root, customDBRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(customDBFull, []byte(customDBText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+
+	// Verify clip.context returns dailyDir and each database's recordsDir.
+	ctxAny, err := a.handleControl(ControlRequest{Action: "clip.context"})
+	if err != nil {
+		t.Fatalf("clip.context: %v", err)
+	}
+	ctxMap := ctxAny.(map[string]any)
+	if got := ctxMap["dailyDir"]; got != "日记" {
+		t.Fatalf("clip.context dailyDir = %v, want 日记", got)
+	}
+	spaces := ctxMap["spaces"].([]clipSpaceContext)
+	if len(spaces) == 0 {
+		t.Fatal("expected at least one space in clip.context")
+	}
+	gotRecordsDir := map[string]string{}
+	for _, db := range spaces[0].Databases {
+		gotRecordsDir[db.Path] = db.RecordsDir
+	}
+	if gotRecordsDir[defaultDBRel] != "Reading/稍后阅读" {
+		t.Fatalf("default DB recordsDir = %q, want Reading/稍后阅读", gotRecordsDir[defaultDBRel])
+	}
+	if gotRecordsDir[customDBRel] != "Reading/CustomItems" {
+		t.Fatalf("custom DB recordsDir = %q, want Reading/CustomItems", gotRecordsDir[customDBRel])
+	}
+
+	// Verify daily docDir uploads to 日记/assets and deduplicates byte-identical uploads.
+	pngA := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R', 1}
+	pngB := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R', 2}
+	up1, err := a.handleControl(ControlRequest{
+		Action: "clip.upload_asset",
+		Params: mustMarshalClipParams(t, map[string]any{
+			"space":      sp.ID,
+			"docDir":     "日记",
+			"filename":   "cover.png",
+			"mimeType":   "image/png",
+			"dataBase64": base64.StdEncoding.EncodeToString(pngA),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("upload 1: %v", err)
+	}
+	up1Map := up1.(map[string]any)
+	if up1Map["storedPath"] != "日记/assets/cover.png" || up1Map["relUrl"] != "assets/cover.png" {
+		t.Fatalf("unexpected daily asset upload: %+v", up1Map)
+	}
+	// Identical bytes must reuse cover.png instead of creating cover-2.png.
+	up2, err := a.handleControl(ControlRequest{
+		Action: "clip.upload_asset",
+		Params: mustMarshalClipParams(t, map[string]any{
+			"space":      sp.ID,
+			"docDir":     "日记",
+			"filename":   "cover.png",
+			"mimeType":   "image/png",
+			"dataBase64": base64.StdEncoding.EncodeToString(pngA),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("upload 2: %v", err)
+	}
+	if up2.(map[string]any)["storedPath"] != "日记/assets/cover.png" {
+		t.Fatalf("identical upload should reuse cover.png, got %+v", up2)
+	}
+	// Different bytes with the same name must still allocate cover-2.png.
+	up3, err := a.handleControl(ControlRequest{
+		Action: "clip.upload_asset",
+		Params: mustMarshalClipParams(t, map[string]any{
+			"space":      sp.ID,
+			"docDir":     "日记",
+			"filename":   "cover.png",
+			"mimeType":   "image/png",
+			"dataBase64": base64.StdEncoding.EncodeToString(pngB),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("upload 3: %v", err)
+	}
+	if up3.(map[string]any)["storedPath"] != "日记/assets/cover-2.png" {
+		t.Fatalf("different bytes should allocate cover-2.png, got %+v", up3)
+	}
+
+	// Verify database clip stores image under Reading/稍后阅读/assets and persists cover in record frontmatter.
+	dbAsset, err := a.handleControl(ControlRequest{
+		Action: "clip.upload_asset",
+		Params: mustMarshalClipParams(t, map[string]any{
+			"space":      sp.ID,
+			"docDir":     gotRecordsDir[defaultDBRel],
+			"filename":   "hero.png",
+			"mimeType":   "image/png",
+			"dataBase64": base64.StdEncoding.EncodeToString(pngA),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("db asset upload: %v", err)
+	}
+	dbAssetMap := dbAsset.(map[string]any)
+	if dbAssetMap["storedPath"] != "Reading/稍后阅读/assets/hero.png" || dbAssetMap["relUrl"] != "assets/hero.png" {
+		t.Fatalf("unexpected db asset upload: %+v", dbAssetMap)
+	}
+	dbSave, err := a.handleControl(ControlRequest{
+		Action: "clip.save",
+		Params: mustMarshalClipParams(t, map[string]any{
+			"space":   sp.ID,
+			"mode":    "database",
+			"path":    defaultDBRel,
+			"title":   "With Cover Record",
+			"content": "![hero](assets/hero.png)\n",
+			"cover":   "assets/hero.png",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("clip.save database with cover: %v", err)
+	}
+	recMap := dbSave.(map[string]any)["record"].(map[string]any)
+	recPath := recMap["path"].(string)
+	if filepath.ToSlash(filepath.Dir(recPath)) != "Reading/稍后阅读" {
+		t.Fatalf("record path = %q, want under Reading/稍后阅读", recPath)
+	}
+	recMD, err := readFile(sp, recPath)
+	if err != nil || !strings.Contains(recMD, "cover: assets/hero.png") {
+		t.Fatalf("database record frontmatter missing cover: err=%v\n%s", err, recMD)
+	}
+}
+
 func TestClipperSettingsSnapshot(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render Settings › AI Web Clipper")
 	for _, variant := range []string{"light", "dark"} {
