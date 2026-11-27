@@ -143,9 +143,15 @@ func (a *App) startAgentIPC() error {
 			writeControlJSON(w, http.StatusBadRequest, ControlResponse{Error: decErr.Error()})
 			return
 		}
-		res, execErr := a.invokeOnMain(r.Context(), func() (any, error) {
-			return a.handleControl(req)
-		})
+		var res any
+		var execErr error
+		if strings.TrimSpace(req.Action) == "clip.ai" {
+			res, execErr = a.handleClipAIAsync(r.Context(), req.Params)
+		} else {
+			res, execErr = a.invokeOnMain(r.Context(), func() (any, error) {
+				return a.handleControl(req)
+			})
+		}
 		if execErr != nil {
 			writeControlJSON(w, http.StatusOK, ControlResponse{OK: false, Live: true, Error: execErr.Error()})
 			return
@@ -282,6 +288,10 @@ func ExecuteControl(ctx context.Context, cfg Config, req ControlRequest) (result
 	if err != nil {
 		return nil, false, err
 	}
+	if strings.TrimSpace(req.Action) == "clip.ai" {
+		out, err := h.handleClipAIAsync(ctx, req.Params)
+		return out, false, err
+	}
 	out, err := h.handleControl(req)
 	return out, false, err
 }
@@ -308,7 +318,11 @@ func callLiveIPC(ctx context.Context, cfg Config, req ControlRequest) (any, erro
 	}
 	var connected atomic.Bool
 	reqCtx := context.WithValue(ctx, ipcConnectedKey{}, &connected)
-	callCtx, cancel := context.WithTimeout(reqCtx, liveIPCTimeout)
+	timeout := liveIPCTimeout
+	if strings.TrimSpace(req.Action) == "clip.ai" && timeout < 60*time.Second {
+		timeout = 60 * time.Second
+	}
+	callCtx, cancel := context.WithTimeout(reqCtx, timeout)
 	defer cancel()
 
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, "http://"+info.Addr+"/v1/control", bytes.NewReader(payload))

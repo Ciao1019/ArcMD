@@ -89,6 +89,9 @@ type Prefs struct {
 	// AI is the model the space's questions are asked of. Its API key is
 	// not here but in a separate local file managed by Secrets.
 	AI AI `json:"ai,omitzero"`
+	// ClipperExtensionIDs holds optional additional Chromium extension IDs
+	// allowed to connect to ArcMD's Native Messaging host alongside the built-in default.
+	ClipperExtensionIDs []string `json:"clipperExtensionIds,omitempty"`
 }
 
 // AI selects a model service and its streaming protocol.

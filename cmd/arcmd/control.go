@@ -13,7 +13,9 @@ import (
 
 	"github.com/Ciao1019/ArcMD/internal/agentmcp"
 	"github.com/Ciao1019/ArcMD/internal/app"
+	"github.com/Ciao1019/ArcMD/internal/clipper"
 	"github.com/Ciao1019/ArcMD/internal/i18n"
+	"github.com/Ciao1019/ArcMD/internal/prefs"
 )
 
 const cliUsage = `Usage:
@@ -25,6 +27,8 @@ const cliUsage = `Usage:
   arcmd db <subcommand> [flags]        Create, query, or update multi-view databases (.db.md)
   arcmd format-guide [topic]           Print ArcMD rich Markdown/HTML/Whiteboard/Database format spec
   arcmd skill [print|install|mcp]      Print or install SKILL.md and MCP config for local AI agents
+  arcmd clipper [status|install|uninstall]  Manage browser Web Clipper Native Messaging host
+  arcmd native-host                    Run Chrome/Chromium Native Messaging stdio host
   arcmd mcp                            Run stdio Model Context Protocol (MCP) server
   arcmd ask [flags] "question"         Ask the read-only Space QA agent a question
 `
@@ -32,6 +36,9 @@ const cliUsage = `Usage:
 func dispatchCLI(args []string, cfg app.Config, stdin io.Reader, stdout, stderr io.Writer) (int, bool) {
 	if len(args) == 0 {
 		return 0, false
+	}
+	if clipper.IsNativeMessagingInvocation(args) {
+		return runNativeHost(cfg, stdin, stdout, stderr), true
 	}
 	switch args[0] {
 	case "ask":
@@ -41,6 +48,8 @@ func dispatchCLI(args []string, cfg app.Config, stdin io.Reader, stdout, stderr 
 		return 0, true
 	case "mcp":
 		return runMCP(cfg, stdin, stdout, stderr), true
+	case "clipper":
+		return runClipperCLI(args[1:], cfg, stdout, stderr), true
 	case "format-guide", "formats":
 		topic := "all"
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
@@ -79,6 +88,123 @@ func runMCP(cfg app.Config, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func runNativeHost(cfg app.Config, stdin io.Reader, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	err := clipper.Serve(ctx, stdin, stdout, func(callCtx context.Context, action string, params json.RawMessage) (any, bool, error) {
+		return app.ExecuteControl(callCtx, cfg, app.ControlRequest{
+			Action: action,
+			Params: params,
+		})
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintln(stderr, "arcmd native-host:", err)
+		return 1
+	}
+	return 0
+}
+
+func runClipperCLI(args []string, cfg app.Config, stdout, stderr io.Writer) int {
+	sub := "status"
+	rest := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub = args[0]
+		rest = args[1:]
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(stderr, "arcmd clipper:", err)
+		return 1
+	}
+	switch sub {
+	case "status":
+		fs := flag.NewFlagSet("clipper status", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		asJSON := fs.Bool("json", false, "output JSON")
+		if err := parseFlexible(fs, rest); err != nil {
+			return 2
+		}
+		targets := clipper.DetectBrowsers(home, cfg.ConfigDir)
+		if *asJSON {
+			writeJSON(stdout, map[string]any{
+				"hostName":           clipper.HostName,
+				"defaultExtensionId": clipper.DefaultExtensionID,
+				"browsers":           targets,
+			})
+			return 0
+		}
+		for _, t := range targets {
+			state := "not detected"
+			if t.Installed {
+				state = "installed"
+			} else if t.Detected {
+				state = "detected (not installed)"
+			}
+			fmt.Fprintf(stdout, "%-10s %s\n", t.Name, state)
+		}
+		return 0
+
+	case "install":
+		fs := flag.NewFlagSet("clipper install", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		extIDs := fs.String("ext-id", "", "optional comma-separated extra Chrome extension IDs")
+		bin := fs.String("bin", "", "optional explicit ArcMD executable path")
+		asJSON := fs.Bool("json", false, "output JSON")
+		if err := parseFlexible(fs, rest); err != nil {
+			return 2
+		}
+		binPath := strings.TrimSpace(*bin)
+		if binPath == "" {
+			binPath = currentBinaryCommand()
+		}
+		var extra []string
+		if p, pErr := (prefs.Store{Path: cfg.ConfigDir + string(os.PathSeparator) + "prefs.json"}).Load(); pErr == nil && p != nil {
+			extra = append(extra, p.ClipperExtensionIDs...)
+		}
+		if strings.TrimSpace(*extIDs) != "" {
+			for _, part := range strings.Split(*extIDs, ",") {
+				if id, ok := clipper.ParseExtensionID(part); ok {
+					extra = append(extra, id)
+				}
+			}
+		}
+		res, instErr := clipper.InstallHost(home, cfg.ConfigDir, binPath, extra)
+		if instErr != nil {
+			fmt.Fprintln(stderr, "arcmd clipper install:", instErr)
+			return 1
+		}
+		if *asJSON {
+			writeJSON(stdout, res)
+			return 0
+		}
+		fmt.Fprintf(stdout, "Installed %s for %d browser(s): %s\n", clipper.HostName, res.InstalledCount, res.ManifestPath)
+		return 0
+
+	case "uninstall":
+		fs := flag.NewFlagSet("clipper uninstall", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		asJSON := fs.Bool("json", false, "output JSON")
+		if err := parseFlexible(fs, rest); err != nil {
+			return 2
+		}
+		removed, rmErr := clipper.UninstallHost(home, cfg.ConfigDir)
+		if rmErr != nil {
+			fmt.Fprintln(stderr, "arcmd clipper uninstall:", rmErr)
+			return 1
+		}
+		if *asJSON {
+			writeJSON(stdout, map[string]any{"removed": removed})
+			return 0
+		}
+		fmt.Fprintf(stdout, "Removed %d browser Native Messaging registration(s).\n", removed)
+		return 0
+
+	default:
+		fmt.Fprintf(stderr, "arcmd clipper: unknown subcommand %q (use status, install, or uninstall)\n", sub)
+		return 2
+	}
 }
 
 func currentBinaryCommand() string {
