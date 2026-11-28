@@ -1076,8 +1076,13 @@ func (e *Editor) exportVectorRowText(
 			continue
 		}
 		if obj.hasImage {
+			padY := float32(0)
+			if obj.imgH >= 20 && obj.rect.H > obj.imgH {
+				padY = (obj.rect.H - obj.imgH) / 2
+			}
 			ox := r.x - scrollX + obj.rect.X
-			oy := r.y + obj.rect.Y
+			oy := r.y + obj.rect.Y + padY
+			oh := max(1, obj.rect.H-2*padY)
 			var raw image.Image
 			if o.LoadRawImage != nil {
 				raw = o.LoadRawImage(obj.image.URL)
@@ -1089,21 +1094,21 @@ func (e *Editor) exportVectorRowText(
 						ui.Box(c).Fill().Draw(func(p *ui.Painter, rect ui.Rect) {
 							p.Image(obj.imageRes.Bitmap, rect, ui.Contain)
 						})
-					}, max(1, int(math.Ceil(float64(obj.rect.W)))), max(1, int(math.Ceil(float64(obj.rect.H)))), 2)
+					}, max(1, int(math.Ceil(float64(obj.rect.W)))), max(1, int(math.Ceil(float64(oh)))), 2)
 				}
 			}
 			if raw == nil && obj.imageRes.SVG != nil {
-				raw = rasterizeSVGForPDF(obj.imageRes.SVG, obj.rect.W, obj.rect.H, t)
+				raw = rasterizeSVGForPDF(obj.imageRes.SVG, obj.rect.W, oh, t)
 			}
 			if raw != nil {
-				vp.DrawImage(raw, px(ox), py(oy), pw(obj.rect.W), ph(obj.rect.H), 0)
+				vp.DrawImage(raw, px(ox), py(oy), pw(obj.rect.W), ph(oh), 0)
 			} else {
 				alt := strings.TrimSpace(obj.image.Alt)
 				if alt == "" {
 					alt = imageName(obj.image.URL)
 				}
 				if alt != "" {
-					vp.DrawText(alt, px(ox+4), py(oy+obj.rect.H*0.72), pw(max(1, obj.rect.W-8)), float64(max(10, font.Size*0.78))*sy, pdfTextStyleFor(font, ui.Span{}), pdfRGBA(pg.Caption))
+					vp.DrawText(alt, px(ox+4), py(oy+oh*0.72), pw(max(1, obj.rect.W-8)), float64(max(10, font.Size*0.78))*sy, pdfTextStyleFor(font, ui.Span{}), pdfRGBA(pg.Caption))
 				}
 			}
 			continue

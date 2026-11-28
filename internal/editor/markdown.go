@@ -21,8 +21,9 @@ import (
 )
 
 type importedChunk struct {
-	from, to int
-	raw      string
+	from, to  int
+	raw       string
+	sepBefore string
 }
 
 type parsedMarkdown struct {
@@ -394,6 +395,7 @@ func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text strin
 		return blocks, nil
 	}
 	var chunks []importedChunk
+	prevEnd, prevTo := -1, -1
 	for i := 0; i < len(blocks); {
 		s, ok := spanStart[blocks[i]]
 		if !ok || s < 0 {
@@ -418,7 +420,16 @@ func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text strin
 		if e >= s && e <= len(text) {
 			raw := strings.TrimRight(text[s:e], "\r\n")
 			if raw != "" {
-				chunks = append(chunks, importedChunk{from: i, to: j + 1, raw: raw})
+				var sepBefore string
+				if prevEnd >= 0 && prevTo == i && s >= prevEnd {
+					gap := text[prevEnd:s]
+					if strings.Trim(gap, " \t\r\n") == "" && strings.Contains(gap, "\n") {
+						sepBefore = strings.ReplaceAll(gap, "\r\n", "\n")
+					}
+				}
+				chunks = append(chunks, importedChunk{from: i, to: j + 1, raw: raw, sepBefore: sepBefore})
+				prevEnd = s + len(raw)
+				prevTo = j + 1
 			}
 		}
 		i = j + 1
@@ -2315,8 +2326,9 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 	used := make([]bool, len(orig.chunks))
 	cursors := make(map[uint64]int, len(buckets))
 	type emittedItem struct {
-		text   string
-		isList bool
+		text     string
+		isList   bool
+		chunkIdx int
 	}
 	items := make([]emittedItem, 0, len(blocks))
 	numberedSeq := map[int]int{}
@@ -2367,19 +2379,21 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 					advanceListState(blocks[bi], numberedSeq, listCols, numberedDelim)
 				}
 			}
-			items = append(items, emittedItem{text: ch.raw, isList: isList})
+			items = append(items, emittedItem{text: ch.raw, isList: isList, chunkIdx: matched})
 			i += spanLen
 			continue
 		}
 		text, consumed, isList := renderSingleMarkdownItem(blocks, i, numberedSeq, listCols, numberedDelim)
-		items = append(items, emittedItem{text: text, isList: isList})
+		items = append(items, emittedItem{text: text, isList: isList, chunkIdx: -1})
 		i += consumed
 	}
 
 	var body strings.Builder
 	for idx, it := range items {
 		if idx > 0 {
-			if items[idx-1].isList && it.isList {
+			if it.chunkIdx >= 0 && items[idx-1].chunkIdx >= 0 && it.chunkIdx == items[idx-1].chunkIdx+1 && orig.chunks[it.chunkIdx].sepBefore != "" {
+				body.WriteString(orig.chunks[it.chunkIdx].sepBefore)
+			} else if items[idx-1].isList && it.isList {
 				body.WriteString("\n")
 			} else {
 				body.WriteString("\n\n")

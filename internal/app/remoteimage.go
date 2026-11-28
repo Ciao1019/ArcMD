@@ -127,15 +127,22 @@ func (a *App) remoteImageResource(d *document, rawURL string) editor.ImageResour
 		a.remoteImages.mu.Unlock()
 
 		post(func() {
-			if a.imgResolved != nil {
-				delete(a.imgResolved, imageKey{doc: d, url: rawURL})
-			}
-			if d != nil && !d.closed.Load() {
-				if d.imgCache != nil {
-					delete(d.imgCache, rawURL)
+			invalidateDoc := func(target *document) {
+				if target == nil || target.closed.Load() {
+					return
 				}
-				if d.ed != nil {
-					d.ed.InvalidateImage(rawURL)
+				if a.imgResolved != nil {
+					delete(a.imgResolved, imageKey{doc: target, url: rawURL})
+				}
+				if target.imgCache != nil {
+					delete(target.imgCache, rawURL)
+				}
+				target.invalidateImage(rawURL)
+			}
+			invalidateDoc(d)
+			for _, rd := range a.residentDocuments() {
+				if rd != d {
+					invalidateDoc(rd)
 				}
 			}
 		})

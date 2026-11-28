@@ -1672,11 +1672,7 @@ func (d *document) thumbImageResource(url string) editor.ImageResource {
 	return res
 }
 
-func (d *document) rawImage(url string) image.Image {
-	full, err := d.localImage(url)
-	if err != nil {
-		return nil
-	}
+func decodeRawImageFile(full string) image.Image {
 	f, err := os.Open(full)
 	if err != nil {
 		return nil
@@ -1687,6 +1683,35 @@ func (d *document) rawImage(url string) image.Image {
 		return nil
 	}
 	return img
+}
+
+func (d *document) rawImage(url string) image.Image {
+	full, err := d.localImage(url)
+	if err != nil {
+		return nil
+	}
+	return decodeRawImageFile(full)
+}
+
+// invalidateImage clears cached image state across every editor owned by d
+// (rich editor, split source preview, and cached MDZip page editors).
+func (d *document) invalidateImage(url string) {
+	if d == nil {
+		return
+	}
+	if d.ed != nil {
+		d.ed.InvalidateImage(url)
+	}
+	if d.sourcePreviewEd != nil {
+		d.sourcePreviewEd.InvalidateImage(url)
+	}
+	if d.mdz != nil {
+		for _, ed := range d.mdz.editors {
+			if ed != nil {
+				ed.InvalidateImage(url)
+			}
+		}
+	}
 }
 
 func (d *document) imageResourceWith(url string, post func(func())) editor.ImageResource {
@@ -1765,7 +1790,7 @@ func (d *document) imageResourceFrom(full, url string, post func(func())) editor
 			if d.closed.Load() {
 				return
 			}
-			if decoded.Bitmap != nil {
+			if decoded.HasVisual() {
 				decoded.LoadedAt = time.Now()
 			}
 			if d.imgCache == nil {
@@ -1776,9 +1801,7 @@ func (d *document) imageResourceFrom(full, url string, post func(func())) editor
 				size:     size,
 				resource: decoded,
 			}
-			if d.ed != nil {
-				d.ed.InvalidateImage(url)
-			}
+			d.invalidateImage(url)
 		})
 	}()
 	return placeholder

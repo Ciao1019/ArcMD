@@ -232,5 +232,13 @@ func TestRepositoryReadmeImportsWithoutRawHTMLBadges(t *testing.T) {
 		if name == "README.md" && !strings.Contains(partial, "| Linux | ARM64 | `.deb`、`.tar.gz` |") {
 			t.Fatalf("%s partial edit truncated trailing pipe on unchanged table row", name)
 		}
+		// Appending a new paragraph at the end must preserve exact inter-chunk blank lines
+		// everywhere else (e.g. the two blank lines between Star History </a> and ## 致谢).
+		appended := doc.Clone()
+		appended.Blocks = append(appended.Blocks, document.NewBlock("paragraph", "Appended verification line."))
+		wantAppended := strings.TrimRight(src, "\n") + "\n\nAppended verification line.\n"
+		if got := ExportMarkdown(appended); got != wantAppended {
+			t.Fatalf("%s appending paragraph altered unrelated lines (got len=%d want len=%d)", name, len(got), len(wantAppended))
+		}
 	}
 }

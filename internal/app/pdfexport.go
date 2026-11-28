@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"image"
 	"io/fs"
 	"os"
 	"path"
@@ -135,8 +136,8 @@ func (a *App) pdfExportView(c *ui.Context) {
 			Width:          paperWidth,
 			Theme:          documentTheme(false),
 			Page:           pageStyle(false),
-			LoadImage:      job.source.imageResource,
-			LoadRawImage:   job.source.rawImage,
+			LoadImage:      func(url string) editor.ImageResource { return a.pdfImageResource(job.source, url) },
+			LoadRawImage:   func(url string) image.Image { return a.pdfRawImage(job.source, url) },
 			LoadWhiteboard: func(url string) (*whiteboard.Scene, uint64, error) { return a.loadWhiteboardFor(job.source, url) },
 			LoadPDF:        func(url string) (*pdfdoc.Document, uint64, error) { return a.loadPDFFor(job.source, url) },
 			LoadBook:       func(url string) (*bookdoc.Document, uint64, error) { return a.loadBookFor(job.source, url) },
@@ -254,6 +255,30 @@ func (a *App) finishPDF(job *pdfExport) {
 			mygo.Shell.ShowItemInFolder(full)
 		}
 	}
+}
+
+func (a *App) pdfImageResource(d *document, url string) editor.ImageResource {
+	if isRemoteImageURL(url) {
+		if cachePath := a.remoteImageCachePath(url); cachePath != "" {
+			if info, err := os.Stat(cachePath); err == nil && info.Mode().IsRegular() {
+				res := decodeLocalImageSync(cachePath)
+				res.Local = false
+				return res
+			}
+		}
+		return editor.ImageResource{Problem: editor.ImageRemote}
+	}
+	return d.imageResource(url)
+}
+
+func (a *App) pdfRawImage(d *document, url string) image.Image {
+	if isRemoteImageURL(url) {
+		if cachePath := a.remoteImageCachePath(url); cachePath != "" {
+			return decodeRawImageFile(cachePath)
+		}
+		return nil
+	}
+	return d.rawImage(url)
 }
 
 func isInsideDir(root, full string) bool {

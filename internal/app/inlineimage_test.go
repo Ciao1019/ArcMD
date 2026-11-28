@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"image/color"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/mdz"
 	"github.com/Ciao1019/ArcMD/internal/vault"
@@ -102,6 +104,132 @@ func TestInlineImageLocalRemoteSVGAndMDZRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMDZAsyncRemoteSVGAndPDFRemoteBadgeExport(t *testing.T) {
+	a, tt := newTestApp(t)
+	sp := a.state.ActiveSpace()
+
+	remoteSVGURL := "https://img.shields.io/badge/version-0.5.1-16a34a"
+	greenBadgeSVG := `<svg xmlns="http://www.w3.org/2000/svg" width="112" height="20" viewBox="0 0 112 20"><rect width="112" height="20" rx="3" fill="#16a34a"/></svg>`
+	if _, err := a.cacheRemoteImageBytes(remoteSVGURL, []byte(greenBadgeSVG)); err != nil {
+		t.Fatalf("cacheRemoteImageBytes(SVG) failed: %v", err)
+	}
+	remotePNGURL := "https://example.test/assets/remote-icon.png"
+	remotePNG := makeBookSnapshotPNG(t, 48, 24, color.RGBA{37, 99, 235, 255}, color.RGBA{239, 246, 255, 255}, color.RGBA{96, 165, 250, 255})
+	if _, err := a.cacheRemoteImageBytes(remotePNGURL, remotePNG); err != nil {
+		t.Fatalf("cacheRemoteImageBytes(PNG) failed: %v", err)
+	}
+
+	md := "# Remote Badges\n\n[![version](" + remoteSVGURL + ")](https://github.com/Ciao1019/ArcMD) <img src=\"" + remotePNGURL + "\" width=\"24\" height=\"12\" alt=\"rpng\">\n"
+	rel, err := vault.CreateFile(sp.Root, "", "RemoteBadgeOnly", ".md", md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.refreshTree()
+	a.open(rel)
+	settle(tt)
+
+	// 1. PDF export must embed cached remote SVG & PNG images (not degrade to alt text).
+	a.exportPDF()
+	finishTestPDF(t, a, tt)
+	pdfBytes, err := os.ReadFile(filepath.Join(sp.Root, "RemoteBadgeOnly.pdf"))
+	if err != nil {
+		t.Fatalf("exported PDF missing: %v", err)
+	}
+	if count := bytes.Count(pdfBytes, []byte("/Subtype /Image")); count < 2 {
+		t.Fatalf("expected >=2 embedded /Subtype /Image objects for remote SVG + PNG, got %d", count)
+	}
+
+	// 2. Export to .mdz and re-open with async image decoding enabled (matching real GUI window).
+	a.exportMDZ()
+	a.refreshTree()
+
+	posted := make(chan func(), 16)
+	a.search.async = true
+	a.runAsync = func(fn func()) {
+		posted <- fn
+	}
+	t.Cleanup(func() {
+		a.search.async = false
+		a.runAsync = nil
+	})
+
+	a.open("RemoteBadgeOnly.mdz")
+	tt.Frame()
+	if !a.doc.isMDZ() {
+		t.Fatal("expected opened .mdz viewer")
+	}
+
+	countGreenDocPixels := func() int {
+		img := tt.Image()
+		docRect, ok := tt.Find("文档")
+		if !ok {
+			t.Fatal("could not find document bounds in .mdz viewer")
+		}
+		b := img.Bounds()
+		x0 := max(b.Min.X, int(docRect.X))
+		y0 := max(b.Min.Y, int(docRect.Y))
+		x1 := min(b.Max.X, int(docRect.X+docRect.W))
+		y1 := min(b.Max.Y, int(docRect.Y+docRect.H))
+		n := 0
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				r, g, bl, _ := img.At(x, y).RGBA()
+				r8, g8, b8 := r>>8, g>>8, bl>>8
+				if g8 > 130 && r8 < 60 && b8 < 100 {
+					n++
+				}
+			}
+		}
+		return n
+	}
+
+	// On the initial frame before async callbacks run, the remote SVG is still loading (gray skeleton).
+	if before := countGreenDocPixels(); before != 0 {
+		t.Fatalf("expected 0 green badge pixels before async decode completes, got %d", before)
+	}
+
+	// Wait for the background decode callback to fire and invalidate the MDZ page editor.
+	deadline := time.After(5 * time.Second)
+	for {
+		res := a.mdzLoadImage(a.doc, remoteSVGURL)
+		if res.SVG != nil {
+			break
+		}
+		select {
+		case fn := <-posted:
+			fn()
+			tt.Frame()
+		case <-deadline:
+			t.Fatalf("timed out waiting for async remote SVG decode in .mdz; last res=%+v", res)
+		}
+	}
+	// Drain any remaining queued callbacks (e.g. remote PNG decode) and render a frame.
+	for draining := true; draining; {
+		select {
+		case fn := <-posted:
+			fn()
+		default:
+			draining = false
+		}
+	}
+	tt.Frame()
+
+	ed := a.doc.mdz.activeEditor()
+	if ed == nil {
+		t.Fatal("expected active MDZ page editor")
+	}
+	if after := countGreenDocPixels(); after < 100 {
+		t.Fatalf(".mdz editor did not repaint remote SVG after async invalidation (green pixels=%d)", after)
+	}
+	res := a.mdzLoadImage(a.doc, remoteSVGURL)
+	if res.SVG == nil || res.Loading || res.Width != 112 || res.Height != 20 {
+		t.Fatalf(".mdz remote SVG did not settle after async invalidation: %+v", res)
+	}
+	if pngRes := a.mdzLoadImage(a.doc, remotePNGURL); pngRes.Bitmap == nil || pngRes.Loading {
+		t.Fatalf(".mdz remote PNG did not settle after async invalidation: %+v", pngRes)
+	}
+}
+
 func TestSnapshotInlineHTMLImages(t *testing.T) {
 	dir := snapshotDir(t, "set ARCMD_SNAPSHOT to render inline HTML images and README")
 
@@ -190,7 +318,7 @@ func TestSnapshotInlineHTMLImages(t *testing.T) {
 			svg := `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="20" viewBox="0 0 128 20"><rect width="56" height="20" rx="3" fill="#555"/><rect x="56" width="72" height="20" rx="3" fill="` + fill + `"/><text x="28" y="14" text-anchor="middle" fill="#fff" font-size="11" font-family="sans-serif">` + left + `</text><text x="92" y="14" text-anchor="middle" fill="#fff" font-size="11" font-family="sans-serif">` + right + `</text></svg>`
 			_, _ = a.cacheRemoteImageBytes(u, []byte(svg))
 		}
-		seed("https://img.shields.io/badge/version-0.5.1-F21158", "version", "0.5.1", "#F21158")
+		seed("https://img.shields.io/badge/version-0.5.2-F21158", "version", "0.5.2", "#F21158")
 		seed("https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F25F11", "platform", "mac|Win|Lin", "#F25F11")
 		seed("https://img.shields.io/badge/built%20with-Go%20%2B%20MyGo-00ADD8?logo=go&logoColor=white", "built with", "Go + MyGo", "#00ADD8")
 		seed("https://img.shields.io/badge/CI-GitHub%20Actions-2088ff?logo=githubactions&logoColor=white", "CI", "Actions", "#2088ff")
