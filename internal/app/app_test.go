@@ -40,6 +40,33 @@ func newTestApp(t testing.TB) (*App, *ui.Tester) {
 
 func root(a *App) string { return a.state.ActiveSpace().Root }
 
+// scrollSettingsTo brings target into the visible center of the active Settings
+// scroll pane so UI tests do not depend on platform-specific font metrics.
+func scrollSettingsTo(t testing.TB, tt *ui.Tester, target string) {
+	t.Helper()
+	tt.Frame()
+	tabs, ok := tt.AccessByRole(ui.RoleTabList, "设置")
+	if !ok {
+		tabs, ok = tt.AccessByRole(ui.RoleTabList, "Settings")
+	}
+	if !ok {
+		t.Fatalf("settings tab list not found")
+	}
+	r, ok := tt.Find(target)
+	if !ok {
+		t.Fatalf("settings target %q not found", target)
+	}
+	viewTop := tabs.Bounds.Y
+	viewBot := tabs.Bounds.Y + tabs.Bounds.H
+	if r.Y >= viewTop+16 && r.Y+r.H <= viewBot-16 {
+		return
+	}
+	scrollX := tabs.Bounds.X + tabs.Bounds.W + 180
+	centerY := viewTop + tabs.Bounds.H/2
+	tt.Scroll(scrollX, centerY, 0, (r.Y+r.H/2)-centerY)
+	tt.Frame()
+}
+
 // Documents open for reading. Editing tests explicitly focus the writing
 // surface, preserving the test's chosen caret after the pointer click.
 func focusDocument(a *App, tt *ui.Tester) {

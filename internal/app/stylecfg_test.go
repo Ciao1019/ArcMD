@@ -190,11 +190,7 @@ func TestStyleConfigOpenTemplateAndManualReloadControls(t *testing.T) {
 
 	// Click 打开样式配置文件 in Settings -> Appearance.
 	a.openSettings(tabAppearance)
-	tt.Frame()
-	if r, ok := tt.Find("界面语言"); ok {
-		tt.Scroll(r.X+r.W/2, r.Y+120, 0, 600)
-		tt.Frame()
-	}
+	scrollSettingsTo(t, tt, "打开样式配置文件")
 	if err := tt.Click("打开样式配置文件"); err != nil {
 		t.Fatalf("click 打开样式配置文件: %v", err)
 	}
@@ -406,11 +402,7 @@ func TestPaperPresetsSettingsPaletteDarkOverrideAndReset(t *testing.T) {
 
 	// 恢复默认外观 resets paperPreset back to default white paper.
 	a.openSettings(tabAppearance)
-	tt.Frame()
-	if r, ok := tt.Find("恢复默认外观"); ok {
-		tt.Scroll(r.X, 400, 0, 500)
-		tt.Frame()
-	}
+	scrollSettingsTo(t, tt, "恢复默认外观")
 	if err := tt.Click("恢复默认外观"); err != nil {
 		t.Fatalf("click 恢复默认外观: %v", err)
 	}

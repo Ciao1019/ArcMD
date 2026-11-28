@@ -13,20 +13,28 @@ func TestReadingSettingsAndToolbarLock(t *testing.T) {
 	a, tt := newTestApp(t)
 	tt.Frame()
 	a.openSettings(tabAppearance)
-	tt.Frame()
-	// The reading group is below the writing group: scroll to it.
-	r, _ := tt.Find("增大正文字号")
-	tt.Scroll(r.X, 400, 0, 400)
-	tt.Frame()
+	scrollSettingsTo(t, tt, "增大正文字号")
 	if err := tt.Click("增大正文字号"); err != nil {
 		t.Fatal(err)
 	}
 	if a.prefs.ReadingSize() != 17 {
 		t.Fatal("font size")
 	}
+	scrollSettingsTo(t, tt, "增大行距")
 	if err := tt.Click("增大行距"); err != nil {
 		t.Fatal(err)
 	}
+	// Verify scrolling and clicking still work when the settings viewport is shorter.
+	tt.SetSize(960, 520)
+	scrollSettingsTo(t, tt, "减小正文字号")
+	if err := tt.Click("减小正文字号"); err != nil {
+		t.Fatal(err)
+	}
+	scrollSettingsTo(t, tt, "增大正文字号")
+	if err := tt.Click("增大正文字号"); err != nil {
+		t.Fatal(err)
+	}
+	tt.SetSize(1200, 760)
 	p, err := (prefs.Store{Path: a.prefStore.Path}).Load()
 	if err != nil || p.FontSize != 17 || p.LineHeight != a.prefs.LineHeight {
 		t.Fatal("preferences not saved", p, err)

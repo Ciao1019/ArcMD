@@ -487,11 +487,7 @@ func TestAgentControlLiveWindowIPCAndSettingsUI(t *testing.T) {
 	uiMu.Unlock()
 
 	tt.SetSize(1200, 820)
-	tt.Frame()
-	if r, ok := tt.Find("Base URL"); ok {
-		tt.Scroll(r.X+r.W/2, r.Y+80, 0, 520)
-	}
-	tt.Frame()
+	scrollSettingsTo(t, tt, "一键安装 Skill")
 	if !tt.HasText("本地 Agent 接入") {
 		t.Fatal("expected '本地 Agent 接入' section in Settings › AI")
 	}

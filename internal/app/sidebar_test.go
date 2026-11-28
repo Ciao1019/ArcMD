@@ -412,9 +412,7 @@ func TestSidebarHeaderNewAndDensitySetting(t *testing.T) {
 	if a.prefs.SidebarDensity != "comfortable" || rowHeightOf("Journal") != 40 {
 		t.Fatalf("comfortable density: pref=%q height=%v", a.prefs.SidebarDensity, rowHeightOf("Journal"))
 	}
-	r, _ := tt.Find("恢复默认外观")
-	tt.Scroll(r.X, 400, 0, 400)
-	tt.Frame()
+	scrollSettingsTo(t, tt, "恢复默认外观")
 	if err := tt.Click("恢复默认外观"); err != nil {
 		t.Fatal(err)
 	}

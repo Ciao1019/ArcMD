@@ -197,13 +197,7 @@ func TestTyporaPresetConflictAndUnboundZoomReset(t *testing.T) {
 func TestRecordCustomHeadingShortcutInSettingsUI(t *testing.T) {
 	a, tt := newTestApp(t)
 	a.openSettings(tabShortcuts)
-	tt.Frame()
-
-	// Scroll down to the heading shortcuts in the settings modal.
-	if r, ok := tt.Find("命令栏"); ok {
-		tt.Scroll(r.X+r.W/2, r.Y+120, 0, 1400)
-		tt.Frame()
-	}
+	scrollSettingsTo(t, tt, "更改快捷键：标题 2")
 	if err := tt.Click("更改快捷键：标题 2"); err != nil {
 		t.Fatalf("click key field for 标题 2: %v", err)
 	}

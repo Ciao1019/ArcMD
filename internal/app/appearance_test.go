@@ -32,11 +32,7 @@ func TestAppearanceFontAndPageWidth(t *testing.T) {
 		t.Fatal("a wide page has narrower margins", wide, standard)
 	}
 	a.openSettings(tabAppearance)
-	tt.Frame()
-	// The reset is below the sample: scroll to it.
-	r, _ := tt.Find("恢复默认外观")
-	tt.Scroll(r.X, 400, 0, 400)
-	tt.Frame()
+	scrollSettingsTo(t, tt, "恢复默认外观")
 	if err := tt.Click("恢复默认外观"); err != nil {
 		t.Fatal(err)
 	}

@@ -62,11 +62,7 @@ func TestCustomToolbarModalPresetReorderRemoveAndPersistence(t *testing.T) {
 
 	// Open from Settings -> Appearance -> 自定义工具栏…
 	a.openSettings(tabAppearance)
-	tt.Frame()
-	if r, ok := tt.Find("界面语言"); ok {
-		tt.Scroll(r.X+r.W/2, r.Y+120, 0, 500)
-		tt.Frame()
-	}
+	scrollSettingsTo(t, tt, "自定义工具栏…")
 	if err := tt.Click("自定义工具栏…"); err != nil {
 		t.Fatalf("click 自定义工具栏… in Appearance settings: %v", err)
 	}

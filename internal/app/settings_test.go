@@ -241,11 +241,7 @@ func TestCompactBlockMaxHeightSettings(t *testing.T) {
 	if err := tt.Click("设置…"); err != nil {
 		t.Fatal(err)
 	}
-	tt.Frame()
-	if r, ok := tt.Find("自动保存"); ok {
-		tt.Scroll(r.X+r.W/2, r.Y+r.H/2, 0, 520)
-		tt.Frame()
-	}
+	scrollSettingsTo(t, tt, "图片最大高度")
 	if err := tt.Click("300"); err != nil {
 		t.Fatal(err)
 	}
