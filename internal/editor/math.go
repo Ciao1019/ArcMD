@@ -276,6 +276,8 @@ func (e *Editor) paintFormulaScaled(p *ui.Painter, box tex.Box, x, y, scale floa
 				h = max(min(op.H, 0.85), h)
 			}
 			p.Fill(ui.Rect{X: x + op.X*scale, Y: y + op.Y*scale, W: op.W * scale, H: h}, t.Text, 0)
+		case "frame":
+			p.Stroke(ui.Rect{X: x + op.X*scale, Y: y + op.Y*scale, W: op.W * scale, H: op.H * scale}, t.Text, 0, op.Width*scale)
 		case "path":
 			pts := make([][2]float32, len(op.Points))
 			for i, pt := range op.Points {

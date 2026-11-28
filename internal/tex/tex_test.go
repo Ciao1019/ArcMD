@@ -122,8 +122,40 @@ func TestStructures(t *testing.T) {
 	layout(t, `\lim_{x \to 0} \frac{\sin x}{x} = 1, \hat{x}, \vec{v}, \overline{AB}, \mathbb{R}, \binom{n}{k}, \int_0^1 x\,dx`)
 }
 
+func TestBoxed(t *testing.T) {
+	const src = `\frac{x}{2}`
+	const inset = 7
+	inner := layout(t, src)
+	framed, err := LayoutInline(`\boxed{`+src+`}`, 20, fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if framed.W != inner.W+2*inset || framed.Ascent != inner.Ascent+inset || framed.Descent != inner.Descent+inset {
+		t.Fatalf("frame does not enclose the display-style fraction with padding: %+v", framed)
+	}
+	if len(framed.Ops) != len(inner.Ops)+1 || kinds(framed, "rule") != 1 {
+		t.Fatalf("expected a frame and a fraction bar, got %+v", framed.Ops)
+	}
+	if outline := framed.Ops[len(inner.Ops)]; outline.Kind != "frame" || outline.X != 0 || outline.Y != -framed.Ascent || outline.W != framed.W || outline.H != framed.Ascent+framed.Descent || outline.Width != 1 {
+		t.Fatalf("frame does not match the box bounds: %+v", outline)
+	}
+	for index, op := range inner.Ops {
+		got := framed.Ops[index]
+		if got.Kind != op.Kind || got.Text != op.Text || got.X != op.X+inset || got.Y != op.Y || got.Size != op.Size || got.Error {
+			t.Fatalf("boxed content moved off its baseline or changed style: got %+v, inner %+v", got, op)
+		}
+	}
+	nested := layout(t, `\boxed{\boxed{x}}^2`)
+	if kinds(nested, "frame") != 2 || strings.Join(texts(nested), "") != "x2" {
+		t.Fatalf("expected two frames and a superscript, got %+v", nested.Ops)
+	}
+	if got := nested.Ops[len(nested.Ops)-1]; got.X < layout(t, `\boxed{\boxed{x}}`).W || got.Y >= 0 {
+		t.Fatalf("superscript is not placed above and outside the frame: %+v", got)
+	}
+}
+
 func TestErrors(t *testing.T) {
-	for _, src := range []string{`\frac{a}`, `{a`, `a}`, `\left( x`, `\begin{matrix} a`, `x^`, `\sqrt[2`} {
+	for _, src := range []string{`\frac{a}`, `\boxed`, `\boxed{x`, `{a`, `a}`, `\left( x`, `\begin{matrix} a`, `x^`, `\sqrt[2`} {
 		if _, err := Layout(src, 20, fixed); err == nil {
 			t.Errorf("%q laid out", src)
 		}

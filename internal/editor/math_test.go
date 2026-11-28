@@ -2,11 +2,13 @@ package editor
 
 import (
 	"bytes"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
+	"github.com/Ciao1019/ArcMD/internal/tex"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
@@ -61,6 +63,47 @@ func TestMathReadingAndEditing(t *testing.T) {
 	tt.Frame()
 	if !e.rows[1].mathHidden || e.rows[1].mathPanel != 0 {
 		t.Fatal("source panel remained after leaving the formula")
+	}
+}
+
+func TestBoxedBorderKeepsPixelWidthAtFractionalOffsets(t *testing.T) {
+	formula, err := tex.Layout(`\boxed{}`, 24, func(_ string, size float32, _, _ bool) (float32, float32, float32) {
+		return size * 0.5, size * 0.8, size * 0.2
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ed := New("")
+	theme := ui.LightTheme()
+	baseline := float32(40)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Size(100, 80).Background(ui.RGB(255, 255, 255)).Draw(func(p *ui.Painter, bounds ui.Rect) {
+			ed.paintFormula(p, formula, bounds.X+26, bounds.Y+baseline, theme)
+		})
+	}, 100, 80)
+	for _, scale := range []float32{1, 1.25, 1.5, 2} {
+		tt.SetScale(scale)
+		want := int(math.Round(float64(scale)))
+		for offset := range 8 {
+			baseline = 40 + float32(offset)/(8*scale)
+			tt.Frame()
+			image := tt.Image()
+			sampleX := int((26 + formula.W/2) * scale)
+			top, bottom := 0, 0
+			for pixelY := range image.Bounds().Dy() {
+				if image.RGBAAt(sampleX, pixelY).R >= 128 {
+					continue
+				}
+				if float32(pixelY) < baseline*scale {
+					top++
+				} else {
+					bottom++
+				}
+			}
+			if top != want || bottom != want {
+				t.Fatalf("scale %g, offset %d: border thickness top=%d bottom=%d, want %d pixels each", scale, offset, top, bottom, want)
+			}
+		}
 	}
 }
 
