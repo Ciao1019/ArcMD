@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/agentmcp"
+	"github.com/Ciao1019/ArcMD/internal/clipper"
 	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/editor"
 	"github.com/Ciao1019/ArcMD/internal/history"
@@ -330,6 +331,9 @@ type App struct {
 	agentSkillTargets  []agentmcp.SkillTarget
 	agentBinCmd        string
 	agentSkillsChecked bool
+	clipperTargets     []clipper.BrowserTarget
+	clipperChecked     bool
+	clipperExtInput    string
 	controlExec        func(func() (any, error)) (any, error)
 }
 

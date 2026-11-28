@@ -27,6 +27,7 @@ func (a *App) openSettings(tab string) {
 	a.settingsOpen = true
 	a.settingsTab = tab
 	a.refreshAgentSkillsCache()
+	a.refreshClipperTargets()
 }
 
 // moreMenu keeps document actions at hand. Library and settings lead to

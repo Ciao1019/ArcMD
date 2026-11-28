@@ -150,6 +150,7 @@ func (a *App) settingsAI(c *ui.Context) {
 	ui.Text(c, i18n.T("提问时，问题和模型读到的文档片段会发送给上面的服务；服务地址须为 https（本机服务除外）。ArcMD 不会把文档发到别处。")).
 		FontSize(12).TextColor(t.TextMuted)
 	a.settingsLocalAgents(c, sep, row)
+	a.settingsWebClipper(c, sep, row)
 }
 
 func (a *App) agentCommandPath() string {

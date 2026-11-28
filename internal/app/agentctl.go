@@ -114,6 +114,16 @@ func (a *App) handleControl(req ControlRequest) (any, error) {
 		return a.ctlDatabaseSchema(req.Params)
 	case "database.records":
 		return a.ctlDatabaseRecords(req.Params)
+	case "clip.ping":
+		return a.ctlClipPing()
+	case "clip.context":
+		return a.ctlClipContext()
+	case "clip.check_url":
+		return a.ctlClipCheckURL(req.Params)
+	case "clip.upload_asset":
+		return a.ctlClipUploadAsset(req.Params)
+	case "clip.save":
+		return a.ctlClipSave(req.Params)
 	default:
 		return nil, fmt.Errorf("unknown action %q", req.Action)
 	}

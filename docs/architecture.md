@@ -17,6 +17,7 @@ cmd/arcmd ──▶ internal/app ──▶ internal/space       spaces and space
     │              │      ├──▶ internal/plugin      marketplace catalog, install, wazero WASM sandbox
     │              │      └──▶ internal/fuzzy / search           command bar ranking & incremental index
     ├──▶ internal/agentmcp     stdio MCP server, SKILL.md installer & rich format guide
+    ├──▶ internal/clipper      browser Web Clipper Native Messaging framing, host manifests & image validation
     ├──▶ internal/sysproxy     system proxy auto-detection for HTTP transports
     ▼
 github.com/egoist/mygo v0.10.0 (mygo, ui)
@@ -58,6 +59,7 @@ cannot show the compositor's decorations.
 | `split.go`, `splitview.go`, `splitstore.go` | Document pane lifecycle, native split cards and dividers, saved layout |
 | `database.go`, `newmodal.go` | Database workspace host, side/center peek drawers, sidebar view tree, unified new-item modal |
 | `agentctl*.go` | Local CLI/MCP loopback IPC server and live/headless Space, Markdown, whiteboard & database controllers |
+| `clipper.go` | Web Clipper control endpoints (`clip.ping/context/check_url/upload_asset/save/ai`) and Settings › AI host installer UI |
 | `theme.go` | Design tokens: the space-tinted theme and chrome colors |
 
 ### Window

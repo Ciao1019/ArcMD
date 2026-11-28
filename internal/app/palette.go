@@ -391,6 +391,8 @@ func (a *App) actions() []action {
 	cmd(i18n.T("AI 问答设置…"), "", func() { a.openSettings(tabAI) })
 	cmd(i18n.T("本地 Agent 接入设置…"), "", func() { a.openSettings(tabAI) })
 	cmd(i18n.T("安装本地 Agent Skill"), "", a.installAgentSkillsAction)
+	cmd(i18n.T("浏览器剪藏设置…"), "", func() { a.openSettings(tabAI) })
+	cmd(i18n.T("安装浏览器剪藏连接"), "", a.installClipperHostAction)
 	cmd(i18n.T("书签…"), a.keyLabel("bookmarks"), a.openBookmarks)
 	cmd(i18n.T("按标签浏览"), "#", func() { a.openPalette(); a.palette.query = "#" })
 	cmd(i18n.T("最近删除…"), "", a.openTrash)
