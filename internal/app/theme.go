@@ -809,6 +809,12 @@ func pageStyleWith(dark bool, cfg *prefs.StyleConfig) editor.Page {
 	if col, ok := styleColor(pal.InlineCodeText); ok {
 		p.InlineText = col
 	}
+	if col, ok := styleColor(pal.InlineTexFill); ok {
+		p.InlineTexFill = col
+	}
+	if col, ok := styleColor(pal.TexBlockFill); ok {
+		p.TexBlockFill = col
+	}
 	if col, ok := styleColor(pal.QuoteBar); ok {
 		p.QuoteBar = col
 	}

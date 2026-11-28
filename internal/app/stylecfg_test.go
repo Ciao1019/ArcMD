@@ -44,6 +44,8 @@ func TestStyleConfigMappingLightAndDark(t *testing.T) {
     "codeText": "#1F2937",
     "inlineCodeFill": "#EDE8DC",
     "inlineCodeText": "#9A3412",
+    "inlineTexFill": "#EFF6FF",
+    "texBlockFill": "#F2F7FF",
     "quoteBar": "#94A3B8"
   },
   "dark": {
@@ -63,6 +65,8 @@ func TestStyleConfigMappingLightAndDark(t *testing.T) {
     "codeText": "#E5E7EB",
     "inlineCodeFill": "#2A303C",
     "inlineCodeText": "#FDBA74",
+    "inlineTexFill": "#283552",
+    "texBlockFill": "#242F46",
     "quoteBar": "#4B5563"
   }
 }`
@@ -95,6 +99,9 @@ func TestStyleConfigMappingLightAndDark(t *testing.T) {
 	if lp.CodeFill != ui.Hex("#F3EFE6") || lp.CodeBorder != ui.Hex("#E2DAC9") || lp.CodeText != ui.Hex("#1F2937") || lp.InlineFill != ui.Hex("#EDE8DC") || lp.InlineText != ui.Hex("#9A3412") || lp.QuoteBar != ui.Hex("#94A3B8") {
 		t.Fatalf("light code/quote colors mismatch")
 	}
+	if lp.InlineTexFill != ui.Hex("#EFF6FF") || lp.TexBlockFill != ui.Hex("#F2F7FF") {
+		t.Fatal("light TeX colors mismatch")
+	}
 	if lp.HighlightDefault.R != 253 || lp.HighlightDefault.G != 230 || lp.HighlightDefault.B != 138 || lp.HighlightDefault.A == 0 {
 		t.Fatalf("light default highlight mismatch: %+v", lp.HighlightDefault)
 	}
@@ -106,6 +113,9 @@ func TestStyleConfigMappingLightAndDark(t *testing.T) {
 	}
 	if dp.HeadingText != ui.Hex("#93C5FD") || dp.BoldText != ui.Hex("#FDBA74") || dp.TableStripe != ui.Hex("#1E222B") || dp.HighlightDefault != ui.Hex("#FACC1566") {
 		t.Fatalf("dark page colors mismatch: heading=%+v bold=%+v stripe=%+v hl=%+v", dp.HeadingText, dp.BoldText, dp.TableStripe, dp.HighlightDefault)
+	}
+	if dp.InlineTexFill != ui.Hex("#283552") || dp.TexBlockFill != ui.Hex("#242F46") {
+		t.Fatal("dark TeX colors mismatch")
 	}
 
 	// Uncustomized fallback helpers stay untouched for PDF export and baseline tests.
@@ -138,7 +148,7 @@ func TestStyleConfigLiveReloadErrorResilienceAndRemoval(t *testing.T) {
 	}
 
 	// Live reload after 1500ms via Tester.Advance without goroutines or sleep.
-	writeWithMtime(`{"light": {"paper": "#EEF6FF"}, "tableAlign": "right"}`, 3*time.Second)
+	writeWithMtime(`{"light": {"paper": "#EEF6FF", "inlineTexFill": "#EDF4FF", "texBlockFill": "#F2F7FF"}, "tableAlign": "right"}`, 3*time.Second)
 	tt.Advance(styleConfigPollInterval + 50*time.Millisecond)
 	tt.Frame()
 	if got := a.documentTheme(false).Background; got != ui.Hex("#EEF6FF") {
@@ -146,6 +156,9 @@ func TestStyleConfigLiveReloadErrorResilienceAndRemoval(t *testing.T) {
 	}
 	if got := a.pageStyle(false).TableAlign; got != "right" {
 		t.Fatalf("reloaded TableAlign = %q; want right", got)
+	}
+	if page := a.pageStyle(false); page.InlineTexFill != ui.Hex("#EDF4FF") || page.TexBlockFill != ui.Hex("#F2F7FF") {
+		t.Fatal("TeX fills were not reloaded")
 	}
 
 	// Invalid JSON/color keeps previous valid config and surfaces error toast once per mtime.
@@ -174,6 +187,9 @@ func TestStyleConfigLiveReloadErrorResilienceAndRemoval(t *testing.T) {
 	tt.Frame()
 	if got := a.documentTheme(false).Background; got != ui.Hex("#FFFFFF") {
 		t.Fatalf("after removing style.json: paper = %+v; want #FFFFFF", got)
+	}
+	if page := a.pageStyle(false); page.InlineTexFill.A != 0 || page.TexBlockFill.A != 0 {
+		t.Fatal("TeX fills should be transparent without style.json")
 	}
 }
 
