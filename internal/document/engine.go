@@ -122,6 +122,9 @@ func dropStrayColors(blocks []*Block) {
 		if b.Kind != "callout" {
 			b.Color, b.Emoji = "", ""
 		}
+		if b.Background != "" && !AllowsBackground(b.Kind) {
+			b.Background = ""
+		}
 		if b.Kind != "heading" && !isListKind(b.Kind) && b.Kind != "toggle" {
 			b.Folded = false
 		}
@@ -169,6 +172,23 @@ func (e *Engine) SetColor(id, color string) {
 	e.Edit(func() {
 		if parent, index := e.find(id); parent != nil && (*parent)[index].Kind == "callout" {
 			(*parent)[index].Color = color
+		}
+	})
+}
+
+// SetBlockBackground fills the text block id (or the caret's block when id is
+// empty) with a color from TextHighlights, or clears it when background is "".
+// Table cells use SetCellBackground instead.
+func (e *Engine) SetBlockBackground(id, background string) {
+	if background != "" && !oneOf(background, TextHighlights) {
+		return
+	}
+	if id == "" {
+		id = e.LeafAt(e.Caret).Block.ID
+	}
+	e.Edit(func() {
+		if parent, index := e.find(id); parent != nil && AllowsBlockBackground((*parent)[index].Kind) {
+			(*parent)[index].Background = background
 		}
 	})
 }
@@ -351,6 +371,9 @@ func (e *Engine) replace(a, z int, text string) {
 					block.ID = NewID()
 					block.Checked = false
 					block.Start = 0
+					if first.Block.Kind == "heading" || !runsHasText(lineRuns) {
+						block.Background = ""
+					}
 					if block.Kind != "bullet" && block.Kind != "numbered" && block.Kind != "task" && block.Kind != "quote" {
 						block.Kind, block.Level = "paragraph", 0
 					}
@@ -781,6 +804,9 @@ func (e *Engine) Paste(fragment *Document) {
 				target.Block.Runs = Compact(append(append(SliceRuns(runs, 0, start-target.Start), middle...), SliceRuns(runs, end-target.Start, target.End-target.Start)...))
 				if replaceWhole && insert.Align != "" && target.Block.Kind == "paragraph" {
 					target.Block.Align = insert.Align
+				}
+				if replaceWhole && insert.Background != "" && target.Block.Kind == "paragraph" {
+					target.Block.Background = insert.Background
 				}
 				if len(insert.Comments) > 0 {
 					midC := SliceComments(insert.Comments, start-a, end-a)

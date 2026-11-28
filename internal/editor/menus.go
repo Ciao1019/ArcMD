@@ -464,6 +464,9 @@ func (e *Editor) blockMenuHeight(b *document.Block) float32 {
 	if b.Kind == "callout" {
 		h += 32
 	}
+	if document.AllowsBlockBackground(b.Kind) {
+		h += 32
+	}
 	if b.Kind == "numbered" {
 		h += 32
 	}
@@ -481,6 +484,9 @@ func (e *Editor) blockMenuHeight(b *document.Block) float32 {
 func blockSideMenuHeight(b *document.Block, sub string) float32 {
 	if sub == "color" {
 		return 70
+	}
+	if sub == "bg" {
+		return 108
 	}
 	if sub == "listnum" {
 		return 114
@@ -552,6 +558,9 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 					if b.Kind == "callout" {
 						hover(e.menuRow(c, "bm-color", iconPalette, e.page.CodeText, i18n.T("颜色"), "›", e.menuSub == "color"), "color")
 					}
+					if document.AllowsBlockBackground(b.Kind) {
+						hover(e.menuRow(c, "bm-bg", iconPaintBucket, e.page.CodeText, i18n.T("背景颜色"), "›", e.menuSub == "bg"), "bg")
+					}
 					if b.Kind == "numbered" {
 						hover(e.menuRow(c, "bm-listnum", iconOrdered, e.page.CodeText, i18n.T("编号设置"), "›", e.menuSub == "listnum"), "listnum")
 					}
@@ -621,8 +630,13 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 			if n := len(turnItems(b)); n > 0 {
 				rowOffset += float32((n+gridCols-1)/gridCols)*36 + 5
 			}
-			if e.menuSub == "color" || e.menuSub == "listnum" {
+			if e.menuSub == "color" || e.menuSub == "bg" {
 				rowOffset += 32
+			} else if e.menuSub == "listnum" {
+				rowOffset += 32
+				if document.AllowsBlockBackground(b.Kind) {
+					rowOffset += 32
+				}
 			}
 			sideX := x + menuWidth + 4
 			if sideX+menuWidth > windowW-8 {
@@ -661,6 +675,11 @@ func (e *Editor) blockMenu(c *ui.Context, surface ui.Element) {
 						case "color":
 							ui.Text(c, i18n.T("高亮块颜色")).FontSize(12).TextColor(t.Text).Margin(0, 0, 6, 0)
 							e.colorSwatches(c, id, done)
+						case "bg":
+							ui.Text(c, i18n.T("背景颜色")).FontSize(12).TextColor(t.Text).Margin(0, 0, 6, 0)
+							e.blockBgSwatches(c, b.Background, func(name string) {
+								act(func() { e.Engine.SetBlockBackground(id, name) })()
+							})
 						case "listnum":
 							_, curNum, prevNum, adjacent := e.listNumInfo(id)
 							if prevNum > 0 && (!adjacent || b.Start > 0) {
@@ -883,12 +902,37 @@ func kindIcon(b *document.Block) *ui.SVG {
 	return iconParagraph
 }
 
+// blocksBackgroundState reports whether any selected top-level block supports
+// a background color, and the shared background color if all supported selected
+// blocks have the same value (or "__mixed__" if they differ).
+func (e *Editor) blocksBackgroundState(ids []string) (supported bool, common string) {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	first := true
+	for _, b := range e.Doc.Blocks {
+		if !want[b.ID] || !document.AllowsBlockBackground(b.Kind) {
+			continue
+		}
+		supported = true
+		if first {
+			common = b.Background
+			first = false
+		} else if b.Background != common {
+			common = "__mixed__"
+		}
+	}
+	return supported, common
+}
+
 // blocksMenu is the block menu of several selected blocks: the types they
-// can all turn into, indent, then cut, copy, duplicate, delete and move,
-// each acting on every selected block at once.
+// can all turn into, indent, background color, then cut, copy, duplicate,
+// delete and move, each acting on every selected block at once.
 func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHandle) {
 	ids := e.BlockSelection()
 	bounds := e.surfaceBounds(surface)
+	t := c.Theme()
 	done := func() { e.menuOpen, e.menuSub = false, ""; e.RequestFocus = true; e.sync() }
 	// The types every selected text block can take.
 	var items []insertion
@@ -898,8 +942,14 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 			items = append(items, it)
 		}
 	}
+	canBg, commonBg := e.blocksBackgroundState(ids)
 	rows := (len(items) + gridCols - 1) / gridCols
-	menuH := float32(18 + 28 + rows*36 - 4 + 9 + 64 + 9 + 128 + 9 + 64)
+	// Keep compact height (<= 397px) so short viewports fit every row without clipping:
+	// "缩进 ›" (32px) + optional "背景颜色 ›" (32px) match the previous two indent rows.
+	menuH := float32(18 + 28 + rows*36 - 4 + 9 + 32 + 9 + 128 + 9 + 64)
+	if canBg {
+		menuH += 32
+	}
 	windowW, windowH := c.Size()
 	anchor := ui.Rect{
 		X: bounds.X + handle.rect.X,
@@ -923,18 +973,15 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 						}
 					})
 					menuSeparator(c)
-					for _, row := range []struct {
-						key, label, hint string
-						icon             *ui.SVG
-						run              func()
-					}{
-						{"bms-indent", i18n.T("增加缩进"), "Tab", iconIndent, func() { e.Engine.IndentBlocks(ids, 1) }},
-						{"bms-outdent", i18n.T("减少缩进"), "Shift + Tab", iconOutdent, func() { e.Engine.IndentBlocks(ids, -1) }},
-					} {
-						if e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false).Clicked() {
-							row.run()
-							done()
+					hover := func(row ui.Element, sub string) ui.Element {
+						if row.Hovered() || (sub != "" && row.Clicked()) {
+							e.menuSub = sub
 						}
+						return row
+					}
+					hover(e.menuRow(c, "bms-indent", iconIndent, e.page.CodeText, i18n.T("缩进"), "›", e.menuSub == "indent"), "indent")
+					if canBg {
+						hover(e.menuRow(c, "bms-bg", iconPaintBucket, e.page.CodeText, i18n.T("背景颜色"), "›", e.menuSub == "bg"), "bg")
 					}
 					menuSeparator(c)
 					for _, row := range []struct {
@@ -942,21 +989,21 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 						icon             *ui.SVG
 						run              func()
 					}{
-						{"bms-cut", i18n.T("剪切"), "⌘X", iconScissors, func() {
+						{"bms-cut", i18n.T("剪切"), (Combo{Mods: ui.Cmd, Key: ui.KeyX}).Label(), iconScissors, func() {
 							e.copyBlocks(ids, e.services.WriteClipboard)
 							e.Engine.DeleteBlocks(ids)
 							e.clearBlocks()
 						}},
-						{"bms-copy", i18n.T("复制"), "⌘C", iconCopy, func() { e.copyBlocks(ids, e.services.WriteClipboard) }},
+						{"bms-copy", i18n.T("复制"), (Combo{Mods: ui.Cmd, Key: ui.KeyC}).Label(), iconCopy, func() { e.copyBlocks(ids, e.services.WriteClipboard) }},
 						{"bms-duplicate", i18n.T("创建副本"), "", iconDuplicate, func() {
 							if copies := e.Engine.DuplicateBlocks(ids); len(copies) > 0 {
 								// The copies are selected once they are laid out.
 								e.blocks.pending = [2]string{copies[0], copies[len(copies)-1]}
 							}
 						}},
-						{"bms-delete", i18n.T("删除"), "⌫", iconTrash, func() { e.Engine.DeleteBlocks(ids); e.clearBlocks() }},
+						{"bms-delete", i18n.T("删除"), (Combo{Key: ui.KeyBackspace}).Label(), iconTrash, func() { e.Engine.DeleteBlocks(ids); e.clearBlocks() }},
 					} {
-						if e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false).Clicked() {
+						if hover(e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false), "").Clicked() {
 							row.run()
 							done()
 						}
@@ -966,8 +1013,11 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 						key, label, hint string
 						icon             *ui.SVG
 						delta            int
-					}{{"bms-up", i18n.T("上移"), "⇧⌘↑", iconArrowUp, -1}, {"bms-down", i18n.T("下移"), "⇧⌘↓", iconArrowDown, 1}} {
-						if e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false).Clicked() {
+					}{
+						{"bms-up", i18n.T("上移"), (Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyUp}).Label(), iconArrowUp, -1},
+						{"bms-down", i18n.T("下移"), (Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyDown}).Label(), iconArrowDown, 1},
+					} {
+						if hover(e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false), "").Clicked() {
 							e.Engine.ShiftBlocks(ids, row.delta)
 							done()
 						}
@@ -975,7 +1025,55 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 				})
 			})
 		})
-		if menu.PressedOutside() {
+		outside := menu.PressedOutside()
+		if e.menuSub == "indent" || (canBg && e.menuSub == "bg") {
+			rowOffset := float32(9 + 28 + rows*36 - 4 + 9)
+			sideNaturalH := float32(82)
+			if e.menuSub == "bg" {
+				rowOffset += 32
+				sideNaturalH = 108
+			}
+			sideX := x + menuWidth + 4
+			if sideX+menuWidth > windowW-8 {
+				if x-menuWidth-4 >= 8 {
+					sideX = x - menuWidth - 4
+				} else {
+					sideX = max(8, windowW-menuWidth-8)
+				}
+			}
+			sideMaxH := max(48, windowH-16)
+			sideH := min(sideNaturalH, sideMaxH)
+			alignedY := max(y, y+rowOffset-e.menuScroll.Y)
+			sideY := max(8, min(alignedY, windowH-8-sideH))
+			side := ui.Column(c.Key("blocks-menu-side")).Absolute().Left(sideX).Top(sideY).Width(menuWidth)
+			e.popover(c, side).Children(func() {
+				ui.Scroll(c.Key("blocks-menu-side-scroll")).MaxHeight(sideMaxH - 2).Children(func() {
+					ui.Column(c).Padding(8).Children(func() {
+						switch e.menuSub {
+						case "indent":
+							if e.menuRow(c, "bms-in-inc", iconIndent, e.page.CodeText, i18n.T("增加缩进"), "Tab", false).Clicked() {
+								e.Engine.IndentBlocks(ids, 1)
+								done()
+							}
+							if e.menuRow(c, "bms-in-dec", iconOutdent, e.page.CodeText, i18n.T("减少缩进"), "Shift + Tab", false).Clicked() {
+								e.Engine.IndentBlocks(ids, -1)
+								done()
+							}
+						case "bg":
+							ui.Text(c, i18n.T("背景颜色")).FontSize(12).TextColor(t.Text).Margin(0, 0, 6, 0)
+							e.blockBgSwatches(c, commonBg, func(name string) {
+								e.Engine.SetBlocksBackground(ids, name)
+								done()
+							})
+						}
+					})
+				})
+			})
+			if !side.PressedOutside() {
+				outside = false
+			}
+		}
+		if outside {
 			e.menuOpen, e.menuSub = false, ""
 		}
 	})

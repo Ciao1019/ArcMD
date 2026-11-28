@@ -416,7 +416,7 @@ func pastedMath(source string) *document.Document {
 // plain text, worth pasting as structure.
 func rich(doc *document.Document) bool {
 	for _, b := range doc.Blocks {
-		if b.Kind != "paragraph" || b.Align != "" || b.Indent != 0 || len(b.Comments) > 0 {
+		if b.Kind != "paragraph" || b.Align != "" || b.Indent != 0 || b.Background != "" || len(b.Comments) > 0 {
 			return true
 		}
 		for _, r := range b.Runs {

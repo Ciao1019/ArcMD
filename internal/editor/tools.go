@@ -149,6 +149,21 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 			sub.Separator()
 			menuAction(sub, i18n.T("增加缩进"), func() { e.Engine.Indent(1) })
 			menuAction(sub, i18n.T("减少缩进"), func() { e.Engine.Indent(-1) })
+			if document.AllowsBlockBackground(leaf.Block.Kind) {
+				sub.Separator()
+				sub.Submenu(i18n.T("背景颜色"), func(bg *ui.Menu) {
+					for _, name := range append([]string{""}, document.TextHighlights...) {
+						label := i18n.T("无")
+						if name != "" {
+							label = ColorName(name, true)
+						}
+						if bg.Item(label).Radio(leaf.Block.Background == name).Chosen() {
+							e.Engine.SetBlockBackground(leaf.Block.ID, name)
+							e.RequestFocus = true
+						}
+					}
+				})
+			}
 		})
 		m.Submenu(i18n.T("插入"), func(sub *ui.Menu) {
 			menuAction(sub, i18n.T("行内公式"), e.InsertInlineMath)
@@ -291,6 +306,62 @@ func (e *Editor) colorSwatches(c *ui.Context, id string, done func()) {
 			}
 		}
 	})
+}
+
+// blockBgSwatches draws a 2x8 swatch grid (None + 15 soft block fills) for the
+// block handle menu and multi-block menu side panels.
+func (e *Editor) blockBgSwatches(c *ui.Context, current string, pick func(string)) {
+	t := c.Theme()
+	pg := e.page
+	names := append([]string{""}, document.TextHighlights...)
+	ui.Column(c).Gap(4).Children(func() {
+		for row := 0; row < len(names); row += 8 {
+			ui.Row(c.Key(row)).Justify(ui.SpaceBetween).Children(func() {
+				for _, name := range names[row:min(row+8, len(names))] {
+					label := i18n.T("无背景颜色")
+					if name != "" {
+						label = i18n.T("块背景：") + ColorName(name, true)
+					}
+					s := ui.ButtonBase(c.Key("bbg:"+name)).Size(26, 26).Radius(4).Center().Label(label).Tooltip(label).KeepFocus().Cursor(ui.CursorPointer)
+					if current == name {
+						s.Border(2, pg.CodeHover)
+					} else if s.Hovered() {
+						s.Background(pg.Hover)
+					}
+					s.Children(func() {
+						box := ui.Box(c).Size(22, 22).Radius(2).Border(1, pg.Hover)
+						if name == "" {
+							box.Background(t.Background).Center().Children(func() {
+								ui.Icon(c, iconSlash).FontSize(20).TextColor(pg.Placeholder)
+							})
+						} else {
+							box.Background(pg.CellFills[name])
+						}
+					})
+					if s.Clicked() {
+						pick(name)
+					}
+				}
+			})
+		}
+	})
+}
+
+// SetBlockBackground fills the currently selected blocks (when a block
+// selection is active) or the caret's block with a color from
+// document.TextHighlights, or clears it when background is "".
+func (e *Editor) SetBlockBackground(background string) {
+	if e.ReadOnly {
+		e.refused = true
+		return
+	}
+	if len(e.blocks.ids) > 0 {
+		e.Engine.SetBlocksBackground(e.BlockSelection(), background)
+	} else {
+		e.Engine.SetBlockBackground("", background)
+	}
+	e.RequestFocus = true
+	e.sync()
 }
 
 // OpenColorPicker opens the color picker of callout id, as a click on its

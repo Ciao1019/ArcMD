@@ -1022,6 +1022,11 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	for _, tone := range model.CalloutColors {
 		cmd(i18n.T("高亮块颜色：")+editor.CalloutName(tone), "", after(func() { ed.Engine.SetColor("", tone) }))
 	}
+	for _, name := range model.TextHighlights {
+		bg := name
+		cmd(i18n.T("块背景色：")+editor.ColorName(bg, true), "", after(func() { ed.SetBlockBackground(bg) }))
+	}
+	cmd(i18n.T("清除块背景色"), "", after(func() { ed.SetBlockBackground("") }))
 	for _, name := range model.Annotations {
 		cmd(i18n.T("手绘标注：")+i18n.T(editor.AnnotationNames[name]), "", after(func() { ed.Annotate(name, "") }))
 	}

@@ -175,6 +175,26 @@ func (e *Engine) IndentBlocks(ids []string, delta int) {
 	})
 }
 
+// SetBlocksBackground fills the supported text blocks among ids with
+// background (one of TextHighlights, or "" to clear) as one history step.
+func (e *Engine) SetBlocksBackground(ids []string, background string) {
+	if background != "" && !oneOf(background, TextHighlights) {
+		return
+	}
+	set := e.exactSet(ids)
+	if len(set) == 0 {
+		return
+	}
+	e.Edit(func() {
+		for _, i := range set {
+			b := e.Doc.Blocks[i]
+			if AllowsBlockBackground(b.Kind) {
+				b.Background = background
+			}
+		}
+	})
+}
+
 // ClearBlocksFormatting strips inline formatting (including links, colors,
 // highlights and hand-drawn annotations) across the selected top-level blocks
 // ids and their nested children (such as table cells and columns) as one

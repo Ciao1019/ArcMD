@@ -445,8 +445,10 @@ type decoration struct {
 	table        ui.Rect
 	right, below bool
 	label        string
-	// tone is a callout's color.
-	tone string
+	// tone is a callout's or cell's color; bg is a text block's background color.
+	tone     string
+	bg       string
+	inColumn bool
 	// id is the block of a code block or table, whose hover controls act
 	// on it.
 	id      string
@@ -474,6 +476,53 @@ type decoration struct {
 	bookURL        string
 	dbEmbed        bool
 	yApplied       float64
+}
+
+// blockBackgroundRect returns the tight text-body rectangle for a block's
+// background decoration while keeping rect.Y >= y for incremental shifting.
+func blockBackgroundRect(b *document.Block, x, y, w, top, bottom, total, gap, z float32) ui.Rect {
+	bx, bw := x, w
+	switch b.Kind {
+	case "bullet", "numbered", "task":
+		if b.Indent > 0 {
+			off := min(float32(b.Indent)*24*z, max(0, w-24))
+			bx += off
+			bw -= off
+		}
+	case "toggle":
+		if b.Indent > 0 {
+			off := min(float32(b.Indent)*20*z, max(0, w-24))
+			bx += off
+			bw -= off
+		}
+	}
+	by := y
+	bh := max(0, total-gap)
+	switch b.Kind {
+	case "heading":
+		by = y + top
+		bh = max(0, total-top-bottom)
+	case "footnote":
+		by = y + top
+		bh = max(0, total-top-gap)
+	}
+	return ui.Rect{X: bx, Y: by, W: bw, H: bh}
+}
+
+// blockBackgroundPaintRect expands a block's tight decoration rect outward by a
+// subtle breathing margin without altering text alignment or line wrapping.
+func blockBackgroundPaintRect(r ui.Rect, z float32, inColumn bool) (ui.Rect, float32) {
+	padX := 8 * z
+	if inColumn {
+		padX = min(padX, columnInset-2)
+	}
+	padY := 3 * z
+	return ui.Rect{
+		X: r.X - padX,
+		Y: r.Y - padY,
+		W: r.W + 2*padX,
+		H: r.H + 2*padY,
+	}, 6 * z
 }
 
 // hovered reports whether the pointer is over r, with slack around it for
@@ -1709,7 +1758,19 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 					if b.Kind == "callout" {
 						d.tone, d.id, d.label = b.Color, b.ID, b.Emoji
 					}
+					if b.Kind == "quote" && b.Background != "" {
+						d.bg, d.inColumn = b.Background, leaf.Owner != "" && leaf.Owner != b.ID
+					}
 					e.decorations = append(e.decorations, d)
+				} else if b.Background != "" && document.AllowsBlockBackground(b.Kind) {
+					e.decorations = append(e.decorations, decoration{
+						kind:     "block-bg",
+						id:       b.ID,
+						ownerID:  leaf.Owner,
+						rect:     blockBackgroundRect(b, x, y, w, top, bottom, total, gap, e.zoomFactor()),
+						bg:       b.Background,
+						inColumn: leaf.Owner != "" && leaf.Owner != b.ID,
+					})
 				}
 				return total
 			}
@@ -1787,7 +1848,19 @@ func (e *Editor) blockLayouter(o Options, leafOf func(string) document.Leaf, hid
 			if b.Kind == "callout" {
 				d.tone, d.id, d.label = b.Color, b.ID, b.Emoji
 			}
+			if b.Kind == "quote" && b.Background != "" {
+				d.bg, d.inColumn = b.Background, leaf.Owner != "" && leaf.Owner != b.ID
+			}
 			e.decorations = append(e.decorations, d)
+		} else if b.Background != "" && document.AllowsBlockBackground(b.Kind) {
+			e.decorations = append(e.decorations, decoration{
+				kind:     "block-bg",
+				id:       b.ID,
+				ownerID:  leaf.Owner,
+				rect:     blockBackgroundRect(b, x, y, w, top, bottom, total, gap, e.zoomFactor()),
+				bg:       b.Background,
+				inColumn: leaf.Owner != "" && leaf.Owner != b.ID,
+			})
 		}
 		return total
 	}
@@ -2033,7 +2106,18 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				} else {
 					p.Icon(calloutIcon(d.tone), ui.Rect{X: icon.X + 3*cz, Y: icon.Y + 3*cz, W: 18 * cz, H: 18 * cz}, look.Icon)
 				}
+			case "block-bg":
+				if fill, ok := e.page.CellFills[d.bg]; ok && fill.A > 0 {
+					bgRect, rad := blockBackgroundPaintRect(r, e.zoomFactor(), d.inColumn)
+					p.Fill(bgRect, fill, rad)
+				}
 			case "quote":
+				if d.bg != "" {
+					if fill, ok := e.page.CellFills[d.bg]; ok && fill.A > 0 {
+						bgRect, rad := blockBackgroundPaintRect(r, e.zoomFactor(), d.inColumn)
+						p.Fill(bgRect, fill, rad)
+					}
+				}
 				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 2, H: r.H}, e.page.QuoteBar, 1)
 			case "rule":
 				p.Line(r.X, r.Y+12.5, r.X+r.W, r.Y+12.5, 1, e.page.Rule)

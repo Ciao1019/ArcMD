@@ -1077,7 +1077,7 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 		centerCloseRe.MatchString(trimmed) {
 		return nil, false
 	}
-	if _, _, ok := parseAlignedWrapperOpen(trimmed); ok {
+	if _, _, _, _, ok := parseAlignedWrapperOpen(trimmed); ok {
 		return nil, false
 	}
 	if b, ok := parseSingleImgTag(trimmed, ""); ok {
@@ -1191,15 +1191,17 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 			return nil, false
 		}
 		align := parseBlockAlign(el)
-		if align == "" {
+		bg := parseBlockBackground(el)
+		if align == "" && bg == "" {
 			return nil, false
 		}
-		return importAlignedHTMLContainer(el, align, baseIndent, explicitLeft)
+		return importAlignedHTMLContainer(el, align, bg, baseIndent, explicitLeft)
 	case atom.Center:
-		return importAlignedHTMLContainer(el, "center", baseIndent, explicitLeft)
+		return importAlignedHTMLContainer(el, "center", parseBlockBackground(el), baseIndent, explicitLeft)
 	case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		align, explicit := parseBlockAlignExplicit(el)
 		ind, hasInd := parseBlockIndent(el)
+		bg := parseBlockBackground(el)
 		if img := singleChildImg(el); img != nil && el.DataAtom == atom.P {
 			if b, ok := imgNodeToBlock(img, align); ok {
 				b.Indent = min(12, baseIndent+ind)
@@ -1209,7 +1211,7 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 				return []*document.Block{b}, true
 			}
 		}
-		if !explicit && !hasInd {
+		if !explicit && !hasInd && bg == "" {
 			return nil, false
 		}
 		if hasBlockElementChild(el) || hasUnsupportedInlineMedia(el) {
@@ -1224,6 +1226,7 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 		b.Level = level
 		b.Align = align
 		b.Indent = min(12, baseIndent+ind)
+		b.Background = bg
 		b.Runs, b.Comments = parseInlineHTMLNodesWithBreak(el, document.Style{}, "\u2028")
 		if len(b.Runs) == 0 {
 			b.Runs = []document.Run{{Text: ""}}
@@ -1236,7 +1239,7 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 	return nil, false
 }
 
-func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, explicitLeft map[*document.Block]bool) ([]*document.Block, bool) {
+func importAlignedHTMLContainer(el *xhtml.Node, align, bg string, baseIndent int, explicitLeft map[*document.Block]bool) ([]*document.Block, bool) {
 	if img := singleChildImg(el); img != nil {
 		if b, ok := imgNodeToBlock(img, align); ok {
 			b.Indent = baseIndent
@@ -1253,6 +1256,7 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 		b := document.NewBlock("paragraph", "")
 		b.Align = align
 		b.Indent = baseIndent
+		b.Background = bg
 		b.Runs, b.Comments = parseInlineHTMLNodesWithBreak(el, document.Style{}, "\u2028")
 		if len(b.Runs) == 0 {
 			b.Runs = []document.Run{{Text: ""}}
@@ -1279,6 +1283,7 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 		b := document.NewBlock("paragraph", "")
 		b.Align = align
 		b.Indent = baseIndent
+		b.Background = bg
 		b.Runs = runs
 		b.Comments = comments
 		if align == "" && explicitLeft != nil {
@@ -1340,6 +1345,10 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 					childAlign = align
 				}
 				ind, _ := parseBlockIndent(c)
+				childBg := parseBlockBackground(c)
+				if childBg == "" {
+					childBg = bg
+				}
 				if c.DataAtom == atom.P {
 					if img := singleChildImg(c); img != nil {
 						if b, ok := imgNodeToBlock(img, childAlign); ok {
@@ -1364,6 +1373,7 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 				b.Level = level
 				b.Align = childAlign
 				b.Indent = min(12, baseIndent+ind)
+				b.Background = childBg
 				b.Runs, b.Comments = parseInlineHTMLNodesWithBreak(c, document.Style{}, "\u2028")
 				if len(b.Runs) == 0 {
 					b.Runs = []document.Run{{Text: ""}}
@@ -1381,14 +1391,22 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 				if !explicit {
 					childAlign = align
 				}
-				sub, ok := importAlignedHTMLContainer(c, childAlign, baseIndent, explicitLeft)
+				childBg := parseBlockBackground(c)
+				if childBg == "" {
+					childBg = bg
+				}
+				sub, ok := importAlignedHTMLContainer(c, childAlign, childBg, baseIndent, explicitLeft)
 				if !ok {
 					return nil, false
 				}
 				out = append(out, sub...)
 			case atom.Center:
 				flushInline()
-				sub, ok := importAlignedHTMLContainer(c, "center", baseIndent, explicitLeft)
+				childBg := parseBlockBackground(c)
+				if childBg == "" {
+					childBg = bg
+				}
+				sub, ok := importAlignedHTMLContainer(c, "center", childBg, baseIndent, explicitLeft)
 				if !ok {
 					return nil, false
 				}
@@ -1480,6 +1498,21 @@ func pictureNodeToBlock(pic *xhtml.Node, align string) (*document.Block, bool) {
 		return nil, false
 	}
 	return inlineImageToBlock(parsed, imgAlign, align), true
+}
+
+func parseBlockBackground(el *xhtml.Node) string {
+	if bg := attr(el, "data-bg"); validStyleName(bg, document.TextHighlights) {
+		return bg
+	}
+	props := parseCSSProps(attr(el, "style"))
+	if len(props) == 0 {
+		return ""
+	}
+	raw := props["background-color"]
+	if raw == "" {
+		raw = props["background"]
+	}
+	return matchBackgroundCSS(raw)
 }
 
 func parseBlockIndent(el *xhtml.Node) (int, bool) {
@@ -2284,7 +2317,7 @@ func hasTrailingBlankBody(blocks []*document.Block) bool {
 	last := blocks[len(blocks)-1]
 	prev := blocks[len(blocks)-2]
 	return prev.Kind == "heading" && last.Kind == "paragraph" && last.Text() == "" &&
-		normCellAlign(last.Align) == "" && last.Indent == 0 && len(last.Children) == 0
+		normCellAlign(last.Align) == "" && last.Indent == 0 && last.Background == "" && len(last.Children) == 0
 }
 
 func exportFreshMarkdown(doc *document.Document) string {
@@ -2369,11 +2402,22 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 			ch := orig.chunks[matched]
 			spanLen := ch.to - ch.from
 			firstKind := blocks[i].Kind
-			isList := isMarkdownListKind(firstKind) && blocks[i].Align == ""
+			lastBlk := blocks[i+spanLen-1]
+			trimmedRaw := strings.TrimSpace(ch.raw)
+			isList := isMarkdownListKind(firstKind) && blocks[i].Align == "" && blocks[i].Background == "" &&
+				isMarkdownListKind(lastBlk.Kind) && lastBlk.Align == "" && lastBlk.Background == "" &&
+				!strings.HasPrefix(trimmedRaw, "<") && !strings.HasSuffix(trimmedRaw, ">")
 			if !isList {
-				clear(numberedSeq)
-				clear(numberedDelim)
 				clear(listCols)
+				if !isMarkdownListKind(firstKind) {
+					clear(numberedSeq)
+					clear(numberedDelim)
+				} else {
+					for bi := i; bi < i+spanLen; bi++ {
+						advanceListState(blocks[bi], numberedSeq, listCols, numberedDelim)
+					}
+					clear(listCols)
+				}
 			} else {
 				for bi := i; bi < i+spanLen; bi++ {
 					advanceListState(blocks[bi], numberedSeq, listCols, numberedDelim)
@@ -2538,6 +2582,10 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 	if align == "left" {
 		align = ""
 	}
+	hasParentList := b.Indent == 0
+	if b.Indent > 0 {
+		_, hasParentList = listCols[b.Indent-1]
+	}
 	padCols, num, delim := advanceListState(b, numberedSeq, listCols, numberedDelim)
 	pad := strings.Repeat(" ", padCols)
 
@@ -2551,9 +2599,19 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 			body = append(body, &inner)
 			consumed++
 		}
-		open := "<details>"
+		var openAttrs []string
 		if !b.Folded {
-			open = "<details open>"
+			openAttrs = append(openAttrs, "open")
+		}
+		if b.Background != "" {
+			if hex := cellFillHex[b.Background]; hex != "" {
+				openAttrs = append(openAttrs, `style="background-color:`+hex+`"`)
+			}
+			openAttrs = append(openAttrs, `data-bg="`+b.Background+`"`)
+		}
+		open := "<details>"
+		if len(openAttrs) > 0 {
+			open = "<details " + strings.Join(openAttrs, " ") + ">"
 		}
 		summary := exportHTMLRunsWithComments(b.Runs, b.Comments, true)
 		text = open + "\n<summary>" + summary + "</summary>\n\n"
@@ -2563,33 +2621,41 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		text += "</details>"
 	case "footnote":
 		text = "[^" + b.NoteLabel + "]: " + strings.ReplaceAll(inline, "\n", "\n    ")
+		if b.Background != "" {
+			text = formatBlockWrapperOpen("", 0, b.Background) + "\n\n" + text + "\n\n</div>"
+		}
 	case "paragraph":
-		if align != "" || b.Indent > 0 {
-			text = formatAlignedBlockHTML("p", align, b.Indent, exportHTMLRunsWithComments(b.Runs, b.Comments, true))
+		if align != "" || b.Indent > 0 || b.Background != "" {
+			text = formatAlignedBlockHTML("p", align, b.Indent, b.Background, exportHTMLRunsWithComments(b.Runs, b.Comments, true))
 		} else {
 			text = inline
 		}
 	case "heading":
 		lvl := max(1, min(6, b.Level))
-		if align != "" || b.Indent > 0 {
-			text = formatAlignedBlockHTML(fmt.Sprintf("h%d", lvl), align, b.Indent, exportHTMLRunsWithComments(b.Runs, b.Comments, true))
+		if align != "" || b.Indent > 0 || b.Background != "" {
+			text = formatAlignedBlockHTML(fmt.Sprintf("h%d", lvl), align, b.Indent, b.Background, exportHTMLRunsWithComments(b.Runs, b.Comments, true))
 		} else {
 			text = strings.Repeat("#", lvl) + " " + inline
 		}
 	case "bullet":
-		cont := strings.Repeat(" ", listCols[b.Indent])
-		text = pad + "- " + strings.ReplaceAll(inline, "\n", "\n"+cont)
-		if align != "" {
-			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
+		if align != "" || b.Background != "" || (b.Indent > 0 && !hasParentList) {
+			item := "- " + strings.ReplaceAll(inline, "\n", "\n  ")
+			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + item + "\n\n</div>"
+			clear(listCols)
 		} else {
+			cont := strings.Repeat(" ", listCols[b.Indent])
+			text = pad + "- " + strings.ReplaceAll(inline, "\n", "\n"+cont)
 			isList = true
 		}
 	case "numbered":
-		cont := strings.Repeat(" ", listCols[b.Indent])
-		text = fmt.Sprintf("%s%d%c %s", pad, num, delim, strings.ReplaceAll(inline, "\n", "\n"+cont))
-		if align != "" {
-			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
+		if align != "" || b.Background != "" || (b.Indent > 0 && !hasParentList) {
+			marker := fmt.Sprintf("%d%c ", num, delim)
+			item := marker + strings.ReplaceAll(inline, "\n", "\n"+strings.Repeat(" ", len(marker)))
+			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + item + "\n\n</div>"
+			clear(listCols)
 		} else {
+			cont := strings.Repeat(" ", listCols[b.Indent])
+			text = fmt.Sprintf("%s%d%c %s", pad, num, delim, strings.ReplaceAll(inline, "\n", "\n"+cont))
 			isList = true
 		}
 	case "task":
@@ -2597,17 +2663,19 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		if b.Checked {
 			check = "x"
 		}
-		cont := strings.Repeat(" ", listCols[b.Indent])
-		text = pad + "- [" + check + "] " + strings.ReplaceAll(inline, "\n", "\n"+cont)
-		if align != "" {
-			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
+		if align != "" || b.Background != "" || (b.Indent > 0 && !hasParentList) {
+			item := "- [" + check + "] " + strings.ReplaceAll(inline, "\n", "\n  ")
+			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + item + "\n\n</div>"
+			clear(listCols)
 		} else {
+			cont := strings.Repeat(" ", listCols[b.Indent])
+			text = pad + "- [" + check + "] " + strings.ReplaceAll(inline, "\n", "\n"+cont)
 			isList = true
 		}
 	case "quote":
 		text = "> " + strings.ReplaceAll(inline, "\n", "\n> ")
-		if align != "" {
-			text = `<div align="` + align + "\">\n\n" + text + "\n\n</div>"
+		if align != "" || b.Background != "" {
+			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + text + "\n\n</div>"
 		}
 	case "callout":
 		prefix := ""
@@ -2672,13 +2740,48 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 	return text, consumed, isList
 }
 
-func formatAlignedBlockHTML(tag, align string, indent int, inner string) string {
+func formatBlockWrapperOpen(align string, indent int, bg string) string {
 	var attrs []string
 	if align != "" {
 		attrs = append(attrs, `align="`+align+`"`)
 	}
+	if bg != "" {
+		if hex := cellFillHex[bg]; hex != "" {
+			attrs = append(attrs, `style="background-color:`+hex+`"`)
+		}
+		attrs = append(attrs, `data-bg="`+bg+`"`)
+	}
 	if indent > 0 {
-		attrs = append(attrs, fmt.Sprintf(`style="margin-left:%dpx" data-indent="%d"`, indent*24, indent))
+		attrs = append(attrs, fmt.Sprintf(`data-indent="%d"`, indent))
+	}
+	if len(attrs) == 0 {
+		return "<div>"
+	}
+	return "<div " + strings.Join(attrs, " ") + ">"
+}
+
+func formatAlignedBlockHTML(tag, align string, indent int, bg, inner string) string {
+	var attrs []string
+	var styles []string
+	if align != "" {
+		attrs = append(attrs, `align="`+align+`"`)
+	}
+	if indent > 0 {
+		styles = append(styles, fmt.Sprintf("margin-left:%dpx", indent*24))
+	}
+	if bg != "" {
+		if hex := cellFillHex[bg]; hex != "" {
+			styles = append(styles, "background-color:"+hex)
+		}
+	}
+	if len(styles) > 0 {
+		attrs = append(attrs, `style="`+strings.Join(styles, ";")+`"`)
+	}
+	if indent > 0 {
+		attrs = append(attrs, fmt.Sprintf(`data-indent="%d"`, indent))
+	}
+	if bg != "" {
+		attrs = append(attrs, `data-bg="`+bg+`"`)
 	}
 	if len(attrs) == 0 {
 		return "<" + tag + ">" + inner + "</" + tag + ">"
@@ -2712,7 +2815,7 @@ func exportImageMarkdown(b *document.Block, align string) string {
 	}
 	img.WriteString(">")
 	if align != "" || b.Indent > 0 {
-		return formatAlignedBlockHTML("p", align, b.Indent, img.String())
+		return formatAlignedBlockHTML("p", align, b.Indent, "", img.String())
 	}
 	return img.String()
 }
@@ -3264,7 +3367,7 @@ func alertMetadata(children []*document.Block) (color, emoji, align string, ok b
 }
 
 var (
-	detailsOpen      = regexp.MustCompile(`(?is)^\s*<details(\s+open)?\s*>\s*<summary>(.*?)</summary>\s*$`)
+	detailsOpen      = regexp.MustCompile(`(?is)^\s*(<details(?:\s+[^>]*)?>)\s*<summary>(.*?)</summary>\s*$`)
 	detailsClose     = regexp.MustCompile(`(?i)^\s*</details>\s*$`)
 	columnsOpenRe    = regexp.MustCompile(`(?is)^\s*<div\b[^>]*\bclass\s*=\s*["'][^"']*\barcmd-columns\b[^"']*["'][^>]*>\s*(<div\b[^>]*>\s*)?$`)
 	columnsWidthsRe  = regexp.MustCompile(`(?i)\bdata-widths\s*=\s*["']([^"']+)["']`)
@@ -3390,20 +3493,23 @@ func isHTMLOpenTag(raw string, want atom.Atom) (*xhtml.Node, bool) {
 	return &xhtml.Node{Type: xhtml.ElementNode, DataAtom: tok.DataAtom, Data: tok.Data, Attr: tok.Attr}, true
 }
 
-func parseAlignedWrapperOpen(raw string) (align, closeTag string, ok bool) {
+func parseAlignedWrapperOpen(raw string) (align, bg string, indent int, closeTag string, ok bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || detailsOpen.MatchString(trimmed) || columnsOpenRe.MatchString(trimmed) || columnOpenRe.MatchString(trimmed) {
-		return "", "", false
+		return "", "", 0, "", false
 	}
-	if _, isCenter := isHTMLOpenTag(trimmed, atom.Center); isCenter {
-		return "center", "center", true
+	if node, isCenter := isHTMLOpenTag(trimmed, atom.Center); isCenter {
+		return "center", parseBlockBackground(node), 0, "center", true
 	}
 	if node, isDiv := isHTMLOpenTag(trimmed, atom.Div); isDiv && attr(node, "class") == "" {
-		if a := parseBlockAlign(node); a != "" {
-			return a, "div", true
+		a := parseBlockAlign(node)
+		b := parseBlockBackground(node)
+		ind, _ := parseBlockIndent(node)
+		if a != "" || b != "" || ind > 0 {
+			return a, b, ind, "div", true
 		}
 	}
-	return "", "", false
+	return "", "", 0, "", false
 }
 
 func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int, explicitLeft map[*document.Block]bool) []*document.Block {
@@ -3411,7 +3517,7 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 	for i := 0; i < len(blocks); i++ {
 		b := blocks[i]
 		if b.Kind == "raw" {
-			if align, closeTag, ok := parseAlignedWrapperOpen(b.Text()); ok {
+			if align, bg, wrapIndent, closeTag, ok := parseAlignedWrapperOpen(b.Text()); ok {
 				closeIdx := -1
 				depth := 1
 				for j := i + 1; j < len(blocks); j++ {
@@ -3447,8 +3553,14 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 					}
 					if valid {
 						for _, child := range inner {
-							if child.Align == "" && !explicitLeft[child] && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" && child.Kind != "code" && child.Kind != "math" && child.Kind != "rule" {
+							if align != "" && child.Align == "" && !explicitLeft[child] && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" && child.Kind != "code" && child.Kind != "math" && child.Kind != "rule" {
 								child.Align = align
+							}
+							if bg != "" && child.Background == "" && document.AllowsBlockBackground(child.Kind) {
+								child.Background = bg
+							}
+							if wrapIndent > 0 && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" {
+								child.Indent = min(12, child.Indent+wrapIndent)
 							}
 						}
 						if spanStart != nil {
@@ -3730,17 +3842,27 @@ func importDetails(blocks []*document.Block, spanStart, spanEnd map[*document.Bl
 	for _, b := range blocks {
 		if b.Kind == "raw" {
 			if m := detailsOpen.FindStringSubmatch(b.Text()); m != nil {
-				t := document.NewBlock("toggle", "")
-				t.Runs, t.Comments = parseInlineHTMLFragment(strings.TrimSpace(m[2]))
-				t.Indent = len(open)
-				t.Folded = m[1] == ""
-				if spanStart != nil {
-					spanStart[t] = spanStart[b]
-					spanEnd[t] = -1
+				if node, ok := isHTMLOpenTag(m[1], atom.Details); ok {
+					t := document.NewBlock("toggle", "")
+					t.Runs, t.Comments = parseInlineHTMLFragment(strings.TrimSpace(m[2]))
+					t.Indent = len(open)
+					isOpen := false
+					for _, a := range node.Attr {
+						if strings.EqualFold(a.Key, "open") {
+							isOpen = true
+							break
+						}
+					}
+					t.Folded = !isOpen
+					t.Background = parseBlockBackground(node)
+					if spanStart != nil {
+						spanStart[t] = spanStart[b]
+						spanEnd[t] = -1
+					}
+					out = append(out, t)
+					open = append(open, openToggle{block: t, openB: b})
+					continue
 				}
-				out = append(out, t)
-				open = append(open, openToggle{block: t, openB: b})
-				continue
 			}
 			if detailsClose.MatchString(b.Text()) && len(open) > 0 {
 				top := open[len(open)-1]

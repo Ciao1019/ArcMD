@@ -103,12 +103,14 @@ img { max-width: 100%; border-radius: 8px; }
 hr { border: 0; border-top: 1px solid #dee0e3; margin: 1.5em 0; }
 details { margin: .5em 0; }
 summary { cursor: pointer; }
-@media (prefers-color-scheme: dark) {
+.arcmd-bg { border-radius: 6px; padding: 4px 10px; }
+li > .arcmd-bg { margin: 0; }
+` + editor.BlockBackgroundCSS(pageStyle(false).CellFills) + `@media (prefers-color-scheme: dark) {
   body { background: #1f2023; color: #e3e4e7; }
   pre, th, code { background: #2b2c30; }
   figure.arcmd-mermaid .arcmd-diagram-light { display: none; }
   figure.arcmd-mermaid .arcmd-diagram-dark { display: inline; }
-` + editor.CodeTokenCSS(pageStyle(true).Tokens) + `  kbd { background: #2b2c30; color: #e3e4e7; border-color: #46484f; box-shadow: inset 0 -1px 0 #46484f; }
+` + editor.CodeTokenCSS(pageStyle(true).Tokens) + editor.BlockBackgroundCSS(pageStyle(true).CellFills) + `  kbd { background: #2b2c30; color: #e3e4e7; border-color: #46484f; box-shadow: inset 0 -1px 0 #46484f; }
   blockquote { border-color: #3a3b40; color: #a6a8ad; }
   th, td, hr { border-color: #3a3b40; }
   a { color: #6b9bff; }
