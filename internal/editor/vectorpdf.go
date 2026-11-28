@@ -600,6 +600,9 @@ func (e *Editor) exportVectorFormula(
 			vp.DrawText(op.Text, px(op.X), py(op.Y), 0, float64(op.Size*scale)*sy, st, pdfRGBA(col))
 		case "rule":
 			vp.FillRect(px(op.X), py(op.Y), float64(op.W*scale)*sx, float64(op.H*scale)*sy, 0, pdfRGBA(t.Text))
+		case "frame":
+			stroke := float64(op.Width) * sc
+			vp.StrokeRect(px(op.X)+stroke/2, py(op.Y)+stroke/2, float64(op.W*scale)*sx-stroke, float64(op.H*scale)*sy-stroke, 0, stroke, pdfRGBA(t.Text), false)
 		case "path":
 			if len(op.Points) < 2 {
 				continue

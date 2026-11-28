@@ -274,6 +274,8 @@ func (l *layouter) atom(n *node, size float32, display bool) Box {
 		base = styled.list(n.args[0], size, display)
 	case "space":
 		return Box{W: n.space * size}
+	case "boxed":
+		base = boxed(l.list(n.args[0], size, true), size)
 	case "frac":
 		base = l.fraction(n, size, display)
 	case "sqrt":
@@ -430,6 +432,15 @@ func (l *layouter) limits(base Box, sup, sub *Box, size float32) Box {
 	}
 	out.W = w
 	return out
+}
+
+func boxed(inner Box, size float32) Box {
+	stroke := max(1, size*0.04)
+	inset := size*0.3 + stroke
+	frame := Box{W: inner.W + 2*inset, Ascent: inner.Ascent + inset, Descent: inner.Descent + inset}
+	frame.place(inner, inset, 0)
+	frame.Ops = append(frame.Ops, Op{Kind: "frame", Y: -frame.Ascent, W: frame.W, H: frame.Ascent + frame.Descent, Width: stroke})
+	return frame
 }
 
 // fraction sets a numerator over a denominator, a bar between them on
