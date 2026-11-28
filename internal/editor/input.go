@@ -428,7 +428,21 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		}
 		return false
 	}
-	switch e.boundCommand(mods, key) {
+	cmd := e.boundCommand(mods, key)
+	if level, ok := headingCommandLevel(cmd); ok {
+		if e.ReadOnly {
+			e.refused = true
+			return true
+		}
+		prefix := ""
+		if level > 0 {
+			prefix = strings.Repeat("#", level) + " "
+		}
+		e.Prefix(prefix)
+		e.reveal = true
+		return true
+	}
+	switch cmd {
 	case "bold":
 		return e.command("bold", read, write)
 	case "italic":
@@ -463,19 +477,6 @@ func (e *Editor) key(ev ui.InputEvent, read func() string, write func(string)) b
 		if mods == ui.Cmd {
 			if name, ok := commands[key]; ok {
 				return e.command(name, read, write)
-			}
-		}
-		if mods == ui.Cmd|ui.Alt {
-			for i, k := range []ui.Key{ui.Key0, ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6} {
-				if key == k {
-					prefix := ""
-					if i > 0 {
-						prefix = strings.Repeat("#", i) + " "
-					}
-					e.Prefix(prefix)
-					e.reveal = true
-					return true
-				}
 			}
 		}
 	}

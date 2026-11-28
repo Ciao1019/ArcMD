@@ -112,7 +112,7 @@ func (a *App) newWhiteboard(dir string) {
 func (a *App) boardOptionsFor(c *ui.Context, d *document) editor.BoardOptions {
 	return editor.BoardOptions{
 		Theme:             c.Theme(),
-		Page:              pageStyle(a.paperDark),
+		Page:              a.pageStyle(a.paperDark),
 		ReadOnly:          d.boardReadOnly,
 		WikiSuggest:       func(q string) []string { return a.boardWikiNames(d, q) },
 		OpenWiki:          func(name string, split bool) { a.openWikiFromBoard(d, name, split) },
@@ -216,6 +216,11 @@ func (a *App) linkedMentionsFor(d *document) []string {
 }
 
 func (a *App) documentCorner(c *ui.Context, d *document) {
+	w, _ := c.Size()
+	a.documentCornerWidth(c, d, w)
+}
+
+func (a *App) documentCornerWidth(c *ui.Context, d *document, cardWidth float32) {
 	if d == nil || d.loadErr != nil {
 		return
 	}
@@ -241,7 +246,13 @@ func (a *App) documentCorner(c *ui.Context, d *document) {
 		})
 		return
 	}
-	if !d.source {
+	row := ui.Row(c.Key("doc-corner")).Gap(2).AlignItems(ui.Center)
+	row.ContextMenu(a.customToolbarContextMenu)
+	row.Children(func() {
+		if d.source {
+			a.customToolbarCorner(c, d, cardWidth)
+			return
+		}
 		if a.showPageZoomButton(d) {
 			a.pageZoomButton(c, d)
 		}
@@ -257,8 +268,9 @@ func (a *App) documentCorner(c *ui.Context, d *document) {
 		if b.Clicked() {
 			a.toggleDocumentMap(d)
 		}
+		a.customToolbarCorner(c, d, cardWidth)
 		d.ed.Corner(c)
-	}
+	})
 }
 
 func (a *App) loadWhiteboardFor(d *document, url string) (*whiteboard.Scene, uint64, error) {

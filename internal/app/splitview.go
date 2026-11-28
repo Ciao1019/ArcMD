@@ -102,7 +102,7 @@ func (a *App) splitView(c *ui.Context) {
 func (a *App) splitPaneView(c *ui.Context, s *splitGroup, pane *splitPane, index int, width, caption float32) {
 	t := c.Theme()
 	d := pane.doc
-	card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinWidth(0).MinHeight(0).Radius(10).Clip().
+	card := ui.Themed(c.Key("card"), a.documentTheme(a.paperDark)).Grow(1).MinWidth(0).MinHeight(0).Radius(10).Clip().
 		Shadow(0, 1, 4, 0, cardShadow(t)).Label(fmt.Sprintf(i18n.T("分屏 %d"), index+1))
 	if d == nil {
 		card.Background(splitEmpty(t))
@@ -142,6 +142,9 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 	}
 	t := c.Theme()
 	bar := ui.Row(c.Key("pane-toolbar")).Height(36).Padding(0, 5+caption, 0, 5).Gap(2).MinWidth(0).AlignItems(ui.Center)
+	if d != nil && d.loadErr == nil && !d.isPDF() && !d.isBook() && !d.isMDZ() && !d.isDatabase() && !d.isWhiteboard() {
+		bar.ContextMenu(a.customToolbarContextMenu)
+	}
 	width -= caption
 	full := s.active == index || bar.Hovered()
 	bar.Children(func() {
@@ -181,8 +184,8 @@ func (a *App) paneToolbar(c *ui.Context, s *splitGroup, pane *splitPane, index i
 		if address.Clicked() {
 			run(func() { a.openPalette(); a.palette.pane = pane })
 		}
-		if d != nil && full && width >= 480 && d.loadErr == nil && !d.source {
-			a.documentCorner(c, d)
+		if d != nil && full && width >= 480 && d.loadErr == nil && (!d.source || len(a.activeToolbarItems()) > 0) {
+			a.documentCornerWidth(c, d, width)
 		}
 		if full {
 			options := iconButton(c, "options", iconSplit, fmt.Sprintf(i18n.T("分屏 %d 选项"), index+1), i18n.T("分屏选项"), false).Size(26, 26)
@@ -340,7 +343,7 @@ func (a *App) splitDivider(c *ui.Context, s *splitGroup, index int, offset float
 		pillText := fmt.Sprintf("%d%% · %d%%", pct0, pct1)
 		hb := handle.Bounds()
 		ui.Overlay(c, func() {
-			scrim := pageStyle(a.paperDark)
+			scrim := a.pageStyle(a.paperDark)
 			pill := ui.Box(c.Key(fmt.Sprintf("split-pill-%d", index))).Absolute().
 				Left(hb.X + hb.W/2 - 38).Top(hb.Y + hb.H/2 - 12).Height(24).MinWidth(76).PaddingX(8).
 				Radius(6).Center().Background(scrim.Scrim)

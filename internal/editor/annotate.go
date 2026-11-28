@@ -117,6 +117,9 @@ func lookOf(name string) (annotationLook, bool) {
 
 // annotationColor is the color a mark is drawn in.
 func (e *Editor) annotationColor(variant, color string) ui.Color {
+	if variant == "highlight" && color == "" && e.page.HighlightDefault != (ui.Color{}) {
+		return e.page.HighlightDefault
+	}
 	if color == "" {
 		if l, ok := lookOf(variant); ok {
 			color = l.color

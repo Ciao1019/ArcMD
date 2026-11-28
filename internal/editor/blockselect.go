@@ -227,16 +227,13 @@ func (e *Editor) blockKeys(ev ui.InputEvent, write func(string)) bool {
 			e.markPop.open = false
 			e.drawIn = annotationReveal{}
 		})
-	case mods == ui.Cmd|ui.Alt:
-		for i, k := range []ui.Key{ui.Key0, ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6} {
-			if key == k {
-				kind := "heading"
-				if i == 0 {
-					kind = "paragraph"
-				}
-				return edit(func() { e.Engine.SetBlocksKind(ids, kind, i) })
-			}
+	}
+	if level, ok := headingCommandLevel(e.boundCommand(mods, key)); ok {
+		kind := "heading"
+		if level == 0 {
+			kind = "paragraph"
 		}
+		return edit(func() { e.Engine.SetBlocksKind(ids, kind, level) })
 	}
 	if key == ui.KeyUnknown {
 		return true

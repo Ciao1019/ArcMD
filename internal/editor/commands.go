@@ -55,8 +55,12 @@ func (e *Editor) EditFrontmatter() {
 func (e *Editor) caretSection() int {
 	owner := e.Engine.LeafAt(e.Caret).Owner
 	at := -1
+	minIdx := 0
+	if e.Doc.HasPageTitle() {
+		minIdx = 1
+	}
 	for i, b := range e.Doc.Blocks {
-		if b.Kind == "heading" && i > 0 {
+		if b.Kind == "heading" && i >= minIdx {
 			at = i
 		}
 		if b.ID == owner {
@@ -71,14 +75,18 @@ func (e *Editor) caretSection() int {
 // one step of the history.
 func (e *Editor) MoveSectionAtCaret(delta int) {
 	i := e.caretSection()
-	if i <= 0 {
+	if i < 0 || (i == 0 && e.Doc.HasPageTitle()) {
 		return
 	}
 	blocks := e.Doc.Blocks
 	level := max(1, blocks[i].Level)
 	id := blocks[i].ID
 	if delta < 0 {
-		for j := i - 1; j > 0; j-- {
+		minIdx := 0
+		if e.Doc.HasPageTitle() {
+			minIdx = 1
+		}
+		for j := i - 1; j >= minIdx; j-- {
 			b := blocks[j]
 			if b.Kind == "heading" && max(1, b.Level) < level {
 				return // the top of its parent section

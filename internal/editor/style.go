@@ -61,6 +61,18 @@ type Page struct {
 	Tokens     CodeTokens
 	Callouts   map[string]Callout
 	Whiteboard WhiteboardStyle
+
+	// Typography, table alignment and custom color tokens from style.json.
+	BoldWeight        int
+	HeadingWeight     int
+	TableAlign        string
+	TableHeaderAlign  string
+	TableHeaderWeight int
+	HeadingText       ui.Color
+	BoldText          ui.Color
+	TableHeaderText   ui.Color
+	TableStripe       ui.Color
+	HighlightDefault  ui.Color
 }
 
 // WhiteboardStyle holds the Excalidraw-inspired light/dark adaptive design
@@ -157,6 +169,13 @@ func pageOf(p Page, t *ui.Theme) Page {
 			p.Highlights[name] = c.Alpha(.35)
 		}
 		p.Highlights["medium-gray"] = t.TextMuted.Alpha(.25)
+		if p.HighlightDefault != zero {
+			p.Highlights["light-yellow"] = p.HighlightDefault
+		}
+	} else if p.HighlightDefault != zero {
+		if _, ok := p.Highlights["light-yellow"]; !ok {
+			p.Highlights["light-yellow"] = p.HighlightDefault
+		}
 	}
 	if p.CellFills == nil {
 		p.CellFills = map[string]ui.Color{}
@@ -247,6 +266,16 @@ func samePage(a, b Page) bool {
 		a.ImageShadow == b.ImageShadow &&
 		a.MathBorder == b.MathBorder &&
 		a.MathShadow == b.MathShadow &&
+		a.BoldWeight == b.BoldWeight &&
+		a.HeadingWeight == b.HeadingWeight &&
+		a.TableAlign == b.TableAlign &&
+		a.TableHeaderAlign == b.TableHeaderAlign &&
+		a.TableHeaderWeight == b.TableHeaderWeight &&
+		a.HeadingText == b.HeadingText &&
+		a.BoldText == b.BoldText &&
+		a.TableHeaderText == b.TableHeaderText &&
+		a.TableStripe == b.TableStripe &&
+		a.HighlightDefault == b.HighlightDefault &&
 		a.Tokens == b.Tokens &&
 		maps.Equal(a.Tints, b.Tints) &&
 		maps.Equal(a.TextColors, b.TextColors) &&
@@ -286,4 +315,40 @@ func clonePage(p Page) Page {
 	p.Whiteboard.Strokes = maps.Clone(p.Whiteboard.Strokes)
 	p.Whiteboard.Fills = maps.Clone(p.Whiteboard.Fills)
 	return p
+}
+
+func (e *Editor) boldWeight() int {
+	if e.page.BoldWeight > 0 {
+		return e.page.BoldWeight
+	}
+	return 600
+}
+
+func (e *Editor) headingWeight() int {
+	if e.page.HeadingWeight > 0 {
+		return e.page.HeadingWeight
+	}
+	return 500
+}
+
+func (e *Editor) tableHeaderWeight() int {
+	if e.page.TableHeaderWeight > 0 {
+		return e.page.TableHeaderWeight
+	}
+	return 500
+}
+
+func (e *Editor) effectiveBlockAlign(b *document.Block, header bool) string {
+	if b.Align != "" {
+		return b.Align
+	}
+	if b.Kind == "cell" {
+		if header && e.page.TableHeaderAlign != "" {
+			return e.page.TableHeaderAlign
+		}
+		if e.page.TableAlign != "" {
+			return e.page.TableAlign
+		}
+	}
+	return ""
 }

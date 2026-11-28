@@ -125,7 +125,7 @@ func (e *Editor) hasHeadings() bool {
 	}
 	has := false
 	for i, b := range e.Doc.Blocks {
-		if i > 0 && b.Kind == "heading" && b.Text() != "" {
+		if b.Kind == "heading" && b.Text() != "" && !(i == 0 && b.Level <= 1) {
 			has = true
 			break
 		}
@@ -342,7 +342,7 @@ type outlineBarMatch struct{ ed *Editor }
 func (e *Editor) outlineList(c *ui.Context) {
 	t := c.Theme()
 	title := ""
-	if len(e.Doc.Blocks) > 0 {
+	if e.Doc.HasPageTitle() {
 		title = e.Doc.Blocks[0].ID
 	}
 	active := max(0, sort.Search(len(e.outline), func(i int) bool { return e.indexedOutline(i).y > e.Scroll.Y+96 })-1)
@@ -420,7 +420,7 @@ func (e *Editor) outlineList(c *ui.Context) {
 				}
 				color, weight := t.Text.Alpha(.72), 400
 				if on {
-					color, weight = t.Accent, 500
+					color, weight = t.Accent, e.headingWeight()
 				}
 				row.Children(func() {
 					if on {

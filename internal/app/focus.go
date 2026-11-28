@@ -191,7 +191,7 @@ func (a *App) focusView(c *ui.Context) {
 				a.toggleFocus()
 			}
 		})
-		card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
+		card := ui.Themed(c.Key("card"), a.documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
 			Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
 		card.Children(func() {
 			if a.doc == nil || a.doc.loadErr != nil {
@@ -287,7 +287,8 @@ func (a *App) editorOptionsFor(c *ui.Context, width float32, focus bool, d *docu
 		Resizing:              a.splitResizing || a.qa.resizing || a.dockSliding,
 		Width:                 width,
 		Theme:                 c.Theme(),
-		Page:                  pageStyle(a.paperDark),
+		Page:                  a.pageStyle(a.paperDark),
+		OnCustomizeToolbar:    a.openCustomToolbar,
 		Attach:                func() { run(a.pickImages) },
 		DropFiles:             func(paths []string, at int) { run(func() { a.handleEditorFileDrop(paths, at) }) },
 		PasteImage:            func(data []byte) { run(func() { a.pasteImage(data) }) },

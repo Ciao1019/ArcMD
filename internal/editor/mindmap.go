@@ -944,7 +944,7 @@ func (m *MindMap) sync(e *Editor, o Options) {
 	fallbackTitle := strings.TrimSpace(o.DocTitle)
 	start := 0
 	m.rootEmpty = false
-	if len(doc.Blocks) > 0 && doc.Blocks[0].Kind == "heading" {
+	if doc.HasPageTitle() {
 		start = 1
 		rootBlk := doc.Blocks[0]
 		m.itemIndex[rootBlk.ID] = -1
@@ -1072,7 +1072,7 @@ func restoredListHints(doc *document.Document) map[string]document.ListPlacement
 	parsed, _ := parseMarkdownForExport(doc.ImportSource)
 	bs := parsed.doc.Blocks
 	live := doc.Blocks
-	if len(live) > len(bs) && len(live) > 0 && live[0].Kind == "heading" && (len(bs) == 0 || bs[0].Kind != "heading") {
+	if len(live) > len(bs) && len(live) > 0 && live[0].Kind == "heading" && live[0].Level <= 1 && (len(bs) == 0 || bs[0].Kind != "heading") {
 		live = live[1:]
 	}
 	if len(live) > len(bs) && live[len(live)-1].Kind == "paragraph" && live[len(live)-1].Text() == "" {

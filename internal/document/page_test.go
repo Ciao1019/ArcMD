@@ -69,6 +69,43 @@ func TestMoveSection(t *testing.T) {
 	}
 }
 
+func TestMoveSectionAllowsFirstH2WithoutPageTitle(t *testing.T) {
+	d := New()
+	d.Blocks = nil
+	add := func(kind string, level int, text string) {
+		b := NewBlock(kind, text)
+		b.Level = level
+		d.Blocks = append(d.Blocks, b)
+	}
+	add("heading", 2, "美剧")
+	add("paragraph", 0, "绝命毒师")
+	add("heading", 2, "电影")
+	add("paragraph", 0, "盗梦空间")
+
+	e := NewEngine(d)
+	if e.Doc.HasPageTitle() {
+		t.Fatal("H2 first block should not be locked as a level-1 page title")
+	}
+	firstID, secondID := e.Doc.Blocks[0].ID, e.Doc.Blocks[2].ID
+
+	// Moving second H2 section before index 0 succeeds when Blocks[0] is H2.
+	e.MoveSection(secondID, firstID)
+	want := []string{"电影", "盗梦空间", "美剧", "绝命毒师"}
+	if got := headings(e.Doc); !slices.Equal(got, want) {
+		t.Fatalf("after moving before H2 index 0: got %q, want %q", got, want)
+	}
+	e.Undo()
+	if got := headings(e.Doc); !slices.Equal(got, headings(d)) {
+		t.Fatalf("after undo: got %q, want %q", got, headings(d))
+	}
+
+	// Moving index-0 H2 section to the end also succeeds.
+	e.MoveSection(firstID, "")
+	if got := headings(e.Doc); !slices.Equal(got, want) {
+		t.Fatalf("after moving index-0 H2 to end: got %q, want %q", got, want)
+	}
+}
+
 // The page's icon and cover round-trip, as steps of the history.
 func TestPageIconAndCover(t *testing.T) {
 	e := NewEngine(New())

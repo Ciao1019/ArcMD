@@ -215,7 +215,28 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 							tag = "th"
 						}
 						cols, rows := document.Span(cell)
-						fmt.Fprintf(&out, "<%s colspan=\"%d\" rowspan=\"%d\">%s</%s>", tag, cols, rows, runs(cell.Runs), tag)
+						styleAttr := ""
+						if theme != nil {
+							var styles []string
+							cellAlign := cell.Align
+							if cellAlign == "" {
+								if i == 0 && theme.Light.Page.TableHeaderAlign != "" {
+									cellAlign = theme.Light.Page.TableHeaderAlign
+								} else if theme.Light.Page.TableAlign != "" {
+									cellAlign = theme.Light.Page.TableAlign
+								}
+							}
+							if cellAlign == "left" || cellAlign == "center" || cellAlign == "right" {
+								styles = append(styles, "text-align:"+cellAlign)
+							}
+							if i == 0 && theme.Light.Page.TableHeaderWeight > 0 {
+								styles = append(styles, fmt.Sprintf("font-weight:%d", theme.Light.Page.TableHeaderWeight))
+							}
+							if len(styles) > 0 {
+								styleAttr = ` style="` + strings.Join(styles, ";") + `"`
+							}
+						}
+						fmt.Fprintf(&out, "<%s colspan=\"%d\" rowspan=\"%d\"%s>%s</%s>", tag, cols, rows, styleAttr, runs(cell.Runs), tag)
 					}
 					out.WriteString("</tr>")
 				}
@@ -243,9 +264,16 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 			case "footnote":
 				body = "[" + html.EscapeString(b.NoteLabel) + "] " + body
 			}
-			attrs := ""
+			var styles []string
 			if (b.Align == "center" || b.Align == "right") && tag != "pre" {
-				attrs = ` style="text-align:` + b.Align + `"`
+				styles = append(styles, "text-align:"+b.Align)
+			}
+			if b.Kind == "heading" && theme != nil && theme.Light.Page.HeadingWeight > 0 {
+				styles = append(styles, fmt.Sprintf("font-weight:%d", theme.Light.Page.HeadingWeight))
+			}
+			attrs := ""
+			if len(styles) > 0 {
+				attrs = ` style="` + strings.Join(styles, ";") + `"`
 			}
 			out.WriteString("<" + tag + attrs + ">" + body + "</" + tag + ">")
 		}

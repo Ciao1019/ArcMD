@@ -29,7 +29,34 @@ func DefaultBindings() map[string]Combo {
 		"find":         {ui.Cmd, ui.KeyF},
 		"replace":      {ui.Cmd | ui.Shift, ui.KeyH},
 		"newline":      {ui.Cmd, ui.KeyEnter},
+		"heading-0":    {ui.Cmd | ui.Alt, ui.Key0},
+		"heading-1":    {ui.Cmd | ui.Alt, ui.Key1},
+		"heading-2":    {ui.Cmd | ui.Alt, ui.Key2},
+		"heading-3":    {ui.Cmd | ui.Alt, ui.Key3},
+		"heading-4":    {ui.Cmd | ui.Alt, ui.Key4},
+		"heading-5":    {ui.Cmd | ui.Alt, ui.Key5},
+		"heading-6":    {ui.Cmd | ui.Alt, ui.Key6},
 	}
+}
+
+func headingCommandLevel(command string) (int, bool) {
+	switch command {
+	case "heading-0":
+		return 0, true
+	case "heading-1":
+		return 1, true
+	case "heading-2":
+		return 2, true
+	case "heading-3":
+		return 3, true
+	case "heading-4":
+		return 4, true
+	case "heading-5":
+		return 5, true
+	case "heading-6":
+		return 6, true
+	}
+	return 0, false
 }
 
 // binding is the combo of the editor's command, rebound or not.
@@ -42,6 +69,9 @@ func (e *Editor) binding(command string) Combo {
 
 // boundCommand is the editor's command bound to the key event, if any.
 func (e *Editor) boundCommand(mods ui.Modifiers, key ui.Key) string {
+	if key == ui.KeyUnknown {
+		return ""
+	}
 	for command := range DefaultBindings() {
 		if c := e.binding(command); c.Key == key && c.Mods == mods {
 			return command

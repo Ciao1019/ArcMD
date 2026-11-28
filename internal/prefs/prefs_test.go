@@ -229,3 +229,97 @@ func TestSidebarDensityRoundTrip(t *testing.T) {
 		t.Fatalf("invalid density did not fall back: %+v err=%v", got, err)
 	}
 }
+
+func TestNoDefaultTitleAndToolbarItemsNormalize(t *testing.T) {
+	if len(ValidToolbarItems) != 23 {
+		t.Fatalf("ValidToolbarItems len = %d; want 23", len(ValidToolbarItems))
+	}
+	for _, id := range ValidToolbarItems {
+		if !IsValidToolbarItem(id) {
+			t.Fatalf("IsValidToolbarItem(%q) = false; want true", id)
+		}
+	}
+	if IsValidToolbarItem("") || IsValidToolbarItem("unknown-item") || IsValidToolbarItem("TABLE") {
+		t.Fatal("IsValidToolbarItem accepted invalid ID")
+	}
+
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	p, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.NoDefaultTitle || p.ToolbarItems != nil {
+		t.Fatalf("defaults = (%v, %v); want (false, nil)", p.NoDefaultTitle, p.ToolbarItems)
+	}
+
+	p.NoDefaultTitle = true
+	p.ToolbarItems = []string{"math", "invalid", "table", "math", "code-block", "", "source", "table"}
+	if err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.NoDefaultTitle {
+		t.Fatal("NoDefaultTitle did not round-trip")
+	}
+	want := []string{"math", "table", "code-block", "source"}
+	if len(loaded.ToolbarItems) != len(want) {
+		t.Fatalf("ToolbarItems = %v; want %v", loaded.ToolbarItems, want)
+	}
+	for i := range want {
+		if loaded.ToolbarItems[i] != want[i] {
+			t.Fatalf("ToolbarItems[%d] = %q; want %q", i, loaded.ToolbarItems[i], want[i])
+		}
+	}
+
+	// Only invalid items or empty array normalizes to nil and omits toolbarItems from JSON.
+	if err := os.WriteFile(s.Path, []byte(`{"version":1,"toolbarItems":["bogus","nope"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.ToolbarItems != nil {
+		t.Fatalf("expected nil ToolbarItems when all invalid, got %#v", empty.ToolbarItems)
+	}
+	if err := s.Save(empty); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stringContains(string(raw), "toolbarItems") || stringContains(string(raw), "noDefaultTitle") {
+		t.Fatalf("zero values should be omitted from json: %s", raw)
+	}
+}
+
+func TestPaperPresetRoundTripAndNormalize(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	for _, preset := range PaperPresets {
+		if !IsValidPaperPreset(preset) {
+			t.Fatalf("IsValidPaperPreset(%q) = false; want true", preset)
+		}
+		p := &Prefs{PaperPreset: preset}
+		if err := s.Save(p); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Load()
+		if err != nil || got.PaperPreset != preset {
+			t.Fatalf("preset %q round-trip: got %q, err=%v", preset, got.PaperPreset, err)
+		}
+	}
+	if IsValidPaperPreset("neon") {
+		t.Fatal("IsValidPaperPreset accepted unknown preset")
+	}
+	if err := os.WriteFile(s.Path, []byte(`{"version":1,"paperPreset":"neon"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Load()
+	if err != nil || got.PaperPreset != "" {
+		t.Fatalf("invalid paperPreset should normalize to empty, got %q err=%v", got.PaperPreset, err)
+	}
+}

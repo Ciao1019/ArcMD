@@ -174,7 +174,7 @@ func snapSourceSplitFraction(f, total float32) float32 {
 func (a *App) sourceView(c *ui.Context, d *document, cardWidth float32) ui.Element {
 	d.ensureSourceInit()
 	t := c.Theme()
-	pg := pageStyle(t.Dark)
+	pg := a.pageStyle(t.Dark)
 	active := d == a.doc || a.inWindow(d)
 
 	if active && !a.modalBlocksSidebarKeys() {

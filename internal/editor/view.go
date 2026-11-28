@@ -295,6 +295,7 @@ type Editor struct {
 	databaseSnapshot            func(string, string) string
 	laidFindKey                 string
 	bindings                    map[string]Combo
+	onCustomizeToolbar          func()
 	openWiki, openTag           func(string)
 	maths                       map[string]mathShape
 	mathGlyphs                  map[string]*ui.TextLayout
@@ -448,6 +449,8 @@ type decoration struct {
 	ownerID string
 	rowIdx  int
 	colIdx  int
+	rowSpan int
+	colSpan int
 	// cols and rows are a table's column and row edges.
 	cols, rows []float32
 	// column identifies a column container; empty keeps its writing area
@@ -719,7 +722,8 @@ type Options struct {
 	PickCover func(done func(url string))
 	// Bindings rebind the editor's commands (DefaultBindings) to other
 	// keys; a command left out keeps its default.
-	Bindings map[string]Combo
+	Bindings           map[string]Combo
+	OnCustomizeToolbar func()
 	// Outline opens the outline left of the page; SetOutline, when set,
 	// shows the outline's buttons and keeps what the reader picks. Without
 	// it the page has no outline, as in thumbnails.
@@ -882,6 +886,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 	e.cropImage = o.CropImage
 	e.dropFiles, e.pasteImage = o.DropFiles, o.PasteImage
 	e.typewriter, e.dim, e.bindings = o.Typewriter, o.Dim, o.Bindings
+	e.onCustomizeToolbar = o.OnCustomizeToolbar
 	e.onZoom = o.OnZoom
 	if !e.openReveal.checked {
 		e.openReveal = openReveal{checked: true, pending: o.DrawAnnotations && hasAnnotations(e.Doc.Blocks)}
@@ -1265,6 +1270,9 @@ func (e *Editor) HasZoomModal() bool {
 }
 
 func (e *Editor) layout(o Options) {
+	if o.Theme != nil {
+		e.page = pageOf(o.Page, o.Theme)
+	}
 	e.collectNotes()
 	e.readingSize, e.readingLine, e.fontFamily = o.FontSize, o.LineHeight, o.FontFamily
 	e.pageZoom = clampPageZoom(o.Zoom)
@@ -1938,6 +1946,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 	if e.motion.moving || plan.active || e.tableDrag.active || e.tableColDrag.active {
 		decSlack = 160
 	}
+	cellSelTable, cellSelRange, hasCellSel := e.cellRange()
 	paintDecorationPass := func(draggedOnly bool) {
 		for i := range e.visibleDecorations(decSlack) {
 			d := *e.indexedDecoration(i)
@@ -2009,6 +2018,8 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				tb.Y += bounds.Y + e.ownerVisualDY(d.ownerID)
 				if d.header {
 					p.Clip(tb, 8, func() { p.Fill(r, e.page.TableHeader, 0) })
+				} else if d.rowIdx >= 1 && d.rowIdx%2 == 1 && d.tone == "" && e.page.TableStripe != (ui.Color{}) && !e.isTableCellSelected(d, hasCellSel, cellSelTable, cellSelRange) {
+					p.Clip(tb, 8, func() { p.Fill(r, e.page.TableStripe, 0) })
 				}
 				if fill, ok := e.page.CellFills[d.tone]; ok {
 					p.Clip(tb, 8, func() { p.Fill(r, fill, 0) })
@@ -2417,6 +2428,34 @@ func (e *Editor) copyBlock(id string) {
 	}
 }
 
+func (e *Editor) isPageTitle(b *document.Block) bool {
+	return b != nil && len(e.Doc.Blocks) > 0 && e.Doc.Blocks[0].ID == b.ID && b.Kind == "heading" && b.Level <= 1
+}
+
+func (e *Editor) isTableCellSelected(d decoration, hasCellSel bool, rangeTableID string, cr document.CellRange) bool {
+	if e.printing {
+		return false
+	}
+	if e.blockSelected(d.ownerID) {
+		return true
+	}
+	rSpan, cSpan := max(1, d.rowSpan), max(1, d.colSpan)
+	if e.tableSel.ok && e.tableSel.id == d.ownerID {
+		if e.tableSel.rows && e.tableSel.index >= d.rowIdx && e.tableSel.index < d.rowIdx+rSpan {
+			return true
+		}
+		if !e.tableSel.rows && e.tableSel.index >= d.colIdx && e.tableSel.index < d.colIdx+cSpan {
+			return true
+		}
+	}
+	if hasCellSel && rangeTableID == d.ownerID {
+		if d.rowIdx <= cr.Row1 && d.rowIdx+rSpan > cr.Row0 && d.colIdx <= cr.Col1 && d.colIdx+cSpan > cr.Col0 {
+			return true
+		}
+	}
+	return false
+}
+
 // paintHint shows what an empty block is for, as Notion does: the type
 // of an empty heading, and on the empty line being written, the slash menu.
 func (e *Editor) paintHint(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) {
@@ -2432,7 +2471,7 @@ func (e *Editor) paintHint(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) {
 	switch {
 	case b.Kind == "heading":
 		size = []float32{26, 22, 20, 18, 16, 16}[max(1, min(6, b.Level))-1]
-		if len(e.Doc.Blocks) > 0 && e.Doc.Blocks[0].ID == b.ID {
+		if e.isPageTitle(b) {
 			size, hint = 34, i18n.T("请输入标题")
 		} else {
 			hint = blockLabel(b)
@@ -2448,7 +2487,7 @@ func (e *Editor) paintHint(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) {
 	line := r.layout.Caret(0)
 	span := ui.Span{Text: hint, Size: size * e.zoomFactor(), Color: e.page.Placeholder}
 	if b.Kind == "heading" {
-		span.Weight = 500
+		span.Weight = e.headingWeight()
 	}
 	_, h := p.MeasureText(0, span)
 	dx, dy := e.visualOffset(r)

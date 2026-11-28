@@ -207,6 +207,10 @@ func (e *Editor) moreMenu(c *ui.Context, leaf document.Leaf) {
 				menuAction(sub, i18n.T("删除末列"), func() { e.Engine.ResizeTable(false, -1) })
 			})
 		}
+		if e.onCustomizeToolbar != nil {
+			m.Separator()
+			menuAction(m, i18n.T("自定义工具栏…"), e.onCustomizeToolbar)
+		}
 	})
 }
 
@@ -494,7 +498,7 @@ func (e *Editor) watchSlash() {
 	if e.isSlashDismissed(leaf.Block.ID) && !strings.HasPrefix(text, "/") {
 		e.clearSlashDismissed(leaf.Block.ID)
 	}
-	show := !e.ReadOnly && !e.isSlashDismissed(leaf.Block.ID) && e.Anchor == e.Caret && e.Caret > leaf.Start && leaf.Block.Kind == "paragraph" && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
+	show := !e.ReadOnly && !e.isSlashDismissed(leaf.Block.ID) && e.Anchor == e.Caret && e.Caret > leaf.Start && (leaf.Block.Kind == "paragraph" || leaf.Block.Kind == "heading") && strings.HasPrefix(text, "/") && !strings.Contains(text, "\n")
 	if !show {
 		e.slashOpen = false
 		return

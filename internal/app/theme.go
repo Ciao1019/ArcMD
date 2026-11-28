@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
+	"github.com/Ciao1019/ArcMD/internal/prefs"
 	"github.com/Ciao1019/ArcMD/internal/space"
 	"github.com/Ciao1019/ArcMD/internal/whiteboard"
 	"github.com/egoist/mygo/ui"
@@ -680,6 +681,138 @@ func darkPaperTheme() *ui.Theme {
 	t.Selection = ui.Hex("#4C88FF4D")
 	t.Focus = t.Accent.Alpha(0.55)
 	return &t
+}
+
+func styleColor(s string) (ui.Color, bool) {
+	c, ok := prefs.ParseColor(s)
+	if !ok {
+		return ui.Color{}, false
+	}
+	return ui.Color{R: c.R, G: c.G, B: c.B, A: c.A}, true
+}
+
+func documentThemeWith(dark bool, cfg *prefs.StyleConfig) *ui.Theme {
+	t := documentTheme(dark)
+	if cfg == nil {
+		return t
+	}
+	pal := cfg.Light
+	selAlpha := float32(0.18)
+	if dark {
+		pal = cfg.Dark
+		selAlpha = 0.30
+	}
+	if col, ok := styleColor(pal.Paper); ok {
+		t.Background = col
+	}
+	if col, ok := styleColor(pal.Text); ok {
+		t.Text = col
+	}
+	if col, ok := styleColor(pal.Muted); ok {
+		t.TextMuted = col
+	}
+	if col, ok := styleColor(pal.Accent); ok {
+		t.Accent = col
+		t.AccentHover = col.Mix(white, 0.12)
+		t.AccentPressed = col.Mix(black, 0.15)
+		t.Focus = col.Alpha(0.55)
+		t.Selection = col.Alpha(selAlpha)
+	}
+	if col, ok := styleColor(pal.TableLine); ok {
+		t.Border = col
+	}
+	return t
+}
+
+func pageStyleWith(dark bool, cfg *prefs.StyleConfig) editor.Page {
+	p := pageStyle(dark)
+	if cfg == nil {
+		return p
+	}
+	if cfg.BoldWeight > 0 {
+		p.BoldWeight = cfg.BoldWeight
+	}
+	if cfg.HeadingWeight > 0 {
+		p.HeadingWeight = cfg.HeadingWeight
+	}
+	if cfg.TableAlign != "" {
+		p.TableAlign = cfg.TableAlign
+	}
+	if cfg.TableHeaderAlign != "" {
+		p.TableHeaderAlign = cfg.TableHeaderAlign
+	}
+	if cfg.TableHeaderWeight > 0 {
+		p.TableHeaderWeight = cfg.TableHeaderWeight
+	}
+	pal := cfg.Light
+	if dark {
+		pal = cfg.Dark
+	}
+	if col, ok := styleColor(pal.Paper); ok && col.A == 255 {
+		p.Popover = col
+	}
+	if col, ok := styleColor(pal.Muted); ok {
+		p.Caption = col
+	}
+	if col, ok := styleColor(pal.HeadingText); ok {
+		p.HeadingText = col
+	}
+	if col, ok := styleColor(pal.BoldText); ok {
+		p.BoldText = col
+	}
+	if col, ok := styleColor(pal.Accent); ok {
+		p.Marker = col
+		p.CodeHover = col
+	}
+	if col, ok := styleColor(pal.TableHeader); ok {
+		p.TableHeader = col
+	}
+	if col, ok := styleColor(pal.TableHeaderText); ok {
+		p.TableHeaderText = col
+	}
+	if col, ok := styleColor(pal.TableLine); ok {
+		p.TableLine = col
+	}
+	if col, ok := styleColor(pal.TableStripe); ok {
+		p.TableStripe = col
+	}
+	if col, ok := styleColor(pal.Highlight); ok {
+		p.HighlightDefault = col
+	}
+	for k, v := range pal.Highlights {
+		if col, ok := styleColor(v); ok {
+			p.Highlights[k] = col
+		}
+	}
+	for k, v := range pal.TextColors {
+		if col, ok := styleColor(v); ok {
+			p.TextColors[k] = col
+		}
+	}
+	for k, v := range pal.CellFills {
+		if col, ok := styleColor(v); ok {
+			p.CellFills[k] = col
+		}
+	}
+	if col, ok := styleColor(pal.CodeFill); ok {
+		p.CodeFill = col
+	}
+	if col, ok := styleColor(pal.CodeBorder); ok {
+		p.CodeBorder = col
+	}
+	if col, ok := styleColor(pal.CodeText); ok {
+		p.CodeText = col
+	}
+	if col, ok := styleColor(pal.InlineCodeFill); ok {
+		p.InlineFill = col
+	}
+	if col, ok := styleColor(pal.InlineCodeText); ok {
+		p.InlineText = col
+	}
+	if col, ok := styleColor(pal.QuoteBar); ok {
+		p.QuoteBar = col
+	}
+	return p
 }
 
 // pageStyle are the page's colors beyond the theme, from the same Feishu

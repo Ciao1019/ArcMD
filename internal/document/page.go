@@ -92,13 +92,18 @@ func (d *Document) Section(i int) int {
 	return j
 }
 
+// HasPageTitle reports whether the document's first block is a level-1 page title.
+func (d *Document) HasPageTitle() bool {
+	return len(d.Blocks) > 0 && d.Blocks[0].Kind == "heading" && d.Blocks[0].Level <= 1
+}
+
 // MoveSection moves the heading with the ID and its section before the
 // top-level block with the ID before ("" for the end), as one step of the
 // history: the outline's drag. A move into the section itself does
-// nothing; the page title (the first block) stays first.
+// nothing; a level-1 page title (the first block) stays first.
 func (e *Engine) MoveSection(id, before string) {
 	from := e.topIndex(id)
-	if from <= 0 {
+	if from < 0 || e.Doc.Blocks[from].Kind != "heading" || (from == 0 && e.Doc.HasPageTitle()) {
 		return
 	}
 	end := e.Doc.Section(from)
@@ -109,7 +114,7 @@ func (e *Engine) MoveSection(id, before string) {
 			return
 		}
 	}
-	if to >= from && to <= end || to == 0 && e.Doc.Blocks[0].Kind == "heading" {
+	if to >= from && to <= end || to == 0 && e.Doc.HasPageTitle() {
 		return
 	}
 	e.Edit(func() {

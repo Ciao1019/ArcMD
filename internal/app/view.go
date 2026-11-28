@@ -104,6 +104,7 @@ func (a *App) View(c *ui.Context) {
 		}
 	}
 	a.pluginSyncTick(c)
+	a.styleConfigTick(c)
 	for _, n := range a.notices {
 		c.Toast(n)
 	}
@@ -193,6 +194,7 @@ func (a *App) View(c *ui.Context) {
 	a.newModalView(c)
 	a.updateToast(c)
 	a.settingsView(c)
+	a.customToolbarView(c)
 	a.replaceView(c)
 	a.tagRenameView(c)
 	a.versionsView(c)
@@ -300,7 +302,8 @@ func (a *App) shortcuts(c *ui.Context) {
 		if i < splitLimit && c.Shortcut(ui.Ctrl|ui.Shift, k) {
 			a.focusPane(i, true)
 		}
-		if c.Shortcut(ui.Cmd, k) || c.Shortcut(ui.Ctrl, k) {
+		if (!a.isComboBound(combo(ui.Cmd, k)) && c.Shortcut(ui.Cmd, k)) ||
+			(ui.Cmd != ui.Ctrl && !a.isComboBound(combo(ui.Ctrl, k)) && c.Shortcut(ui.Ctrl, k)) {
 			a.switchSpaceAt(i)
 		}
 	}
@@ -399,12 +402,13 @@ func (a *App) main(c *ui.Context, docked float32) {
 			}
 			const compactToolbarWidth = 400
 			caption := max(0, captionWidth-panel)
-			a.toolbar(c, a.library.open && panel <= 0.5 && caption > 0 && w-docked < compactToolbarWidth, caption)
-			card := ui.Themed(c.Key("card"), documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
+			cardW := w - docked - right - left - 2 - panel
+			a.toolbar(c, a.library.open && panel <= 0.5 && caption > 0 && w-docked < compactToolbarWidth, caption, cardW)
+			card := ui.Themed(c.Key("card"), a.documentTheme(a.paperDark)).Grow(1).MinHeight(0).Radius(10).
 				Shadow(0, 1, 4, 0, cardShadow(t)).Border(1, t.Border.Alpha(0.35)).Clip()
 			a.splitDropTarget(c, card)
 			a.tourMark("bookmarks", card)
-			card.Children(func() { a.documentContent(c, a.doc, w-docked-right-left-2-panel) })
+			card.Children(func() { a.documentContent(c, a.doc, cardW) })
 		})
 		if !a.spaceForm.open || a.spaceForm.id != "" {
 			a.qaPanel(c)
@@ -515,7 +519,7 @@ func (a *App) documentContent(c *ui.Context, d *document, cardWidth float32) {
 // toolbar is the row above the card: the history's arrows, the address
 // of the document, as Arc's, the editor's word count and format menu,
 // and the more menu. It drags the window.
-func (a *App) toolbar(c *ui.Context, compact bool, caption float32) {
+func (a *App) toolbar(c *ui.Context, compact bool, caption, cardWidth float32) {
 	bar := c.TitleBar()
 	// The sidebar reserves the left controls; Windows and Linux can keep
 	// their window buttons on the right, over this toolbar instead.
@@ -525,6 +529,9 @@ func (a *App) toolbar(c *ui.Context, compact bool, caption float32) {
 	}
 	right += caption
 	toolbar := ui.Row(c.Key("toolbar")).Height(max(bar.Height, 46)).Padding(0, right, 0, 0).Gap(2).AlignItems(ui.Center).DragWindow()
+	if a.doc != nil && a.doc.loadErr == nil && !a.doc.isPDF() && !a.doc.isBook() && !a.doc.isMDZ() && !a.doc.isDatabase() && !a.doc.isWhiteboard() {
+		toolbar.ContextMenu(a.customToolbarContextMenu)
+	}
 	if a.qa.shown > 0.5 {
 		// A narrow document's controls must not paint or receive clicks over
 		// the question panel while it takes room beside the document.
@@ -551,7 +558,7 @@ func (a *App) toolbar(c *ui.Context, compact bool, caption float32) {
 		ui.Box(c).Width(6)
 		a.address(c)
 		ui.Box(c).Width(6)
-		a.documentCorner(c, a.doc)
+		a.documentCornerWidth(c, a.doc, cardWidth)
 		a.gitToolbarButton(c)
 		ask := iconButton(c, "ask", iconAsk, i18n.T("问答"), a.withKey(i18n.T("向当前空间提问"), "ask"), a.state.ActiveSpace() == nil)
 		if a.qa.open {

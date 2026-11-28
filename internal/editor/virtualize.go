@@ -538,7 +538,7 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 						size:         14 * z,
 						tableHeader:  ri == 0,
 					})
-					cells = append(cells, decoration{kind: "cell", rect: rect, table: table, header: ri == 0, right: ci+spanCols < cols, below: ri+spanRows < nrows, tone: cell.Background, id: cell.ID, ownerID: b.ID, rowIdx: ri, colIdx: ci})
+					cells = append(cells, decoration{kind: "cell", rect: rect, table: table, header: ri == 0, right: ci+spanCols < cols, below: ri+spanRows < nrows, tone: cell.Background, id: cell.ID, ownerID: b.ID, rowIdx: ri, colIdx: ci, rowSpan: spanRows, colSpan: spanCols})
 				}
 			}
 			e.decorations = append(e.decorations, cells...)
@@ -604,7 +604,7 @@ func (e *Editor) layoutTable(b *document.Block, x, y, w float32, canDefer bool, 
 		r := &e.rows[sp.index]
 		r.y += rect.Y + padY
 		r.rect = rect
-		cells = append(cells, decoration{kind: "cell", rect: rect, header: sp.r == 0, right: sp.c+sp.cols < cols, below: sp.r+sp.rows < nrows, tone: sp.cell.Background, id: sp.cell.ID, ownerID: b.ID, rowIdx: sp.r, colIdx: sp.c})
+		cells = append(cells, decoration{kind: "cell", rect: rect, header: sp.r == 0, right: sp.c+sp.cols < cols, below: sp.r+sp.rows < nrows, tone: sp.cell.Background, id: sp.cell.ID, ownerID: b.ID, rowIdx: sp.r, colIdx: sp.c, rowSpan: sp.rows, colSpan: sp.cols})
 	}
 	table := ui.Rect{X: x, Y: top, W: w, H: y - top}
 	for _, d := range cells {
@@ -651,13 +651,16 @@ func (e *Editor) blockMetrics(b *document.Block, w float32, header bool) blockMe
 		baseH := []float32{26, 22, 20, 18, 16, 16}[level-1]
 		m.font.Size = baseH * z
 		m.font.LineHeight = []float32{36.4, 30.8, 28, 25.2, 26, 26}[level-1] / baseH
-		m.font.Weight = 500
+		m.font.Weight = e.headingWeight()
 		m.top = []float32{26, 22, 20, 18, 18, 16}[level-1] * z
 		m.bottom = []float32{10, 8, 8, 8, 8, 8}[level-1] * z
 		if len(e.Doc.Blocks) > 0 && e.Doc.Blocks[0].ID == b.ID {
-			// The first heading is the page title: 34 on 55.25.
-			m.font.Size, m.font.Weight, m.font.LineHeight = 34*z, 500, 55.25/34
-			m.top, m.bottom = 0, 22*z
+			m.top = 0
+			if b.Level <= 1 {
+				// A level-1 first heading is the page title: 34 on 55.25.
+				m.font.Size, m.font.LineHeight = 34*z, 55.25/34
+				m.bottom = 22 * z
+			}
 		}
 	case "code", "raw", "math":
 		m.font.Family, m.font.Size, m.font.LineHeight = "monospace", 14*z, 22.0/14
@@ -700,7 +703,7 @@ func (e *Editor) blockShapeKey(b *document.Block, font ui.Font, header bool) sha
 	if b.Kind == "code" {
 		lang = b.Language
 	}
-	return shapeStyle{font: font, align: b.Align, kind: b.Kind, language: lang, revealed: revealed, notes: e.noteKey(), checked: b.Checked, header: header, noWrap: e.isCodeNoWrap(b)}
+	return shapeStyle{font: font, align: e.effectiveBlockAlign(b, header), kind: b.Kind, language: lang, revealed: revealed, notes: e.noteKey(), checked: b.Checked, header: header, noWrap: e.isCodeNoWrap(b)}
 }
 
 func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme *ui.Theme) []ui.Span {
@@ -726,8 +729,16 @@ func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme 
 				span.BaselineShift = -font.Size * .18
 			}
 		}
+		if b.Kind == "heading" && pg.HeadingText != (ui.Color{}) {
+			span.Color, span.DecorationColor = pg.HeadingText, pg.HeadingText
+		} else if header && pg.TableHeaderText != (ui.Color{}) {
+			span.Color, span.DecorationColor = pg.TableHeaderText, pg.TableHeaderText
+		}
 		if style.Bold {
-			span.Weight = 600
+			span.Weight = max(e.boldWeight(), font.Weight)
+			if pg.BoldText != (ui.Color{}) {
+				span.Color, span.DecorationColor = pg.BoldText, pg.BoldText
+			}
 		}
 		if style.Kbd {
 			span.Font = "system-ui"
@@ -747,12 +758,20 @@ func (e *Editor) blockSpans(b *document.Block, font ui.Font, header bool, theme 
 		if c, ok := pg.TextColors[style.Color]; ok {
 			span.Color, span.DecorationColor = c, c
 		}
-		if c, ok := pg.Highlights[style.Highlight]; ok && !style.Kbd {
-			span.Background, span.Radius = c, 2
+		if !style.Kbd && style.Highlight != "" {
+			if style.Highlight == "light-yellow" && pg.HighlightDefault != (ui.Color{}) {
+				span.Background, span.Radius = pg.HighlightDefault, 2
+			} else if c, ok := pg.Highlights[style.Highlight]; ok {
+				span.Background, span.Radius = c, 2
+			}
 		}
 		switch {
 		case header:
-			span.Weight = max(span.Weight, 500)
+			if !style.Bold && !style.Kbd {
+				span.Weight = e.tableHeaderWeight()
+			} else {
+				span.Weight = max(span.Weight, e.tableHeaderWeight())
+			}
 		case b.Kind == "quote":
 			span.Color = pg.Caption
 		case b.Kind == "task" && b.Checked:
@@ -777,10 +796,10 @@ func (e *Editor) shapeBlock(b *document.Block, key shapeStyle, shapeWidth float3
 	font := key.font
 	spans := e.blockSpans(b, font, key.header, theme)
 	align := ui.Start
-	if b.Align == "center" {
+	if key.align == "center" {
 		align = ui.Center
 	}
-	if b.Align == "right" {
+	if key.align == "right" {
 		align = ui.End
 	}
 	if b.Kind == "math" || b.Kind == "image" {

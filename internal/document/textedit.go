@@ -113,8 +113,15 @@ func (e *Engine) replaceTextWithOptions(a, z int, text string, committed, allowA
 	style.NoMath = false
 	runs := Compact(append(append(SliceRuns(b.Runs, 0, a-first.Start), Run{Text: text, Style: style}), SliceRuns(b.Runs, z-first.Start, first.End-first.Start)...))
 	// Short Markdown prefixes at the start of a block still take the structural transaction path.
-	if allowAutoformat && text == " " && (b.Kind == "paragraph" || b.Kind == "bullet") && a-first.Start <= 9 {
-		return false
+	if allowAutoformat && (b.Kind == "paragraph" || b.Kind == "bullet" || b.Kind == "heading") {
+		if text == " " && a-first.Start <= 9 {
+			return false
+		}
+		if (b.Kind == "paragraph" || b.Kind == "heading") && a == first.Start {
+			if _, _, ok := leadingHeadingPrefix(text); ok {
+				return false
+			}
+		}
 	}
 	nextComments := ShiftComments(b.Comments, a-first.Start, z-first.Start, Len(text), (first.End-first.Start)-(z-a)+Len(text))
 	var entry historyEntry
@@ -219,8 +226,15 @@ func (e *Engine) CommitLeaf(s LeafState, a, z int, text string) bool {
 	}
 	a = leaf.Start + Len(before[:ByteOffset(before, a-leaf.Start)])
 	z = leaf.Start + Len(before[:ByteOffset(before, z-leaf.Start)])
-	if text == " " && (b.Kind == "paragraph" || b.Kind == "bullet") && a-leaf.Start <= 9 {
-		return false
+	if b.Kind == "paragraph" || b.Kind == "bullet" || b.Kind == "heading" {
+		if text == " " && a-leaf.Start <= 9 {
+			return false
+		}
+		if (b.Kind == "paragraph" || b.Kind == "heading") && a == leaf.Start {
+			if _, _, ok := leadingHeadingPrefix(text); ok {
+				return false
+			}
+		}
 	}
 	style := e.CurrentStyle()
 	style.NoMath = false

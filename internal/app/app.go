@@ -228,6 +228,8 @@ type App struct {
 	imageMaxHBuf    string
 	codeMaxHSynced  float32
 	imageMaxHSynced float32
+	toolbarModal    customToolbarModal
+	styleCfg        styleConfigState
 	// look is the window's look this frame, the two spaces either side
 	// mixed while paging; docTheme the system's theme the document's card
 	// keeps. paperDark is the active space's light or dark, which the
@@ -1322,11 +1324,16 @@ func (a *App) newDocAt(dir string, index int) {
 		}
 	}
 	// An empty title to type, its placeholder showing, and the starter
-	// below; the file is named for the title once it has one.
+	// below — or a single empty paragraph when default H1 titles are off;
+	// the file is named for its first heading once it has one.
 	doc := model.New()
-	title := model.NewBlock("heading", "")
-	title.Level = 1
-	doc.Blocks = []*model.Block{title, model.NewBlock("paragraph", "")}
+	if a.prefs != nil && a.prefs.NoDefaultTitle {
+		doc.Blocks = []*model.Block{model.NewBlock("paragraph", "")}
+	} else {
+		title := model.NewBlock("heading", "")
+		title.Level = 1
+		doc.Blocks = []*model.Block{title, model.NewBlock("paragraph", "")}
+	}
 	content := editor.ExportMarkdown(doc)
 	rel, err := vault.CreateFile(sp.Root, dir, untitled, ".md", content)
 	if err != nil {
@@ -1433,17 +1440,36 @@ func (a *App) followTitle() {
 	}
 }
 
-// docTitle is the text of a document's leading level 1 heading, on one
-// line and at most 60 characters, as a file name can hold it.
-func docTitle(doc *model.Document) string {
-	if len(doc.Blocks) == 0 || doc.Blocks[0].Kind != "heading" || doc.Blocks[0].Level != 1 {
-		return ""
-	}
-	title := strings.Join(strings.Fields(doc.Blocks[0].Text()), " ")
+func cleanDocTitle(raw string) string {
+	title := strings.Join(strings.Fields(raw), " ")
 	if r := []rune(title); len(r) > 60 {
 		title = strings.TrimSpace(string(r[:60]))
 	}
 	return strings.Trim(title, ". ")
+}
+
+// docTitle is the text of a document's first non-empty level 1 heading, or
+// when it has none, its first non-empty heading of any level, on one line
+// and at most 60 characters, as a file name can hold it.
+func docTitle(doc *model.Document) string {
+	if doc == nil {
+		return ""
+	}
+	for _, b := range doc.Blocks {
+		if b.Kind == "heading" && b.Level <= 1 {
+			if t := cleanDocTitle(b.Text()); t != "" {
+				return t
+			}
+		}
+	}
+	for _, b := range doc.Blocks {
+		if b.Kind == "heading" {
+			if t := cleanDocTitle(b.Text()); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
 }
 
 // newFolder makes a folder in dir and starts naming it.

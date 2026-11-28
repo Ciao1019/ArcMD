@@ -382,6 +382,20 @@ func (a *App) actions() []action {
 		}
 	}
 	cmd(i18n.T("外观设置…"), "", func() { a.openSettings(tabAppearance) })
+	curPaperPreset := a.paperPreset()
+	for _, opt := range paperPresetChoices {
+		presetID := opt.id
+		hint := ""
+		if curPaperPreset == presetID {
+			hint = i18n.T("当前使用")
+		}
+		cmd(fmt.Sprintf(i18n.T("纸面配色：%s"), i18n.T(opt.label)), hint, func() {
+			a.setPaperPreset(presetID)
+		})
+	}
+	cmd(i18n.T("自定义工具栏…"), "", a.openCustomToolbar)
+	cmd(i18n.T("打开样式配置文件"), "", a.openStyleConfigFile)
+	cmd(i18n.T("重新载入样式配置"), "", a.reloadStyleConfigAction)
 	ask := i18n.T("向当前空间提问")
 	if a.qa.open {
 		ask = i18n.T("关闭问答")
@@ -970,12 +984,16 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("斜体"), a.keyLabel("italic"), after(func() { ed.Wrap("*") }))
 	cmd(i18n.T("删除线"), a.keyLabel("strike"), after(func() { ed.Wrap("~~") }))
 	cmd(i18n.T("行内代码"), a.keyLabel("code"), after(func() { ed.Wrap("`") }))
-	for _, item := range []struct{ name, prefix string }{
-		{i18n.T("正文"), ""}, {i18n.T("一级标题"), "# "}, {i18n.T("二级标题"), "## "}, {i18n.T("三级标题"), "### "},
-		{i18n.T("四级标题"), "#### "}, {i18n.T("五级标题"), "##### "}, {i18n.T("六级标题"), "###### "},
-		{i18n.T("引用"), "> "}, {i18n.T("无序列表"), "- "}, {i18n.T("有序列表"), "1. "}, {i18n.T("任务列表"), "- [ ] "},
+	for _, item := range []struct{ name, prefix, key string }{
+		{i18n.T("正文"), "", "heading-0"}, {i18n.T("一级标题"), "# ", "heading-1"}, {i18n.T("二级标题"), "## ", "heading-2"}, {i18n.T("三级标题"), "### ", "heading-3"},
+		{i18n.T("四级标题"), "#### ", "heading-4"}, {i18n.T("五级标题"), "##### ", "heading-5"}, {i18n.T("六级标题"), "###### ", "heading-6"},
+		{i18n.T("引用"), "> ", ""}, {i18n.T("无序列表"), "- ", ""}, {i18n.T("有序列表"), "1. ", ""}, {i18n.T("任务列表"), "- [ ] ", ""},
 	} {
-		cmd(i18n.T("转换为")+item.name, "", after(func() { ed.Prefix(item.prefix) }))
+		hint := ""
+		if item.key != "" {
+			hint = a.keyLabel(item.key)
+		}
+		cmd(i18n.T("转换为")+item.name, hint, after(func() { ed.Prefix(item.prefix) }))
 	}
 	cmd(i18n.T("在下方新建段落"), a.keyLabel("newline"), after(func() { ed.Engine.Insert(model.NewBlock("paragraph", "")) }))
 	cmd(i18n.T("插入链接…"), "", ed.EditLink)

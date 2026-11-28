@@ -37,6 +37,12 @@ type Prefs struct {
 	// until explicitly saved or confirmed when closing.
 	NoAutosave bool `json:"noAutosave,omitempty"`
 	NoAutoPair bool `json:"noAutoPair,omitempty"`
+	// NoDefaultTitle starts newly created blank documents with an empty
+	// paragraph instead of a default H1 page title.
+	NoDefaultTitle bool `json:"noDefaultTitle,omitempty"`
+	// ToolbarItems lists the quick-action IDs shown in the document toolbar,
+	// in user-chosen order.
+	ToolbarItems []string `json:"toolbarItems,omitempty"`
 	// AutoSpace puts a space between Chinese and Latin text as it is typed.
 	AutoSpace bool `json:"autoSpace,omitempty"`
 	// CodeNoWrap disables soft wrapping in code blocks by default so long
@@ -58,6 +64,7 @@ type Prefs struct {
 	// ("" the standard 32 DIP row height).
 	Font           string `json:"font,omitempty"`
 	Page           string `json:"page,omitempty"`
+	PaperPreset    string `json:"paperPreset,omitempty"`
 	SidebarDensity string `json:"sidebarDensity,omitempty"`
 	// Typewriter keeps the line being written in the middle of the page.
 	Typewriter bool `json:"typewriter,omitempty"`
@@ -218,6 +225,29 @@ var (
 	SidebarDensities = []string{"compact", "", "comfortable"}
 )
 
+// ValidToolbarItems are the quick-action IDs supported in the customizable
+// document toolbar.
+var ValidToolbarItems = []string{
+	"table", "code-block", "link", "image", "math", "inline-math",
+	"callout", "task", "bullet", "numbered", "quote", "toggle",
+	"rule", "columns", "mermaid", "whiteboard", "bold", "italic",
+	"underline", "strike", "inline-code", "annotate", "source",
+}
+
+var validToolbarItemSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(ValidToolbarItems))
+	for _, id := range ValidToolbarItems {
+		m[id] = struct{}{}
+	}
+	return m
+}()
+
+// IsValidToolbarItem reports whether id is a valid customizable toolbar action.
+func IsValidToolbarItem(id string) bool {
+	_, ok := validToolbarItemSet[id]
+	return ok
+}
+
 // fontFamilies are the family lists of Fonts: the first a system has sets
 // the text, Latin before CJK so each script gets a face of its kind.
 var fontFamilies = map[string]string{
@@ -273,6 +303,9 @@ func (p *Prefs) normalize() {
 	if p.Page != "narrow" && p.Page != "wide" && p.Page != "full" {
 		p.Page = ""
 	}
+	if !IsValidPaperPreset(p.PaperPreset) {
+		p.PaperPreset = ""
+	}
 	if p.SidebarDensity != "compact" && p.SidebarDensity != "comfortable" {
 		p.SidebarDensity = ""
 	}
@@ -292,6 +325,29 @@ func (p *Prefs) normalize() {
 	}
 	p.CodeMaxHeight = sanitizeMaxHeight(p.CodeMaxHeight)
 	p.ImageMaxHeight = sanitizeMaxHeight(p.ImageMaxHeight)
+	p.ToolbarItems = normalizeToolbarItems(p.ToolbarItems)
+}
+
+func normalizeToolbarItems(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, id := range items {
+		if !IsValidToolbarItem(id) {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func sanitizeMaxHeight(h float32) float32 {

@@ -244,6 +244,13 @@ func (a *App) settingsGeneral(c *ui.Context) {
 		FontSize(12).TextColor(t.TextMuted)
 	settingsHeading(c, i18n.T("写作"), "")
 	settingsGroup(c, "writing", func() {
+		defaultTitle := !a.prefs.NoDefaultTitle
+		toggleRow(c, "default-title", i18n.T("新建文档默认使用一级标题"), i18n.T("关闭后新建文档从空正文开始，可直接输入 ## 使用二级或其他级别标题。"), &defaultTitle, nil)
+		if defaultTitle == a.prefs.NoDefaultTitle {
+			a.prefs.NoDefaultTitle = !defaultTitle
+			a.savePrefs()
+		}
+		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
 		autosave := !a.prefs.NoAutosave
 		toggleRow(c, "autosave", i18n.T("自动保存"), fmt.Sprintf(i18n.T("编辑后自动写入文件；关闭后需按 %s 手动保存。"), a.keyLabel("save")), &autosave, nil)
 		if autosave == a.prefs.NoAutosave {
@@ -435,6 +442,43 @@ func (a *App) settingsAppearance(c *ui.Context) {
 		sep()
 		choice("sidebar-density", i18n.T("侧边栏行高"), prefs.SidebarDensities, []string{i18n.T("紧凑"), i18n.T("标准"), i18n.T("舒适")}, &a.prefs.SidebarDensity, nil)
 		sep()
+		curPreset := a.paperPreset()
+		ui.Row(c.Key("paper-preset")).Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, i18n.T("纸面配色")).Grow(1).MinWidth(0)
+			ui.Row(c.Key("paper-preset-swatches")).Gap(6).AlignItems(ui.Center).Role(ui.RoleRadioGroup).Label(i18n.T("纸面配色")).Children(func() {
+				for _, opt := range paperPresetChoices {
+					presetID := opt.id
+					label := i18n.T(opt.label)
+					on := curPreset == presetID
+					paperCol, inkCol, borderCol := paperPresetSwatchColors(presetID, a.paperDark)
+					pill := ui.Row(c.Key("paper-swatch:"+presetID)).Height(30).Padding(0, 9, 0, 7).Gap(6).Radius(8).
+						AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().
+						Role(ui.RoleRadio).Label(label).Checked(on)
+					if on {
+						pill.Background(t.Accent.Alpha(0.14)).Border(1.5, t.Accent)
+					} else {
+						pill.Background(t.Text.Alpha(0.035)).Border(1, t.Text.Alpha(0.08))
+						if pill.Hovered() {
+							pill.Background(hoverFill(t))
+						}
+					}
+					pill.Children(func() {
+						ui.Box(c.Key("swatch")).Size(18, 18).Radius(5).Center().
+							Background(paperCol).Border(1, borderCol).Children(func() {
+							ui.Text(c, "Aa").FontSize(9.5).FontWeight(600).TextColor(inkCol).NoWrap()
+						})
+						txt := ui.Text(c, label).FontSize(12.5).NoWrap()
+						if on {
+							txt.FontWeight(600)
+						}
+					})
+					if pill.Clicked() {
+						a.setPaperPreset(presetID)
+					}
+				}
+			})
+		})
+		sep()
 		for _, item := range []struct {
 			label string
 			value float32
@@ -462,20 +506,62 @@ func (a *App) settingsAppearance(c *ui.Context) {
 			})
 		}
 	})
-	// The sample, set in the chosen face, size and leading.
+	// The sample, set in the chosen face, size, leading, and active paper look.
 	family := a.prefs.BodyFamily()
 	if family == "" {
 		family = "system-ui"
 	}
-	ui.Column(c.Key("appearance-sample")).Padding(14, 16).Gap(6).Radius(10).Border(1, t.Text.Alpha(0.08)).Children(func() {
-		ui.Text(c, i18n.T("预览")).FontSize(11).TextColor(t.TextMuted)
+	sampleTheme := a.documentTheme(a.paperDark)
+	samplePage := a.pageStyle(a.paperDark)
+	sampleHeading := sampleTheme.Text
+	if samplePage.HeadingText.A != 0 {
+		sampleHeading = samplePage.HeadingText
+	}
+	sampleHeadingWeight := 500
+	if samplePage.HeadingWeight > 0 {
+		sampleHeadingWeight = samplePage.HeadingWeight
+	}
+	ui.Column(c.Key("appearance-sample")).Padding(14, 16).Gap(6).Radius(10).
+		Background(sampleTheme.Background).Border(1, sampleTheme.Border).Children(func() {
+		ui.Text(c, i18n.T("预览")).FontSize(11).TextColor(sampleTheme.TextMuted)
 		size := a.prefs.ReadingSize()
-		ui.Text(c, i18n.T("留一点空白")).Font(family).FontSize(size * 1.3).FontWeight(500)
+		ui.Text(c, i18n.T("留一点空白")).Font(family).FontSize(size * 1.3).FontWeight(sampleHeadingWeight).TextColor(sampleHeading)
 		ui.Text(c, i18n.T("写作可以很简单。打开一页，记下此刻的想法，让文字慢慢成为自己的形状。Quiet words, written slowly.")).
-			Font(family).FontSize(size).LineHeight(a.prefs.ReadingLine())
+			Font(family).FontSize(size).LineHeight(a.prefs.ReadingLine()).TextColor(sampleTheme.Text)
+	})
+	settingsGroup(c, "appearance-customize", func() {
+		ui.Row(c.Key("toolbar-row")).Padding(10, 12).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, i18n.T("文档快捷工具栏"))
+				note := i18n.T("在文档右上角放置表格、代码块、链接、公式等常用按钮。")
+				if n := len(a.activeToolbarItems()); n > 0 {
+					note = fmt.Sprintf(i18n.T("已启用 %d 个快捷按钮"), n)
+				}
+				ui.Text(c, note).FontSize(12).TextColor(t.TextMuted)
+			})
+			if ui.Button(c.Key("customize-toolbar"), i18n.T("自定义工具栏…")).Clicked() {
+				a.openCustomToolbar()
+			}
+		})
+		sep()
+		ui.Row(c.Key("style-config-row")).Padding(10, 12).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, i18n.T("自定义样式配置 (style.json)"))
+				ui.Text(c, i18n.T("配置浅色与深色纸面配色、标题与粗体字重、表格对齐及高亮颜色，保存后自动生效。")).FontSize(12).TextColor(t.TextMuted)
+			})
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if ui.Button(c.Key("reload-style"), i18n.T("重新载入样式配置")).Clicked() {
+					a.reloadStyleConfigAction()
+				}
+				if ui.Button(c.Key("open-style"), i18n.T("打开样式配置文件")).Clicked() {
+					a.openStyleConfigFile()
+				}
+			})
+		})
 	})
 	if ui.Button(c.Key("appearance-reset"), i18n.T("恢复默认外观")).AlignSelf(ui.Start).Clicked() {
-		a.prefs.FontSize, a.prefs.LineHeight, a.prefs.Font, a.prefs.Page, a.prefs.SidebarDensity = 0, 0, "", "", ""
+		a.prefs.FontSize, a.prefs.LineHeight, a.prefs.Font, a.prefs.Page, a.prefs.SidebarDensity, a.prefs.PaperPreset = 0, 0, "", "", "", ""
+		a.styleCfg.mergedValid = false
 		a.pageWidthBeforeFull = ""
 		a.savePrefs()
 	}

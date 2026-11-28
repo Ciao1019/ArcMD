@@ -243,10 +243,13 @@ func (e *Editor) exportVectorDecorations(
 			vp.Line(x, py(d.rect.Y+12.5), x+w, py(d.rect.Y+12.5), 1*sc, pdfRGBA(pg.Rule), false)
 
 		case "cell":
-			if d.header || pg.CellFills[d.tone].A > 0 {
+			stripe := !d.header && d.rowIdx >= 1 && d.rowIdx%2 == 1 && d.tone == "" && pg.TableStripe.A > 0
+			if d.header || stripe || pg.CellFills[d.tone].A > 0 {
 				vp.PushClip(px(d.table.X), py(d.table.Y), pw(d.table.W), ph(d.table.H), 8*sc)
 				if d.header {
 					vp.FillRect(x, y, w, h, 0, pdfRGBA(pg.TableHeader))
+				} else if stripe {
+					vp.FillRect(x, y, w, h, 0, pdfRGBA(pg.TableStripe))
 				}
 				if fill, ok := pg.CellFills[d.tone]; ok && fill.A > 0 {
 					vp.FillRect(x, y, w, h, 0, pdfRGBA(fill))

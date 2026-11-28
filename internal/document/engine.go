@@ -438,17 +438,49 @@ func isOrderedListPrefix(s string) bool {
 	return ok
 }
 
+func leadingHeadingPrefix(s string) (level, prefixBytes int, ok bool) {
+	if strings.ContainsAny(s, "\r\n") {
+		return 0, 0, false
+	}
+	lead := 0
+	for lead < len(s) && s[lead] == ' ' {
+		lead++
+	}
+	if lead > 3 {
+		return 0, 0, false
+	}
+	hashes := 0
+	for lead+hashes < len(s) && s[lead+hashes] == '#' {
+		hashes++
+	}
+	if hashes < 1 || hashes > 6 || lead+hashes >= len(s) || s[lead+hashes] != ' ' {
+		return 0, 0, false
+	}
+	return hashes, lead + hashes + 1, true
+}
+
 func (e *Engine) autoformat(inserted string) {
-	if inserted != " " || e.Anchor != e.Caret {
+	if e.Anchor != e.Caret {
 		return
 	}
 	leaf := e.LeafAt(e.Caret)
 	b := leaf.Block
-	if b.Kind != "paragraph" && b.Kind != "bullet" {
+	if b.Kind != "paragraph" && b.Kind != "bullet" && b.Kind != "heading" {
 		return
 	}
-	prefixUnits := e.Caret - leaf.Start
-	if prefixUnits <= 0 || prefixUnits > 11 {
+	var prefixUnits int
+	if inserted == " " {
+		prefixUnits = e.Caret - leaf.Start
+		if prefixUnits <= 0 || prefixUnits > 11 {
+			return
+		}
+	} else if b.Kind == "paragraph" || b.Kind == "heading" {
+		_, prefBytes, ok := leadingHeadingPrefix(inserted)
+		if !ok || e.Caret-leaf.Start != Len(inserted) {
+			return
+		}
+		prefixUnits = Len(inserted[:prefBytes])
+	} else {
 		return
 	}
 	for _, r := range SliceRuns(b.Runs, 0, prefixUnits) {
@@ -464,14 +496,20 @@ func (e *Engine) autoformat(inserted string) {
 	}
 	prefix := rawPrefix[lead:]
 	kind, level, listNum, checked := "", 0, 0, false
-	if b.Kind == "bullet" {
+	switch b.Kind {
+	case "bullet":
 		switch prefix {
 		case "[] ", "[ ] ":
 			kind = "task"
 		case "[x] ", "[X] ":
 			kind, checked = "task", true
 		}
-	} else {
+	case "heading":
+		switch prefix {
+		case "# ", "## ", "### ", "#### ", "##### ", "###### ":
+			kind, level = "heading", len(prefix)-1
+		}
+	default:
 		switch prefix {
 		case "# ", "## ", "### ", "#### ", "##### ", "###### ":
 			kind, level = "heading", len(prefix)-1
@@ -536,7 +574,8 @@ func (e *Engine) autoformat(inserted string) {
 	} else {
 		b.Start = 0
 	}
-	e.Anchor, e.Caret = leaf.Start, leaf.Start
+	newCaret := max(leaf.Start, e.Caret-prefixUnits)
+	e.Anchor, e.Caret = newCaret, newCaret
 }
 
 func (e *Engine) Enter(soft bool) {

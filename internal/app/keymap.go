@@ -81,6 +81,13 @@ var bindings = []binding{
 	{id: "strike", label: "删除线", editor: true},
 	{id: "code", label: "行内代码", editor: true},
 	{id: "clear-format", label: "清除样式", editor: true},
+	{id: "heading-0", label: "正文", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key0)}, editor: true},
+	{id: "heading-1", label: "标题 1", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key1)}, editor: true},
+	{id: "heading-2", label: "标题 2", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key2)}, editor: true},
+	{id: "heading-3", label: "标题 3", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key3)}, editor: true},
+	{id: "heading-4", label: "标题 4", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key4)}, editor: true},
+	{id: "heading-5", label: "标题 5", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key5)}, editor: true},
+	{id: "heading-6", label: "标题 6", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key6)}, editor: true},
 	{id: "find", label: "查找", editor: true},
 	{id: "replace", label: "查找和替换", editor: true},
 	{id: "newline", label: "在下方新建段落", editor: true},
@@ -90,7 +97,9 @@ func init() {
 	defaults := editor.DefaultBindings()
 	for i, b := range bindings {
 		if b.editor {
-			bindings[i].defaults = []editor.Combo{defaults[b.id]}
+			if c, ok := defaults[b.id]; ok {
+				bindings[i].defaults = []editor.Combo{c}
+			}
 		}
 	}
 }
@@ -100,7 +109,6 @@ func init() {
 var fixedShortcuts = []struct{ keys, label string }{
 	{"⌃1…⌃9 / ⌘1…⌘9", "切换到第 N 个空间"},
 	{"⌃⇧1…⌃⇧4", "切换到第 N 个分屏"},
-	{"⌥⌘0…⌥⌘6", "正文 / 标题 1–6"},
 	{"⌘Z / ⇧⌘Z", "撤销 / 重做"},
 	{"⌘ 点击", "打开链接、[[双链]] 或 #标签"},
 	{"[[", "链接到其他文档"},
@@ -200,6 +208,16 @@ func (a *App) ensureKeyCache() {
 	}
 	res = append(res, a.combos("ask")...)
 	res = append(res, a.combos("mindmap")...)
+	if a.prefs != nil {
+		for _, b := range bindings {
+			if b.editor {
+				continue
+			}
+			if _, ok := a.prefs.Keys[b.id]; ok {
+				res = append(res, a.combos(b.id)...)
+			}
+		}
+	}
 	a.cachedEditorBindings = eb
 	a.cachedReserved = res
 	a.cachedBookmarkKey = a.shortKey("bookmark")
@@ -279,15 +297,111 @@ func (a *App) resetKeys(id string) {
 	a.savePrefs()
 }
 
+// isComboBound reports whether any rebindable command currently uses target.
+func (a *App) isComboBound(target editor.Combo) bool {
+	for _, b := range bindings {
+		if a != nil && a.prefs != nil {
+			if s, ok := a.prefs.Keys[b.id]; ok {
+				if c, ok := editor.ParseCombo(s); ok && c == target {
+					return true
+				}
+				continue
+			}
+		}
+		for _, d := range b.defaults {
+			if d == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a *App) anyCmdDigitBound() bool {
+	for _, k := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6, ui.Key7, ui.Key8, ui.Key9} {
+		if a.isComboBound(combo(ui.Cmd, k)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) spaceSwitchShortcutKeys() string {
+	if ui.Cmd != ui.Ctrl && a.anyCmdDigitBound() {
+		return "⌃1…⌃9"
+	}
+	return "⌃1…⌃9 / ⌘1…⌘9"
+}
+
+// applyTyporaHeadings binds headings 1–6 to Cmd+1–Cmd+6, and binds正文 to Cmd+0
+// when Cmd+0 is not currently bound (leaving ⌘0 on zoom-reset by default).
+func (a *App) applyTyporaHeadings() {
+	if a.prefs == nil {
+		return
+	}
+	a.recording = ""
+	if a.prefs.Keys == nil {
+		a.prefs.Keys = map[string]string{}
+	}
+	targets := []struct {
+		id  string
+		key ui.Key
+	}{
+		{"heading-1", ui.Key1},
+		{"heading-2", ui.Key2},
+		{"heading-3", ui.Key3},
+		{"heading-4", ui.Key4},
+		{"heading-5", ui.Key5},
+		{"heading-6", ui.Key6},
+	}
+	isTargetHeading := func(id string) bool {
+		for _, t := range targets {
+			if t.id == id {
+				return true
+			}
+		}
+		return false
+	}
+	var cleared []string
+	seenCleared := map[string]bool{}
+	for _, t := range targets {
+		want := combo(ui.Cmd, t.key)
+		for _, b := range bindings {
+			if isTargetHeading(b.id) {
+				continue
+			}
+			for _, other := range a.combos(b.id) {
+				if other == want {
+					a.prefs.Keys[b.id] = unbound
+					if !seenCleared[b.id] {
+						seenCleared[b.id] = true
+						cleared = append(cleared, i18n.T(b.label))
+					}
+					break
+				}
+			}
+		}
+		a.prefs.Keys[t.id] = want.String()
+	}
+	cmd0 := combo(ui.Cmd, ui.Key0)
+	if !a.isComboBound(cmd0) {
+		a.prefs.Keys["heading-0"] = cmd0.String()
+	}
+	a.keyGen++
+	a.savePrefs()
+	if len(cleared) > 0 {
+		a.notify("已清除冲突快捷键：%s。", strings.Join(cleared, "、"))
+	}
+}
+
 // reservedCombos are the fixed keys a command cannot take.
 func reservedCombos() []editor.Combo {
 	out := []editor.Combo{combo(ui.Cmd, ui.KeyZ), combo(ui.Cmd|ui.Shift, ui.KeyZ), combo(ui.Cmd, ui.KeyC),
 		combo(ui.Cmd, ui.KeyV), combo(ui.Cmd, ui.KeyX), combo(ui.Cmd, ui.KeyA), combo(ui.Cmd, ui.KeyQ), combo(ui.Cmd, ui.KeyW)}
-	for _, k := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6, ui.Key7, ui.Key8, ui.Key9} {
-		out = append(out, combo(ui.Cmd, k), combo(ui.Ctrl, k))
-	}
-	for _, k := range []ui.Key{ui.Key0, ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6} {
-		out = append(out, combo(ui.Cmd|ui.Alt, k))
+	if ui.Cmd != ui.Ctrl {
+		for _, k := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6, ui.Key7, ui.Key8, ui.Key9} {
+			out = append(out, combo(ui.Ctrl, k))
+		}
 	}
 	for _, k := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4} {
 		out = append(out, combo(ui.Ctrl|ui.Shift, k))
@@ -303,13 +417,20 @@ func reservedCombos() []editor.Combo {
 func (a *App) settingsShortcuts(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
-		ui.Column(c).Grow(1).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 			settingsHeading(c, i18n.T("快捷键"), i18n.T("点击快捷键后按下新的组合键；Esc 取消，⌫ 清除。所有功能也都能从命令栏找到。"))
 		})
-		if ui.Button(c.Key("keys-reset-all"), i18n.T("全部恢复默认")).Disabled(a.prefs == nil || len(a.prefs.Keys) == 0).Clicked() {
-			a.resetKeys("")
-			a.recording = ""
-		}
+		ui.Row(c).Gap(8).Shrink(0).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("keys-typora-headings"), i18n.T("Typora 标题键")).
+				Tooltip(i18n.T("将标题 1–6 设为 ⌘1–⌘6（切换空间仍可用 ⌃1–⌃9）")).
+				Disabled(a.prefs == nil).Clicked() {
+				a.applyTyporaHeadings()
+			}
+			if ui.Button(c.Key("keys-reset-all"), i18n.T("全部恢复默认")).Disabled(a.prefs == nil || len(a.prefs.Keys) == 0).Clicked() {
+				a.resetKeys("")
+				a.recording = ""
+			}
+		})
 	})
 	settingsGroup(c, "shortcut-list", func() {
 		for i, b := range bindings {
@@ -337,13 +458,17 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 	})
 	settingsGroup(c, "shortcut-fixed", func() {
 		for i, s := range fixedShortcuts {
-			row := ui.Row(c.Key(s.keys)).Height(34).PaddingX(12).AlignItems(ui.Center)
+			keys := s.keys
+			if s.label == "切换到第 N 个空间" {
+				keys = a.spaceSwitchShortcutKeys()
+			}
+			row := ui.Row(c.Key(s.label)).Height(34).PaddingX(12).AlignItems(ui.Center)
 			if i%2 == 1 {
 				row.Background(t.Text.Alpha(0.025))
 			}
 			row.Children(func() {
 				ui.Text(c, i18n.T(s.label)).Grow(1).MinWidth(0)
-				ui.Text(c, i18n.T(s.keys)).FontSize(12).TextColor(t.TextMuted).NoWrap()
+				ui.Text(c, i18n.T(keys)).FontSize(12).TextColor(t.TextMuted).NoWrap()
 			})
 		}
 	})

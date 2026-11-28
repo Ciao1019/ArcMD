@@ -164,7 +164,7 @@ func (a *App) backToMain(w *docWindow) {
 // windowView is a document's window: a bar to drag it by, with its name,
 // over the page.
 func (a *App) windowView(c *ui.Context, w *docWindow) {
-	paper := documentTheme(a.paperDark)
+	paper := a.documentTheme(a.paperDark)
 	c.SetTheme(paper)
 	t := c.Theme()
 	d := w.doc
@@ -195,13 +195,17 @@ func (a *App) windowView(c *ui.Context, w *docWindow) {
 	bar := c.TitleBar()
 	ui.Column(c.Key("window-doc")).Fill().Children(func() {
 		top := ui.Row(c.Key("window-bar")).Height(max(44, bar.Height)).PaddingX(12).Gap(8).AlignItems(ui.Center).DragWindow()
+		if d.loadErr == nil && !d.isPDF() && !d.isBook() && !d.isMDZ() && !d.isDatabase() && !d.isWhiteboard() {
+			top.ContextMenu(a.customToolbarContextMenu)
+		}
 		top.Children(func() {
 			ui.Box(c).Width(bar.Left)
 			fileIcon(c, d.rel, a.iconTitle(d.space.ID, d.rel), 16)
 			ui.Text(c, docName(d.title())).FontSize(13).FontWeight(600).SingleLine().Shrink(1).MinWidth(0)
 			ui.Text(c, d.space.Name).FontSize(12).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
 			ui.Box(c).Grow(1)
-			a.documentCorner(c, d)
+			winW, _ := c.Size()
+			a.documentCornerWidth(c, d, winW)
 			if iconButton(c, "window-main", iconWindowBack, i18n.T("在主窗口中打开"), i18n.T("在主窗口中打开"), false).Clicked() {
 				a.backToMain(w)
 			}

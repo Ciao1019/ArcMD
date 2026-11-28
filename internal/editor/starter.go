@@ -18,7 +18,7 @@ var starterKinds = []string{"task", "bullet", "table", "callout", "code", "image
 // an optional level 1 heading and at most one empty paragraph.
 func (e *Editor) Blank() bool {
 	blocks := e.Doc.Blocks
-	if len(blocks) > 0 && blocks[0].Kind == "heading" && blocks[0].Level == 1 {
+	if e.Doc.HasPageTitle() {
 		blocks = blocks[1:]
 	}
 	switch len(blocks) {
@@ -53,7 +53,7 @@ func (e *Editor) start(item insertion) {
 	e.insertItemAfter(func() {
 		blocks := e.Engine.Doc.Blocks
 		last := blocks[len(blocks)-1]
-		if len(blocks) == 1 && last.Kind == "heading" {
+		if len(blocks) == 1 && e.Engine.Doc.HasPageTitle() {
 			last = document.NewBlock("paragraph", "")
 			e.Engine.InsertAt(len(blocks), last)
 		}
