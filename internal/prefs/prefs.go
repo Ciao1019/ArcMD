@@ -45,6 +45,10 @@ type Prefs struct {
 	ToolbarItems []string `json:"toolbarItems,omitempty"`
 	// AutoSpace puts a space between Chinese and Latin text as it is typed.
 	AutoSpace bool `json:"autoSpace,omitempty"`
+	// CopyPlainText strips Markdown formatting and omits external HTML/Markdown
+	// pasteboard formats on standard copy while keeping ArcMD's internal
+	// fragment format for in-app rich paste.
+	CopyPlainText bool `json:"copyPlainText,omitempty"`
 	// CodeNoWrap disables soft wrapping in code blocks by default so long
 	// lines scroll horizontally instead.
 	CodeNoWrap bool `json:"codeNoWrap,omitempty"`

@@ -81,6 +81,7 @@ var bindings = []binding{
 	{id: "strike", label: "删除线", editor: true},
 	{id: "code", label: "行内代码", editor: true},
 	{id: "clear-format", label: "清除样式", editor: true},
+	{id: "copy-plain", label: "复制为纯文本", editor: true},
 	{id: "heading-0", label: "正文", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key0)}, editor: true},
 	{id: "heading-1", label: "标题 1", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key1)}, editor: true},
 	{id: "heading-2", label: "标题 2", defaults: []editor.Combo{combo(ui.Cmd|ui.Alt, ui.Key2)}, editor: true},

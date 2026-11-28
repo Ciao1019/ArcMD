@@ -1246,6 +1246,13 @@ var en = map[string]string{
 	"键盘按键":                     "Keyboard Key",
 	"HTML 注释":                  "HTML Comment",
 
+	// Copy as Plain Text
+	"复制为纯文本":             "Copy as Plain Text",
+	"默认复制去除 Markdown 格式": "Copy without Markdown formatting by default",
+	"常规复制到其他应用时去除列表符号、标题与样式标记；在 ArcMD 内粘贴仍保留格式。": "Strip list markers, headings, and styling when copying to other apps; pasting inside ArcMD still preserves formatting.",
+	"开启默认复制去除 Markdown 格式": "Enable Plain-Text Copy by Default",
+	"关闭默认复制去除 Markdown 格式": "Disable Plain-Text Copy by Default",
+
 	// Plugins & Cloud Sync
 	"搜索插件…":                  "Search plugins…",
 	"搜索插件":                   "Search plugins",

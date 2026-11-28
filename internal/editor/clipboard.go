@@ -29,7 +29,21 @@ func (e *Editor) copySelection(write func(string)) {
 	e.writeClipboard(fragment, data, text)
 }
 
+func (e *Editor) copyPlainSelection(write func(string)) {
+	r := e.Selection().Range
+	if r.Start == r.End {
+		return
+	}
+	slice := strings.ReplaceAll(e.slice(r.Start, r.End), "\u2028", "\n")
+	fragment := e.Engine.Fragment()
+	fragment.ImportSource = ""
+	e.writePlainClipboard(e.selectionPlainText(r, fragment, slice), write)
+}
+
 func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Document, slice string) string {
+	if e.copyPlainText {
+		return e.selectionPlainText(r, fragment, slice)
+	}
 	a, z := e.LeafAt(r.Start), e.LeafAt(r.End)
 	if literalBlock(a.Block.Kind) {
 		return slice
@@ -53,6 +67,100 @@ func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Docu
 		return plainFragmentText(fragment)
 	}
 	return trimNewline(ExportMarkdown(fragment))
+}
+
+func (e *Editor) selectionPlainText(r ui.TextInputRange, fragment *document.Document, slice string) string {
+	a, z := e.LeafAt(r.Start), e.LeafAt(r.End)
+	if a.Block == z.Block && !isWhiteboardBlock(a.Block) && !isDatabaseBlock(a.Block) {
+		return slice
+	}
+	if tableID, cr, ok := e.cellRange(); ok && !(len(fragment.Blocks) == 1 && fragment.Blocks[0].Kind == "table") {
+		if table := e.blockByID(tableID); table != nil {
+			return exportCellRangePlainText(table, cr)
+		}
+	}
+	return exportFragmentPlainText(fragment)
+}
+
+type plainTextItem struct {
+	text   string
+	isList bool
+}
+
+func exportFragmentPlainText(doc *document.Document) string {
+	if doc == nil {
+		return ""
+	}
+	var items []plainTextItem
+	collectPlainTextBlocks(doc.Blocks, &items)
+	var out strings.Builder
+	for i, it := range items {
+		if i > 0 {
+			if items[i-1].isList && it.isList {
+				out.WriteByte('\n')
+			} else {
+				out.WriteString("\n\n")
+			}
+		}
+		out.WriteString(it.text)
+	}
+	return out.String()
+}
+
+func collectPlainTextBlocks(blocks []*document.Block, out *[]plainTextItem) {
+	for _, b := range blocks {
+		if b == nil || b.Kind == "rule" || isAtomicVisualBlock(b) {
+			continue
+		}
+		switch b.Kind {
+		case "table":
+			if len(b.Children) == 0 {
+				continue
+			}
+			maxCols := 0
+			for _, row := range b.Children {
+				if len(row.Children) > maxCols {
+					maxCols = len(row.Children)
+				}
+			}
+			if maxCols == 0 {
+				continue
+			}
+			t := exportCellRangePlainText(b, document.CellRange{
+				Row0: 0, Col0: 0,
+				Row1: len(b.Children) - 1, Col1: maxCols - 1,
+			})
+			if t != "" {
+				*out = append(*out, plainTextItem{text: t})
+			}
+		case "columns":
+			for _, col := range b.Children {
+				collectPlainTextBlocks(col.Children, out)
+			}
+		case "image":
+			if alt := strings.ReplaceAll(b.Text(), "\u2028", "\n"); alt != "" {
+				*out = append(*out, plainTextItem{text: alt})
+			}
+		default:
+			isList := b.Kind == "bullet" || b.Kind == "numbered" || b.Kind == "task"
+			*out = append(*out, plainTextItem{
+				text:   strings.ReplaceAll(b.Text(), "\u2028", "\n"),
+				isList: isList,
+			})
+		}
+	}
+}
+
+func (e *Editor) writePlainClipboard(text string, write func(string)) {
+	if e.services != (ui.Services{}) {
+		e.services.WriteClipboardData(transfer.New(transfer.NewItem(
+			transfer.Bytes(transfer.Text, []byte(text)),
+		)))
+		return
+	}
+	if write != nil {
+		write(text)
+	}
 }
 
 func inlineLiteralRuns(b *document.Block, from, to int) bool {
@@ -98,8 +206,17 @@ func exportCellRangePlainText(table *document.Block, cr document.CellRange) stri
 func trimNewline(s string) string { return strings.TrimSuffix(s, "\n") }
 
 // writeClipboard offers a fragment, encoded as data, with its text,
-// Markdown and HTML.
+// Markdown and HTML. When CopyPlainText is enabled, Markdown and HTML are
+// omitted so external apps (including rich editors) paste plain text while
+// ArcMD itself still restores formatting via fragmentFormat.
 func (e *Editor) writeClipboard(fragment *document.Document, data, text string) {
+	if e.copyPlainText {
+		e.services.WriteClipboardData(transfer.New(transfer.NewItem(
+			transfer.Bytes(fragmentFormat, []byte(data)),
+			transfer.Bytes(transfer.Text, []byte(text)),
+		)))
+		return
+	}
 	e.services.WriteClipboardData(transfer.New(transfer.NewItem(
 		transfer.Bytes(fragmentFormat, []byte(data)),
 		transfer.Bytes(transfer.Text, []byte(text)),

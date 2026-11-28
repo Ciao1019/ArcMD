@@ -276,6 +276,8 @@ func (a *App) settingsGeneral(c *ui.Context) {
 		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
 		toggleRow(c, "auto-space", i18n.T("中英文之间自动加空格"), i18n.T("输入时在汉字与英文字母、数字之间加一个空格；代码与公式不受影响。"), &a.prefs.AutoSpace, a.savePrefs)
 		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
+		toggleRow(c, "copy-plain-text", i18n.T("默认复制去除 Markdown 格式"), i18n.T("常规复制到其他应用时去除列表符号、标题与样式标记；在 ArcMD 内粘贴仍保留格式。"), &a.prefs.CopyPlainText, a.savePrefs)
+		ui.Box(c).Height(1).Margin(0, 12).Background(t.Text.Alpha(0.06))
 		codeWrap := !a.prefs.CodeNoWrap
 		toggleRow(c, "code-wrap", i18n.T("代码块自动换行"), i18n.T("关闭后长代码行横向滚动，也可在单个代码块右上角单独切换。"), &codeWrap, nil)
 		if codeWrap == a.prefs.CodeNoWrap {
@@ -443,8 +445,8 @@ func (a *App) settingsAppearance(c *ui.Context) {
 		choice("sidebar-density", i18n.T("侧边栏行高"), prefs.SidebarDensities, []string{i18n.T("紧凑"), i18n.T("标准"), i18n.T("舒适")}, &a.prefs.SidebarDensity, nil)
 		sep()
 		curPreset := a.paperPreset()
-		ui.Row(c.Key("paper-preset")).Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, i18n.T("纸面配色")).Grow(1).MinWidth(0)
+		ui.Column(c.Key("paper-preset")).Padding(10, 12).Gap(8).Children(func() {
+			ui.Text(c, i18n.T("纸面配色")).NoWrap()
 			ui.Row(c.Key("paper-preset-swatches")).Gap(6).AlignItems(ui.Center).Role(ui.RoleRadioGroup).Label(i18n.T("纸面配色")).Children(func() {
 				for _, opt := range paperPresetChoices {
 					presetID := opt.id

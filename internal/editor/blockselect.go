@@ -212,6 +212,9 @@ func (e *Editor) blockKeys(ev ui.InputEvent, write func(string)) bool {
 	case key == ui.KeyC && mods == ui.Cmd:
 		e.copyBlocks(ids, write)
 		return true
+	case e.boundCommand(mods, key) == "copy-plain":
+		e.copyBlocksPlain(ids, write)
+		return true
 	case key == ui.KeyX && mods == ui.Cmd:
 		if e.ReadOnly {
 			e.copyBlocks(ids, write)
@@ -245,6 +248,11 @@ func (e *Editor) blockKeys(ev ui.InputEvent, write func(string)) bool {
 // copyBlocks puts the blocks ids on the clipboard, whole.
 func (e *Editor) copyBlocks(ids []string, write func(string)) {
 	e.writeFragment(e.Engine.BlocksFragment(ids), "", write)
+}
+
+// copyBlocksPlain puts the blocks ids on the clipboard as stripped plain text.
+func (e *Editor) copyBlocksPlain(ids []string, write func(string)) {
+	e.writePlainClipboard(exportFragmentPlainText(e.Engine.BlocksFragment(ids)), write)
 }
 
 // blockPointer starts and drives a drag down the page's left margin,
@@ -360,7 +368,9 @@ func (e *Editor) writeFragment(fragment *document.Document, text string, write f
 		return
 	}
 	if text == "" {
-		if !rich(fragment) {
+		if e.copyPlainText {
+			text = exportFragmentPlainText(fragment)
+		} else if !rich(fragment) {
 			text = plainFragmentText(fragment)
 		} else {
 			text = trimNewline(ExportMarkdown(fragment))
