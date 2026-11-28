@@ -370,6 +370,11 @@ func (a *App) actions() []action {
 		space = i18n.T("关闭中英文自动加空格")
 	}
 	cmd(space, "", func() { a.prefs.AutoSpace = !a.prefs.AutoSpace; a.savePrefs() })
+	copyPlain := i18n.T("开启默认复制去除 Markdown 格式")
+	if a.prefs.CopyPlainText {
+		copyPlain = i18n.T("关闭默认复制去除 Markdown 格式")
+	}
+	cmd(copyPlain, "", func() { a.prefs.CopyPlainText = !a.prefs.CopyPlainText; a.savePrefs() })
 	autosave := i18n.T("关闭自动保存")
 	if a.prefs.NoAutosave {
 		autosave = i18n.T("开启自动保存")
@@ -528,6 +533,11 @@ func (a *App) actions() []action {
 					cmd(railLabel, "", func() { mdzDoc.mdz.sidebarOpen = !mdzDoc.mdz.sidebarOpen })
 					cmd(i18n.T("MDZip：上一页"), "", func() { mdzDoc.mdz.stepPage(-1) })
 					cmd(i18n.T("MDZip：下一页"), "", func() { mdzDoc.mdz.stepPage(1) })
+				}
+			}
+			if mdzDoc.mdz.hasActivePage() {
+				if ed := mdzDoc.mdz.editors[mdzDoc.mdz.currentPage]; ed != nil {
+					cmd(i18n.T("复制为纯文本"), a.keyLabel("copy-plain"), func() { ed.CopyPlainText(); ed.RequestFocus = true })
 				}
 			}
 			if mdzDoc.mdz.archive != nil && len(mdzDoc.mdz.pages) > 0 {
@@ -926,6 +936,7 @@ func (a *App) editorActions(cmd func(string, string, func())) {
 	cmd(i18n.T("阅读设置…"), "", func() { a.openSettings(tabAppearance) })
 	cmd(i18n.T("跳转脚注 / 返回正文"), "", func() { ed.FollowFootnote() })
 	cmd(i18n.T("查找"), a.keyLabel("find"), func() { ed.OpenFind(false) })
+	cmd(i18n.T("复制为纯文本"), a.keyLabel("copy-plain"), after(ed.CopyPlainText))
 	if ed.ReadOnly {
 		return
 	}

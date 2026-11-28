@@ -328,8 +328,9 @@ type Editor struct {
 	column float32
 	// complete is the list of emoji and mentions being typed (complete.go);
 	// autoSpace puts a space between Chinese and Latin text as it is typed.
-	complete  completion
-	autoSpace bool
+	complete      completion
+	autoSpace     bool
+	copyPlainText bool
 	// goalEditing shows the box that takes a word goal of the writer's own.
 	goalEditing bool
 	goalText    string
@@ -706,8 +707,13 @@ type Options struct {
 	EmojiSuggest func(typed string) []EmojiItem
 	// AutoSpace puts a space between Chinese and Latin letters or digits
 	// as they are typed next to each other.
-	AutoSpace   bool
-	PreviewWiki func(name string) WikiPreview
+	AutoSpace bool
+	// CopyPlainText puts stripped plain text (without Markdown syntax) on the
+	// clipboard during standard copy and omits external HTML/Markdown formats
+	// so external apps paste plain text while ArcMD keeps fragmentFormat for
+	// in-app rich paste.
+	CopyPlainText bool
+	PreviewWiki   func(name string) WikiPreview
 	// Footer, when set, draws below the document, in the page's text
 	// column: the host's backlinks.
 	Footer func(c *ui.Context)
@@ -871,7 +877,7 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 		e.windowResize.pending = true
 		o.Resizing = true
 	}
-	e.noAutoPair, e.autoSpace, e.codeNoWrap = o.NoAutoPair, o.AutoSpace, o.CodeNoWrap
+	e.noAutoPair, e.autoSpace, e.copyPlainText, e.codeNoWrap = o.NoAutoPair, o.AutoSpace, o.CopyPlainText, o.CodeNoWrap
 	e.codeMaxHeight, e.imageMaxHeight = o.CodeMaxHeight, o.ImageMaxHeight
 	if e.ReadOnly {
 		o.Attach = nil
@@ -1171,6 +1177,14 @@ func (e *Editor) buildContextMenu(menu *ui.Menu, read func() string, write func(
 	}
 	if menu.Item(i18n.T("复制")).Shortcut(ui.Cmd, ui.KeyC).Disabled(!hasSelection).Chosen() {
 		e.command("copy", read, write)
+		e.RequestFocus = true
+	}
+	copyPlainItem := menu.Item(i18n.T("复制为纯文本")).Disabled(!hasSelection)
+	if combo := e.binding("copy-plain"); combo.Valid() {
+		copyPlainItem.Shortcut(combo.Mods, combo.Key)
+	}
+	if copyPlainItem.Chosen() {
+		e.command("copyPlain", read, write)
 		e.RequestFocus = true
 	}
 	if !e.ReadOnly {

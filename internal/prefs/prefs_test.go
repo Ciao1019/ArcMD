@@ -323,3 +323,30 @@ func TestPaperPresetRoundTripAndNormalize(t *testing.T) {
 		t.Fatalf("invalid paperPreset should normalize to empty, got %q err=%v", got.PaperPreset, err)
 	}
 }
+
+func TestCopyPlainTextRoundTrip(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "prefs.json")}
+	p, err := s.Load()
+	if err != nil || p.CopyPlainText {
+		t.Fatalf("default CopyPlainText = %v, err=%v; want false", p.CopyPlainText, err)
+	}
+	p.CopyPlainText = true
+	if err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.Load()
+	if err != nil || !loaded.CopyPlainText {
+		t.Fatalf("loaded CopyPlainText = %v, err=%v; want true", loaded.CopyPlainText, err)
+	}
+	loaded.CopyPlainText = false
+	if err := s.Save(loaded); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stringContains(string(raw), "copyPlainText") {
+		t.Fatalf("false CopyPlainText should be omitted from json: %s", raw)
+	}
+}
