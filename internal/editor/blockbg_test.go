@@ -247,26 +247,31 @@ func TestBlockBackgroundHTMLClipboardAndVectorPDF(t *testing.T) {
 	p.Background = "light-blue"
 	q := document.NewBlock("quote", "带底色引用")
 	q.Background = "purple"
-	li := document.NewBlock("bullet", "列表项")
+	li := document.NewBlock("bullet", "父列表项")
 	li.Background = "green"
+	liChild := document.NewBlock("bullet", "未着色子列表项")
+	liChild.Indent = 1
 	tg := document.NewBlock("toggle", "折叠项")
 	tg.Background = "orange"
+	tgChild := document.NewBlock("paragraph", "折叠体内子段落")
+	tgChild.Indent = 1
 
 	doc := document.New()
-	doc.Blocks = []*document.Block{p, q, li, tg}
+	doc.Blocks = []*document.Block{p, q, li, liChild, tg, tgChild}
 
 	if !rich(&document.Document{Format: "arcmd", Version: document.CurrentVersion, Blocks: []*document.Block{p}}) {
 		t.Fatal("tinted paragraph must be considered rich for clipboard export")
 	}
 
-	// Clipboard HTML writes inline background-color + data-bg and round-trips via ImportHTML without leaking Highlight onto runs.
+	// Clipboard HTML writes inline background-color + data-bg and scopes toggle/parent-list
+	// backgrounds to <summary> and the parent label <div> so children are not tinted.
 	clipHTML := ExportHTML(doc)
 	for _, want := range []string{
 		`style="background-color:#F0F4FF"`,
 		`data-bg="light-blue"`,
 		`<blockquote data-bg="purple" style="background-color:#ECE2FE">`,
-		`<li style="background-color:#D9F5D6" data-bg="green">`,
-		`<details open style="background-color:#FEEAD2" data-bg="orange">`,
+		`<li><div style="background-color:#D9F5D6" data-bg="green">父列表项</div><ul><li>未着色子列表项</li></ul></li>`,
+		`<details open><summary style="background-color:#FEEAD2" data-bg="orange">折叠项</summary><p>折叠体内子段落</p></details>`,
 	} {
 		if !strings.Contains(clipHTML, want) {
 			t.Fatalf("ExportHTML missing %q:\n%s", want, clipHTML)
@@ -274,14 +279,14 @@ func TestBlockBackgroundHTMLClipboardAndVectorPDF(t *testing.T) {
 	}
 
 	imported := ImportHTML(clipHTML)
-	if len(imported.Blocks) < 3 {
-		t.Fatalf("ImportHTML blocks=%d, want >=3", len(imported.Blocks))
+	if len(imported.Blocks) < 4 {
+		t.Fatalf("ImportHTML blocks=%d, want >=4", len(imported.Blocks))
 	}
-	if imported.Blocks[0].Background != "light-blue" || imported.Blocks[1].Background != "purple" || imported.Blocks[2].Background != "green" {
-		t.Fatalf("ImportHTML lost block backgrounds: %q, %q, %q",
-			imported.Blocks[0].Background, imported.Blocks[1].Background, imported.Blocks[2].Background)
+	if imported.Blocks[0].Background != "light-blue" || imported.Blocks[1].Background != "purple" || imported.Blocks[2].Background != "green" || imported.Blocks[3].Background != "" {
+		t.Fatalf("ImportHTML block backgrounds mismatch: %q, %q, %q, child=%q",
+			imported.Blocks[0].Background, imported.Blocks[1].Background, imported.Blocks[2].Background, imported.Blocks[3].Background)
 	}
-	for _, b := range imported.Blocks[:3] {
+	for _, b := range imported.Blocks[:4] {
 		for _, r := range b.Runs {
 			if r.Style.Highlight != "" {
 				t.Fatalf("block background leaked into inline run Highlight %q on %q", r.Style.Highlight, b.Kind)
@@ -289,18 +294,21 @@ func TestBlockBackgroundHTMLClipboardAndVectorPDF(t *testing.T) {
 		}
 	}
 
-	// ExportHTMLPage uses adaptive classes (.arcmd-bg / .arcmd-bg-*).
+	// ExportHTMLPage uses adaptive classes (.arcmd-bg / .arcmd-bg-*) scoped to parent/summary only.
 	htmlTheme := testHTMLTheme()
 	pageBody := ExportHTMLPage(doc, htmlTheme)
 	for _, want := range []string{
 		`class="arcmd-bg arcmd-bg-light-blue" data-bg="light-blue"`,
 		`class="arcmd-bg arcmd-bg-purple" data-bg="purple"`,
-		`class="arcmd-bg arcmd-bg-green" data-bg="green"`,
-		`class="arcmd-bg arcmd-bg-orange" data-bg="orange"`,
+		`<li><div class="arcmd-bg arcmd-bg-green" data-bg="green">父列表项</div><ul><li>未着色子列表项</li></ul></li>`,
+		`<details open><summary class="arcmd-bg arcmd-bg-orange" data-bg="orange">折叠项</summary><p>折叠体内子段落</p></details>`,
 	} {
 		if !strings.Contains(pageBody, want) {
 			t.Fatalf("ExportHTMLPage missing %q:\n%s", want, pageBody)
 		}
+	}
+	if strings.Contains(pageBody, `<details open class="arcmd-bg`) {
+		t.Fatalf("toggle background should apply to <summary>, not <details>:\n%s", pageBody)
 	}
 	css := BlockBackgroundCSS(pageOf(Page{}, ui.LightTheme()).CellFills)
 	if !strings.Contains(css, ".arcmd-bg-light-blue { background-color:") {
@@ -332,5 +340,84 @@ func TestBlockBackgroundHTMLClipboardAndVectorPDF(t *testing.T) {
 	plainPDF := renderPDF(plainDoc)
 	if !bytes.HasPrefix(tintedPDF, []byte("%PDF-")) || len(tintedPDF) <= len(plainPDF) {
 		t.Fatalf("expected tinted vector PDF (%d bytes) to exceed plain PDF (%d bytes)", len(tintedPDF), len(plainPDF))
+	}
+}
+
+// Regression for QA TC5: successive saves with ImportSource chunk reuse on
+// tinted list items (bullet, indented child, ordered list) must always emit
+// blank lines after </div> and preserve indentation and list numbering cleanly.
+func TestBlockBackgroundListSuccessiveSavesAndChildIndent(t *testing.T) {
+	initial := "- x\n  - y\n- z\n\n1. 一\n2. 二\n"
+	ed := New(initial)
+
+	// Save 1: tint parent bullet x only (untinted child y must keep indent 1).
+	ed.Engine.SetBlockBackground(ed.Doc.Blocks[0].ID, "blue")
+	md1 := ExportMarkdown(ed.Doc)
+	if strings.Contains(md1, "</div>\n<div") || strings.Contains(md1, "</div>\n-") || strings.Contains(md1, "</div>\n2.") {
+		t.Fatalf("save 1 missing blank line after </div>:\n%s", md1)
+	}
+	reload1 := ImportMarkdown(md1)
+	if len(reload1.Blocks) != 5 || reload1.Blocks[0].Background != "blue" ||
+		reload1.Blocks[1].Kind != "bullet" || reload1.Blocks[1].Indent != 1 || reload1.Blocks[1].Background != "" ||
+		reload1.Blocks[2].Kind != "bullet" || reload1.Blocks[2].Indent != 0 {
+		t.Fatalf("reload after save 1 corrupted list:\nMD:\n%s\nblocks=%+v", md1, reload1.Blocks)
+	}
+
+	// Simulate auto-save refreshing ImportSource, then Save 2: tint child y.
+	ed.Doc.ImportSource = md1
+	ed.Engine.SetBlockBackground(ed.Doc.Blocks[1].ID, "green")
+	md2 := ExportMarkdown(ed.Doc)
+	if strings.Contains(md2, "</div>\n<div") || strings.Contains(md2, "</div>\n-") {
+		t.Fatalf("save 2 missing blank line after </div>:\n%s", md2)
+	}
+
+	// Save 3: refresh ImportSource again, then tint ordered item 1 (both x/y chunks now reuse).
+	ed.Doc.ImportSource = md2
+	ed.Engine.SetBlockBackground(ed.Doc.Blocks[3].ID, "light-yellow")
+	md3 := ExportMarkdown(ed.Doc)
+	if strings.Contains(md3, "</div>\n<div") || strings.Contains(md3, "</div>\n-") || strings.Contains(md3, "</div>\n2.") {
+		t.Fatalf("save 3 missing blank line after </div>:\n%s", md3)
+	}
+	// Save 4: edit an unrelated trailing item so ordered item 1 also hits chunk reuse before 2. 二.
+	ed.Doc.ImportSource = md3
+	ed.Engine.SetBlockBackground(ed.Doc.Blocks[2].ID, "purple")
+	md4 := ExportMarkdown(ed.Doc)
+	if strings.Contains(md4, "</div>\n<div") || strings.Contains(md4, "</div>\n-") || strings.Contains(md4, "</div>\n2.") {
+		t.Fatalf("save 4 missing blank line after </div>:\n%s", md4)
+	}
+
+	reloaded := ImportMarkdown(md4)
+	if len(reloaded.Blocks) != 5 {
+		t.Fatalf("reloaded block count = %d, want 5\nMD:\n%s", len(reloaded.Blocks), md4)
+	}
+	want := []struct {
+		kind, text, bg string
+		indent, start  int
+	}{
+		{"bullet", "x", "blue", 0, 0},
+		{"bullet", "y", "green", 1, 0},
+		{"bullet", "z", "purple", 0, 0},
+		{"numbered", "一", "light-yellow", 0, 0},
+		{"numbered", "二", "", 0, 2},
+	}
+	for i, w := range want {
+		b := reloaded.Blocks[i]
+		if b.Kind != w.kind || b.Text() != w.text || b.Background != w.bg || b.Indent != w.indent || b.Start != w.start {
+			t.Fatalf("reloaded[%d] = (%q %q bg=%q indent=%d start=%d), want (%q %q bg=%q indent=%d start=%d)\nMD:\n%s",
+				i, b.Kind, b.Text(), b.Background, b.Indent, b.Start, w.kind, w.text, w.bg, w.indent, w.start, md4)
+		}
+	}
+}
+
+func TestBlockBackgroundTableCellDoesNotUseBlockBackground(t *testing.T) {
+	e := New("| A | B |\n| --- | --- |\n| 1 | 2 |")
+	cell := e.Doc.Blocks[0].Children[1].Children[0]
+	if document.AllowsBlockBackground(cell.Kind) {
+		t.Fatalf("table cell must not allow block background")
+	}
+	e.Engine.FocusBlock(cell.ID)
+	e.SetBlockBackground("blue")
+	if cell.Background != "" {
+		t.Fatalf("SetBlockBackground mutated table cell background to %q", cell.Background)
 	}
 }

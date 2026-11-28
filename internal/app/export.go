@@ -104,6 +104,7 @@ hr { border: 0; border-top: 1px solid #dee0e3; margin: 1.5em 0; }
 details { margin: .5em 0; }
 summary { cursor: pointer; }
 .arcmd-bg { border-radius: 6px; padding: 4px 10px; }
+li > .arcmd-bg { margin: 0; }
 ` + editor.BlockBackgroundCSS(pageStyle(false).CellFills) + `@media (prefers-color-scheme: dark) {
   body { background: #1f2023; color: #e3e4e7; }
   pre, th, code { background: #2b2c30; }

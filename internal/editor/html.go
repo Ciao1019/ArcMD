@@ -698,7 +698,7 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 	nodeBg := ""
 	if !h.inTableCell {
 		switch n.DataAtom {
-		case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6, atom.Blockquote, atom.Li:
+		case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6, atom.Blockquote, atom.Li, atom.Summary:
 			nodeBg = parseBlockBackground(n)
 		case atom.Div, atom.Center:
 			if bg := attr(n, "data-bg"); validStyleName(bg, document.TextHighlights) {

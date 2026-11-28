@@ -110,7 +110,12 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 							break
 						}
 						firstAtDepth = false
-						out.WriteString("<li" + blockBgAttrString(item.Background, theme) + ">")
+						hasChildren := i+1 < len(bs) && isHTMLList(bs[i+1]) && bs[i+1].Indent > depth
+						if hasChildren && item.Background != "" {
+							out.WriteString("<li><div" + blockBgAttrString(item.Background, theme) + ">")
+						} else {
+							out.WriteString("<li" + blockBgAttrString(item.Background, theme) + ">")
+						}
 						if item.Kind == "task" {
 							if item.Checked {
 								out.WriteString("☑ ")
@@ -119,6 +124,9 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 							}
 						}
 						out.WriteString(runs(item.Runs))
+						if hasChildren && item.Background != "" {
+							out.WriteString("</div>")
+						}
 						i++
 						for i < len(bs) && isHTMLList(bs[i]) && bs[i].Indent > depth {
 							list(bs[i].Indent)
@@ -165,7 +173,7 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 				if !b.Folded {
 					open = " open"
 				}
-				out.WriteString("<details" + open + blockBgAttrString(b.Background, theme) + "><summary>" + body + "</summary>" + blocks(inner) + "</details>")
+				out.WriteString("<details" + open + "><summary" + blockBgAttrString(b.Background, theme) + ">" + body + "</summary>" + blocks(inner) + "</details>")
 				continue
 			case "raw":
 				if spec, snapMD, ok := ParseDatabaseEmbed(b.Text()); ok {

@@ -2383,7 +2383,7 @@ var en = map[string]string{
 	// Block Background
 	"缩进":     "Indent",
 	"背景颜色":   "Background Color",
-	"块背景：":   "Block background: ",
+	"块背景：":   "Block Background: ",
 	"块背景色：":  "Block Background: ",
 	"清除块背景色": "Clear Block Background",
 }

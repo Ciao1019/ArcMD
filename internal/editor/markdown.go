@@ -1841,7 +1841,7 @@ func hasTrailingBlankBody(blocks []*document.Block) bool {
 	last := blocks[len(blocks)-1]
 	prev := blocks[len(blocks)-2]
 	return prev.Kind == "heading" && last.Kind == "paragraph" && last.Text() == "" &&
-		normCellAlign(last.Align) == "" && last.Indent == 0 && len(last.Children) == 0
+		normCellAlign(last.Align) == "" && last.Indent == 0 && last.Background == "" && len(last.Children) == 0
 }
 
 func exportFreshMarkdown(doc *document.Document) string {
@@ -1925,11 +1925,22 @@ func exportWithSourceChunks(doc *document.Document, orig parsedMarkdown, buckets
 			ch := orig.chunks[matched]
 			spanLen := ch.to - ch.from
 			firstKind := blocks[i].Kind
-			isList := isMarkdownListKind(firstKind) && blocks[i].Align == ""
+			lastBlk := blocks[i+spanLen-1]
+			trimmedRaw := strings.TrimSpace(ch.raw)
+			isList := isMarkdownListKind(firstKind) && blocks[i].Align == "" && blocks[i].Background == "" &&
+				isMarkdownListKind(lastBlk.Kind) && lastBlk.Align == "" && lastBlk.Background == "" &&
+				!strings.HasPrefix(trimmedRaw, "<") && !strings.HasSuffix(trimmedRaw, ">")
 			if !isList {
-				clear(numberedSeq)
-				clear(numberedDelim)
 				clear(listCols)
+				if !isMarkdownListKind(firstKind) {
+					clear(numberedSeq)
+					clear(numberedDelim)
+				} else {
+					for bi := i; bi < i+spanLen; bi++ {
+						advanceListState(blocks[bi], numberedSeq, listCols, numberedDelim)
+					}
+					clear(listCols)
+				}
 			} else {
 				for bi := i; bi < i+spanLen; bi++ {
 					advanceListState(blocks[bi], numberedSeq, listCols, numberedDelim)
@@ -2092,6 +2103,10 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 	if align == "left" {
 		align = ""
 	}
+	hasParentList := b.Indent == 0
+	if b.Indent > 0 {
+		_, hasParentList = listCols[b.Indent-1]
+	}
 	padCols, num, delim := advanceListState(b, numberedSeq, listCols, numberedDelim)
 	pad := strings.Repeat(" ", padCols)
 
@@ -2144,19 +2159,21 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 			text = strings.Repeat("#", lvl) + " " + inline
 		}
 	case "bullet":
-		if align != "" || b.Background != "" {
+		if align != "" || b.Background != "" || (b.Indent > 0 && !hasParentList) {
 			item := "- " + strings.ReplaceAll(inline, "\n", "\n  ")
 			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + item + "\n\n</div>"
+			clear(listCols)
 		} else {
 			cont := strings.Repeat(" ", listCols[b.Indent])
 			text = pad + "- " + strings.ReplaceAll(inline, "\n", "\n"+cont)
 			isList = true
 		}
 	case "numbered":
-		if align != "" || b.Background != "" {
+		if align != "" || b.Background != "" || (b.Indent > 0 && !hasParentList) {
 			marker := fmt.Sprintf("%d%c ", num, delim)
 			item := marker + strings.ReplaceAll(inline, "\n", "\n"+strings.Repeat(" ", len(marker)))
 			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + item + "\n\n</div>"
+			clear(listCols)
 		} else {
 			cont := strings.Repeat(" ", listCols[b.Indent])
 			text = fmt.Sprintf("%s%d%c %s", pad, num, delim, strings.ReplaceAll(inline, "\n", "\n"+cont))
@@ -2167,9 +2184,10 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		if b.Checked {
 			check = "x"
 		}
-		if align != "" || b.Background != "" {
+		if align != "" || b.Background != "" || (b.Indent > 0 && !hasParentList) {
 			item := "- [" + check + "] " + strings.ReplaceAll(inline, "\n", "\n  ")
 			text = formatBlockWrapperOpen(align, b.Indent, b.Background) + "\n\n" + item + "\n\n</div>"
+			clear(listCols)
 		} else {
 			cont := strings.Repeat(" ", listCols[b.Indent])
 			text = pad + "- [" + check + "] " + strings.ReplaceAll(inline, "\n", "\n"+cont)
@@ -2969,7 +2987,7 @@ func parseAlignedWrapperOpen(raw string) (align, bg string, indent int, closeTag
 		a := parseBlockAlign(node)
 		b := parseBlockBackground(node)
 		ind, _ := parseBlockIndent(node)
-		if a != "" || b != "" {
+		if a != "" || b != "" || ind > 0 {
 			return a, b, ind, "div", true
 		}
 	}
