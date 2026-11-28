@@ -445,8 +445,8 @@ func (a *App) settingsAppearance(c *ui.Context) {
 		choice("sidebar-density", i18n.T("侧边栏行高"), prefs.SidebarDensities, []string{i18n.T("紧凑"), i18n.T("标准"), i18n.T("舒适")}, &a.prefs.SidebarDensity, nil)
 		sep()
 		curPreset := a.paperPreset()
-		ui.Row(c.Key("paper-preset")).Padding(10, 12).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, i18n.T("纸面配色")).Grow(1).MinWidth(0)
+		ui.Column(c.Key("paper-preset")).Padding(10, 12).Gap(8).Children(func() {
+			ui.Text(c, i18n.T("纸面配色")).NoWrap()
 			ui.Row(c.Key("paper-preset-swatches")).Gap(6).AlignItems(ui.Center).Role(ui.RoleRadioGroup).Label(i18n.T("纸面配色")).Children(func() {
 				for _, opt := range paperPresetChoices {
 					presetID := opt.id

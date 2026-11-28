@@ -170,3 +170,37 @@ func TestCopyPlainTextCommandBarSettingsShortcutAndMDZ(t *testing.T) {
 		t.Fatalf("MDZ command bar copy-plain = %q; want %q", got, want)
 	}
 }
+
+func TestEnglishPaperColorLabelDoesNotWrap(t *testing.T) {
+	a, tt := newTestApp(t)
+	t.Cleanup(func() { i18n.SetLanguage("zh-Hans") })
+	i18n.SetLanguage("en")
+	a.openSettings(tabAppearance)
+	tt.Frame()
+
+	labelRect, ok := tt.Find("Paper color")
+	if !ok {
+		t.Fatalf("English appearance settings missing Paper color label: %v", tt.Texts())
+	}
+	if labelRect.H > 28 || labelRect.W < 55 {
+		t.Fatalf("Paper color label wrapped unexpectedly: rect=%+v", labelRect)
+	}
+	prevRight := float32(-1)
+	for _, swatch := range []string{"Default", "Warm", "Sepia", "Sage", "Slate"} {
+		r, ok := tt.Find(swatch)
+		if !ok {
+			t.Fatalf("missing paper swatch %q", swatch)
+		}
+		if r.Y < labelRect.Y+labelRect.H {
+			t.Fatalf("swatch %q (%+v) overlaps Paper color label (%+v)", swatch, r, labelRect)
+		}
+		if prevRight >= 0 && r.X < prevRight {
+			t.Fatalf("swatch %q (%+v) overlapped previous swatch right=%v", swatch, r, prevRight)
+		}
+		prevRight = r.X + r.W
+	}
+	if dir := os.Getenv("ARCMD_SNAPSHOT"); dir != "" {
+		_ = os.MkdirAll(dir, 0o755)
+		savePNG(t, filepath.Join(dir, "settings-appearance-en.png"), tt)
+	}
+}
