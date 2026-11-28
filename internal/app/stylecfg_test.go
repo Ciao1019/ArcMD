@@ -177,6 +177,76 @@ func TestStyleConfigLiveReloadErrorResilienceAndRemoval(t *testing.T) {
 	}
 }
 
+func TestPortableStylePathRespectsArcMDHome(t *testing.T) {
+	t.Setenv("ARCMD_HOME", "")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := discoverPortableStylePath(), filepath.Join(filepath.Dir(executable), prefs.StyleFileName); got != want {
+		t.Fatalf("portable style path = %q; want %q", got, want)
+	}
+
+	t.Setenv("ARCMD_HOME", t.TempDir())
+	if got := discoverPortableStylePath(); got != "" {
+		t.Fatalf("portable style path = %q with an isolated home; want empty", got)
+	}
+}
+
+func TestPortableStyleConfigOverridesUserConfig(t *testing.T) {
+	a, tt := newTestApp(t)
+	userPath := a.styleConfigPath()
+	portablePath := filepath.Join(t.TempDir(), prefs.StyleFileName)
+	a.styleCfg.portablePath = portablePath
+	mtime := time.Now().Truncate(time.Second)
+	writeStyle := func(path, data string, mtime time.Time) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertStyle := func(path, color string) {
+		t.Helper()
+		if got := a.styleConfigPath(); got != path {
+			t.Fatalf("selected style path = %q; want %q", got, path)
+		}
+		if got := a.documentTheme(false).Background; got != ui.Hex(color) {
+			t.Fatalf("active paper color = %+v; want %s", got, color)
+		}
+	}
+
+	const userStyle = `{"light":{"paper":"#FAF8F5"}}`
+	writeStyle(userPath, userStyle, mtime)
+	tt.Advance(styleConfigPollInterval + 50*time.Millisecond)
+	tt.Frame()
+	assertStyle(userPath, "#FAF8F5")
+
+	writeStyle(portablePath, `{"light":{"paper":"#EEF6FF"}}`, mtime.Add(2*time.Second))
+	tt.Advance(styleConfigPollInterval + 50*time.Millisecond)
+	tt.Frame()
+	assertStyle(portablePath, "#EEF6FF")
+
+	var openedPath string
+	a.styleCfg.openFile = func(path string) { openedPath = path }
+	a.openStyleConfigFile()
+	if openedPath != portablePath {
+		t.Fatalf("opened style path = %q; want %q", openedPath, portablePath)
+	}
+	if data, err := os.ReadFile(userPath); err != nil || string(data) != userStyle {
+		t.Fatalf("user style was not preserved: %q, %v", data, err)
+	}
+
+	if err := os.Remove(portablePath); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(styleConfigPollInterval + 50*time.Millisecond)
+	tt.Frame()
+	assertStyle(userPath, "#FAF8F5")
+}
+
 func TestStyleConfigOpenTemplateAndManualReloadControls(t *testing.T) {
 	a, tt := newTestApp(t)
 	var openedPath string

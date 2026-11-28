@@ -15,11 +15,12 @@ import (
 
 const styleConfigPollInterval = 1500 * time.Millisecond
 
-// styleConfigState tracks live loading and mtime polling for <configDir>/style.json,
+// styleConfigState tracks live loading and mtime polling for the selected style.json,
 // merged over any selected built-in paper preset.
 type styleConfigState struct {
 	loaded       bool
 	lastCheck    time.Time
+	portablePath string
 	modNano      int64
 	size         int64
 	exists       bool
@@ -74,7 +75,27 @@ func paperPresetSwatchColors(id string, dark bool) (paper, ink, border ui.Color)
 	return th.Background, th.Text, th.Border
 }
 
+func discoverPortableStylePath() string {
+	if os.Getenv("ARCMD_HOME") != "" {
+		return ""
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(executable), prefs.StyleFileName)
+}
+
 func (a *App) styleConfigPath() string {
+	if portable := a.styleCfg.portablePath; portable != "" {
+		if info, err := os.Stat(portable); err == nil && info.Mode().IsRegular() {
+			return portable
+		}
+	}
+	return a.userStyleConfigPath()
+}
+
+func (a *App) userStyleConfigPath() string {
 	if a.prefStore.Path != "" {
 		return filepath.Join(filepath.Dir(a.prefStore.Path), prefs.StyleFileName)
 	}
@@ -118,7 +139,7 @@ func (a *App) pageStyle(dark bool) editor.Page {
 // styleConfigTick lazily loads style.json on the first frame and polls its
 // modification timestamp every 1500ms using c.Now() + c.After without goroutines.
 func (a *App) styleConfigTick(c *ui.Context) {
-	if a.styleConfigPath() == "" {
+	if a.styleCfg.portablePath == "" && a.userStyleConfigPath() == "" {
 		return
 	}
 	now := c.Now()

@@ -455,6 +455,7 @@ func (a *App) Run() error {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return nil
 	}
+	a.styleCfg.portablePath = discoverPortableStylePath()
 	var pending []string
 	if !mygo.App.IsPackaged() {
 		wd, _ := os.Getwd()
