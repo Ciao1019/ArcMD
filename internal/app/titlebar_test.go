@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -185,5 +186,103 @@ func TestLongTitleSnapshot(t *testing.T) {
 		a.doc.rel = "这是一篇标题很长很长的文档用于检查窄窗口中的工具栏不会丢失任何操作按钮.arcmd"
 		settle(tt)
 		savePNG(t, filepath.Join(dir, fmt.Sprintf("long-title-%d.png", width)), tt)
+	}
+}
+
+func TestToolbarKeepsWindowDragSpace(t *testing.T) {
+	macBar := ui.TitleBar{Height: 46, Left: 78}
+	rightEdgeOf := func(t *testing.T, tt *ui.Tester, bar ui.TitleBar) float32 {
+		t.Helper()
+		minX := float32(1e9)
+		for _, info := range tt.AccessAll() {
+			if info.Bounds.W <= 0 || info.Bounds.H <= 0 || info.Bounds.Y >= bar.Height {
+				continue
+			}
+			// Any button to the right of the address bar belongs to the right toolbar group.
+			if info.Name == "页面宽度" || info.Name == "思维导图" || info.Name == "更多格式" || info.Name == "问答" || info.Name == "更多" {
+				if info.Bounds.X < minX {
+					minX = info.Bounds.X
+				}
+			}
+		}
+		if minX >= 1e8 {
+			t.Fatal("could not find right-side toolbar buttons")
+		}
+		return minX
+	}
+
+	for _, tc := range []struct {
+		name        string
+		mode        string
+		longTitle   bool
+		emptyDoc    bool
+		dirtyDoc    bool
+		minDragRoom float32
+	}{
+		{"folded-normal-title", "folded", false, false, false, 400},
+		{"normal-sidebar-normal-title", "normal", false, false, false, 200},
+		{"folded-long-title", "folded", true, false, false, 120},
+		{"normal-sidebar-long-title", "normal", true, false, false, 80},
+		{"folded-empty-doc", "folded", false, true, false, 400},
+		{"folded-dirty-doc", "folded", false, false, true, 350},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, tt := titleBarTestApp(t, tc.mode, 1240, macBar)
+			switch {
+			case tc.emptyDoc:
+				a.doc = nil
+				settle(tt)
+			case tc.longTitle:
+				a.doc.rel = "这是一篇标题很长很长非常长用于验证顶部工具栏始终保留窗口拖动空白的测试文档名称.arcmd"
+				settle(tt)
+			case tc.dirtyDoc:
+				a.doc.ed.SetSelection(0, 0)
+				a.doc.ed.ReplaceText(nil, "Hello ")
+				tt.Frame()
+				if !a.doc.dirty() || !tt.HasText("已修改") {
+					t.Fatal("dirty status badge not shown in address pill")
+				}
+			}
+			addr, ok := tt.Find("文档路径")
+			if !ok || addr.W <= 0 {
+				t.Fatalf("address bar missing: %+v", addr)
+			}
+			rightStart := rightEdgeOf(t, tt, macBar)
+			dragW := rightStart - (addr.X + addr.W)
+			if dragW < tc.minDragRoom {
+				t.Fatalf("expected at least %.0fpx drag space to the right of address, got %.1fpx (addr=%+v, rightStart=%.1f)", tc.minDragRoom, dragW, addr, rightStart)
+			}
+
+			// Moving and clicking in the empty drag strip must not trigger hover cursor or open palette.
+			dragX := addr.X + addr.W + dragW/2
+			dragY := addr.Y + addr.H/2
+			tt.Move(dragX, dragY)
+			if got := tt.Cursor(); got == ui.CursorPointer {
+				t.Fatalf("drag strip should not show pointer cursor, got %v", got)
+			}
+			tt.ClickAt(dragX, dragY)
+			if a.palette.open {
+				t.Fatal("clicking the toolbar drag strip opened the command palette")
+			}
+
+			// Right-clicking the drag strip still opens the toolbar context menu when a document is open.
+			if !tc.emptyDoc {
+				tt.RightClickAt(dragX, dragY)
+				if !slices.Contains(tt.Menu(), "自定义工具栏…") {
+					t.Fatalf("right-clicking toolbar drag strip did not open custom toolbar menu: %v", tt.Menu())
+				}
+				tt.CloseMenu()
+			}
+
+			// Clicking the compact address pill still opens the command palette.
+			tt.Move(addr.X+addr.W/2, dragY)
+			if got := tt.Cursor(); got != ui.CursorPointer {
+				t.Fatalf("address pill should show pointer cursor, got %v", got)
+			}
+			tt.ClickAt(addr.X+addr.W/2, dragY)
+			if !a.palette.open {
+				t.Fatal("clicking the address pill did not open the command palette")
+			}
+		})
 	}
 }

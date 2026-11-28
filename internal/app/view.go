@@ -556,7 +556,17 @@ func (a *App) toolbar(c *ui.Context, compact bool, caption, cardWidth float32) {
 			a.goHistory(1)
 		}
 		ui.Box(c).Width(6)
-		a.address(c)
+		// Keep the address pill sized to its content inside a flex slot so the
+		// remaining toolbar strip stays an unobstructed native DragWindow area.
+		// When the toolbar has enough net width, cap long paths at 80% of the
+		// slot so even very long filenames leave an easy-to-grab drag strip.
+		usable := cardWidth - right
+		if a.folded() {
+			usable -= bar.Left + 4
+		}
+		ui.Row(c.Key("address-slot")).Grow(1).Basis(0).MinWidth(0).AlignItems(ui.Center).Children(func() {
+			a.address(c, usable >= 520)
+		})
 		ui.Box(c).Width(6)
 		a.documentCornerWidth(c, a.doc, cardWidth)
 		a.gitToolbarButton(c)
@@ -571,24 +581,28 @@ func (a *App) toolbar(c *ui.Context, compact bool, caption, cardWidth float32) {
 	})
 }
 
-// address shows where the document is as a quiet clickable title bar: the
-// space, its folders and its name; a click opens the command bar.
-func (a *App) address(c *ui.Context) {
+// address shows where the document is as a compact clickable title pill: the
+// space, its folders and its name; a click opens the command bar, while the
+// empty strip to its right remains part of the toolbar's DragWindow region.
+func (a *App) address(c *ui.Context, reserveDrag bool) {
 	t := c.Theme()
-	f := ui.Row(c.Key("address")).Grow(1).MinWidth(0).Height(30).Radius(8).PaddingX(8).Gap(7).
+	f := ui.Row(c.Key("address")).Shrink(1).MinWidth(0).Height(30).Radius(8).PaddingX(8).Gap(7).
 		AlignItems(ui.Center).Cursor(ui.CursorPointer).Focusable().Role(ui.RoleButton).Label(i18n.T("文档路径"))
+	if reserveDrag {
+		f.MaxWidthPercent(80)
+	}
 	if f.Hovered() {
 		f.Background(hoverFill(t))
 	}
 	f.Children(func() {
 		if a.spaceForm.open && a.spaceForm.id == "" {
-			ui.Icon(c, iconSearch).FontSize(14).TextColor(t.TextMuted)
-			ui.Text(c, i18n.T("新空间")).TextColor(t.TextMuted).NoWrap()
+			ui.Icon(c, iconSearch).FontSize(14).TextColor(t.TextMuted).Shrink(0)
+			ui.Text(c, i18n.T("新空间")).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
 			return
 		}
 		if a.doc == nil {
-			ui.Icon(c, iconSearch).FontSize(14).TextColor(t.TextMuted)
-			ui.Text(c, i18n.T("搜索或打开文档")).TextColor(t.TextMuted).NoWrap()
+			ui.Icon(c, iconSearch).FontSize(14).TextColor(t.TextMuted).Shrink(0)
+			ui.Text(c, i18n.T("搜索或打开文档")).TextColor(t.TextMuted).SingleLine().Shrink(1).MinWidth(0)
 			return
 		}
 		fileIcon(c, a.doc.rel, a.iconTitle(a.doc.space.ID, a.doc.rel), 16)
@@ -603,7 +617,6 @@ func (a *App) address(c *ui.Context) {
 			tip = sp.ExternalFiles[a.doc.rel]
 		}
 		ui.Text(c, path.Base(a.doc.rel)).FontWeight(500).SingleLine().Shrink(1).MinWidth(0).Tooltip(tip)
-		ui.Spacer(c)
 		status, color := "", t.TextMuted
 		switch {
 		case a.doc.saveErr != nil:
@@ -612,7 +625,7 @@ func (a *App) address(c *ui.Context) {
 			status = i18n.T("已修改")
 		}
 		if status != "" {
-			ui.Text(c, status).FontSize(12).TextColor(color).NoWrap().Tooltip(errText(a.doc.saveErr))
+			ui.Text(c, status).FontSize(12).TextColor(color).NoWrap().Shrink(0).Tooltip(errText(a.doc.saveErr))
 		}
 	})
 	if f.Clicked() {
