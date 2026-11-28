@@ -63,6 +63,8 @@ type StylePalette struct {
 	CodeText        string            `json:"codeText,omitempty"`
 	InlineCodeFill  string            `json:"inlineCodeFill,omitempty"`
 	InlineCodeText  string            `json:"inlineCodeText,omitempty"`
+	InlineTexFill   string            `json:"inlineTexFill,omitempty"`
+	TexBlockFill    string            `json:"texBlockFill,omitempty"`
 	QuoteBar        string            `json:"quoteBar,omitempty"`
 }
 
@@ -87,6 +89,8 @@ func (p StylePalette) IsZero() bool {
 		p.CodeText == "" &&
 		p.InlineCodeFill == "" &&
 		p.InlineCodeText == "" &&
+		p.InlineTexFill == "" &&
+		p.TexBlockFill == "" &&
 		p.QuoteBar == ""
 }
 
@@ -327,6 +331,8 @@ func validatePalette(prefix string, p StylePalette) error {
 		{"codeText", p.CodeText},
 		{"inlineCodeFill", p.InlineCodeFill},
 		{"inlineCodeText", p.InlineCodeText},
+		{"inlineTexFill", p.InlineTexFill},
+		{"texBlockFill", p.TexBlockFill},
 		{"quoteBar", p.QuoteBar},
 	}
 	for _, f := range fields {
@@ -680,6 +686,12 @@ func applyStylePalette(dst *StylePalette, src StylePalette) {
 	}
 	if src.InlineCodeText != "" {
 		dst.InlineCodeText = src.InlineCodeText
+	}
+	if src.InlineTexFill != "" {
+		dst.InlineTexFill = src.InlineTexFill
+	}
+	if src.TexBlockFill != "" {
+		dst.TexBlockFill = src.TexBlockFill
 	}
 	if src.QuoteBar != "" {
 		dst.QuoteBar = src.QuoteBar

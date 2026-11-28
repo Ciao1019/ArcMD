@@ -2114,6 +2114,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 			e.paintMarker(p, bounds, r, t)
 			paintRowBody := func(scrollX, scrollY float32) {
 				shiftedBounds := ui.Rect{X: bounds.X + dx - scrollX, Y: bounds.Y + dy - scrollY, W: bounds.W, H: bounds.H}
+				e.paintTexBackgrounds(p, shiftedBounds, r)
 				e.paintKeycaps(p, shiftedBounds, r)
 				if e.focused && len(e.blocks.ids) == 0 && selection.End > r.leaf.Start && selection.Start < r.leaf.End && e.inlineMath.blockID != r.leaf.Block.ID {
 					if r.mathHidden && r.math != nil {

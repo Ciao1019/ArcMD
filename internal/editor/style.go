@@ -53,7 +53,7 @@ type Page struct {
 	// while it is repositioned, and OnScrim their color.
 	Scrim, OnScrim ui.Color
 	ImageShadow    ui.Color
-	// MathBorder and MathShadow belong to the source panel and live preview.
+	// MathBorder outlines formula blocks; MathShadow belongs to the source panel.
 	MathBorder, MathShadow ui.Color
 	// Covers are the two colors, top-left to bottom-right, of each of
 	// document.CoverGradients.
@@ -73,6 +73,8 @@ type Page struct {
 	TableHeaderText   ui.Color
 	TableStripe       ui.Color
 	HighlightDefault  ui.Color
+	InlineTexFill     ui.Color
+	TexBlockFill      ui.Color
 }
 
 // WhiteboardStyle holds the Excalidraw-inspired light/dark adaptive design
@@ -266,6 +268,8 @@ func samePage(a, b Page) bool {
 		a.ImageShadow == b.ImageShadow &&
 		a.MathBorder == b.MathBorder &&
 		a.MathShadow == b.MathShadow &&
+		a.InlineTexFill == b.InlineTexFill &&
+		a.TexBlockFill == b.TexBlockFill &&
 		a.BoldWeight == b.BoldWeight &&
 		a.HeadingWeight == b.HeadingWeight &&
 		a.TableAlign == b.TableAlign &&

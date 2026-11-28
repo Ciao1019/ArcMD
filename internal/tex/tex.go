@@ -25,10 +25,10 @@ type Measure func(text string, size float32, italic, bold bool) (w, ascent, desc
 // Op is one thing a formula draws, in DIPs from the origin of its box, the
 // left end of its baseline, y growing downwards.
 type Op struct {
-	// Kind is "text", "rule" (a filled rectangle) or "path" (a polyline).
+	// Kind is "text", "rule" (a filled rectangle), "frame" (an outline), or "path" (a polyline).
 	Kind string
-	// X and Y place text by its baseline's left end, and a rule by its top
-	// left corner.
+	// X and Y place text by its baseline's left end, and a rule or frame by
+	// its top left corner.
 	X, Y   float32
 	Text   string
 	Size   float32
@@ -36,9 +36,9 @@ type Op struct {
 	Bold   bool
 	// Error marks text TeX did not understand, drawn as a warning.
 	Error bool
-	// W and H are a rule's size.
+	// W and H are a rule's or frame's size.
 	W, H float32
-	// Points are a path's, Width its stroke.
+	// Points are a path's; Width is the stroke width of a path or frame.
 	Points [][2]float32
 	Width  float32
 }
@@ -508,6 +508,12 @@ func (p *parser) commandNode(name string) (*node, error) {
 		return n, nil
 	case "tag":
 		return p.tagNode()
+	case "boxed":
+		body, err := p.argument()
+		if err != nil {
+			return nil, err
+		}
+		return &node{kind: "boxed", args: [][]*node{body}}, nil
 	case "frac", "dfrac", "tfrac", "binom", "cfrac":
 		num, err := p.argument()
 		if err != nil {

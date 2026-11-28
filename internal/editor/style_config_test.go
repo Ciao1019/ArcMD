@@ -30,6 +30,8 @@ func TestPageStyleTokensComparisonAndTypography(t *testing.T) {
 		func(p *Page) { p.TableHeaderText = ui.RGB(10, 90, 60) },
 		func(p *Page) { p.TableStripe = ui.RGB(240, 244, 250) },
 		func(p *Page) { p.HighlightDefault = ui.RGB(255, 224, 102) },
+		func(p *Page) { p.InlineTexFill = ui.RGB(230, 243, 255) },
+		func(p *Page) { p.TexBlockFill = ui.RGB(240, 248, 255) },
 	}
 	for i, mutate := range checks {
 		p := clonePage(base)
