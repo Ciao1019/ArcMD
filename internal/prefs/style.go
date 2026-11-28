@@ -426,7 +426,7 @@ func DefaultStyleTemplateJSON() []byte {
 			CodeText:        "#D5D7DB",
 			InlineCodeFill:  "#303136",
 			InlineCodeText:  "#D5D7DB",
-			QuoteBar:        "#5A5D63",
+			QuoteBar:        "#9A9FA8",
 		},
 	}
 	data, err := json.MarshalIndent(tpl, "", "  ")

@@ -157,6 +157,17 @@ func TestBlockBackgroundBlockMenuAndMultiBlock(t *testing.T) {
 	if !tt.HasText("缩进") || !tt.HasText("背景颜色") {
 		t.Fatalf("blocks menu missing 缩进 or 背景颜色: %v", tt.Texts())
 	}
+	for _, wantHint := range []string{
+		(Combo{Mods: ui.Cmd, Key: ui.KeyX}).Label(),
+		(Combo{Mods: ui.Cmd, Key: ui.KeyC}).Label(),
+		(Combo{Key: ui.KeyBackspace}).Label(),
+		(Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyUp}).Label(),
+		(Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyDown}).Label(),
+	} {
+		if !tt.HasText(wantHint) {
+			t.Fatalf("blocks menu missing platform shortcut hint %q: %v", wantHint, tt.Texts())
+		}
+	}
 	if err := tt.Click("块背景：深绿"); err != nil {
 		t.Fatalf("click multi-block swatch failed: %v", err)
 	}

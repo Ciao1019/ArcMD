@@ -989,19 +989,19 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 						icon             *ui.SVG
 						run              func()
 					}{
-						{"bms-cut", i18n.T("剪切"), "⌘X", iconScissors, func() {
+						{"bms-cut", i18n.T("剪切"), (Combo{Mods: ui.Cmd, Key: ui.KeyX}).Label(), iconScissors, func() {
 							e.copyBlocks(ids, e.services.WriteClipboard)
 							e.Engine.DeleteBlocks(ids)
 							e.clearBlocks()
 						}},
-						{"bms-copy", i18n.T("复制"), "⌘C", iconCopy, func() { e.copyBlocks(ids, e.services.WriteClipboard) }},
+						{"bms-copy", i18n.T("复制"), (Combo{Mods: ui.Cmd, Key: ui.KeyC}).Label(), iconCopy, func() { e.copyBlocks(ids, e.services.WriteClipboard) }},
 						{"bms-duplicate", i18n.T("创建副本"), "", iconDuplicate, func() {
 							if copies := e.Engine.DuplicateBlocks(ids); len(copies) > 0 {
 								// The copies are selected once they are laid out.
 								e.blocks.pending = [2]string{copies[0], copies[len(copies)-1]}
 							}
 						}},
-						{"bms-delete", i18n.T("删除"), "⌫", iconTrash, func() { e.Engine.DeleteBlocks(ids); e.clearBlocks() }},
+						{"bms-delete", i18n.T("删除"), (Combo{Key: ui.KeyBackspace}).Label(), iconTrash, func() { e.Engine.DeleteBlocks(ids); e.clearBlocks() }},
 					} {
 						if hover(e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false), "").Clicked() {
 							row.run()
@@ -1013,7 +1013,10 @@ func (e *Editor) blocksMenu(c *ui.Context, surface ui.Element, handle *blockHand
 						key, label, hint string
 						icon             *ui.SVG
 						delta            int
-					}{{"bms-up", i18n.T("上移"), "⇧⌘↑", iconArrowUp, -1}, {"bms-down", i18n.T("下移"), "⇧⌘↓", iconArrowDown, 1}} {
+					}{
+						{"bms-up", i18n.T("上移"), (Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyUp}).Label(), iconArrowUp, -1},
+						{"bms-down", i18n.T("下移"), (Combo{Mods: ui.Cmd | ui.Shift, Key: ui.KeyDown}).Label(), iconArrowDown, 1},
+					} {
 						if hover(e.menuRow(c, row.key, row.icon, e.page.CodeText, row.label, row.hint, false), "").Clicked() {
 							e.Engine.ShiftBlocks(ids, row.delta)
 							done()

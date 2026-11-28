@@ -2,11 +2,13 @@ package app
 
 import (
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	model "github.com/Ciao1019/ArcMD/internal/document"
 	"github.com/Ciao1019/ArcMD/internal/vault"
 	"github.com/egoist/mygo/ui"
 )
@@ -77,6 +79,57 @@ func TestBlockBackgroundPaletteAndExportHTML(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		if got := a.doc.ed.Doc.Blocks[i].Background; got != "" {
 			t.Fatalf("palette clear block[%d] bg = %q, want empty", i, got)
+		}
+	}
+}
+
+func TestDarkPaperBlockBackgroundContrast(t *testing.T) {
+	srgbLin := func(c uint8) float64 {
+		v := float64(c) / 255.0
+		if v <= 0.04045 {
+			return v / 12.92
+		}
+		return math.Pow((v+0.055)/1.055, 2.4)
+	}
+	over := func(fg, bg ui.Color) [3]uint8 {
+		f, b := fg.SRGB(), bg.SRGB()
+		a := float64(f.A) / 255.0
+		blend := func(fc, bc uint8) uint8 {
+			return uint8(math.Round(float64(fc)*a + float64(bc)*(1-a)))
+		}
+		return [3]uint8{blend(f.R, b.R), blend(f.G, b.G), blend(f.B, b.B)}
+	}
+	contrast := func(fg, bg ui.Color) float64 {
+		fgRGB := over(fg, bg)
+		b := bg.SRGB()
+		l1 := 0.2126*srgbLin(fgRGB[0]) + 0.7152*srgbLin(fgRGB[1]) + 0.0722*srgbLin(fgRGB[2])
+		l2 := 0.2126*srgbLin(b.R) + 0.7152*srgbLin(b.G) + 0.0722*srgbLin(b.B)
+		if l1 < l2 {
+			l1, l2 = l2, l1
+		}
+		return (l1 + 0.05) / (l2 + 0.05)
+	}
+
+	th := documentTheme(true)
+	pg := pageStyle(true)
+	surfaces := map[string]ui.Color{"paper": th.Background}
+	for _, name := range model.TextHighlights {
+		fill, ok := pg.CellFills[name]
+		if !ok {
+			t.Fatalf("darkPageStyle missing CellFills[%q]", name)
+		}
+		rgb := over(fill, th.Background)
+		surfaces[name] = ui.RGBA(rgb[0], rgb[1], rgb[2], 255)
+	}
+	for name, bg := range surfaces {
+		if r := contrast(th.Text, bg); r < 4.5 {
+			t.Errorf("dark %s: body text contrast %.2f < 4.5", name, r)
+		}
+		if r := contrast(pg.TaskDone, bg); r < 4.5 {
+			t.Errorf("dark %s: TaskDone contrast %.2f < 4.5", name, r)
+		}
+		if r := contrast(pg.QuoteBar, bg); r < 3.0 {
+			t.Errorf("dark %s: QuoteBar contrast %.2f < 3.0", name, r)
 		}
 	}
 }
