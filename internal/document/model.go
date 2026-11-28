@@ -26,9 +26,10 @@ import (
 // emoji, version 5 the page's icon and cover, version 6 scripts, image widths
 // and footnotes, version 7 hand-drawn text annotations, version 8 toggle
 // blocks and the word goal, version 9 keyboard key marks, version 10 ordered
-// list start numbers. Older documents are read and migrated in memory, and
-// written back as the current version only when edited.
-const CurrentVersion = 10
+// list start numbers, version 11 inline images and image heights. Older
+// documents are read and migrated in memory, and written back as the current
+// version only when edited.
+const CurrentVersion = 11
 
 // CoverGradients are the covers drawn rather than pictured, as
 // "gradient:name" in Document.Cover.
@@ -90,9 +91,35 @@ type Style struct {
 	AnnotationColor string `json:"annotationColor,omitempty"`
 }
 
+// InlineImagePlaceholder is the single UTF-16 object replacement character
+// carried by a Run that represents an inline image (version 11).
+const InlineImagePlaceholder = "\ufffc"
+
+// InlineImage describes a picture embedded inline within a text block (version
+// 11). Keeping it as a comparable value field on Run (outside Style) keeps Run
+// slices value-comparable and prevents typed text next to an image from
+// inheriting image attributes.
+type InlineImage struct {
+	URL    string  `json:"url,omitempty"`
+	Alt    string  `json:"alt,omitempty"`
+	Width  float32 `json:"width,omitempty"`
+	Height float32 `json:"height,omitempty"`
+}
+
+func (img InlineImage) IsZero() bool { return img == (InlineImage{}) }
+
 type Run struct {
-	Text  string `json:"text"`
-	Style Style  `json:"style,omitempty"`
+	Text  string      `json:"text"`
+	Style Style       `json:"style,omitempty"`
+	Image InlineImage `json:"image,omitzero"`
+}
+
+// IsImage reports whether this run holds an inline image.
+func (r Run) IsImage() bool { return r.Image.URL != "" }
+
+// InlineImageRun creates a canonical single-placeholder Run for an inline image.
+func InlineImageRun(img InlineImage, style Style) Run {
+	return Run{Text: InlineImagePlaceholder, Style: style, Image: img}
 }
 
 // ListPlacement retains view-only Markdown container information when the
@@ -111,21 +138,22 @@ type InlineComment struct {
 }
 
 type Block struct {
-	MapList    *ListPlacement  `json:"-"`
-	ImageWidth float32         `json:"imageWidth,omitempty"` // Preferred DIP width; zero is natural.
-	NoteLabel  string          `json:"noteLabel,omitempty"`  // Footnote definition label (version 6).
-	ID         string          `json:"id"`
-	Kind       string          `json:"kind"`
-	Runs       []Run           `json:"runs,omitempty"`
-	Comments   []InlineComment `json:"comments,omitempty"` // Preserved inline HTML comments (version 9).
-	Level      int             `json:"level,omitempty"`
-	Indent     int             `json:"indent,omitempty"`
-	Start      int             `json:"start,omitempty"`
-	Checked    bool            `json:"checked,omitempty"`
-	Language   string          `json:"language,omitempty"`
-	URL        string          `json:"url,omitempty"`
-	Align      string          `json:"align,omitempty"`
-	Widths     []float32       `json:"widths,omitempty"`
+	MapList     *ListPlacement  `json:"-"`
+	ImageWidth  float32         `json:"imageWidth,omitempty"`  // Preferred DIP width; zero is natural.
+	ImageHeight float32         `json:"imageHeight,omitempty"` // Preferred DIP height; zero is natural (version 11).
+	NoteLabel   string          `json:"noteLabel,omitempty"`   // Footnote definition label (version 6).
+	ID          string          `json:"id"`
+	Kind        string          `json:"kind"`
+	Runs        []Run           `json:"runs,omitempty"`
+	Comments    []InlineComment `json:"comments,omitempty"` // Preserved inline HTML comments (version 9).
+	Level       int             `json:"level,omitempty"`
+	Indent      int             `json:"indent,omitempty"`
+	Start       int             `json:"start,omitempty"`
+	Checked     bool            `json:"checked,omitempty"`
+	Language    string          `json:"language,omitempty"`
+	URL         string          `json:"url,omitempty"`
+	Align       string          `json:"align,omitempty"`
+	Widths      []float32       `json:"widths,omitempty"`
 	// Color is a callout's color, one of CalloutColors (version 2).
 	Color string `json:"color,omitempty"`
 	// Folded hides what a heading or list item holds (version 4).
@@ -417,6 +445,29 @@ func (d *Document) migrate() error {
 	if d.Version < 10 && v10(d.Blocks) {
 		return errors.New("document: ordered list start values require version 10")
 	}
+	var v11 func([]*Block) bool
+	v11 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b == nil {
+				continue
+			}
+			if b.ImageHeight != 0 {
+				return true
+			}
+			for _, r := range b.Runs {
+				if !r.Image.IsZero() {
+					return true
+				}
+			}
+			if v11(b.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	if d.Version < 11 && v11(d.Blocks) {
+		return errors.New("document: inline images and image heights require version 11")
+	}
 	d.Version = CurrentVersion
 	return nil
 }
@@ -512,6 +563,11 @@ func (dh *docHasher) runs(runs []Run) {
 		dh.str(st.Highlight)
 		dh.str(st.Annotation)
 		dh.str(st.AnnotationColor)
+		img := &r.Image
+		dh.str(img.URL)
+		dh.str(img.Alt)
+		dh.float32(img.Width)
+		dh.float32(img.Height)
 	}
 }
 
@@ -542,6 +598,7 @@ func (dh *docHasher) block(b *Block, includeLeafRuns bool, leafOverrides map[str
 	}
 	dh.bool(true)
 	dh.float32(b.ImageWidth)
+	dh.float32(b.ImageHeight)
 	dh.str(b.NoteLabel)
 	dh.str(b.ID)
 	dh.str(b.Kind)
@@ -685,7 +742,7 @@ func SameBlock(a, b *Block) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if a.ImageWidth != b.ImageWidth || a.NoteLabel != b.NoteLabel ||
+	if a.ImageWidth != b.ImageWidth || a.ImageHeight != b.ImageHeight || a.NoteLabel != b.NoteLabel ||
 		a.ID != b.ID || a.Kind != b.Kind ||
 		a.Level != b.Level || a.Indent != b.Indent || a.Start != b.Start ||
 		a.Checked != b.Checked || a.Language != b.Language ||
@@ -791,6 +848,9 @@ func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 		if !(b.ImageWidth >= 0 && b.ImageWidth <= 10000) || b.ImageWidth != 0 && b.Kind != "image" {
 			return errors.New("document: invalid image width")
 		}
+		if !(b.ImageHeight >= 0 && b.ImageHeight <= 10000) || b.ImageHeight != 0 && b.Kind != "image" {
+			return errors.New("document: invalid image height")
+		}
 		if b.Kind == "footnote" && (b.NoteLabel == "" || len(b.NoteLabel) > 1000 || strings.ContainsAny(b.NoteLabel, "[]\n\r\t ")) || b.Kind != "footnote" && b.NoteLabel != "" {
 			return errors.New("document: invalid footnote label")
 		}
@@ -810,6 +870,16 @@ func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 			if r.Style.Annotation != "" && !oneOf(r.Style.Annotation, Annotations) ||
 				r.Style.AnnotationColor != "" && (r.Style.Annotation == "" || !oneOf(r.Style.AnnotationColor, TextColors)) {
 				return errors.New("document: invalid annotation")
+			}
+			if !r.Image.IsZero() {
+				if len(b.Children) > 0 || !AllowsInlineComments(b.Kind) {
+					return errors.New("document: inline image not allowed in block")
+				}
+				if r.Image.URL == "" || r.Text != InlineImagePlaceholder ||
+					!(r.Image.Width >= 0 && r.Image.Width <= 10000) ||
+					!(r.Image.Height >= 0 && r.Image.Height <= 10000) {
+					return errors.New("document: invalid inline image")
+				}
 			}
 		}
 		if len(b.Comments) > 0 {
@@ -1025,7 +1095,7 @@ func SliceRuns(runs []Run, start, end int) []Run {
 		n := Len(run.Text)
 		a, z := max(0, start-position), min(n, end-position)
 		if z > a {
-			out = append(out, Run{Text: run.Text[ByteOffset(run.Text, a):ByteOffset(run.Text, z)], Style: run.Style})
+			out = append(out, Run{Text: run.Text[ByteOffset(run.Text, a):ByteOffset(run.Text, z)], Style: run.Style, Image: run.Image})
 		}
 		position += n
 	}
@@ -1038,7 +1108,7 @@ func Compact(runs []Run) []Run {
 	}
 	clean := true
 	for i, run := range runs {
-		if run.Text == "" || (i > 0 && runs[i-1].Style == run.Style) {
+		if run.Text == "" || (i > 0 && runs[i-1].Style == run.Style && runs[i-1].Image.IsZero() && run.Image.IsZero()) {
 			clean = false
 			break
 		}
@@ -1052,10 +1122,15 @@ func Compact(runs []Run) []Run {
 			i++
 			continue
 		}
+		if !runs[i].Image.IsZero() {
+			out = append(out, runs[i])
+			i++
+			continue
+		}
 		style := runs[i].Style
 		j := i + 1
 		nonEmpty := 1
-		for j < len(runs) && (runs[j].Text == "" || runs[j].Style == style) {
+		for j < len(runs) && runs[j].Image.IsZero() && (runs[j].Text == "" || runs[j].Style == style) {
 			if runs[j].Text != "" {
 				nonEmpty++
 			}
@@ -1356,7 +1431,7 @@ func MapBlockRunText(b *Block, filter func(Run) bool, change func(string) string
 	for i := range b.Runs {
 		oldText := b.Runs[i].Text
 		oldLen := Len(oldText)
-		if filter != nil && !filter(b.Runs[i]) {
+		if !b.Runs[i].Image.IsZero() || (filter != nil && !filter(b.Runs[i])) {
 			runStart += oldLen
 			continue
 		}

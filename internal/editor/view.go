@@ -91,6 +91,7 @@ type Editor struct {
 	cacheClock                                     uint64
 	heightHints                                    map[string]heightHint
 	images                                         map[string]ImageResource
+	loadImage                                      func(string) ImageResource
 	imageCaptionID                                 string
 	imageViewer                                    imageViewer
 	width, height, viewport, padding, rightPadding float32
@@ -154,6 +155,8 @@ type Editor struct {
 	linkOpen                  bool
 	linkURL                   string
 	linkText                  string
+	linkImage                 bool
+	linkImageAt               int
 	linkRange                 ui.TextInputRange
 	linkOpened                bool
 	pendingLink               linkSpan
@@ -1075,8 +1078,12 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 					}
 				}
 				hoveredDirectLink := false
-				if e.ReadOnly && e.directLinks && inside {
-					_, hoveredDirectLink = e.linkAtPoint(px, py, false)
+				if inside {
+					if e.ReadOnly && e.directLinks {
+						_, hoveredDirectLink = e.linkAtPoint(px, py, false)
+					} else if obj, _, ok := e.inlineImageAtPoint(px, py); ok && obj.imageLink != "" {
+						hoveredDirectLink = true
+					}
 				}
 				_, hoveredGap := e.hoveredGap()
 				switch {
@@ -1274,6 +1281,9 @@ func (e *Editor) layout(o Options) {
 		e.page = pageOf(o.Page, o.Theme)
 	}
 	e.collectNotes()
+	if o.LoadImage != nil {
+		e.loadImage = o.LoadImage
+	}
 	e.readingSize, e.readingLine, e.fontFamily = o.FontSize, o.LineHeight, o.FontFamily
 	e.pageZoom = clampPageZoom(o.Zoom)
 	z := e.zoomFactor()
@@ -1566,6 +1576,7 @@ func (e *Editor) layoutOptions() Options {
 		CodeNoWrap:     e.codeNoWrap,
 		CodeMaxHeight:  e.codeMaxHeight,
 		ImageMaxHeight: e.imageMaxHeight,
+		LoadImage:      e.loadImage,
 		LoadWhiteboard: e.loadWhiteboard,
 	}
 }

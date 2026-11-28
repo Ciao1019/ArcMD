@@ -482,7 +482,7 @@ func (e *Editor) exportVectorRows(
 			continue
 		}
 		e.exportVectorAnnotations(vp, r, true, sx, sy, sc, top, paperMargin)
-		e.exportVectorRowText(vp, t, pg, r, top, bottom, tops, paperH, paperMargin, sx, sy, sc, px, py, pw, ph)
+		e.exportVectorRowText(vp, o, t, pg, r, top, bottom, tops, paperH, paperMargin, sx, sy, sc, px, py, pw, ph)
 		e.exportVectorAnnotations(vp, r, false, sx, sy, sc, top, paperMargin)
 	}
 }
@@ -518,6 +518,9 @@ func (e *Editor) exportVectorImage(
 				})
 			}, max(1, int(math.Ceil(float64(fb.W)))), max(1, int(math.Ceil(float64(fb.H)))), 2)
 		}
+	}
+	if raw == nil && f.resource.SVG != nil {
+		raw = rasterizeSVGForPDF(f.resource.SVG, fb.W, fb.H, t)
 	}
 	if raw != nil {
 		vp.DrawImage(raw, px(fb.X), py(fb.Y), pw(fb.W), ph(fb.H), 8*sc)
@@ -910,8 +913,22 @@ type spanSeg struct {
 	span       ui.Span
 }
 
+func rasterizeSVGForPDF(svg *ui.SVG, w, h float32, t *ui.Theme) image.Image {
+	if svg == nil || w <= 0 || h <= 0 {
+		return nil
+	}
+	pw := max(1, min(4096, int(math.Ceil(float64(w)*2))))
+	ph := max(1, min(4096, int(math.Ceil(float64(h)*2))))
+	ink := stdcolor.NRGBA{A: 255}
+	if t != nil {
+		s := t.Text.SRGB()
+		ink = stdcolor.NRGBA{R: s.R, G: s.G, B: s.B, A: s.A}
+	}
+	return svg.WithDark(t != nil && t.Dark).Image(pw, ph, ink)
+}
+
 func (e *Editor) exportVectorRowText(
-	vp *pdf.VectorPage, t *ui.Theme, pg Page, r row,
+	vp *pdf.VectorPage, o Options, t *ui.Theme, pg Page, r row,
 	top, bottom float32, tops []float32, paperH, paperMargin float32,
 	sx, sy, sc float64,
 	px, py, pw, ph func(float32) float64,
@@ -1053,42 +1070,80 @@ func (e *Editor) exportVectorRowText(
 		}
 	}
 
-	// Render inline objects (inline math, footnote refs, sup/sub scripts).
-	for _, o := range r.layout.objects {
-		if r.y+o.rect.Y+o.rect.H < top-2 || r.y+o.rect.Y > bottom+2 {
+	// Render inline objects (inline images, inline math, footnote refs, sup/sub scripts).
+	for _, obj := range r.layout.objects {
+		if r.y+obj.rect.Y+obj.rect.H < top-2 || r.y+obj.rect.Y > bottom+2 {
 			continue
 		}
-		if o.box != nil {
-			e.exportVectorFormula(vp, *o.box, r.x+o.rect.X+2, r.y+o.rect.Y, o.scale, sx, sy, top, paperMargin, t)
+		if obj.hasImage {
+			padY := float32(0)
+			if obj.imgH >= 20 && obj.rect.H > obj.imgH {
+				padY = (obj.rect.H - obj.imgH) / 2
+			}
+			ox := r.x - scrollX + obj.rect.X
+			oy := r.y + obj.rect.Y + padY
+			oh := max(1, obj.rect.H-2*padY)
+			var raw image.Image
+			if o.LoadRawImage != nil {
+				raw = o.LoadRawImage(obj.image.URL)
+			}
+			if raw == nil && obj.imageRes.Bitmap != nil {
+				iw, ih := obj.imageRes.Bitmap.Size()
+				if iw > 0 && ih > 0 {
+					raw = ui.Render(func(c *ui.Context) {
+						ui.Box(c).Fill().Draw(func(p *ui.Painter, rect ui.Rect) {
+							p.Image(obj.imageRes.Bitmap, rect, ui.Contain)
+						})
+					}, max(1, int(math.Ceil(float64(obj.rect.W)))), max(1, int(math.Ceil(float64(oh)))), 2)
+				}
+			}
+			if raw == nil && obj.imageRes.SVG != nil {
+				raw = rasterizeSVGForPDF(obj.imageRes.SVG, obj.rect.W, oh, t)
+			}
+			if raw != nil {
+				vp.DrawImage(raw, px(ox), py(oy), pw(obj.rect.W), ph(oh), 0)
+			} else {
+				alt := strings.TrimSpace(obj.image.Alt)
+				if alt == "" {
+					alt = imageName(obj.image.URL)
+				}
+				if alt != "" {
+					vp.DrawText(alt, px(ox+4), py(oy+oh*0.72), pw(max(1, obj.rect.W-8)), float64(max(10, font.Size*0.78))*sy, pdfTextStyleFor(font, ui.Span{}), pdfRGBA(pg.Caption))
+				}
+			}
 			continue
 		}
-		if o.label != nil {
+		if obj.box != nil {
+			e.exportVectorFormula(vp, *obj.box, r.x+obj.rect.X+2, r.y+obj.rect.Y, obj.scale, sx, sy, top, paperMargin, t)
+			continue
+		}
+		if obj.label != nil {
 			col := t.Accent
-			if o.script {
+			if obj.script {
 				col = t.Text
 			}
 			labelText := ""
-			if o.note != "" {
-				if n, ok := e.notes[o.note]; ok {
+			if obj.note != "" {
+				if n, ok := e.notes[obj.note]; ok {
 					labelText = fmt.Sprint(n.number)
 				}
-			} else if o.end > o.start {
-				bStart := ui.UTF16ByteOffset(blockText, o.start)
-				bEnd := ui.UTF16ByteOffset(blockText, o.end)
+			} else if obj.end > obj.start {
+				bStart := ui.UTF16ByteOffset(blockText, obj.start)
+				bEnd := ui.UTF16ByteOffset(blockText, obj.end)
 				labelText = blockText[bStart:bEnd]
 			}
 			if labelText == "" {
 				continue
 			}
 			base := float32(font.Size * 0.72)
-			if lines := o.label.Lines(); len(lines) > 0 {
+			if lines := obj.label.Lines(); len(lines) > 0 {
 				base = lines[0].Baseline
 			}
-			ox := r.x - scrollX + o.rect.X
-			if !o.script {
+			ox := r.x - scrollX + obj.rect.X
+			if !obj.script {
 				ox += 2
 			}
-			vp.DrawText(labelText, px(ox), py(r.y+o.rect.Y+base), pw(o.rect.W), float64(font.Size*0.72)*sy, pdfTextStyleFor(font, ui.Span{}), pdfRGBA(col))
+			vp.DrawText(labelText, px(ox), py(r.y+obj.rect.Y+base), pw(obj.rect.W), float64(font.Size*0.72)*sy, pdfTextStyleFor(font, ui.Span{}), pdfRGBA(col))
 		}
 	}
 

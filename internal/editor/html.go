@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"path"
 	"strconv"
 	"strings"
 
@@ -1354,10 +1355,10 @@ func parseSpanAttr(val string) int {
 	return min(64, n)
 }
 
-func parseHTMLWidth(n *html.Node) float32 {
-	raw := strings.TrimSpace(attr(n, "width"))
+func parseHTMLDimension(n *html.Node, prop string) float32 {
+	raw := strings.TrimSpace(attr(n, prop))
 	if raw == "" {
-		raw = parseCSSProps(attr(n, "style"))["width"]
+		raw = parseCSSProps(attr(n, "style"))[prop]
 	}
 	raw = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), "px")
 	if raw == "" || strings.HasSuffix(raw, "%") {
@@ -1368,6 +1369,141 @@ func parseHTMLWidth(n *html.Node) float32 {
 		return 0
 	}
 	return float32(v)
+}
+
+func parseHTMLWidth(n *html.Node) float32 {
+	return parseHTMLDimension(n, "width")
+}
+
+func parseHTMLHeight(n *html.Node) float32 {
+	return parseHTMLDimension(n, "height")
+}
+
+// parseImageAlign extracts an image's explicit horizontal alignment, keeping
+// "left" distinct from "" because block images default to centered.
+func parseImageAlign(n *html.Node) string {
+	a := strings.ToLower(strings.TrimSpace(attr(n, "align")))
+	if a == "" {
+		props := parseCSSProps(attr(n, "style"))
+		a = strings.ToLower(strings.TrimSpace(props["float"]))
+	}
+	switch a {
+	case "left", "center", "right":
+		return a
+	}
+	return ""
+}
+
+func validImportedImageSrc(src string) bool {
+	trimmed := strings.TrimSpace(src)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	return !strings.HasPrefix(lower, "data:") && !strings.HasPrefix(lower, "javascript:")
+}
+
+func parseHTMLInlineImage(img *html.Node) (document.InlineImage, string, bool) {
+	if img == nil || img.Type != html.ElementNode || img.DataAtom != atom.Img {
+		return document.InlineImage{}, "", false
+	}
+	src := strings.TrimSpace(attr(img, "src"))
+	if !validImportedImageSrc(src) {
+		return document.InlineImage{}, "", false
+	}
+	return document.InlineImage{
+		URL:    src,
+		Alt:    attr(img, "alt"),
+		Width:  parseHTMLWidth(img),
+		Height: parseHTMLHeight(img),
+	}, parseImageAlign(img), true
+}
+
+func parseSrcsetFirstURL(srcset string) string {
+	for _, cand := range strings.Split(srcset, ",") {
+		fields := strings.Fields(strings.TrimSpace(cand))
+		if len(fields) == 0 {
+			continue
+		}
+		if validImportedImageSrc(fields[0]) {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
+func supportedPictureSourceType(typ, url string) bool {
+	if typ != "" {
+		t := strings.ToLower(strings.TrimSpace(strings.Split(typ, ";")[0]))
+		switch t {
+		case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp", "image/svg+xml":
+			return true
+		default:
+			return false
+		}
+	}
+	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(url)), "?")
+	base, _, _ = strings.Cut(base, "#")
+	switch strings.ToLower(path.Ext(base)) {
+	case "", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg":
+		return true
+	default:
+		return false
+	}
+}
+
+func parsePictureInlineImage(pic *html.Node) (document.InlineImage, string, bool) {
+	if pic == nil || pic.Type != html.ElementNode || pic.DataAtom != atom.Picture {
+		return document.InlineImage{}, "", false
+	}
+	var imgNode *html.Node
+	var sources []*html.Node
+	for c := pic.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != html.ElementNode {
+			continue
+		}
+		switch c.DataAtom {
+		case atom.Img:
+			if imgNode == nil {
+				imgNode = c
+			}
+		case atom.Source:
+			sources = append(sources, c)
+		}
+	}
+	if imgNode != nil {
+		if img, align, ok := parseHTMLInlineImage(imgNode); ok {
+			return img, align, true
+		}
+	}
+	pickSource := func(requireNoMedia bool) string {
+		for _, s := range sources {
+			if requireNoMedia && strings.TrimSpace(attr(s, "media")) != "" {
+				continue
+			}
+			u := parseSrcsetFirstURL(attr(s, "srcset"))
+			if u != "" && supportedPictureSourceType(attr(s, "type"), u) {
+				return u
+			}
+		}
+		return ""
+	}
+	src := pickSource(true)
+	if src == "" {
+		src = pickSource(false)
+	}
+	if src == "" {
+		return document.InlineImage{}, "", false
+	}
+	out := document.InlineImage{URL: src}
+	align := ""
+	if imgNode != nil {
+		out.Alt = attr(imgNode, "alt")
+		out.Width = parseHTMLWidth(imgNode)
+		out.Height = parseHTMLHeight(imgNode)
+		align = parseImageAlign(imgNode)
+	}
+	return out, align, true
 }
 
 func parseBlockAlignExplicit(n *html.Node) (string, bool) {

@@ -44,6 +44,37 @@ func (e *Editor) linkSpanAt(at int) (linkSpan, bool) {
 	return linkSpan{}, false
 }
 
+func (e *Editor) isLinkedInlineImagePoint(x, y float32) bool {
+	obj, _, ok := e.inlineImageAtPoint(x, y)
+	return ok && obj.imageLink != ""
+}
+
+func (e *Editor) inlineImageAtPoint(x, y float32) (inlineObject, row, bool) {
+	var candidates []int
+	for i := range e.rowSpace.between(y-2, y+2) {
+		candidates = append(candidates, i)
+	}
+	for _, i := range candidates {
+		r := e.ensureRow(i)
+		if r.layout == nil || len(r.layout.objects) == 0 {
+			continue
+		}
+		px, py := x-r.x, y-r.y
+		if _, _, _, _, scrollX, noWrap := e.codeScrollFor(*r); noWrap {
+			px += scrollX
+		}
+		for _, o := range r.layout.objects {
+			if !o.hasImage {
+				continue
+			}
+			if px >= o.rect.X && px <= o.rect.X+o.rect.W && py >= o.rect.Y && py <= o.rect.Y+o.rect.H {
+				return o, *r, true
+			}
+		}
+	}
+	return inlineObject{}, row{}, false
+}
+
 func (e *Editor) pointInTextRange(x, y float32, start, end int) bool {
 	if start >= end {
 		return false
@@ -56,7 +87,15 @@ func (e *Editor) pointInTextRange(x, y float32, start, end int) bool {
 	if _, _, _, _, scrollX, noWrap := e.codeScrollFor(*r); noWrap {
 		px += scrollX
 	}
-	for _, rect := range r.layout.SelectionRects(ui.TextInputRange{Start: start - r.leaf.Start, End: end - r.leaf.Start}) {
+	localA, localZ := start-r.leaf.Start, end-r.leaf.Start
+	for _, o := range r.layout.objects {
+		if o.hasImage && o.start >= localA && o.end <= localZ {
+			if px >= o.rect.X && px <= o.rect.X+o.rect.W && py >= o.rect.Y && py <= o.rect.Y+o.rect.H {
+				return true
+			}
+		}
+	}
+	for _, rect := range r.layout.SelectionRects(ui.TextInputRange{Start: localA, End: localZ}) {
 		if px >= rect.X && px <= rect.X+rect.W && py >= rect.Y && py <= rect.Y+rect.H {
 			return true
 		}
@@ -65,6 +104,15 @@ func (e *Editor) pointInTextRange(x, y float32, start, end int) bool {
 }
 
 func (e *Editor) linkAtPoint(x, y float32, strictInterior bool) (linkSpan, bool) {
+	if obj, r, ok := e.inlineImageAtPoint(x, y); ok && obj.imageLink != "" {
+		start := r.leaf.Start + obj.start
+		for _, s := range linkSpansInLeaf(r.leaf) {
+			if start >= s.start && start < s.end {
+				return s, true
+			}
+		}
+		return linkSpan{url: obj.imageLink, start: start, end: r.leaf.Start + obj.end}, true
+	}
 	at, ok := e.IndexForPoint(ui.Point{X: x, Y: y})
 	if !ok {
 		return linkSpan{}, false
@@ -82,6 +130,21 @@ func (e *Editor) linkAtPoint(x, y float32, strictInterior bool) (linkSpan, bool)
 	return linkSpan{}, false
 }
 
+func (e *Editor) singleInlineImageInRange(r ui.TextInputRange) (document.InlineImage, int, bool) {
+	if r.End-r.Start != 1 {
+		return document.InlineImage{}, 0, false
+	}
+	leaf := e.Engine.LeafAt(r.Start)
+	if leaf.Block == nil || r.Start < leaf.Start || r.End > leaf.End {
+		return document.InlineImage{}, 0, false
+	}
+	runs := document.SliceRuns(leaf.Block.Runs, r.Start-leaf.Start, r.End-leaf.Start)
+	if len(runs) == 1 && runs[0].IsImage() {
+		return runs[0].Image, r.Start, true
+	}
+	return document.InlineImage{}, 0, false
+}
+
 func (e *Editor) openLinkSpan(span linkSpan) {
 	if e.ReadOnly || span.url == "" {
 		return
@@ -91,7 +154,13 @@ func (e *Editor) openLinkSpan(span linkSpan) {
 	r := ui.TextInputRange{Start: span.start, End: span.end}
 	e.linkRange = r
 	e.SetSelection(r.Start, r.End)
-	e.linkText = e.slice(r.Start, r.End)
+	if img, at, ok := e.singleInlineImageInRange(r); ok {
+		e.linkImage, e.linkImageAt = true, at
+		e.linkText = img.Alt
+	} else {
+		e.linkImage, e.linkImageAt = false, 0
+		e.linkText = e.slice(r.Start, r.End)
+	}
 	e.linkURL = span.url
 	e.linkOpen, e.linkOpened = true, false
 	e.linkRevision = e.Revision()
@@ -112,7 +181,13 @@ func (e *Editor) EditLink() {
 	}
 	e.linkRange = r
 	e.SetSelection(r.Start, r.End)
-	e.linkText = e.slice(r.Start, r.End)
+	if img, at, ok := e.singleInlineImageInRange(r); ok {
+		e.linkImage, e.linkImageAt = true, at
+		e.linkText = img.Alt
+	} else {
+		e.linkImage, e.linkImageAt = false, 0
+		e.linkText = e.slice(r.Start, r.End)
+	}
 	e.linkURL = e.CurrentStyle().Link
 	e.linkOpen, e.linkOpened = true, false
 	e.linkRevision = e.Revision()
@@ -126,17 +201,25 @@ func (e *Editor) applyLink(remove bool) {
 	r := e.linkRange
 	label := e.linkText
 	address := strings.TrimSpace(e.linkURL)
-	if label == "" {
+	if !e.linkImage && label == "" {
 		label = address
 	}
 	if !remove && !safeHTMLURL(address) {
 		return
 	}
 	e.Engine.Edit(func() {
-		e.SetSelection(r.Start, r.End)
-		if !remove && label != e.slice(r.Start, r.End) {
-			e.Engine.Replace(r.Start, r.End, label)
-			e.SetSelection(r.Start, r.Start+document.Len(label))
+		if e.linkImage {
+			if !remove {
+				e.Engine.SetInlineImageAlt(e.linkImageAt, label)
+			}
+			e.SetSelection(r.Start, r.End)
+		} else {
+			e.SetSelection(r.Start, r.End)
+			orig := e.slice(r.Start, r.End)
+			if !remove && label != orig && !strings.Contains(orig, document.InlineImagePlaceholder) {
+				e.Engine.Replace(r.Start, r.End, label)
+				e.SetSelection(r.Start, r.Start+document.Len(label))
+			}
 		}
 		if remove {
 			address = ""
@@ -178,7 +261,11 @@ func (e *Editor) linkPopover(c *ui.Context, surface ui.Element) {
 		}
 		ui.Column(c.Key("edit-link")).Absolute().Left(x).Top(y).Width(pw).Padding(12).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).Transition(popoverTransition).Children(func() {
 			ui.Text(c, i18n.T("编辑链接")).FontSize(13).FontWeight(600)
-			label := ui.TextInput(c.Key("link-label"), &e.linkText).Label(i18n.T("链接文字")).Placeholder(i18n.T("链接文字"))
+			labelTitle := i18n.T("链接文字")
+			if e.linkImage {
+				labelTitle = i18n.T("图片说明")
+			}
+			label := ui.TextInput(c.Key("link-label"), &e.linkText).Label(labelTitle).Placeholder(labelTitle)
 			address := ui.TextInput(c.Key("link-address"), &e.linkURL).Label(i18n.T("链接地址")).Placeholder("https://")
 			if !e.linkOpened {
 				address.Focus()

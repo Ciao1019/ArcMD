@@ -1141,8 +1141,8 @@ func TestReview9FixesRegression(t *testing.T) {
 		t.Fatalf("columns col0 content corrupted: %+v", col0)
 	}
 
-	// 2. [P1] Centered README image badge (<a><img></a>) must stay lossless raw HTML
-	// instead of turning into an empty paragraph and dropping href/src on edit.
+	// 2. [P1] Centered README image badge (<a><img></a>) imports as a centered
+	// linked inline image and preserves both href and src on export and edit.
 	badges := []string{
 		"<div align=\"center\">\n  <a href=\"https://example.com/ci\"><img src=\"https://example.com/badge.svg\" alt=\"CI\"></a>\n</div>\n",
 		"<div align=\"center\"><a href=\"https://example.com/ci\"><img src=\"https://example.com/badge.svg\" alt=\"CI\"></a></div>\n",
@@ -1150,10 +1150,21 @@ func TestReview9FixesRegression(t *testing.T) {
 	}
 	for _, badgeMD := range badges {
 		bdoc := ImportMarkdown(badgeMD)
-		if len(bdoc.Blocks) != 1 || bdoc.Blocks[0].Kind != "raw" ||
-			!strings.Contains(bdoc.Blocks[0].Text(), "https://example.com/ci") ||
-			!strings.Contains(bdoc.Blocks[0].Text(), "https://example.com/badge.svg") {
-			t.Fatalf("centered badge lost raw HTML or URLs for %q: %+v", badgeMD, bdoc.Blocks)
+		if len(bdoc.Blocks) != 1 || bdoc.Blocks[0].Kind != "paragraph" || bdoc.Blocks[0].Align != "center" ||
+			len(bdoc.Blocks[0].Runs) != 1 || !bdoc.Blocks[0].Runs[0].IsImage() ||
+			bdoc.Blocks[0].Runs[0].Style.Link != "https://example.com/ci" ||
+			bdoc.Blocks[0].Runs[0].Image.URL != "https://example.com/badge.svg" ||
+			bdoc.Blocks[0].Runs[0].Image.Alt != "CI" {
+			t.Fatalf("centered badge did not import as linked inline image for %q: %+v", badgeMD, bdoc.Blocks)
+		}
+		if got := ExportMarkdown(bdoc); got != badgeMD {
+			t.Fatalf("unedited centered badge lost round-trip fidelity:\ngot:  %q\nwant: %q", got, badgeMD)
+		}
+		edited := bdoc.Clone()
+		edited.Blocks[0].Runs = append(edited.Blocks[0].Runs, document.Run{Text: " ok"})
+		exported := ExportMarkdown(edited)
+		if !strings.Contains(exported, "https://example.com/ci") || !strings.Contains(exported, "https://example.com/badge.svg") {
+			t.Fatalf("edited centered badge lost href/src: %q", exported)
 		}
 	}
 

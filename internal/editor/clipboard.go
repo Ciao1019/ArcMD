@@ -303,6 +303,9 @@ func rich(doc *document.Document) bool {
 			return true
 		}
 		for _, r := range b.Runs {
+			if r.IsImage() {
+				return true
+			}
 			s := r.Style
 			s.NoMath = false
 			if s != (document.Style{}) {

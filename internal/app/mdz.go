@@ -437,17 +437,7 @@ func (a *App) mdzLoadImageFrom(d *document, basePage, rawURL string, allowManife
 		m.images[targetPath] = res
 		return res
 	}
-	bmp, err := ui.DecodeBitmap(data)
-	if err != nil {
-		res := editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}
-		m.images[targetPath] = res
-		return res
-	}
-	w, h := bmp.Size()
-	res := editor.ImageResource{Bitmap: bmp, Width: w, Height: h, Local: true}
-	if frames, delays, ok := gifFrames(data); ok {
-		res.Frames, res.Delays = frames, delays
-	}
+	res := decodeImageBytes(data, true)
 	m.images[targetPath] = res
 	return res
 }
@@ -1184,6 +1174,12 @@ func (a *App) exportMDZ() {
 				}
 			}
 			for i := range b.Runs {
+				if b.Runs[i].Image.URL != "" {
+					if nextURL, _, changed := addAsset(b.Runs[i].Image.URL, false); changed {
+						b.Runs[i].Image.URL = nextURL
+						anyRewritten = true
+					}
+				}
 				if b.Runs[i].Style.Link != "" {
 					if nextURL, _, changed := addAsset(b.Runs[i].Style.Link, true); changed {
 						b.Runs[i].Style.Link = nextURL
@@ -1373,6 +1369,12 @@ func (a *App) unpackMDZAsDocument(d *document) {
 				}
 			}
 			for i := range b.Runs {
+				if b.Runs[i].Image.URL != "" {
+					if nextURL, changed := extractAsset(b.Runs[i].Image.URL, false, false); changed {
+						b.Runs[i].Image.URL = nextURL
+						anyRewritten = true
+					}
+				}
 				if b.Runs[i].Style.Link != "" {
 					if nextURL, changed := extractAsset(b.Runs[i].Style.Link, true, false); changed {
 						b.Runs[i].Style.Link = nextURL
