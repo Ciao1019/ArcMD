@@ -195,17 +195,35 @@ func TestStyleConfigLiveReloadErrorResilienceAndRemoval(t *testing.T) {
 
 func TestPortableStylePathRespectsArcMDHome(t *testing.T) {
 	t.Setenv("ARCMD_HOME", "")
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := discoverPortableStylePath(), filepath.Join(filepath.Dir(executable), prefs.StyleFileName); got != want {
+	portableBin := filepath.Join("/opt/ArcMD-portable", "arcmd")
+	if got, want := portableStylePathForExecutable(portableBin), filepath.Join("/opt/ArcMD-portable", prefs.StyleFileName); got != want {
 		t.Fatalf("portable style path = %q; want %q", got, want)
 	}
 
+	// Reject macOS .app bundles, system bin dirs, temp dirs, and ~/Downloads.
+	for _, unsafeBin := range []string{
+		"/Applications/ArcMD.app/Contents/MacOS/ArcMD",
+		"/usr/local/bin/arcmd",
+		"/usr/bin/arcmd",
+		filepath.Join(os.TempDir(), "arcmd-test-bin"),
+	} {
+		if got := portableStylePathForExecutable(unsafeBin); got != "" {
+			t.Fatalf("portableStylePathForExecutable(%q) = %q; want empty", unsafeBin, got)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dlBin := filepath.Join(home, "Downloads", "arcmd")
+		if got := portableStylePathForExecutable(dlBin); got != "" {
+			t.Fatalf("portableStylePathForExecutable(%q) = %q; want empty", dlBin, got)
+		}
+	}
+
 	t.Setenv("ARCMD_HOME", t.TempDir())
-	if got := discoverPortableStylePath(); got != "" {
+	if got := portableStylePathForExecutable(portableBin); got != "" {
 		t.Fatalf("portable style path = %q with an isolated home; want empty", got)
+	}
+	if got := discoverPortableStylePath(); got != "" {
+		t.Fatalf("discoverPortableStylePath() = %q with ARCMD_HOME set; want empty", got)
 	}
 }
 

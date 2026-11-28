@@ -372,7 +372,7 @@ func exportHTMLRuns(runs []document.Run, preserveNoMath bool) string {
 }
 
 func formatHTMLImgTag(img document.InlineImage) string {
-	if !safeHTMLURL(img.URL) {
+	if !safeImageURL(img.URL) {
 		return ""
 	}
 	var out strings.Builder
@@ -751,7 +751,7 @@ func applyElementTagStyle(n *xhtml.Node, style document.Style) document.Style {
 		style.Code = true
 		style.Kbd = false
 	case atom.A:
-		if href := attr(n, "href"); href != "" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(href)), "javascript:") {
+		if href := strings.TrimSpace(attr(n, "href")); safeLinkURL(href) {
 			style.Link = href
 		}
 	}

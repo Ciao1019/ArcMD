@@ -166,6 +166,28 @@ func TestErrors(t *testing.T) {
 	}
 }
 
+func TestMaxNestingDepthGuard(t *testing.T) {
+	// Reasonable nested \boxed expressions continue to lay out cleanly.
+	okSrc := strings.Repeat(`\boxed{`, 8) + "x" + strings.Repeat("}", 8)
+	if box, err := Layout(okSrc, 20, fixed); err != nil || kinds(box, "frame") != 8 {
+		t.Fatalf("8-deep boxed failed: err=%v frames=%d", err, kinds(box, "frame"))
+	}
+
+	// Pathological nesting must fail fast without stack overflow or O(N^2) op blowup.
+	cases := []string{
+		strings.Repeat(`\boxed{`, 200) + "x" + strings.Repeat("}", 200),
+		strings.Repeat(`\boxed`, 200) + " x",
+		strings.Repeat("{", 200) + "x" + strings.Repeat("}", 200),
+		strings.Repeat(`\left(`, 120) + "x" + strings.Repeat(`\right)`, 120),
+		strings.Repeat(`\frac{1}{`, 120) + "x" + strings.Repeat("}", 120),
+	}
+	for _, src := range cases {
+		if _, err := Layout(src, 20, fixed); err == nil || !strings.Contains(err.Error(), "nested too deeply") {
+			t.Fatalf("expected nesting depth error, got err=%v", err)
+		}
+	}
+}
+
 func TestIntegralLimitsClearUpperHook(t *testing.T) {
 	b := layout(t, `\int_0^\infty x^2 e^{-x} dx = 2`)
 	var upper, lower Op

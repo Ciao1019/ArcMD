@@ -156,10 +156,17 @@ func (e *Editor) openLinkSpan(span linkSpan) {
 	e.SetSelection(r.Start, r.End)
 	if img, at, ok := e.singleInlineImageInRange(r); ok {
 		e.linkImage, e.linkImageAt = true, at
+		e.linkHasInlineImage = false
 		e.linkText = img.Alt
 	} else {
 		e.linkImage, e.linkImageAt = false, 0
-		e.linkText = e.slice(r.Start, r.End)
+		orig := e.slice(r.Start, r.End)
+		e.linkHasInlineImage = strings.Contains(orig, document.InlineImagePlaceholder)
+		if e.linkHasInlineImage {
+			e.linkText = ""
+		} else {
+			e.linkText = orig
+		}
 	}
 	e.linkURL = span.url
 	e.linkOpen, e.linkOpened = true, false
@@ -183,10 +190,17 @@ func (e *Editor) EditLink() {
 	e.SetSelection(r.Start, r.End)
 	if img, at, ok := e.singleInlineImageInRange(r); ok {
 		e.linkImage, e.linkImageAt = true, at
+		e.linkHasInlineImage = false
 		e.linkText = img.Alt
 	} else {
 		e.linkImage, e.linkImageAt = false, 0
-		e.linkText = e.slice(r.Start, r.End)
+		orig := e.slice(r.Start, r.End)
+		e.linkHasInlineImage = strings.Contains(orig, document.InlineImagePlaceholder)
+		if e.linkHasInlineImage {
+			e.linkText = ""
+		} else {
+			e.linkText = orig
+		}
 	}
 	e.linkURL = e.CurrentStyle().Link
 	e.linkOpen, e.linkOpened = true, false
@@ -201,7 +215,7 @@ func (e *Editor) applyLink(remove bool) {
 	r := e.linkRange
 	label := e.linkText
 	address := strings.TrimSpace(e.linkURL)
-	if !e.linkImage && label == "" {
+	if !e.linkImage && !e.linkHasInlineImage && label == "" {
 		label = address
 	}
 	if !remove && !safeHTMLURL(address) {
@@ -216,7 +230,7 @@ func (e *Editor) applyLink(remove bool) {
 		} else {
 			e.SetSelection(r.Start, r.End)
 			orig := e.slice(r.Start, r.End)
-			if !remove && label != orig && !strings.Contains(orig, document.InlineImagePlaceholder) {
+			if !remove && !e.linkHasInlineImage && label != orig && !strings.Contains(orig, document.InlineImagePlaceholder) {
 				e.Engine.Replace(r.Start, r.End, label)
 				e.SetSelection(r.Start, r.Start+document.Len(label))
 			}
@@ -261,11 +275,15 @@ func (e *Editor) linkPopover(c *ui.Context, surface ui.Element) {
 		}
 		ui.Column(c.Key("edit-link")).Absolute().Left(x).Top(y).Width(pw).Padding(12).Gap(8).Radius(10).Background(e.page.Popover).Border(1, e.page.MathBorder).Shadow(0, 6, 20, 0, e.page.MathShadow).Transition(popoverTransition).Children(func() {
 			ui.Text(c, i18n.T("编辑链接")).FontSize(13).FontWeight(600)
-			labelTitle := i18n.T("链接文字")
-			if e.linkImage {
-				labelTitle = i18n.T("图片说明")
+			labelSubmitted := false
+			if !e.linkHasInlineImage {
+				labelTitle := i18n.T("链接文字")
+				if e.linkImage {
+					labelTitle = i18n.T("图片说明")
+				}
+				label := ui.TextInput(c.Key("link-label"), &e.linkText).Label(labelTitle).Placeholder(labelTitle)
+				labelSubmitted = label.Submitted()
 			}
-			label := ui.TextInput(c.Key("link-label"), &e.linkText).Label(labelTitle).Placeholder(labelTitle)
 			address := ui.TextInput(c.Key("link-address"), &e.linkURL).Label(i18n.T("链接地址")).Placeholder("https://")
 			if !e.linkOpened {
 				address.Focus()
@@ -274,10 +292,10 @@ func (e *Editor) linkPopover(c *ui.Context, surface ui.Element) {
 			if !safeHTMLURL(e.linkURL) {
 				ui.Text(c, i18n.T("请输入有效的链接地址")).FontSize(12).TextColor(c.Theme().Danger)
 			}
-			apply := label.Submitted() || address.Submitted()
+			apply := labelSubmitted || address.Submitted()
 			ui.Row(c).Gap(6).Children(func() {
-				if ui.Button(c, i18n.T("打开链接")).Disabled(e.linkURL == "" || !safeHTMLURL(e.linkURL)).Clicked() && e.openLink != nil {
-					e.openLink(e.linkURL)
+				if ui.Button(c, i18n.T("打开链接")).Disabled(!safeLinkURL(e.linkURL)).Clicked() && e.openLink != nil {
+					e.openLink(strings.TrimSpace(e.linkURL))
 				}
 				if ui.Button(c, i18n.T("移除链接")).Clicked() {
 					e.applyLink(true)

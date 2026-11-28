@@ -725,7 +725,7 @@ func (l *textLayout) Caret(at int) ui.Rect { return l.TextLayout.Caret(l.visual(
 func (l *textLayout) IndexAt(p ui.Point) int {
 	for _, o := range l.objects {
 		if p.X >= o.rect.X && p.X <= o.rect.X+o.rect.W && p.Y >= o.rect.Y && p.Y <= o.rect.Y+o.rect.H {
-			if o.script {
+			if o.script || o.hasImage {
 				if p.X < o.rect.X+o.rect.W/2 {
 					return o.start
 				}
@@ -799,8 +799,8 @@ func (e *Editor) paintInline(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 					}
 				}
 				p.Image(bitmap, dst, ui.Contain)
-			} else if o.imageRes.SVG != nil {
-				p.Image(o.imageRes.SVG.WithDark(t.Dark), dst, ui.Contain)
+			} else if svg := o.imageRes.SVGFor(t.Dark); svg != nil {
+				p.Image(svg, dst, ui.Contain)
 			} else if o.imageRes.Loading {
 				rad := min(float32(4), min(dst.W, dst.H)/4)
 				p.Fill(dst, e.page.CodeFill, rad)

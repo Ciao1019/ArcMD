@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Ciao1019/ArcMD/internal/editor"
@@ -21,9 +22,11 @@ type styleConfigState struct {
 	loaded       bool
 	lastCheck    time.Time
 	portablePath string
+	loadedPath   string
 	modNano      int64
 	size         int64
 	exists       bool
+	errPath      string
 	errModNano   int64
 	errSize      int64
 	active       *prefs.StyleConfig
@@ -75,6 +78,64 @@ func paperPresetSwatchColors(id string, dark bool) (paper, ink, border ui.Color)
 	return th.Background, th.Text, th.Border
 }
 
+func dirWithin(base, target string) bool {
+	if base == "" || target == "" {
+		return false
+	}
+	baseClean := filepath.Clean(base)
+	targetClean := filepath.Clean(target)
+	rel, err := filepath.Rel(baseClean, targetClean)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func isUnsafePortableDir(dir string) bool {
+	clean := filepath.Clean(dir)
+	slash := strings.ToLower(filepath.ToSlash(clean))
+	if strings.Contains(slash, ".app/contents/macos") {
+		return true
+	}
+	switch slash {
+	case "/", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/opt/homebrew/bin", "/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp":
+		return true
+	}
+	if tmp := os.TempDir(); tmp != "" {
+		if dirWithin(tmp, clean) {
+			return true
+		}
+		if evalTmp, err := filepath.EvalSymlinks(tmp); err == nil && dirWithin(evalTmp, clean) {
+			return true
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		downloads := filepath.Join(home, "Downloads")
+		if filepath.Clean(downloads) == clean {
+			return true
+		}
+	}
+	return false
+}
+
+func portableStylePathForExecutable(executable string) string {
+	if os.Getenv("ARCMD_HOME") != "" || executable == "" {
+		return ""
+	}
+	info, err := os.Lstat(executable)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	dir := filepath.Dir(executable)
+	if isUnsafePortableDir(dir) {
+		return ""
+	}
+	if evalDir, err := filepath.EvalSymlinks(dir); err == nil && isUnsafePortableDir(evalDir) {
+		return ""
+	}
+	return filepath.Join(dir, prefs.StyleFileName)
+}
+
 func discoverPortableStylePath() string {
 	if os.Getenv("ARCMD_HOME") != "" {
 		return ""
@@ -83,12 +144,22 @@ func discoverPortableStylePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(filepath.Dir(executable), prefs.StyleFileName)
+	return portableStylePathForExecutable(executable)
+}
+
+func discoverPortableStylePathFor(cfg Config) string {
+	if os.Getenv("ARCMD_HOME") != "" {
+		return ""
+	}
+	if def, err := DefaultConfig(); err == nil && cfg.ConfigDir != "" && filepath.Clean(cfg.ConfigDir) != filepath.Clean(def.ConfigDir) {
+		return ""
+	}
+	return discoverPortableStylePath()
 }
 
 func (a *App) styleConfigPath() string {
 	if portable := a.styleCfg.portablePath; portable != "" {
-		if info, err := os.Stat(portable); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Lstat(portable); err == nil && info.Mode().IsRegular() {
 			return portable
 		}
 	}
@@ -174,30 +245,44 @@ func (a *App) checkStyleConfig(force bool) bool {
 	if p == "" {
 		return true
 	}
-	info, err := os.Stat(p)
-	if errors.Is(err, os.ErrNotExist) {
+	pathChanged := p != a.styleCfg.loadedPath
+	info, err := os.Lstat(p)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
 		a.styleCfg.active = nil
 		a.styleCfg.mergedValid = false
+		a.styleCfg.loadedPath = ""
 		a.styleCfg.exists = false
 		a.styleCfg.modNano, a.styleCfg.size = 0, 0
+		a.styleCfg.errPath = ""
 		a.styleCfg.errModNano, a.styleCfg.errSize = 0, 0
 		return true
 	}
 	if err != nil {
+		if pathChanged {
+			a.styleCfg.active = nil
+			a.styleCfg.mergedValid = false
+			a.styleCfg.loadedPath = p
+		}
 		if force {
 			a.notify("读取样式配置文件失败。%v", err)
 		}
 		return false
 	}
 	modNano, size := info.ModTime().UnixNano(), info.Size()
-	if !force && a.styleCfg.exists && modNano == a.styleCfg.modNano && size == a.styleCfg.size {
+	if !force && !pathChanged && a.styleCfg.exists && modNano == a.styleCfg.modNano && size == a.styleCfg.size {
 		return a.styleCfg.errModNano == 0 && a.styleCfg.errSize == 0
 	}
 	cfg, loadErr := prefs.LoadStyleFile(p)
+	a.styleCfg.loadedPath = p
 	a.styleCfg.exists = true
 	a.styleCfg.modNano, a.styleCfg.size = modNano, size
 	if loadErr != nil {
-		if force || a.styleCfg.errModNano != modNano || a.styleCfg.errSize != size {
+		if pathChanged {
+			a.styleCfg.active = nil
+			a.styleCfg.mergedValid = false
+		}
+		if force || a.styleCfg.errPath != p || a.styleCfg.errModNano != modNano || a.styleCfg.errSize != size {
+			a.styleCfg.errPath = p
 			a.styleCfg.errModNano, a.styleCfg.errSize = modNano, size
 			a.notify("样式配置文件 style.json 有误：%v", loadErr)
 		}
@@ -205,6 +290,7 @@ func (a *App) checkStyleConfig(force bool) bool {
 	}
 	a.styleCfg.active = cfg
 	a.styleCfg.mergedValid = false
+	a.styleCfg.errPath = ""
 	a.styleCfg.errModNano, a.styleCfg.errSize = 0, 0
 	return true
 }
@@ -229,6 +315,17 @@ func (a *App) openStyleConfigFile() {
 	p := a.styleConfigPath()
 	if p == "" {
 		return
+	}
+	if p == a.styleCfg.portablePath {
+		if f, err := os.OpenFile(p, os.O_WRONLY, 0); err != nil {
+			userPath := a.userStyleConfigPath()
+			if userPath != "" && userPath != p {
+				a.notify("可执行文件目录中的 style.json 为只读，已改为打开用户配置目录中的 style.json。")
+				p = userPath
+			}
+		} else {
+			_ = f.Close()
+		}
 	}
 	if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
 		if mkErr := os.MkdirAll(filepath.Dir(p), 0o755); mkErr != nil {

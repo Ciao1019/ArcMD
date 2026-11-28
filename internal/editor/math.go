@@ -191,14 +191,15 @@ func (e *Editor) hasTexBlockFill() bool {
 	return !e.printing && e.page.TexBlockFill.A != 0
 }
 
-func (e *Editor) paintTexBackgrounds(p *ui.Painter, bounds ui.Rect, r row) {
-	if r.mathHidden && r.math != nil && e.hasTexBlockFill() {
-		frame := ui.Rect{X: bounds.X + r.rect.X, Y: bounds.Y + r.rect.Y + mathMargin/2, W: r.rect.W, H: r.rect.H - mathMargin}
-		p.Fill(frame, e.page.TexBlockFill, 8)
-		p.Stroke(frame, e.page.MathBorder, 8, 1)
-	}
-	if e.printing || e.page.InlineTexFill.A == 0 {
+func (e *Editor) paintInlineTexBackgrounds(p *ui.Painter, bounds ui.Rect, r row) {
+	if e.printing || e.page.InlineTexFill.A == 0 || r.layout == nil {
 		return
+	}
+	fill := e.page.InlineTexFill
+	if !e.reduceMotion && e.motion.foldFade != nil {
+		if op, ok := e.motion.foldFade[r.leaf.Owner]; ok && op < 1 {
+			fill = fill.Alpha(float32(fill.A) / 255 * op)
+		}
 	}
 	for _, obj := range r.layout.objects {
 		if obj.box == nil || obj.editing || obj.rect.W <= 0 || obj.rect.H <= 0 {
@@ -208,7 +209,7 @@ func (e *Editor) paintTexBackgrounds(p *ui.Painter, bounds ui.Rect, r row) {
 		frame.X += bounds.X + r.x
 		frame.Y += bounds.Y + r.y - 1
 		frame.H += 2
-		p.Fill(frame, e.page.InlineTexFill, 4)
+		p.Fill(frame, fill, 4)
 	}
 }
 

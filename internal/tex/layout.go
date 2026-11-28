@@ -435,6 +435,7 @@ func (l *layouter) limits(base Box, sup, sub *Box, size float32) Box {
 }
 
 func boxed(inner Box, size float32) Box {
+	size = max(0, size)
 	stroke := max(1, size*0.04)
 	inset := size*0.3 + stroke
 	frame := Box{W: inner.W + 2*inset, Ascent: inner.Ascent + inset, Descent: inner.Descent + inset}

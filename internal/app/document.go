@@ -8,7 +8,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io/fs"
-	"math"
 	neturl "net/url"
 	"os"
 	"path"
@@ -1847,13 +1846,7 @@ func decodeImageBytes(data []byte, local bool) editor.ImageResource {
 	}
 	if looksLikeSVG(data) {
 		if svg, err := ui.ParseSVG(data); err == nil {
-			sw, sh := svg.Size()
-			return editor.ImageResource{
-				SVG:    svg,
-				Width:  int(math.Ceil(float64(sw))),
-				Height: int(math.Ceil(float64(sh))),
-				Local:  local,
-			}
+			return editor.SVGImageResource(svg, local)
 		}
 	}
 	return editor.ImageResource{Problem: editor.ImageUnsupported, Local: local}
@@ -1872,8 +1865,7 @@ func decodeLocalImageThumb(full string) editor.ImageResource {
 	if err != nil {
 		if looksLikeSVG(data) {
 			if svg, svgErr := ui.ParseSVG(data); svgErr == nil {
-				sw, sh := svg.Size()
-				return editor.ImageResource{SVG: svg, Width: int(math.Ceil(float64(sw))), Height: int(math.Ceil(float64(sh))), Local: true}
+				return editor.SVGImageResource(svg, true)
 			}
 		}
 		return editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}

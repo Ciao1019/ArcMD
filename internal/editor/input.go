@@ -123,8 +123,8 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			return false
 		}
 		if ev.Mods&ui.Cmd != 0 {
-			if span, ok := e.linkAtPoint(ev.X, ev.Y, false); ok && open != nil {
-				open(span.url)
+			if span, ok := e.linkAtPoint(ev.X, ev.Y, false); ok && open != nil && safeLinkURL(span.url) {
+				open(strings.TrimSpace(span.url))
 				return true
 			}
 			if name := e.wikiAtPoint(ev.X, ev.Y); name != "" && e.openWiki != nil {
@@ -215,8 +215,8 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			e.pendingLink = linkSpan{}
 			if e.Anchor == e.Caret {
 				if hit, ok := e.linkAtPoint(ev.X, ev.Y, !e.directLinks); ok && hit == span {
-					if e.ReadOnly && (e.directLinks || e.isLinkedInlineImagePoint(ev.X, ev.Y)) && open != nil {
-						open(span.url)
+					if e.ReadOnly && (e.directLinks || e.isLinkedInlineImagePoint(ev.X, ev.Y)) && open != nil && safeLinkURL(span.url) {
+						open(strings.TrimSpace(span.url))
 					} else if !e.ReadOnly {
 						e.openLinkSpan(span)
 					}

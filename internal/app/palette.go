@@ -536,7 +536,7 @@ func (a *App) actions() []action {
 				}
 			}
 			if mdzDoc.mdz.hasActivePage() {
-				if ed := mdzDoc.mdz.editors[mdzDoc.mdz.currentPage]; ed != nil {
+				if ed := mdzDoc.mdz.activeEditor(); ed != nil {
 					cmd(i18n.T("复制为纯文本"), a.keyLabel("copy-plain"), func() { ed.CopyPlainText(); ed.RequestFocus = true })
 				}
 			}

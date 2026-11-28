@@ -409,7 +409,7 @@ func TestBlockBackgroundListSuccessiveSavesAndChildIndent(t *testing.T) {
 		{"bullet", "y", "green", 1, 0},
 		{"bullet", "z", "purple", 0, 0},
 		{"numbered", "一", "light-yellow", 0, 0},
-		{"numbered", "二", "", 0, 2},
+		{"numbered", "二", "", 0, 0},
 	}
 	for i, w := range want {
 		b := reloaded.Blocks[i]

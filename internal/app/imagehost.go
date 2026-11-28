@@ -237,23 +237,20 @@ func (a *App) uploadCurrentDocumentImages(p *plugin.Installed) {
 	}
 	var items []localItem
 	seen := map[string]bool{}
-	for _, leaf := range d.ed.Doc.Leaves() {
-		if leaf.Block.Kind != "image" {
-			continue
-		}
-		u := strings.TrimSpace(leaf.Block.URL)
-		if u == "" || seen[u] || isRemoteImageURL(u) || strings.HasPrefix(u, "data:") ||
+	addCandidate := func(raw string) {
+		u := strings.TrimSpace(raw)
+		if u == "" || seen[u] || isRemoteImageURL(u) || strings.HasPrefix(strings.ToLower(u), "data:") ||
 			editor.IsPDFURL(u) || editor.IsBookURL(u) || vault.IsWhiteboard(u) {
-			continue
+			return
 		}
 		seen[u] = true
 		full, rerr := d.localImage(u)
 		if rerr != nil {
-			continue
+			return
 		}
 		data, ferr := os.ReadFile(full)
 		if ferr != nil || len(data) == 0 {
-			continue
+			return
 		}
 		items = append(items, localItem{
 			url:      u,
@@ -261,6 +258,16 @@ func (a *App) uploadCurrentDocumentImages(p *plugin.Installed) {
 			data:     data,
 			name:     filepath.Base(full),
 		})
+	}
+	for _, leaf := range d.ed.Doc.Leaves() {
+		if leaf.Block.Kind == "image" {
+			addCandidate(leaf.Block.URL)
+		}
+		for _, r := range leaf.Block.Runs {
+			if r.IsImage() {
+				addCandidate(r.Image.URL)
+			}
+		}
 	}
 	if len(items) == 0 {
 		msg := i18n.T("当前文档没有需要上传的本地图片。")

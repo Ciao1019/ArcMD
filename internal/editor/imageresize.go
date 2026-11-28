@@ -197,8 +197,8 @@ func (e *Editor) imageCanvas(c *ui.Context, w, h float32) {
 		}
 		if v.bitmap != nil {
 			p.Image(v.bitmap, dst, ui.Contain)
-		} else if v.svg != nil {
-			p.Image(v.svg.WithDark(c.Theme().Dark), dst, ui.Contain)
+		} else if svg := v.svgFor(c.Theme().Dark); svg != nil {
+			p.Image(svg, dst, ui.Contain)
 		}
 	})
 }

@@ -3,7 +3,6 @@ package editor
 import (
 	"fmt"
 	"html"
-	"net/url"
 	"strings"
 
 	"github.com/Ciao1019/ArcMD/internal/document"
@@ -27,16 +26,72 @@ func isSafeLangClass(lang string) bool {
 	return true
 }
 
+func hasURLControlChars(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func extractURIScheme(s string) (string, bool) {
+	if len(s) == 0 {
+		return "", false
+	}
+	c0 := s[0]
+	if !((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z')) {
+		return "", false
+	}
+	i := 1
+	for i < len(s) {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.' {
+			i++
+			continue
+		}
+		if c == ':' {
+			return strings.ToLower(s[:i]), true
+		}
+		return "", false
+	}
+	return "", false
+}
+
 func safeHTMLURL(s string) bool {
-	u, err := url.Parse(strings.TrimSpace(s))
-	if err != nil {
+	trimmed := strings.TrimSpace(s)
+	if hasURLControlChars(trimmed) {
 		return false
 	}
-	switch strings.ToLower(u.Scheme) {
-	case "", "http", "https", "mailto", "file", "tel":
+	if trimmed == "" {
+		return true
+	}
+	scheme, hasScheme := extractURIScheme(trimmed)
+	if !hasScheme {
+		return true
+	}
+	switch scheme {
+	case "http", "https", "mailto", "tel":
 		return true
 	}
 	return false
+}
+
+func safeLinkURL(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	return trimmed != "" && safeHTMLURL(trimmed)
+}
+
+func safeImageURL(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || hasURLControlChars(trimmed) {
+		return false
+	}
+	scheme, hasScheme := extractURIScheme(trimmed)
+	if !hasScheme {
+		return true
+	}
+	return scheme == "http" || scheme == "https"
 }
 
 // ExportHTML supplies semantic clipboard content without depending on a web
@@ -192,7 +247,7 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 				out.WriteString("<hr>")
 				continue
 			case "image":
-				if safeHTMLURL(b.URL) {
+				if safeImageURL(b.URL) {
 					if IsPDFURL(b.URL) {
 						h := float32(480)
 						out.WriteString(`<figure class="arcmd-pdf"><object data="` + html.EscapeString(b.URL) + `" type="application/pdf" width="100%" height="` + fmt.Sprintf("%.0f", h) + `"><a href="` + html.EscapeString(b.URL) + `">` + html.EscapeString(imageName(b.URL)) + `</a></object></figure>`)
@@ -286,7 +341,7 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 				styles = append(styles, fmt.Sprintf("font-weight:%d", theme.Light.Page.HeadingWeight))
 			}
 			var attrParts []string
-			if b.Background != "" && document.AllowsBlockBackground(b.Kind) {
+			if b.Background != "" && document.AllowsBlockBackground(b.Kind) && cellFillHex[b.Background] != "" {
 				if theme != nil {
 					attrParts = append(attrParts, `class="arcmd-bg arcmd-bg-`+b.Background+`"`)
 				} else if hex := cellFillHex[b.Background]; hex != "" {
@@ -362,7 +417,7 @@ func htmlTokenClass(c ui.Color) string {
 }
 
 func blockBgAttrString(bg string, theme *HTMLTheme) string {
-	if bg == "" {
+	if bg == "" || cellFillHex[bg] == "" {
 		return ""
 	}
 	var parts []string

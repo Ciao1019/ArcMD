@@ -157,6 +157,7 @@ type Editor struct {
 	linkText                  string
 	linkImage                 bool
 	linkImageAt               int
+	linkHasInlineImage        bool
 	linkRange                 ui.TextInputRange
 	linkOpened                bool
 	pendingLink               linkSpan
@@ -1135,8 +1136,10 @@ func View(c *ui.Context, e *Editor, o Options) ui.Element {
 				hoveredDirectLink := false
 				if inside {
 					if e.ReadOnly && e.directLinks {
-						_, hoveredDirectLink = e.linkAtPoint(px, py, false)
-					} else if obj, _, ok := e.inlineImageAtPoint(px, py); ok && obj.imageLink != "" {
+						if span, ok := e.linkAtPoint(px, py, false); ok && safeLinkURL(span.url) {
+							hoveredDirectLink = true
+						}
+					} else if obj, _, ok := e.inlineImageAtPoint(px, py); ok && safeLinkURL(obj.imageLink) {
 						hoveredDirectLink = true
 					}
 				}
@@ -1542,8 +1545,8 @@ func (e *Editor) layout(o Options) {
 				hx = fx - 28
 			}
 		}
-		if b.Kind == "heading" && b.Text() != "" {
-			e.outline = append(e.outline, outlineItem{b.ID, b.Text(), b.Level, y, 0})
+		if b.Kind == "heading" && b.VisibleText() != "" {
+			e.outline = append(e.outline, outlineItem{b.ID, b.VisibleText(), b.Level, y, 0})
 		}
 		e.handles = append(e.handles, blockHandle{
 			id:    b.ID,
@@ -2040,7 +2043,7 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		p.Fill(slot, t.Accent.Alpha(0.055), 8)
 		p.StrokeDashed(slot, t.Accent.Alpha(0.65), 8, 1.25)
 	}
-	decSlack := float32(1)
+	decSlack := max(float32(8), 4*e.zoomFactor())
 	if e.motion.moving || plan.active || e.tableDrag.active || e.tableColDrag.active {
 		decSlack = 160
 	}
@@ -2083,6 +2086,25 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 				}
 			case "mermaid":
 				e.paintMermaidDecoration(p, bounds, d, ddx, ddy, t)
+			case "math":
+				if e.hasTexBlockFill() {
+					if ri, ok := e.rowIDs[d.id]; ok {
+						mr := e.indexedRow(ri)
+						if mr.mathHidden && mr.math != nil {
+							fill := e.page.TexBlockFill
+							border := e.page.MathBorder
+							if !e.reduceMotion && e.motion.foldFade != nil {
+								if op, ok := e.motion.foldFade[d.ownerID]; ok && op < 1 {
+									fill = fill.Alpha(float32(fill.A) / 255 * op)
+									border = border.Alpha(float32(border.A) / 255 * op)
+								}
+							}
+							frame := ui.Rect{X: r.X, Y: r.Y + mathMargin/2, W: r.W, H: max(0, mr.rect.H-mathMargin)}
+							p.Fill(frame, fill, 8)
+							p.Stroke(frame, border, 8, 1)
+						}
+					}
+				}
 			case "callout":
 				look := e.page.Callouts[d.tone]
 				if !e.printing && !e.reduceMotion && e.motion.callouts != nil {
@@ -2158,6 +2180,23 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 		}
 	}
 	paintDecorationPass(false)
+	if !e.printing && e.page.InlineTexFill.A != 0 {
+		rowSlack := float32(40)
+		if e.motion.moving || plan.active || e.tableDrag.active || e.tableColDrag.active {
+			rowSlack = 200
+		}
+		for i := range e.visibleRows(rowSlack) {
+			r := *e.indexedRow(i)
+			if r.layout == nil || r.rect.Y+r.rect.H < e.Scroll.Y-rowSlack || r.rect.Y > e.Scroll.Y+e.viewport+rowSlack {
+				continue
+			}
+			if plan.active && e.isDraggedOwner(r.leaf.Owner, plan) {
+				continue
+			}
+			dx, dy := e.visualOffset(r)
+			e.paintInlineTexBackgrounds(p, ui.Rect{X: bounds.X + dx, Y: bounds.Y + dy, W: bounds.W, H: bounds.H}, r)
+		}
+	}
 	e.paintBlockSelection(p, bounds, t)
 	if !e.printing {
 		e.paintHoverControls(p, bounds, t)
@@ -2198,7 +2237,9 @@ func (e *Editor) paint(p *ui.Painter, bounds ui.Rect, t *ui.Theme, caret bool) {
 			e.paintMarker(p, bounds, r, t)
 			paintRowBody := func(scrollX, scrollY float32) {
 				shiftedBounds := ui.Rect{X: bounds.X + dx - scrollX, Y: bounds.Y + dy - scrollY, W: bounds.W, H: bounds.H}
-				e.paintTexBackgrounds(p, shiftedBounds, r)
+				if draggedOnly {
+					e.paintInlineTexBackgrounds(p, shiftedBounds, r)
+				}
 				e.paintKeycaps(p, shiftedBounds, r)
 				if e.focused && len(e.blocks.ids) == 0 && selection.End > r.leaf.Start && selection.Start < r.leaf.End && e.inlineMath.blockID != r.leaf.Block.ID {
 					if r.mathHidden && r.math != nil {

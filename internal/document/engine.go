@@ -792,6 +792,10 @@ func (e *Engine) Paste(fragment *Document) {
 		// A formula remains a block even when it is the only copied item.
 		if len(fragment.Blocks) == 1 && len(fragment.Blocks[0].Children) == 0 && (fragment.Blocks[0].Kind == "paragraph" || isVerbatim(leaf.Block) || leaf.Block.Kind == "cell") {
 			insert := fragment.Blocks[0]
+			if isVerbatim(leaf.Block) && slices.ContainsFunc(insert.Runs, Run.IsImage) {
+				e.replace(a, z, insert.VisibleText())
+				return
+			}
 			replaceWhole := leaf.Block.Kind == "paragraph" && a == leaf.Start && z == leaf.End
 			e.replace(a, z, insert.Text())
 			for _, target := range e.Doc.Leaves() {
@@ -818,7 +822,7 @@ func (e *Engine) Paste(fragment *Document) {
 			return
 		}
 		if leaf.Block.Kind == "cell" {
-			e.replace(a, z, fragment.PlainText())
+			e.replace(a, z, fragment.VisiblePlainText())
 			return
 		}
 		e.replace(a, z, "")

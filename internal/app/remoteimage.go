@@ -81,6 +81,13 @@ func (a *App) cacheRemoteImageBytes(rawURL string, data []byte) (string, error) 
 }
 
 func (a *App) remoteImageResource(d *document, rawURL string) editor.ImageResource {
+	return a.remoteImageResourceWithScheme(d, rawURL, false)
+}
+
+func (a *App) remoteImageResourceWithScheme(d *document, rawURL string, httpsOnly bool) editor.ImageResource {
+	if httpsOnly && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawURL)), "https://") {
+		return editor.ImageResource{Problem: editor.ImageRemote}
+	}
 	if cachePath := a.remoteImageCachePath(rawURL); cachePath != "" {
 		if info, err := os.Stat(cachePath); err == nil && info.Mode().IsRegular() {
 			res := d.imageResourceFrom(cachePath, rawURL, a.asyncPost())
@@ -109,13 +116,35 @@ func (a *App) remoteImageResource(d *document, rawURL string) editor.ImageResour
 	a.remoteImages.loading[rawURL] = true
 	a.remoteImages.mu.Unlock()
 
-	client := a.pluginsUI.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+	baseClient := a.pluginsUI.httpClient
+	if baseClient == nil {
+		baseClient = &http.Client{Timeout: 15 * time.Second}
+	}
+	clientCopy := *baseClient
+	prevCheck := baseClient.CheckRedirect
+	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if req.URL == nil {
+			return errors.New("invalid redirect URL")
+		}
+		scheme := strings.ToLower(req.URL.Scheme)
+		if httpsOnly {
+			if scheme != "https" {
+				return errors.New("disallowed redirect scheme")
+			}
+		} else if scheme != "http" && scheme != "https" {
+			return errors.New("disallowed redirect scheme")
+		}
+		if prevCheck != nil {
+			return prevCheck(req, via)
+		}
+		return nil
 	}
 
 	go func() {
-		fetchErr := a.fetchAndCacheRemoteImage(client, rawURL)
+		fetchErr := a.fetchAndCacheRemoteImageWithScheme(&clientCopy, rawURL, httpsOnly)
 		a.remoteImages.mu.Lock()
 		delete(a.remoteImages.loading, rawURL)
 		if fetchErr != nil {
@@ -152,6 +181,22 @@ func (a *App) remoteImageResource(d *document, rawURL string) editor.ImageResour
 }
 
 func (a *App) fetchAndCacheRemoteImage(client *http.Client, rawURL string) error {
+	return a.fetchAndCacheRemoteImageWithScheme(client, rawURL, false)
+}
+
+func (a *App) fetchAndCacheRemoteImageWithScheme(client *http.Client, rawURL string, httpsOnly bool) error {
+	u, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return errors.New("invalid remote image URL")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if httpsOnly {
+		if scheme != "https" {
+			return errors.New("disallowed remote image scheme")
+		}
+	} else if scheme != "http" && scheme != "https" {
+		return errors.New("disallowed remote image scheme")
+	}
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
@@ -174,13 +219,19 @@ func (a *App) fetchAndCacheRemoteImage(client *http.Client, rawURL string) error
 	if len(data) > maxRemoteImageBytes {
 		return errors.New("remote image exceeds size limit")
 	}
-	if _, err := ui.DecodeBitmap(data); err != nil {
+	if bmp, err := ui.DecodeBitmap(data); err != nil {
 		if !looksLikeSVG(data) {
 			return err
 		}
-		if _, svgErr := ui.ParseSVG(data); svgErr != nil {
+		svg, svgErr := ui.ParseSVG(data)
+		if svgErr != nil {
 			return err
 		}
+		if !editor.SVGImageResource(svg, false).HasValidSVG() {
+			return errors.New("invalid SVG dimensions")
+		}
+	} else if w, h := bmp.Size(); w <= 0 || h <= 0 {
+		return errors.New("invalid bitmap dimensions")
 	}
 	_, err = a.cacheRemoteImageBytes(rawURL, data)
 	return err

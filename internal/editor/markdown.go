@@ -149,9 +149,9 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 				if node.Kind == parser.Heading {
 					b.Kind, b.Level = "heading", node.Level
 				}
-				if len(in) > 0 && in[0].Kind == parser.Image && in[0].Next == len(in) {
+				if len(in) > 0 && in[0].Kind == parser.Image && in[0].Next == len(in) && validImportedImageSrc(in[0].Dest) {
 					alt, width := parseMarkdownImageAlt(parser.PlainText(in[1:]))
-					b.Kind, b.URL = "image", in[0].Dest
+					b.Kind, b.URL = "image", strings.TrimSpace(in[0].Dest)
 					b.ImageWidth = width
 					b.Runs = []document.Run{{Text: alt}}
 					b.Comments = nil
@@ -389,7 +389,9 @@ func buildStructuredBlocks(blocks []*document.Block, spans []rawSpan, text strin
 	blocks = importDatabaseViews(blocks, spanStart, spanEnd)
 	blocks = importColumns(blocks, spanStart, spanEnd, explicitLeft)
 	blocks = importDetails(blocks, spanStart, spanEnd)
-	blocks = importAlignedWrappers(blocks, spanStart, spanEnd, explicitLeft)
+	wrapped := make(map[*document.Block]bool)
+	blocks = importAlignedWrappers(blocks, spanStart, spanEnd, explicitLeft, wrapped)
+	normalizeWrappedNumberedStarts(blocks, wrapped)
 
 	if forSearch {
 		return blocks, nil
@@ -791,13 +793,13 @@ func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline
 						blocks = append(blocks, img)
 						continue
 					}
-					if len(cIn) > 0 && cIn[0].Kind == parser.Image && cIn[0].Next == len(cIn) {
+					if len(cIn) > 0 && cIn[0].Kind == parser.Image && cIn[0].Next == len(cIn) && validImportedImageSrc(cIn[0].Dest) {
 						alt, width := parseMarkdownImageAlt(parser.PlainText(cIn[1:]))
 						blocks = append(blocks, &document.Block{
 							ID:         nextID(),
 							Kind:       "image",
 							Indent:     indent,
-							URL:        cIn[0].Dest,
+							URL:        strings.TrimSpace(cIn[0].Dest),
 							ImageWidth: width,
 							Runs:       []document.Run{{Text: alt}},
 						})
@@ -1202,13 +1204,15 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 		align, explicit := parseBlockAlignExplicit(el)
 		ind, hasInd := parseBlockIndent(el)
 		bg := parseBlockBackground(el)
-		if img := singleChildImg(el); img != nil && el.DataAtom == atom.P {
-			if b, ok := imgNodeToBlock(img, align); ok {
-				b.Indent = min(12, baseIndent+ind)
-				if explicit && align == "" && explicitLeft != nil {
-					explicitLeft[b] = true
+		if bg == "" && el.DataAtom == atom.P {
+			if img := singleChildImg(el); img != nil {
+				if b, ok := imgNodeToBlock(img, align); ok {
+					b.Indent = min(12, baseIndent+ind)
+					if explicit && align == "" && explicitLeft != nil {
+						explicitLeft[b] = true
+					}
+					return []*document.Block{b}, true
 				}
-				return []*document.Block{b}, true
 			}
 		}
 		if !explicit && !hasInd && bg == "" {
@@ -1240,13 +1244,15 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 }
 
 func importAlignedHTMLContainer(el *xhtml.Node, align, bg string, baseIndent int, explicitLeft map[*document.Block]bool) ([]*document.Block, bool) {
-	if img := singleChildImg(el); img != nil {
-		if b, ok := imgNodeToBlock(img, align); ok {
-			b.Indent = baseIndent
-			if align == "" && explicitLeft != nil {
-				explicitLeft[b] = true
+	if bg == "" {
+		if img := singleChildImg(el); img != nil {
+			if b, ok := imgNodeToBlock(img, align); ok {
+				b.Indent = baseIndent
+				if align == "" && explicitLeft != nil {
+					explicitLeft[b] = true
+				}
+				return []*document.Block{b}, true
 			}
-			return []*document.Block{b}, true
 		}
 	}
 	if !hasBlockElementChild(el) {
@@ -1315,7 +1321,7 @@ func importAlignedHTMLContainer(el *xhtml.Node, align, bg string, baseIndent int
 				if hasUnsupportedInlineMedia(c) {
 					return nil, false
 				}
-				if len(inlineBuf) > 0 || hasAdjacentInlineSibling(c.NextSibling) {
+				if bg != "" || len(inlineBuf) > 0 || hasAdjacentInlineSibling(c.NextSibling) {
 					inlineBuf = append(inlineBuf, c)
 					continue
 				}
@@ -1349,7 +1355,7 @@ func importAlignedHTMLContainer(el *xhtml.Node, align, bg string, baseIndent int
 				if childBg == "" {
 					childBg = bg
 				}
-				if c.DataAtom == atom.P {
+				if c.DataAtom == atom.P && childBg == "" {
 					if img := singleChildImg(c); img != nil {
 						if b, ok := imgNodeToBlock(img, childAlign); ok {
 							b.Indent = min(12, baseIndent+ind)
@@ -2135,7 +2141,9 @@ func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, har
 			case parser.Strikethrough:
 				next.Strike = true
 			case parser.Link:
-				next.Link = node.Dest
+				if safeLinkURL(node.Dest) {
+					next.Link = strings.TrimSpace(node.Dest)
+				}
 			case parser.Code:
 				if !next.Kbd {
 					next.Code = true
@@ -2603,11 +2611,8 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		if !b.Folded {
 			openAttrs = append(openAttrs, "open")
 		}
-		if b.Background != "" {
-			if hex := cellFillHex[b.Background]; hex != "" {
-				openAttrs = append(openAttrs, `style="background-color:`+hex+`"`)
-			}
-			openAttrs = append(openAttrs, `data-bg="`+b.Background+`"`)
+		if b.Background != "" && cellFillHex[b.Background] != "" {
+			openAttrs = append(openAttrs, `style="background-color:`+cellFillHex[b.Background]+`"`, `data-bg="`+b.Background+`"`)
 		}
 		open := "<details>"
 		if len(openAttrs) > 0 {
@@ -2745,11 +2750,8 @@ func formatBlockWrapperOpen(align string, indent int, bg string) string {
 	if align != "" {
 		attrs = append(attrs, `align="`+align+`"`)
 	}
-	if bg != "" {
-		if hex := cellFillHex[bg]; hex != "" {
-			attrs = append(attrs, `style="background-color:`+hex+`"`)
-		}
-		attrs = append(attrs, `data-bg="`+bg+`"`)
+	if bg != "" && cellFillHex[bg] != "" {
+		attrs = append(attrs, `style="background-color:`+cellFillHex[bg]+`"`, `data-bg="`+bg+`"`)
 	}
 	if indent > 0 {
 		attrs = append(attrs, fmt.Sprintf(`data-indent="%d"`, indent))
@@ -2769,10 +2771,9 @@ func formatAlignedBlockHTML(tag, align string, indent int, bg, inner string) str
 	if indent > 0 {
 		styles = append(styles, fmt.Sprintf("margin-left:%dpx", indent*24))
 	}
-	if bg != "" {
-		if hex := cellFillHex[bg]; hex != "" {
-			styles = append(styles, "background-color:"+hex)
-		}
+	hasValidBg := bg != "" && cellFillHex[bg] != ""
+	if hasValidBg {
+		styles = append(styles, "background-color:"+cellFillHex[bg])
 	}
 	if len(styles) > 0 {
 		attrs = append(attrs, `style="`+strings.Join(styles, ";")+`"`)
@@ -2780,7 +2781,7 @@ func formatAlignedBlockHTML(tag, align string, indent int, bg, inner string) str
 	if indent > 0 {
 		attrs = append(attrs, fmt.Sprintf(`data-indent="%d"`, indent))
 	}
-	if bg != "" {
+	if hasValidBg {
 		attrs = append(attrs, `data-bg="`+bg+`"`)
 	}
 	if len(attrs) == 0 {
@@ -2797,6 +2798,9 @@ func formatMarkdownDest(dest string) string {
 }
 
 func exportImageMarkdown(b *document.Block, align string) string {
+	if !safeImageURL(b.URL) {
+		return exportRuns(b.Runs)
+	}
 	if b.ImageWidth == 0 && b.ImageHeight == 0 && align == "" && b.Indent == 0 {
 		return "![" + exportRuns(b.Runs) + "](" + formatMarkdownDest(b.URL) + ")"
 	}
@@ -2913,11 +2917,8 @@ func exportRichHTMLTable(b *document.Block) string {
 			if a := normCellAlign(cell.Align); a != "" {
 				attrs = append(attrs, `align="`+a+`"`)
 			}
-			if cell.Background != "" {
-				if hex := cellFillHex[cell.Background]; hex != "" {
-					attrs = append(attrs, `style="background-color:`+hex+`"`)
-				}
-				attrs = append(attrs, `data-bg="`+cell.Background+`"`)
+			if cell.Background != "" && cellFillHex[cell.Background] != "" {
+				attrs = append(attrs, `style="background-color:`+cellFillHex[cell.Background]+`"`, `data-bg="`+cell.Background+`"`)
 			}
 			if len(attrs) > 0 {
 				out.WriteString("<" + tag + " " + strings.Join(attrs, " ") + ">")
@@ -3122,10 +3123,12 @@ func renderMarkdownRuns(runs []document.Run, before, after rune, inKbd bool) str
 					break
 				}
 			}
-			if hasSizedImg && safeHTMLURL(val) {
+			if !safeLinkURL(val) {
+				chunk = inner
+			} else if hasSizedImg {
 				chunk = `<a href="` + html.EscapeString(val) + `">` + inner + "</a>"
 			} else {
-				chunk = fmt.Sprintf("[%s](%s)", inner, val)
+				chunk = fmt.Sprintf("[%s](%s)", inner, formatMarkdownDest(val))
 			}
 		case "kbd":
 			chunk = "<kbd>" + inner + "</kbd>"
@@ -3170,6 +3173,9 @@ func renderMarkdownRuns(runs []document.Run, before, after rune, inKbd bool) str
 
 func formatMarkdownLeafRun(run document.Run, skipWiki bool) string {
 	if run.IsImage() {
+		if !safeImageURL(run.Image.URL) {
+			return escapePlainSegment(run.Image.Alt, skipWiki)
+		}
 		if run.Image.Width > 0 || run.Image.Height > 0 {
 			return formatHTMLImgTag(run.Image)
 		}
@@ -3512,7 +3518,7 @@ func parseAlignedWrapperOpen(raw string) (align, bg string, indent int, closeTag
 	return "", "", 0, "", false
 }
 
-func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int, explicitLeft map[*document.Block]bool) []*document.Block {
+func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int, explicitLeft, wrapped map[*document.Block]bool) []*document.Block {
 	var out []*document.Block
 	for i := 0; i < len(blocks); i++ {
 		b := blocks[i]
@@ -3553,6 +3559,9 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 					}
 					if valid {
 						for _, child := range inner {
+							if wrapped != nil {
+								wrapped[child] = true
+							}
 							if align != "" && child.Align == "" && !explicitLeft[child] && child.Kind != "table" && child.Kind != "columns" && child.Kind != "raw" && child.Kind != "code" && child.Kind != "math" && child.Kind != "rule" {
 								child.Align = align
 							}
@@ -3592,6 +3601,43 @@ func importAlignedWrappers(blocks []*document.Block, spanStart, spanEnd map[*doc
 		out = append(out, b)
 	}
 	return out
+}
+
+// normalizeWrappedNumberedStarts clears redundant explicit Start numbers on
+// ordered list items that were split into separate CommonMark lists solely
+// because an aligned/background <div> wrapper interrupted the list run.
+func normalizeWrappedNumberedStarts(blocks []*document.Block, wrapped map[*document.Block]bool) {
+	if len(wrapped) == 0 {
+		return
+	}
+	for i, b := range blocks {
+		if b == nil || b.Kind != "numbered" || b.Start <= 1 {
+			continue
+		}
+		prevNum, adj := document.PreviousListNumber(blocks, i)
+		if !adj || prevNum <= 0 || b.Start != prevNum+1 {
+			continue
+		}
+		splitByWrapper := wrapped[b]
+		if !splitByWrapper {
+			for k := i - 1; k >= 0; k-- {
+				bk := blocks[k]
+				if bk == nil {
+					continue
+				}
+				if wrapped[bk] {
+					splitByWrapper = true
+					break
+				}
+				if bk.Kind == "numbered" && bk.Indent == b.Indent {
+					break
+				}
+			}
+		}
+		if splitByWrapper {
+			b.Start = 0
+		}
+	}
 }
 
 func importColumns(blocks []*document.Block, spanStart, spanEnd map[*document.Block]int, explicitLeft map[*document.Block]bool) []*document.Block {
@@ -3685,7 +3731,9 @@ func parseColumnsGroup(blocks []*document.Block, start int, firstColOpened bool,
 
 	finishCol := func() {
 		inner := importDetails(cur, spanStart, spanEnd)
-		inner = importAlignedWrappers(inner, spanStart, spanEnd, explicitLeft)
+		colWrapped := make(map[*document.Block]bool)
+		inner = importAlignedWrappers(inner, spanStart, spanEnd, explicitLeft, colWrapped)
+		normalizeWrappedNumberedStarts(inner, colWrapped)
 		if len(inner) == 0 {
 			inner = []*document.Block{document.NewBlock("paragraph", "")}
 		}

@@ -24,6 +24,40 @@ const (
 	ImageRemote
 )
 
+const maxSVGDimension = 16384
+
+func validSVGDimensions(w, h float32) (float32, float32, bool) {
+	if !(w > 0 && h > 0) || math.IsNaN(float64(w)) || math.IsNaN(float64(h)) || math.IsInf(float64(w), 0) || math.IsInf(float64(h), 0) {
+		return 0, 0, false
+	}
+	if w > maxSVGDimension || h > maxSVGDimension {
+		scale := float64(maxSVGDimension) / max(float64(w), float64(h))
+		w = max(1, float32(float64(w)*scale))
+		h = max(1, float32(float64(h)*scale))
+	}
+	return w, h, true
+}
+
+// SVGImageResource validates svg's dimensions and pre-builds stable light and
+// dark SVG handles so per-frame painting hits MyGo's pointer-keyed SVG cache.
+func SVGImageResource(svg *ui.SVG, local bool) ImageResource {
+	if svg == nil {
+		return ImageResource{Problem: ImageUnsupported, Local: local}
+	}
+	sw, sh := svg.Size()
+	vw, vh, ok := validSVGDimensions(sw, sh)
+	if !ok {
+		return ImageResource{Problem: ImageUnsupported, Local: local}
+	}
+	return ImageResource{
+		SVG:     svg.WithDark(false),
+		SVGDark: svg.WithDark(true),
+		Width:   int(math.Ceil(float64(vw))),
+		Height:  int(math.Ceil(float64(vh))),
+		Local:   local,
+	}
+}
+
 // ImageResource is a decoded picture, a picture whose header dimensions are
 // already known while its pixels decode in the background, or the reason it
 // could not be loaded. Local means the host can reveal its file or the nearest
@@ -31,6 +65,7 @@ const (
 type ImageResource struct {
 	Bitmap        *ui.Bitmap
 	SVG           *ui.SVG
+	SVGDark       *ui.SVG
 	Width, Height int
 	Loading       bool
 	LoadedAt      time.Time
@@ -42,9 +77,35 @@ type ImageResource struct {
 	Delays []time.Duration
 }
 
+// HasValidSVG reports whether r holds an SVG with finite, positive dimensions.
+func (r ImageResource) HasValidSVG() bool {
+	if r.SVG == nil {
+		return false
+	}
+	_, _, ok := validSVGDimensions(r.SVG.Size())
+	return ok
+}
+
+// SVGFor returns the cached light or dark SVG handle without allocating per frame.
+func (r ImageResource) SVGFor(dark bool) *ui.SVG {
+	if !r.HasValidSVG() {
+		return nil
+	}
+	if dark && r.SVGDark != nil {
+		return r.SVGDark
+	}
+	return r.SVG
+}
+
 // HasVisual reports whether the resource has a decoded raster bitmap or vector SVG.
 func (r ImageResource) HasVisual() bool {
-	return r.Bitmap != nil || r.SVG != nil
+	if r.Bitmap != nil {
+		w, h := r.Bitmap.Size()
+		if w > 0 && h > 0 {
+			return true
+		}
+	}
+	return r.HasValidSVG()
 }
 
 // IntrinsicSize returns the picture's natural DIP width and height, preferring
@@ -57,13 +118,15 @@ func (r ImageResource) IntrinsicSize() (float32, float32) {
 		}
 	}
 	if r.SVG != nil {
-		w, h := r.SVG.Size()
-		if w > 0 && h > 0 {
-			return w, h
+		if vw, vh, ok := validSVGDimensions(r.SVG.Size()); ok {
+			return vw, vh
 		}
+		return 0, 0
 	}
 	if r.Width > 0 && r.Height > 0 {
-		return float32(r.Width), float32(r.Height)
+		if vw, vh, ok := validSVGDimensions(float32(r.Width), float32(r.Height)); ok {
+			return vw, vh
+		}
 	}
 	return 0, 0
 }
@@ -212,11 +275,29 @@ type imageViewer struct {
 	name         string
 	bitmap       *ui.Bitmap
 	svg          *ui.SVG
+	svgDark      *ui.SVG
 	scroll       ui.ScrollState
 }
 
 func (v *imageViewer) hasVisual() bool {
-	return v.bitmap != nil || v.svg != nil
+	if v.bitmap != nil {
+		w, h := v.bitmap.Size()
+		if w > 0 && h > 0 {
+			return true
+		}
+	}
+	if v.svg != nil {
+		_, _, ok := validSVGDimensions(v.svg.Size())
+		return ok
+	}
+	return false
+}
+
+func (v *imageViewer) svgFor(dark bool) *ui.SVG {
+	if dark && v.svgDark != nil {
+		return v.svgDark
+	}
+	return v.svg
 }
 
 func (v *imageViewer) intrinsicSize() (float32, float32) {
@@ -225,7 +306,9 @@ func (v *imageViewer) intrinsicSize() (float32, float32) {
 		return float32(w), float32(h)
 	}
 	if v.svg != nil {
-		return v.svg.Size()
+		if vw, vh, ok := validSVGDimensions(v.svg.Size()); ok {
+			return vw, vh
+		}
 	}
 	return 0, 0
 }
@@ -327,6 +410,18 @@ func (e *Editor) imageResource(src string, o Options) ImageResource {
 	resource := ImageResource{}
 	if o.LoadImage != nil {
 		resource = o.LoadImage(src)
+		if resource.SVG != nil {
+			if !resource.HasValidSVG() {
+				resource.SVG = nil
+				resource.SVGDark = nil
+				if resource.Bitmap == nil && !resource.Loading {
+					resource.Problem = ImageUnsupported
+				}
+			} else if resource.SVGDark == nil {
+				resource.SVGDark = resource.SVG.WithDark(true)
+				resource.SVG = resource.SVG.WithDark(false)
+			}
+		}
 		e.images[src] = resource
 	}
 	return resource
@@ -506,8 +601,8 @@ func (e *Editor) paintImage(p *ui.Painter, bounds ui.Rect, row row, t *ui.Theme)
 					}
 				}
 				src = bitmap
-			} else if f.resource.SVG != nil {
-				src = f.resource.SVG.WithDark(t.Dark)
+			} else if svg := f.resource.SVGFor(t.Dark); svg != nil {
+				src = svg
 			}
 			p.Shadow(r, 8, 0, 2, 10, 0, e.page.ImageShadow)
 			barBox, viewH, contentH, scrollY, compact := e.imageVScrollFor(row)
@@ -755,7 +850,8 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 				open:     true,
 				name:     f.name,
 				bitmap:   f.resource.Bitmap,
-				svg:      f.resource.SVG,
+				svg:      f.resource.SVGFor(false),
+				svgDark:  f.resource.SVGFor(true),
 				origin:   picture.Bounds(),
 				openedAt: c.Now(),
 			}

@@ -54,7 +54,7 @@ func (e *Editor) relayoutText(o Options) bool {
 		// The heading's identity and level did not change; only its label
 		// and presence in the outline can change in a text transaction.
 		at := slices.IndexFunc(e.outline, func(item outlineItem) bool { return item.id == b.ID })
-		text := b.Text()
+		text := b.VisibleText()
 		switch {
 		case at >= 0 && text == "":
 			if e.hasLazyY {

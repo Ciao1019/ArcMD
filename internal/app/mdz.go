@@ -412,7 +412,7 @@ func (a *App) mdzLoadImageFrom(d *document, basePage, rawURL string, allowManife
 		return editor.ImageResource{Problem: editor.ImageRemote}
 	}
 	if strings.HasPrefix(strings.ToLower(trimmed), "https://") {
-		return a.remoteImageResource(d, trimmed)
+		return a.remoteImageResourceWithScheme(d, trimmed, true)
 	}
 	var targetPath string
 	if link := m.archive.ResolveLink(basePage, trimmed); link.Kind == mdz.LinkInternal && link.Found {

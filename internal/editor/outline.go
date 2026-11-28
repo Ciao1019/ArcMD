@@ -125,7 +125,7 @@ func (e *Editor) hasHeadings() bool {
 	}
 	has := false
 	for i, b := range e.Doc.Blocks {
-		if b.Kind == "heading" && b.Text() != "" && !(i == 0 && b.Level <= 1) {
+		if b.Kind == "heading" && b.VisibleText() != "" && !(i == 0 && b.Level <= 1) {
 			has = true
 			break
 		}
@@ -475,11 +475,15 @@ func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout
 		return nil
 	}
 	leaf, hasLeaf := e.Engine.LeafByID(item.id)
+	rawText := item.text
+	if hasLeaf {
+		rawText = leaf.Block.Text()
+	}
 	var all []inlineToken
 	if hasLeaf {
-		all = inlineTokensInBlock(leaf.Block, item.text)
+		all = inlineTokensInBlock(leaf.Block, rawText)
 	} else {
-		all = inlineTokens(item.text)
+		all = inlineTokens(rawText)
 	}
 	if len(all) == 0 {
 		return nil
@@ -493,7 +497,7 @@ func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout
 		}
 		allowed := true
 		if hasLeaf {
-			allowed = tokenAllowed(leaf.Block, document.Len(item.text[:tok.start]), document.Len(item.text[:tok.end]))
+			allowed = tokenAllowed(leaf.Block, document.Len(rawText[:tok.start]), document.Len(rawText[:tok.end]))
 		}
 		if allowed {
 			tokens = append(tokens, tok)
@@ -514,6 +518,13 @@ func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout
 		}
 	}
 
+	segmentText := func(a, z int) string {
+		if hasLeaf && strings.Contains(rawText[a:z], document.InlineImagePlaceholder) {
+			return document.RunsVisibleText(document.SliceRuns(leaf.Block.Runs, document.Len(rawText[:a]), document.Len(rawText[:z])))
+		}
+		return rawText[a:z]
+	}
+
 	font := ui.Font{Family: "system-ui", Size: 14, Weight: weight}
 	mathFontSize := float32(14 * 1.05)
 	maxMathH := float32(outlineRow - 4)
@@ -527,7 +538,7 @@ func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout
 			continue
 		}
 		if tok.start > pos {
-			seg := item.text[pos:tok.start]
+			seg := segmentText(pos, tok.start)
 			spans = append(spans, ui.Span{Text: seg})
 			visIdx += document.Len(seg)
 		}
@@ -547,8 +558,8 @@ func (e *Editor) outlineMathRow(item outlineItem, weight int) *outlineMathLayout
 	}
 	var out *outlineMathLayout
 	if len(objs) > 0 {
-		if pos < len(item.text) {
-			spans = append(spans, ui.Span{Text: item.text[pos:]})
+		if pos < len(rawText) {
+			spans = append(spans, ui.Span{Text: segmentText(pos, len(rawText))})
 		}
 		tl := ui.ShapeRichText(spans, font, 0)
 		for _, ro := range tl.Objects() {

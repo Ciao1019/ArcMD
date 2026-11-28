@@ -480,7 +480,7 @@ func BuiltinPaperStyle(id string) *StyleConfig {
 				CodeText:       "#DFD8CD",
 				InlineCodeFill: "#332E28",
 				InlineCodeText: "#DFD8CD",
-				QuoteBar:       "#635B50",
+				QuoteBar:       "#A8A095",
 			},
 		}
 	case "sepia":
@@ -517,7 +517,7 @@ func BuiltinPaperStyle(id string) *StyleConfig {
 				CodeText:       "#DDD0BA",
 				InlineCodeFill: "#382F25",
 				InlineCodeText: "#DDD0BA",
-				QuoteBar:       "#695A47",
+				QuoteBar:       "#ACA08E",
 			},
 		}
 	case "sage":
@@ -554,7 +554,7 @@ func BuiltinPaperStyle(id string) *StyleConfig {
 				CodeText:       "#D4DFD8",
 				InlineCodeFill: "#29342E",
 				InlineCodeText: "#D4DFD8",
-				QuoteBar:       "#4F6357",
+				QuoteBar:       "#98AC9F",
 			},
 		}
 	case "slate":
@@ -591,7 +591,7 @@ func BuiltinPaperStyle(id string) *StyleConfig {
 				CodeText:       "#D5DCE8",
 				InlineCodeFill: "#29303D",
 				InlineCodeText: "#D5DCE8",
-				QuoteBar:       "#4F596E",
+				QuoteBar:       "#9AA4B8",
 			},
 		}
 	default:

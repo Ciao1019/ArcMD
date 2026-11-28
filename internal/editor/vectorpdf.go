@@ -178,7 +178,7 @@ func (e *Editor) exportVectorDecorations(
 ) {
 	for i := 0; i < len(e.decorations); i++ {
 		d := *e.indexedDecoration(i)
-		if d.rect.Y+d.rect.H < top-2 || d.rect.Y > bottom+2 {
+		if d.rect.Y+d.rect.H < top-6 || d.rect.Y > bottom+6 {
 			continue
 		}
 		if d.kind == "raw" && e.isCommentRawID(d.id) {
@@ -531,8 +531,8 @@ func (e *Editor) exportVectorImage(
 			}, max(1, int(math.Ceil(float64(fb.W)))), max(1, int(math.Ceil(float64(fb.H)))), 2)
 		}
 	}
-	if raw == nil && f.resource.SVG != nil {
-		raw = rasterizeSVGForPDF(f.resource.SVG, fb.W, fb.H, t)
+	if raw == nil && f.resource.HasValidSVG() {
+		raw = rasterizeSVGForPDF(f.resource, fb.W, fb.H, t)
 	}
 	if raw != nil {
 		vp.DrawImage(raw, px(fb.X), py(fb.Y), pw(fb.W), ph(fb.H), 8*sc)
@@ -616,8 +616,13 @@ func (e *Editor) exportVectorFormula(
 		case "rule":
 			vp.FillRect(px(op.X), py(op.Y), float64(op.W*scale)*sx, float64(op.H*scale)*sy, 0, pdfRGBA(t.Text))
 		case "frame":
-			stroke := float64(op.Width) * sc
-			vp.StrokeRect(px(op.X)+stroke/2, py(op.Y)+stroke/2, float64(op.W*scale)*sx-stroke, float64(op.H*scale)*sy-stroke, 0, stroke, pdfRGBA(t.Text), false)
+			w := float64(op.W*scale) * sx
+			h := float64(op.H*scale) * sy
+			if w <= 0 || h <= 0 {
+				continue
+			}
+			stroke := min(max(0.5, float64(op.Width)*sc), min(w, h)/2)
+			vp.StrokeRect(px(op.X)+stroke/2, py(op.Y)+stroke/2, max(0, w-stroke), max(0, h-stroke), 0, stroke, pdfRGBA(t.Text), false)
 		case "path":
 			if len(op.Points) < 2 {
 				continue
@@ -928,18 +933,21 @@ type spanSeg struct {
 	span       ui.Span
 }
 
-func rasterizeSVGForPDF(svg *ui.SVG, w, h float32, t *ui.Theme) image.Image {
-	if svg == nil || w <= 0 || h <= 0 {
+func rasterizeSVGForPDF(res ImageResource, w, h float32, t *ui.Theme) image.Image {
+	dark := t != nil && t.Dark
+	svg := res.SVGFor(dark)
+	if svg == nil || !(w > 0 && h > 0) || math.IsNaN(float64(w)) || math.IsNaN(float64(h)) || math.IsInf(float64(w), 0) || math.IsInf(float64(h), 0) {
 		return nil
 	}
-	pw := max(1, min(4096, int(math.Ceil(float64(w)*2))))
-	ph := max(1, min(4096, int(math.Ceil(float64(h)*2))))
+	scale := min(2.0, 4096.0/max(float64(w), float64(h)))
+	pw := max(1, min(4096, int(math.Ceil(float64(w)*scale))))
+	ph := max(1, min(4096, int(math.Ceil(float64(h)*scale))))
 	ink := stdcolor.NRGBA{A: 255}
 	if t != nil {
 		s := t.Text.SRGB()
 		ink = stdcolor.NRGBA{R: s.R, G: s.G, B: s.B, A: s.A}
 	}
-	return svg.WithDark(t != nil && t.Dark).Image(pw, ph, ink)
+	return svg.Image(pw, ph, ink)
 }
 
 func (e *Editor) exportVectorRowText(
@@ -1112,8 +1120,8 @@ func (e *Editor) exportVectorRowText(
 					}, max(1, int(math.Ceil(float64(obj.rect.W)))), max(1, int(math.Ceil(float64(oh)))), 2)
 				}
 			}
-			if raw == nil && obj.imageRes.SVG != nil {
-				raw = rasterizeSVGForPDF(obj.imageRes.SVG, obj.rect.W, oh, t)
+			if raw == nil && obj.imageRes.HasValidSVG() {
+				raw = rasterizeSVGForPDF(obj.imageRes, obj.rect.W, oh, t)
 			}
 			if raw != nil {
 				vp.DrawImage(raw, px(ox), py(oy), pw(obj.rect.W), ph(oh), 0)
@@ -1187,8 +1195,8 @@ func (e *Editor) exportVectorRowText(
 						tp, ty := docYToPDFPage(targetY, tops, paperH, paperMargin, vp.Height)
 						vp.AddLinkDest(lx, ly, lw, lh, tp, ty)
 					}
-				} else {
-					vp.AddLinkURI(lx, ly, lw, lh, run.Style.Link)
+				} else if safeLinkURL(run.Style.Link) {
+					vp.AddLinkURI(lx, ly, lw, lh, strings.TrimSpace(run.Style.Link))
 				}
 			}
 		}

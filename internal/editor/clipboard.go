@@ -40,6 +40,15 @@ func (e *Editor) copyPlainSelection(write func(string)) {
 	e.writePlainClipboard(e.selectionPlainText(r, fragment, slice), write)
 }
 
+func runsPlainText(runs []document.Run) string {
+	return strings.ReplaceAll(document.RunsVisibleText(runs), "\u2028", "\n")
+}
+
+func (e *Editor) slicePlainText(r ui.TextInputRange, a document.Leaf) string {
+	sub := document.SliceRuns(a.Block.Runs, max(0, r.Start-a.Start), max(0, min(a.End, r.End)-a.Start))
+	return runsPlainText(sub)
+}
+
 func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Document, slice string) string {
 	if e.copyPlainText {
 		return e.selectionPlainText(r, fragment, slice)
@@ -53,7 +62,7 @@ func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Docu
 	// and commands paste into chat apps, terminals, and login inputs without
 	// Markdown backslash escapes or wrapper markup.
 	if a.Block == z.Block && (a.Block.Kind == "cell" || inlineLiteralRuns(a.Block, r.Start-a.Start, r.End-a.Start)) {
-		return slice
+		return e.slicePlainText(r, a)
 	}
 	if tableID, cr, ok := e.cellRange(); ok && !(len(fragment.Blocks) == 1 && fragment.Blocks[0].Kind == "table") {
 		if table := e.blockByID(tableID); table != nil {
@@ -62,7 +71,7 @@ func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Docu
 	}
 	if !rich(fragment) {
 		if a.Block == z.Block {
-			return slice
+			return e.slicePlainText(r, a)
 		}
 		return plainFragmentText(fragment)
 	}
@@ -71,8 +80,11 @@ func (e *Editor) clipboardPlainText(r ui.TextInputRange, fragment *document.Docu
 
 func (e *Editor) selectionPlainText(r ui.TextInputRange, fragment *document.Document, slice string) string {
 	a, z := e.LeafAt(r.Start), e.LeafAt(r.End)
-	if a.Block == z.Block && !isWhiteboardBlock(a.Block) && !isDatabaseBlock(a.Block) {
-		return slice
+	if a.Block == z.Block && a.Block.Kind != "rule" && !isAtomicVisualBlock(a.Block) {
+		if literalBlock(a.Block.Kind) {
+			return slice
+		}
+		return e.slicePlainText(r, a)
 	}
 	if tableID, cr, ok := e.cellRange(); ok && !(len(fragment.Blocks) == 1 && fragment.Blocks[0].Kind == "table") {
 		if table := e.blockByID(tableID); table != nil {
@@ -144,7 +156,7 @@ func collectPlainTextBlocks(blocks []*document.Block, out *[]plainTextItem) {
 		default:
 			isList := b.Kind == "bullet" || b.Kind == "numbered" || b.Kind == "task"
 			*out = append(*out, plainTextItem{
-				text:   strings.ReplaceAll(b.Text(), "\u2028", "\n"),
+				text:   runsPlainText(b.Runs),
 				isList: isList,
 			})
 		}
@@ -179,7 +191,7 @@ func inlineLiteralRuns(b *document.Block, from, to int) bool {
 func plainFragmentText(doc *document.Document) string {
 	parts := make([]string, 0, len(doc.Blocks))
 	for _, b := range doc.Blocks {
-		parts = append(parts, strings.ReplaceAll(b.Text(), "\u2028", "\n"))
+		parts = append(parts, runsPlainText(b.Runs))
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -196,7 +208,7 @@ func exportCellRangePlainText(table *document.Block, cr document.CellRange) stri
 				cols = append(cols, "")
 				continue
 			}
-			cols = append(cols, strings.ReplaceAll(cell.Text(), "\u2028", "\n"))
+			cols = append(cols, runsPlainText(cell.Runs))
 		}
 		rows = append(rows, strings.Join(cols, "\t"))
 	}
@@ -246,7 +258,7 @@ func (e *Editor) pasteSelection(read func() string) {
 	if data, ok := readFormat(fragmentFormat); ok && len(data) < 16<<20 {
 		if doc, err := document.Decode(string(data)); err == nil {
 			if inLiteral {
-				e.Buffer.ReplaceText(nil, doc.PlainText())
+				e.Buffer.ReplaceText(nil, doc.VisiblePlainText())
 				return
 			}
 			e.UnmarkText()

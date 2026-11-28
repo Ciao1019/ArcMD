@@ -240,6 +240,28 @@ func New() *Document {
 	return &Document{Format: "arcmd", Version: CurrentVersion, Blocks: []*Block{NewBlock("paragraph", "")}}
 }
 
+func RunsVisibleText(runs []Run) string {
+	if len(runs) == 1 {
+		if runs[0].IsImage() {
+			return runs[0].Image.Alt
+		}
+		return runs[0].Text
+	}
+	var out strings.Builder
+	for _, run := range runs {
+		if run.IsImage() {
+			out.WriteString(run.Image.Alt)
+		} else {
+			out.WriteString(run.Text)
+		}
+	}
+	return out.String()
+}
+
+func (b *Block) VisibleText() string {
+	return RunsVisibleText(b.Runs)
+}
+
 func (b *Block) Text() string {
 	if len(b.Runs) == 1 {
 		return b.Runs[0].Text
@@ -1246,6 +1268,42 @@ func (d *Document) PlainText() string {
 			first = false
 			for _, run := range block.Runs {
 				out.WriteString(run.Text)
+			}
+		}
+	}
+	walk(d.Blocks, nil)
+	return out.String()
+}
+
+// VisiblePlainText returns the human-readable text of the document, expanding
+// inline images to their alt text instead of InlineImagePlaceholder ("\ufffc").
+func (d *Document) VisiblePlainText() string {
+	var out strings.Builder
+	first := true
+	var walk func([]*Block, map[*Block]bool)
+	walk = func(blocks []*Block, covered map[*Block]bool) {
+		for _, block := range blocks {
+			if covered[block] {
+				continue
+			}
+			if len(block.Children) > 0 {
+				inner := covered
+				if block.Kind == "table" {
+					inner = CoveredCells(block)
+				}
+				walk(block.Children, inner)
+				continue
+			}
+			if !first {
+				out.WriteByte('\n')
+			}
+			first = false
+			for _, run := range block.Runs {
+				if run.IsImage() {
+					out.WriteString(run.Image.Alt)
+				} else {
+					out.WriteString(run.Text)
+				}
 			}
 		}
 	}

@@ -13,6 +13,13 @@ func (e *Editor) RelocateImages(urls map[string]string) {
 		})
 	}
 	if e.leafComp != nil {
+		for i := range e.leafComp.state.Runs {
+			if url := e.leafComp.state.Runs[i].Image.URL; url != "" {
+				if to, ok := urls[url]; ok {
+					e.leafComp.state.Runs[i].Image.URL = to
+				}
+			}
+		}
 		e.leafComp.committedDoc = nil
 	}
 	clear(e.images)

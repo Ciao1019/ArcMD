@@ -1229,7 +1229,11 @@ func (e *Editor) materializeRows(targets []int, theme *ui.Theme) int {
 		decStart, decEnd := -1, -1
 		if di, hasDec := e.decorationIDs[b.ID]; hasDec {
 			dc := e.indexedDecoration(di)
-			dc.rect.H = newH - m.gap
+			if dc.kind == "block-bg" {
+				dc.rect = blockBackgroundRect(b, r.rect.X, origY, r.rect.W, m.top, m.bottom, newH, m.gap, e.zoomFactor())
+			} else {
+				dc.rect.H = newH - m.gap
+			}
 			if isWhiteboardBlock(b) {
 				dc.boardEditing = r.boardEditing
 				dc.rect = r.boardRect
