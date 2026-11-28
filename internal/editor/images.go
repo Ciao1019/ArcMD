@@ -30,6 +30,7 @@ const (
 // existing folder.
 type ImageResource struct {
 	Bitmap        *ui.Bitmap
+	SVG           *ui.SVG
 	Width, Height int
 	Loading       bool
 	LoadedAt      time.Time
@@ -41,11 +42,52 @@ type ImageResource struct {
 	Delays []time.Duration
 }
 
+// HasVisual reports whether the resource has a decoded raster bitmap or vector SVG.
+func (r ImageResource) HasVisual() bool {
+	return r.Bitmap != nil || r.SVG != nil
+}
+
+// IntrinsicSize returns the picture's natural DIP width and height, preferring
+// decoded Bitmap or SVG metrics and falling back to pre-decode header sizes.
+func (r ImageResource) IntrinsicSize() (float32, float32) {
+	if r.Bitmap != nil {
+		w, h := r.Bitmap.Size()
+		if w > 0 && h > 0 {
+			return float32(w), float32(h)
+		}
+	}
+	if r.SVG != nil {
+		w, h := r.SVG.Size()
+		if w > 0 && h > 0 {
+			return w, h
+		}
+	}
+	if r.Width > 0 && r.Height > 0 {
+		return float32(r.Width), float32(r.Height)
+	}
+	return 0, 0
+}
+
+func runsReferenceImage(runs []document.Run, src string) bool {
+	for _, r := range runs {
+		if r.IsImage() && (src == "" || r.Image.URL == src) {
+			return true
+		}
+	}
+	return false
+}
+
 // InvalidateImage drops a cached image entry (such as a placeholder whose
 // background decode just finished) so the next frame picks up the new resource.
 func (e *Editor) InvalidateImage(src string) {
 	if e.images != nil {
 		delete(e.images, src)
+	}
+	for id, cached := range e.cache {
+		if runsReferenceImage(cached.runs, src) {
+			delete(e.cache, id)
+			delete(e.heightHints, id)
+		}
 	}
 	e.ready = false
 }
@@ -58,6 +100,12 @@ func (e *Editor) ClearImages() {
 	if e.images != nil {
 		clear(e.images)
 		e.images = nil
+	}
+	for id, cached := range e.cache {
+		if runsReferenceImage(cached.runs, "") {
+			delete(e.cache, id)
+			delete(e.heightHints, id)
+		}
 	}
 	for _, v := range e.pdfs {
 		if v != nil {
@@ -163,7 +211,23 @@ type imageViewer struct {
 	origin       ui.Rect
 	name         string
 	bitmap       *ui.Bitmap
+	svg          *ui.SVG
 	scroll       ui.ScrollState
+}
+
+func (v *imageViewer) hasVisual() bool {
+	return v.bitmap != nil || v.svg != nil
+}
+
+func (v *imageViewer) intrinsicSize() (float32, float32) {
+	if v.bitmap != nil {
+		w, h := v.bitmap.Size()
+		return float32(w), float32(h)
+	}
+	if v.svg != nil {
+		return v.svg.Size()
+	}
+	return 0, 0
 }
 
 // ReplaceImage preserves the current composition and makes the replacement a
@@ -190,17 +254,32 @@ func (e *Editor) ReplaceImageURLs(replacements map[string]string) int {
 	changed := 0
 	e.Engine.Edit(func() {
 		for _, leaf := range e.Doc.Leaves() {
-			if leaf.Block.Kind != "image" {
+			if leaf.Block.Kind == "image" {
+				next, ok := replacements[leaf.Block.URL]
+				if ok && next != "" && next != leaf.Block.URL {
+					delete(e.images, leaf.Block.URL)
+					delete(e.images, next)
+					leaf.Block.URL = next
+					changed++
+				}
 				continue
 			}
-			next, ok := replacements[leaf.Block.URL]
-			if !ok || next == "" || next == leaf.Block.URL {
-				continue
+			for i := range leaf.Block.Runs {
+				if !leaf.Block.Runs[i].IsImage() {
+					continue
+				}
+				oldURL := leaf.Block.Runs[i].Image.URL
+				next, ok := replacements[oldURL]
+				if !ok || next == "" || next == oldURL {
+					continue
+				}
+				delete(e.images, oldURL)
+				delete(e.images, next)
+				delete(e.cache, leaf.Block.ID)
+				delete(e.heightHints, leaf.Block.ID)
+				leaf.Block.Runs[i].Image.URL = next
+				changed++
 			}
-			delete(e.images, leaf.Block.URL)
-			delete(e.images, next)
-			leaf.Block.URL = next
-			changed++
 		}
 	})
 	if changed > 0 {
@@ -258,28 +337,44 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 	f := &imageFigure{resource: e.imageResource(b.URL, o), name: imageName(b.URL)}
 	r.picture = f
 	x, y, w := r.rect.X, r.rect.Y+16, r.rect.W
-	iw, ih := 0, 0
-	if bitmap := f.resource.Bitmap; bitmap != nil {
-		iw, ih = bitmap.Size()
-	} else if f.resource.Loading && f.resource.Width > 0 && f.resource.Height > 0 {
-		iw, ih = f.resource.Width, f.resource.Height
-	}
-	if iw > 0 && ih > 0 {
+	iw, ih := f.resource.IntrinsicSize()
+	if iw > 0 && ih > 0 && (f.resource.HasVisual() || f.resource.Loading) {
 		z := e.zoomFactor()
-		scale := min(z, w/float32(max(1, iw)))
-		preferred := b.ImageWidth * z
+		var pw, ph float32
+		preferredW := b.ImageWidth * z
+		preferredH := b.ImageHeight * z
 		if e.imageResize.id == b.ID {
-			preferred = e.imageResize.width
+			preferredW = e.imageResize.width
+			preferredH = 0
 		}
-		if preferred > 0 {
-			scale = min(w, preferred) / float32(max(1, iw))
+		switch {
+		case preferredW > 0 && preferredH > 0:
+			pw, ph = preferredW, preferredH
+			if pw > w {
+				s := w / pw
+				pw = w
+				ph *= s
+			}
+		case preferredW > 0:
+			scale := min(w, preferredW) / max(1, iw)
+			pw, ph = min(w, iw*scale), ih*scale
+		case preferredH > 0:
+			scale := preferredH / max(1, ih)
+			if iw*scale > w {
+				scale = w / max(1, iw)
+			}
+			pw, ph = min(w, iw*scale), ih*scale
+		default:
+			scale := min(z, w/max(1, iw))
+			pw, ph = min(w, iw*scale), ih*scale
 		}
-		if e.printing {
+		if e.printing && ph > 850 {
 			// A whole picture fits an A4 page; the interactive view has no
 			// fixed height limit, so tall screenshots remain readable.
-			scale = min(scale, 850/float32(max(1, ih)))
+			s := 850 / ph
+			pw *= s
+			ph *= s
 		}
-		pw, ph := min(w, float32(iw)*scale), float32(ih)*scale
 		f.contentH = ph
 		if !e.printing && e.imageMaxHeight > 0 && ph > e.imageMaxHeight {
 			f.expandable = true
@@ -288,7 +383,14 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 				ph = e.imageMaxHeight
 			}
 		}
-		f.bounds = ui.Rect{X: x + (w-pw)/2, Y: y, W: pw, H: ph}
+		fx := x + (w-pw)/2
+		switch b.Align {
+		case "left":
+			fx = x
+		case "right":
+			fx = x + w - pw
+		}
+		f.bounds = ui.Rect{X: fx, Y: y, W: pw, H: ph}
 		r.x, r.y = x, y+ph+8
 		bottom := y + ph
 		if e.captionVisible(b) {
@@ -323,7 +425,14 @@ func (e *Editor) layoutImage(r *row, o Options) float32 {
 	}
 	cardW := min(w, max(natural(title, headFont)+22, natural(alt, altFont), natural(f.resource.Problem.text(), reasonFont), 250)+28)
 	cardW = min(cardW, 640)
-	f.bounds = ui.Rect{X: x + (w-cardW)/2, Y: y, W: cardW}
+	cardX := x + (w-cardW)/2
+	switch b.Align {
+	case "left":
+		cardX = x
+	case "right":
+		cardX = x + w - cardW
+	}
+	f.bounds = ui.Rect{X: cardX, Y: y, W: cardW}
 	inner := max(1, cardW-28)
 	f.title = ui.ShapeText(title, headFont, max(1, inner-22))
 	_, headH := f.title.Size()
@@ -384,15 +493,21 @@ func (e *Editor) paintImage(p *ui.Painter, bounds ui.Rect, row row, t *ui.Theme)
 	r.X, r.Y = r.X+bounds.X+dx, r.Y+bounds.Y+dy
 
 	drawBody := func() {
-		if f.resource.Bitmap != nil {
-			bitmap := f.resource.Bitmap
-			if !e.printing && !e.reduceMotion && r.Y+r.H > bounds.Y+e.Scroll.Y && r.Y < bounds.Y+e.Scroll.Y+e.viewport {
-				// An animated GIF in view plays.
-				frame, next := f.resource.frameAt(p.Now())
-				if next > 0 {
-					bitmap = frame
-					p.After(next)
+		if f.resource.HasVisual() {
+			var src ui.ImageSource
+			if f.resource.Bitmap != nil {
+				bitmap := f.resource.Bitmap
+				if !e.printing && !e.reduceMotion && r.Y+r.H > bounds.Y+e.Scroll.Y && r.Y < bounds.Y+e.Scroll.Y+e.viewport {
+					// An animated GIF in view plays.
+					frame, next := f.resource.frameAt(p.Now())
+					if next > 0 {
+						bitmap = frame
+						p.After(next)
+					}
 				}
+				src = bitmap
+			} else if f.resource.SVG != nil {
+				src = f.resource.SVG.WithDark(t.Dark)
 			}
 			p.Shadow(r, 8, 0, 2, 10, 0, e.page.ImageShadow)
 			barBox, viewH, contentH, scrollY, compact := e.imageVScrollFor(row)
@@ -401,7 +516,7 @@ func (e *Editor) paintImage(p *ui.Painter, bounds ui.Rect, row row, t *ui.Theme)
 				if compact {
 					imgRect = ui.Rect{X: r.X, Y: r.Y - scrollY, W: r.W, H: contentH}
 				}
-				p.Image(bitmap, imgRect, ui.Contain)
+				p.Image(src, imgRect, ui.Contain)
 				if !e.printing && !e.reduceMotion && !f.resource.LoadedAt.IsZero() {
 					const fadeDur = 120 * time.Millisecond
 					if elapsed := p.Now().Sub(f.resource.LoadedAt); elapsed >= 0 && elapsed < fadeDur {
@@ -550,7 +665,7 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		if f.resource.Loading {
 			continue
 		}
-		if f.resource.Bitmap == nil {
+		if !f.resource.HasVisual() {
 			r := f.bounds
 			status := ui.Box(key.Key("status")).Absolute().Left(r.X).Top(r.Y).Size(r.W, r.H).
 				Role(ui.RoleImage).Label(i18n.T("无法显示图片：") + f.name + "。" + row.leaf.Block.Text() + "。" + f.resource.Problem.text()).Tooltip(src)
@@ -596,7 +711,7 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 		if f.resource.Loading {
 			continue
 		}
-		if f.resource.Bitmap == nil {
+		if !f.resource.HasVisual() {
 			continue
 		}
 		r := f.bounds
@@ -640,6 +755,7 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 				open:     true,
 				name:     f.name,
 				bitmap:   f.resource.Bitmap,
+				svg:      f.resource.SVG,
 				origin:   picture.Bounds(),
 				openedAt: c.Now(),
 			}
@@ -668,7 +784,7 @@ func (e *Editor) imageControls(c *ui.Context, o Options) {
 			if o.ReplaceImage != nil {
 				menuAction(m, i18n.T("重新选择图片…"), func() { o.ReplaceImage(id, src) })
 			}
-			if o.CropImage != nil && f.resource.Local && len(f.resource.Frames) == 0 {
+			if o.CropImage != nil && f.resource.Local && f.resource.Bitmap != nil && len(f.resource.Frames) == 0 {
 				menuAction(m, i18n.T("裁剪图片…"), func() { e.openCropper(id, src, f.resource.Bitmap) })
 			}
 			if o.RevealImage != nil && f.resource.Local {
@@ -728,7 +844,7 @@ func (e *Editor) editImageCaption() {
 
 func (e *Editor) imagePreview(c *ui.Context) {
 	v := &e.imageViewer
-	if !v.open || v.bitmap == nil {
+	if !v.open || !v.hasVisual() {
 		return
 	}
 	w, h := c.Size()

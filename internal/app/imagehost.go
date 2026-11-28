@@ -416,6 +416,11 @@ func (a *App) countLocalImageReferences(sp *space.Space, targetEval string) int 
 				if b.Kind == "image" {
 					checkURL(b.URL)
 				}
+				for _, r := range b.Runs {
+					if r.Image.URL != "" {
+						checkURL(r.Image.URL)
+					}
+				}
 				walk(b.Children)
 			}
 		}

@@ -40,7 +40,7 @@ func remoteImageExt(rawURL string) string {
 	u, err := neturl.Parse(strings.TrimSpace(rawURL))
 	if err == nil {
 		ext := strings.ToLower(path.Ext(u.Path))
-		if ext != "" && isImage("x"+ext) {
+		if ext == ".svg" || (ext != "" && isImage("x"+ext)) {
 			return ext
 		}
 	}
@@ -168,7 +168,12 @@ func (a *App) fetchAndCacheRemoteImage(client *http.Client, rawURL string) error
 		return errors.New("remote image exceeds size limit")
 	}
 	if _, err := ui.DecodeBitmap(data); err != nil {
-		return err
+		if !looksLikeSVG(data) {
+			return err
+		}
+		if _, svgErr := ui.ParseSVG(data); svgErr != nil {
+			return err
+		}
 	}
 	_, err = a.cacheRemoteImageBytes(rawURL, data)
 	return err

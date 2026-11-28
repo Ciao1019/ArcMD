@@ -101,10 +101,26 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 			case parser.Paragraph, parser.Heading:
 				in := parsed.Inlines(index)
 				if node.Kind == parser.Paragraph && context == "" {
-					if img, ok := tryImportInlineImageBlock(in); ok && indent == 0 {
+					if img, ok := tryImportInlineImageBlock(in, explicitLeft); ok && indent == 0 {
 						out = append(out, img)
 						if !forSearch && parent == 0 {
 							topSpans = append(topSpans, rawSpan{img, node.Start, node.End})
+						}
+						continue
+					}
+					if split := splitFloatingImageParagraph(in, indent, nextID, explicitLeft); len(split) > 0 {
+						out = append(out, split...)
+						if !forSearch && parent == 0 {
+							for k := startCount; k < len(out); k++ {
+								s, e := -1, -1
+								if k == startCount {
+									s = node.Start
+								}
+								if k == len(out)-1 {
+									e = node.End
+								}
+								topSpans = append(topSpans, rawSpan{out[k], s, e})
+							}
 						}
 						continue
 					}
@@ -330,6 +346,13 @@ func parseMarkdownSourceMode(source string, forSearch bool) parsedMarkdown {
 					if node.Fenced && node.Open {
 						includeSpan = false
 					}
+				case parser.Table:
+					// mygo's parser.Table End can stop before the trailing " |" on the last row.
+					if endOff > node.Start && endOff <= len(text) && text[endOff-1] != '\n' {
+						for endOff < len(text) && text[endOff] != '\n' && text[endOff] != '\r' {
+							endOff++
+						}
+					}
 				}
 				if includeSpan {
 					topSpans = append(topSpans, rawSpan{b, node.Start, endOff})
@@ -540,11 +563,106 @@ func parseMarkdownImageAlt(alt string) (string, float32) {
 	return alt[:idx], float32(w)
 }
 
-func tryImportInlineImageBlock(in []parser.Inline) (*document.Block, bool) {
-	if len(in) == 0 || in[0].Kind != parser.HTML || in[0].Next != len(in) {
+func tryImportInlineImageBlock(in []parser.Inline, explicitLeft map[*document.Block]bool) (*document.Block, bool) {
+	if len(in) == 0 {
 		return nil, false
 	}
-	return parseSingleImgTag(in[0].Text, "")
+	if in[0].Kind == parser.HTML && in[0].Next == len(in) {
+		if b, ok := parseSingleImgTag(in[0].Text, ""); ok {
+			if b.Align == "left" && explicitLeft != nil {
+				explicitLeft[b] = true
+			}
+			return b, true
+		}
+	}
+	if img, align, end, ok := matchInlinePictureSequence(in, 0, len(in)); ok && end == len(in) {
+		b := inlineImageToBlock(img, align, "")
+		if b.Align == "left" && explicitLeft != nil {
+			explicitLeft[b] = true
+		}
+		return b, true
+	}
+	return nil, false
+}
+
+// splitFloatingImageParagraph turns a paragraph starting with a left- or
+// right-aligned HTML <img> (or <picture>) followed by text (such as MDZip's
+// floated image export) into a standalone aligned image block plus the
+// remaining paragraph.
+func splitFloatingImageParagraph(in []parser.Inline, indent int, nextID func() string, explicitLeft map[*document.Block]bool) []*document.Block {
+	if len(in) < 2 {
+		return nil
+	}
+	var img document.InlineImage
+	var align string
+	nextIdx := 0
+	if in[0].Kind == parser.HTML {
+		if parsedImg, parsedAlign, ok := parseInlineImgHTMLToken(in[0].Text); ok {
+			img, align, nextIdx = parsedImg, parsedAlign, max(1, in[0].Next)
+		}
+	}
+	if nextIdx == 0 {
+		if parsedImg, parsedAlign, end, ok := matchInlinePictureSequence(in, 0, len(in)); ok && end < len(in) {
+			img, align, nextIdx = parsedImg, parsedAlign, end
+		}
+	}
+	if nextIdx == 0 || (align != "left" && align != "right") || nextIdx >= len(in) {
+		return nil
+	}
+	runs, comments := importRunsAndCommentsWithBreak(in[nextIdx:], document.Style{}, "\u2028")
+	runs, comments = trimLeadingSpaceAndBreaks(runs, comments)
+	if len(runs) == 0 && len(comments) == 0 {
+		return nil
+	}
+	imgBlock := inlineImageToBlock(img, align, "")
+	imgBlock.ID = nextID()
+	imgBlock.Indent = indent
+	if imgBlock.Align == "left" && explicitLeft != nil {
+		explicitLeft[imgBlock] = true
+	}
+	if len(runs) == 0 {
+		runs = []document.Run{{Text: ""}}
+	}
+	para := &document.Block{
+		ID:       nextID(),
+		Kind:     "paragraph",
+		Indent:   indent,
+		Runs:     runs,
+		Comments: comments,
+	}
+	return []*document.Block{imgBlock, para}
+}
+
+func trimLeadingSpaceAndBreaks(runs []document.Run, comments []document.InlineComment) ([]document.Run, []document.InlineComment) {
+	for len(runs) > 0 {
+		if runs[0].IsImage() {
+			break
+		}
+		trimmed := strings.TrimLeft(runs[0].Text, " \t\r\n\u2028")
+		if diff := document.Len(runs[0].Text) - document.Len(trimmed); diff > 0 {
+			runs[0].Text = trimmed
+			comments = document.ShiftComments(comments, 0, diff, 0, runsU16Len(runs))
+		}
+		if runs[0].Text == "" {
+			runs = runs[1:]
+			continue
+		}
+		break
+	}
+	return document.Compact(runs), comments
+}
+
+func inlineImageToBlock(img document.InlineImage, imgAlign, containerAlign string) *document.Block {
+	b := document.NewBlock("image", img.Alt)
+	b.URL = img.URL
+	b.ImageWidth = img.Width
+	b.ImageHeight = img.Height
+	if containerAlign != "" {
+		b.Align = containerAlign
+	} else if imgAlign != "" {
+		b.Align = imgAlign
+	}
+	return b
 }
 
 func overlapsProtectedInline(in []parser.Inline, start, end int) bool {
@@ -658,7 +776,7 @@ func splitObsidianImageParagraph(text string, start, end int, in []parser.Inline
 			case parser.Paragraph, parser.Heading:
 				cIn := sub.Inlines(cIdx)
 				if cNode.Kind == parser.Paragraph {
-					if img, ok := tryImportInlineImageBlock(cIn); ok && indent == 0 {
+					if img, ok := tryImportInlineImageBlock(cIn, explicitLeft); ok && indent == 0 {
 						blocks = append(blocks, img)
 						continue
 					}
@@ -753,20 +871,126 @@ func parseSingleImgTag(raw, align string) (*document.Block, bool) {
 	if err != nil || len(nodes) != 1 || nodes[0].Type != xhtml.ElementNode || nodes[0].DataAtom != atom.Img {
 		return nil, false
 	}
-	img := nodes[0]
-	src := strings.TrimSpace(attr(img, "src"))
-	if src == "" || strings.HasPrefix(strings.ToLower(src), "data:") {
+	img, imgAlign, ok := parseHTMLInlineImage(nodes[0])
+	if !ok {
 		return nil, false
 	}
-	b := document.NewBlock("image", attr(img, "alt"))
-	b.URL = src
-	b.ImageWidth = parseHTMLWidth(img)
-	if align != "" {
-		b.Align = align
-	} else if a := parseBlockAlign(img); a != "" {
-		b.Align = a
+	return inlineImageToBlock(img, imgAlign, align), true
+}
+
+func parseInlineImgHTMLToken(raw string) (document.InlineImage, string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(trimmed), "<img") {
+		return document.InlineImage{}, "", false
 	}
-	return b, true
+	ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(trimmed), ctx)
+	if err != nil || len(nodes) != 1 || nodes[0].Type != xhtml.ElementNode || nodes[0].DataAtom != atom.Img {
+		return document.InlineImage{}, "", false
+	}
+	return parseHTMLInlineImage(nodes[0])
+}
+
+func parseSinglePictureTag(raw, align string) (*document.Block, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(trimmed), "<picture") {
+		return nil, false
+	}
+	ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(trimmed), ctx)
+	if err != nil || len(nodes) != 1 || nodes[0].Type != xhtml.ElementNode || nodes[0].DataAtom != atom.Picture {
+		return nil, false
+	}
+	img, imgAlign, ok := parsePictureInlineImage(nodes[0])
+	if !ok {
+		return nil, false
+	}
+	return inlineImageToBlock(img, imgAlign, align), true
+}
+
+func hasInlineImageDescendant(n *xhtml.Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.Type == xhtml.ElementNode && (n.DataAtom == atom.Img || n.DataAtom == atom.Picture) {
+		return true
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if hasInlineImageDescendant(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// tryImportLeadingImgHTMLBlock handles CommonMark type-7 HTML blocks opened by
+// a single <img> tag on line 1 followed immediately (no blank line) by prose or
+// more images, such as MDZip's floated `<img align="right">\nParagraph` or
+// consecutive `<img ...>\n<img ...>` lines.
+func tryImportLeadingImgHTMLBlock(trimmed string, baseIndent int, explicitLeft map[*document.Block]bool) ([]*document.Block, bool) {
+	nl := strings.IndexByte(trimmed, '\n')
+	if nl < 0 {
+		return nil, false
+	}
+	firstLine := strings.TrimSpace(trimmed[:nl])
+	rest := strings.TrimLeft(trimmed[nl+1:], " \t\r\n")
+	if rest == "" {
+		return nil, false
+	}
+	imgBlock, ok := parseSingleImgTag(firstLine, "")
+	if !ok {
+		return nil, false
+	}
+	if imgBlock.Align == "left" || imgBlock.Align == "right" {
+		imgBlock.Indent = baseIndent
+		if imgBlock.Align == "left" && explicitLeft != nil {
+			explicitLeft[imgBlock] = true
+		}
+		sub := parseMarkdownSource(rest).doc
+		if sub == nil || len(sub.Blocks) == 0 {
+			return nil, false
+		}
+		for _, sb := range sub.Blocks {
+			sb.Indent = min(12, sb.Indent+baseIndent)
+		}
+		return append([]*document.Block{imgBlock}, sub.Blocks...), true
+	}
+	// Non-floated leading <img> followed by more inline content/images: re-parse
+	// as a single Markdown paragraph by neutralizing CommonMark's type-7 rule.
+	ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+	nodes, err := xhtml.ParseFragment(strings.NewReader(trimmed), ctx)
+	if err != nil {
+		return nil, false
+	}
+	wrap := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+	for _, n := range nodes {
+		wrap.AppendChild(n)
+	}
+	if hasBlockElementChild(wrap) || hasUnsupportedInlineMedia(wrap) {
+		return nil, false
+	}
+	sub := parser.New(arcmdMarkdownExtensions)
+	sub.Set("<span></span>" + trimmed)
+	paraIdx := -1
+	count := 0
+	for idx := range sub.Children(0) {
+		count++
+		if sub.Block(idx).Kind == parser.Paragraph {
+			paraIdx = idx
+		}
+	}
+	if count != 1 || paraIdx < 0 {
+		return nil, false
+	}
+	runs, comments := importBlockInlines(sub, paraIdx, document.Style{}, "\u2028")
+	if len(runs) == 0 {
+		return nil, false
+	}
+	b := document.NewBlock("paragraph", "")
+	b.Indent = baseIndent
+	b.Runs = runs
+	b.Comments = comments
+	return []*document.Block{b}, true
 }
 
 // tryImportLeadingCommentParagraph converts a CommonMark type-2 HTML block
@@ -847,7 +1071,20 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 	}
 	if b, ok := parseSingleImgTag(trimmed, ""); ok {
 		b.Indent = baseIndent
+		if b.Align == "left" && explicitLeft != nil {
+			explicitLeft[b] = true
+		}
 		return []*document.Block{b}, true
+	}
+	if b, ok := parseSinglePictureTag(trimmed, ""); ok {
+		b.Indent = baseIndent
+		if b.Align == "left" && explicitLeft != nil {
+			explicitLeft[b] = true
+		}
+		return []*document.Block{b}, true
+	}
+	if hbs, ok := tryImportLeadingImgHTMLBlock(trimmed, baseIndent, explicitLeft); ok {
+		return hbs, true
 	}
 	if b, ok := tryImportLeadingCommentParagraph(trimmed, baseIndent); ok {
 		return []*document.Block{b}, true
@@ -868,11 +1105,67 @@ func tryImportHTMLBlocks(raw string, baseIndent int, explicitLeft map[*document.
 		}
 		elems = append(elems, n)
 	}
-	if len(elems) != 1 {
+	if len(elems) == 0 {
+		return nil, false
+	}
+	// Bare standalone <br> spacer lines (common inside README <div align="center">).
+	allBareBr := true
+	for _, el := range elems {
+		if el.DataAtom != atom.Br || len(el.Attr) > 0 {
+			allBareBr = false
+			break
+		}
+	}
+	if allBareBr {
+		b := document.NewBlock("paragraph", strings.Repeat("\u2028", len(elems)-1))
+		b.Indent = baseIndent
+		return []*document.Block{b}, true
+	}
+	// Multi-element inline image/link rows parsed by CommonMark as an HTML block
+	// (e.g. multiple multi-line <a href="..."><img ...></a> elements).
+	if len(elems) > 1 {
+		hasImg := false
+		allInline := true
+		for _, el := range elems {
+			switch el.DataAtom {
+			case atom.Img, atom.Picture, atom.A, atom.Br:
+				if hasBlockElementChild(el) || hasUnsupportedInlineMedia(el) {
+					allInline = false
+				}
+				if hasInlineImageDescendant(el) {
+					hasImg = true
+				}
+			default:
+				allInline = false
+			}
+		}
+		if allInline && hasImg {
+			runs, comments := parseInlineHTMLNodeSlice(nodes, document.Style{}, "\u2028", false)
+			if len(runs) > 0 {
+				b := document.NewBlock("paragraph", "")
+				b.Indent = baseIndent
+				b.Runs = runs
+				b.Comments = comments
+				return []*document.Block{b}, true
+			}
+		}
 		return nil, false
 	}
 	el := elems[0]
 	switch el.DataAtom {
+	case atom.A:
+		if !hasInlineImageDescendant(el) || hasBlockElementChild(el) || hasUnsupportedInlineMedia(el) {
+			return nil, false
+		}
+		runs, comments := parseInlineHTMLNodeSlice(elems, document.Style{}, "\u2028", false)
+		if len(runs) == 0 {
+			return nil, false
+		}
+		b := document.NewBlock("paragraph", "")
+		b.Indent = baseIndent
+		b.Runs = runs
+		b.Comments = comments
+		return []*document.Block{b}, true
 	case atom.Hr:
 		b := document.NewBlock("rule", "")
 		b.Indent = baseIndent
@@ -1002,14 +1295,27 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 				b := document.NewBlock("rule", "")
 				b.Indent = baseIndent
 				out = append(out, b)
-			case atom.Img:
+			case atom.Img, atom.Picture:
+				if hasUnsupportedInlineMedia(c) {
+					return nil, false
+				}
+				if len(inlineBuf) > 0 || hasAdjacentInlineSibling(c.NextSibling) {
+					inlineBuf = append(inlineBuf, c)
+					continue
+				}
 				flushInline()
-				b, ok := imgNodeToBlock(c, align)
+				var b *document.Block
+				var ok bool
+				if c.DataAtom == atom.Picture {
+					b, ok = pictureNodeToBlock(c, align)
+				} else {
+					b, ok = imgNodeToBlock(c, align)
+				}
 				if !ok {
 					return nil, false
 				}
 				b.Indent = baseIndent
-				if align == "" && explicitLeft != nil {
+				if (align == "" || b.Align == "left") && explicitLeft != nil {
 					explicitLeft[b] = true
 				}
 				out = append(out, b)
@@ -1105,13 +1411,39 @@ func importAlignedHTMLContainer(el *xhtml.Node, align string, baseIndent int, ex
 	return out, true
 }
 
+func hasAdjacentInlineSibling(n *xhtml.Node) bool {
+	for c := n; c != nil; c = c.NextSibling {
+		switch c.Type {
+		case xhtml.TextNode:
+			if strings.TrimSpace(c.Data) == "" {
+				continue
+			}
+			return true
+		case xhtml.ElementNode:
+			switch c.DataAtom {
+			case atom.Img, atom.Picture, atom.Span, atom.Mark, atom.Font,
+				atom.B, atom.Strong, atom.I, atom.Em, atom.Cite, atom.Var, atom.Dfn,
+				atom.U, atom.Ins, atom.S, atom.Del, atom.Strike,
+				atom.Sup, atom.Sub, atom.Code, atom.Kbd, atom.Samp, atom.Tt,
+				atom.A, atom.Small, atom.Abbr, atom.Q, atom.Br:
+				return true
+			default:
+				return false
+			}
+		default:
+			continue
+		}
+	}
+	return false
+}
+
 func singleChildImg(el *xhtml.Node) *xhtml.Node {
 	var found *xhtml.Node
 	for c := el.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == xhtml.TextNode && strings.TrimSpace(c.Data) == "" {
 			continue
 		}
-		if c.Type == xhtml.ElementNode && c.DataAtom == atom.Img && found == nil {
+		if c.Type == xhtml.ElementNode && (c.DataAtom == atom.Img || c.DataAtom == atom.Picture) && found == nil {
 			found = c
 			continue
 		}
@@ -1121,19 +1453,22 @@ func singleChildImg(el *xhtml.Node) *xhtml.Node {
 }
 
 func imgNodeToBlock(img *xhtml.Node, align string) (*document.Block, bool) {
-	src := strings.TrimSpace(attr(img, "src"))
-	if src == "" || strings.HasPrefix(strings.ToLower(src), "data:") {
+	if img != nil && img.DataAtom == atom.Picture {
+		return pictureNodeToBlock(img, align)
+	}
+	parsed, imgAlign, ok := parseHTMLInlineImage(img)
+	if !ok {
 		return nil, false
 	}
-	b := document.NewBlock("image", attr(img, "alt"))
-	b.URL = src
-	b.ImageWidth = parseHTMLWidth(img)
-	if align != "" {
-		b.Align = align
-	} else if a := parseBlockAlign(img); a != "" {
-		b.Align = a
+	return inlineImageToBlock(parsed, imgAlign, align), true
+}
+
+func pictureNodeToBlock(pic *xhtml.Node, align string) (*document.Block, bool) {
+	parsed, imgAlign, ok := parsePictureInlineImage(pic)
+	if !ok {
+		return nil, false
 	}
-	return b, true
+	return inlineImageToBlock(parsed, imgAlign, align), true
 }
 
 func parseBlockIndent(el *xhtml.Node) (int, bool) {
@@ -1179,6 +1514,23 @@ func (a *runAccumulator) add(text string, style document.Style) {
 	a.buf.Reset()
 	a.style = style
 	a.buf.WriteString(text)
+}
+
+func (a *runAccumulator) addImage(img document.InlineImage, style document.Style) {
+	if img.URL == "" {
+		return
+	}
+	if a.has {
+		a.runs = append(a.runs, document.Run{Text: a.buf.String(), Style: a.style})
+		a.has = false
+		a.buf.Reset()
+	}
+	a.runs = append(a.runs, document.InlineImageRun(img, style))
+	a.u16Len += document.Len(document.InlineImagePlaceholder)
+}
+
+func (a *runAccumulator) lastIsImage() bool {
+	return !a.has && len(a.runs) > 0 && a.runs[len(a.runs)-1].IsImage()
 }
 
 func (a *runAccumulator) finish() []document.Run {
@@ -1600,6 +1952,99 @@ func addNoMathText(acc *runAccumulator, s string, style document.Style) {
 	}
 }
 
+func isPictureOpenTag(raw string) bool {
+	z := xhtml.NewTokenizer(strings.NewReader(strings.TrimSpace(raw)))
+	return z.Next() == xhtml.StartTagToken && z.Token().DataAtom == atom.Picture
+}
+
+func isPictureCloseTag(raw string) bool {
+	z := xhtml.NewTokenizer(strings.NewReader(strings.TrimSpace(raw)))
+	return z.Next() == xhtml.EndTagToken && z.Token().DataAtom == atom.Picture
+}
+
+// matchInlinePictureSequence matches <picture>...</picture> spanning one or more
+// inline parser nodes starting at in[start] and returns the resolved image and
+// the exclusive end index.
+func matchInlinePictureSequence(in []parser.Inline, start, stop int) (document.InlineImage, string, int, bool) {
+	if start >= stop || in[start].Kind != parser.HTML || !isPictureOpenTag(in[start].Text) {
+		return document.InlineImage{}, "", 0, false
+	}
+	var raw strings.Builder
+	raw.WriteString(in[start].Text)
+	for j := max(start+1, in[start].Next); j < stop; {
+		n := in[j]
+		next := min(stop, max(j+1, n.Next))
+		switch n.Kind {
+		case parser.HTML:
+			raw.WriteString(n.Text)
+			if isPictureCloseTag(n.Text) {
+				ctx := &xhtml.Node{Type: xhtml.ElementNode, DataAtom: atom.Div, Data: "div"}
+				nodes, err := xhtml.ParseFragment(strings.NewReader(raw.String()), ctx)
+				if err == nil && len(nodes) == 1 && nodes[0].Type == xhtml.ElementNode && nodes[0].DataAtom == atom.Picture {
+					if img, align, ok := parsePictureInlineImage(nodes[0]); ok {
+						return img, align, next, true
+					}
+				}
+				return document.InlineImage{}, "", 0, false
+			}
+		case parser.SoftBreak:
+			raw.WriteByte('\n')
+		case parser.Text:
+			if strings.TrimSpace(n.Text) != "" {
+				return document.InlineImage{}, "", 0, false
+			}
+			raw.WriteString(n.Text)
+		default:
+			return document.InlineImage{}, "", 0, false
+		}
+		j = next
+	}
+	return document.InlineImage{}, "", 0, false
+}
+
+// nextInlineIsImage reports whether the next meaningful inline token starting
+// at in[start:stop] is an inline image (directly or wrapped in a link / HTML
+// inline tag), used to collapse soft breaks between stacked badge lines into a
+// horizontal space like CommonMark/GitHub rendering.
+func nextInlineIsImage(in []parser.Inline, start, stop int) bool {
+	for j := start; j < stop; {
+		n := in[j]
+		next := min(stop, max(j+1, n.Next))
+		switch n.Kind {
+		case parser.Image:
+			return validImportedImageSrc(n.Dest)
+		case parser.Link:
+			return nextInlineIsImage(in, j+1, next)
+		case parser.HTML:
+			if _, _, ok := parseInlineImgHTMLToken(n.Text); ok {
+				return true
+			}
+			if _, _, _, ok := matchInlinePictureSequence(in, j, stop); ok {
+				return true
+			}
+			z := xhtml.NewTokenizer(strings.NewReader(strings.TrimSpace(n.Text)))
+			tt := z.Next()
+			if tt == xhtml.StartTagToken {
+				switch z.Token().DataAtom {
+				case atom.A, atom.Span, atom.Strong, atom.B, atom.Em, atom.I, atom.Sub, atom.Sup:
+					j = next
+					continue
+				}
+			}
+			return false
+		case parser.Text:
+			if strings.TrimSpace(n.Text) == "" {
+				j = next
+				continue
+			}
+			return false
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, hardBreak string) ([]document.Run, []document.InlineComment) {
 	if len(in) == 0 {
 		return nil, nil
@@ -1615,6 +2060,16 @@ func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, har
 			node := in[i]
 			end := min(stop, max(i+1, node.Next))
 			if node.Kind == parser.HTML {
+				if img, _, ok := parseInlineImgHTMLToken(node.Text); ok {
+					acc.addImage(img, style)
+					i = end
+					continue
+				}
+				if img, _, picEnd, ok := matchInlinePictureSequence(in, i, stop); ok {
+					acc.addImage(img, style)
+					i = picEnd
+					continue
+				}
 				if handled, emit, comment := applyInlineHTMLToken(node.Text, &stack, &style, hardBreak); handled {
 					if comment != "" {
 						comments = append(comments, document.InlineComment{Offset: acc.u16Len, Text: comment})
@@ -1652,7 +2107,11 @@ func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, har
 				case parser.LineBreak:
 					text = hardBreak
 				case parser.SoftBreak:
-					text = "\n"
+					if acc.lastIsImage() && nextInlineIsImage(in, end, stop) {
+						text = " "
+					} else {
+						text = "\n"
+					}
 				case parser.FootnoteRef:
 					text = "[^" + node.Text + "]"
 				case parser.Math:
@@ -1662,6 +2121,12 @@ func importRunsAndCommentsWithBreak(in []parser.Inline, base document.Style, har
 					}
 					text = "$" + body + "$"
 				case parser.Image:
+					if validImportedImageSrc(node.Dest) {
+						alt, width := parseMarkdownImageAlt(parser.PlainText(in[i+1 : end]))
+						acc.addImage(document.InlineImage{URL: node.Dest, Alt: alt, Width: width}, next)
+						i = end
+						continue
+					}
 					text = "![" + parser.PlainText(in[i+1:end]) + "](" + node.Dest + ")"
 				}
 				acc.add(text, next)
@@ -2154,7 +2619,7 @@ func renderSingleMarkdownItem(blocks []*document.Block, i int, numberedSeq, list
 		}
 		text = fence + b.Language + "\n" + b.Text() + "\n" + fence
 	case "image":
-		text = exportImageMarkdown(b, align)
+		text = exportImageMarkdown(b, b.Align)
 	case "rule":
 		text = "---"
 	case "raw":
@@ -2207,18 +2672,29 @@ func formatAlignedBlockHTML(tag, align string, indent int, inner string) string 
 	return "<" + tag + " " + strings.Join(attrs, " ") + ">" + inner + "</" + tag + ">"
 }
 
+func formatMarkdownDest(dest string) string {
+	if strings.ContainsAny(dest, " ()\t") && !strings.ContainsAny(dest, "<>\r\n") {
+		return "<" + dest + ">"
+	}
+	return dest
+}
+
 func exportImageMarkdown(b *document.Block, align string) string {
-	if b.ImageWidth == 0 && align == "" && b.Indent == 0 {
-		dest := b.URL
-		if strings.ContainsAny(dest, " ()\t") && !strings.ContainsAny(dest, "<>\r\n") {
-			dest = "<" + dest + ">"
-		}
-		return "![" + exportRuns(b.Runs) + "](" + dest + ")"
+	if b.ImageWidth == 0 && b.ImageHeight == 0 && align == "" && b.Indent == 0 {
+		return "![" + exportRuns(b.Runs) + "](" + formatMarkdownDest(b.URL) + ")"
 	}
 	var img strings.Builder
 	img.WriteString(`<img src="` + html.EscapeString(b.URL) + `" alt="` + html.EscapeString(b.Text()) + `"`)
 	if b.ImageWidth > 0 {
 		fmt.Fprintf(&img, ` width="%.0f"`, b.ImageWidth)
+	}
+	if b.ImageHeight > 0 {
+		fmt.Fprintf(&img, ` height="%.0f"`, b.ImageHeight)
+	}
+	if (align == "left" || align == "right") && b.Indent == 0 {
+		img.WriteString(` align="` + align + `"`)
+		img.WriteString(">")
+		return img.String()
 	}
 	img.WriteString(">")
 	if align != "" || b.Indent > 0 {
@@ -2522,7 +2998,18 @@ func renderMarkdownRuns(runs []document.Run, before, after rune, inKbd bool) str
 		var chunk string
 		switch kind {
 		case "link":
-			chunk = fmt.Sprintf("[%s](%s)", inner, val)
+			hasSizedImg := false
+			for _, sr := range sub {
+				if sr.IsImage() && (sr.Image.Width > 0 || sr.Image.Height > 0) {
+					hasSizedImg = true
+					break
+				}
+			}
+			if hasSizedImg && safeHTMLURL(val) {
+				chunk = `<a href="` + html.EscapeString(val) + `">` + inner + "</a>"
+			} else {
+				chunk = fmt.Sprintf("[%s](%s)", inner, val)
+			}
 		case "kbd":
 			chunk = "<kbd>" + inner + "</kbd>"
 		case "bold":
@@ -2565,6 +3052,13 @@ func renderMarkdownRuns(runs []document.Run, before, after rune, inKbd bool) str
 }
 
 func formatMarkdownLeafRun(run document.Run, skipWiki bool) string {
+	if run.IsImage() {
+		if run.Image.Width > 0 || run.Image.Height > 0 {
+			return formatHTMLImgTag(run.Image)
+		}
+		alt := strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`).Replace(run.Image.Alt)
+		return "![" + alt + "](" + formatMarkdownDest(run.Image.URL) + ")"
+	}
 	if run.Style.Code {
 		fence := "`"
 		for strings.Contains(run.Text, fence) {
@@ -2809,16 +3303,26 @@ func hasBlockElementChild(n *xhtml.Node) bool {
 }
 
 func hasUnsupportedInlineMedia(n *xhtml.Node) bool {
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type != xhtml.ElementNode {
-			continue
-		}
-		switch c.DataAtom {
-		case atom.Img, atom.Svg, atom.Video, atom.Audio, atom.Iframe,
-			atom.Picture, atom.Canvas, atom.Input, atom.Button,
+	if n == nil {
+		return false
+	}
+	if n.Type == xhtml.ElementNode {
+		switch n.DataAtom {
+		case atom.Img:
+			return !validImportedImageSrc(attr(n, "src"))
+		case atom.Picture:
+			_, _, ok := parsePictureInlineImage(n)
+			return !ok
+		case atom.Svg, atom.Video, atom.Audio, atom.Iframe,
+			atom.Canvas, atom.Input, atom.Button,
 			atom.Object, atom.Embed, atom.Form, atom.Select,
 			atom.Textarea, atom.Script, atom.Style:
 			return true
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != xhtml.ElementNode {
+			continue
 		}
 		if hasUnsupportedInlineMedia(c) {
 			return true
@@ -3266,13 +3770,23 @@ func sameBlockSliceSemantics(a, b []*document.Block) bool {
 	return true
 }
 
+func normBlockAlignForCompare(kind, align string) string {
+	if kind == "image" {
+		if align == "left" || align == "center" || align == "right" {
+			return align
+		}
+		return ""
+	}
+	return normCellAlign(align)
+}
+
 func sameBlockSemantics(a, b *document.Block) bool {
 	if a.Kind != b.Kind || a.Level != b.Level || a.Indent != b.Indent || a.Start != b.Start ||
 		a.Checked != b.Checked || a.Language != b.Language || a.URL != b.URL ||
-		normCellAlign(a.Align) != normCellAlign(b.Align) ||
+		normBlockAlignForCompare(a.Kind, a.Align) != normBlockAlignForCompare(b.Kind, b.Align) ||
 		a.Color != b.Color || a.Emoji != b.Emoji ||
 		a.Background != b.Background || a.ColSpan != b.ColSpan || a.RowSpan != b.RowSpan ||
-		a.ImageWidth != b.ImageWidth || a.NoteLabel != b.NoteLabel {
+		a.ImageWidth != b.ImageWidth || a.ImageHeight != b.ImageHeight || a.NoteLabel != b.NoteLabel {
 		return false
 	}
 	if a.Kind == "toggle" && a.Folded != b.Folded {
@@ -3369,7 +3883,7 @@ func blockSemanticHash(b *document.Block) uint64 {
 	}
 	h = fnvMixString(h, b.Language)
 	h = fnvMixString(h, b.URL)
-	h = fnvMixString(h, normCellAlign(b.Align))
+	h = fnvMixString(h, normBlockAlignForCompare(b.Kind, b.Align))
 	h = fnvMixString(h, b.Color)
 	h = fnvMixString(h, b.Emoji)
 	h = fnvMixString(h, b.Background)
@@ -3380,6 +3894,11 @@ func blockSemanticHash(b *document.Block) uint64 {
 		imgW = 0
 	}
 	h = fnvMixUint32(h, math.Float32bits(imgW))
+	imgH := b.ImageHeight
+	if imgH == 0 {
+		imgH = 0
+	}
+	h = fnvMixUint32(h, math.Float32bits(imgH))
 	h = fnvMixString(h, b.NoteLabel)
 	if b.Kind == "toggle" && b.Folded {
 		h = fnvMixByte(h, 1)
@@ -3406,6 +3925,21 @@ func blockSemanticHash(b *document.Block) uint64 {
 	return h
 }
 
+func fnvMixInlineImage(h uint64, img document.InlineImage) uint64 {
+	h = fnvMixString(h, img.URL)
+	h = fnvMixString(h, img.Alt)
+	w := img.Width
+	if w == 0 {
+		w = 0
+	}
+	h = fnvMixUint32(h, math.Float32bits(w))
+	ht := img.Height
+	if ht == 0 {
+		ht = 0
+	}
+	return fnvMixUint32(h, math.Float32bits(ht))
+}
+
 func hashNormalizedRuns(h uint64, rs []document.Run) uint64 {
 	hasCur := false
 	var curStyle document.Style
@@ -3425,6 +3959,14 @@ func hashNormalizedRuns(h uint64, rs []document.Run) uint64 {
 	}
 	for i := range rs {
 		r := &rs[i]
+		if !r.Image.IsZero() {
+			hasCur = false
+			h = fnvMixByte(h, 0xfd)
+			h = fnvMixStyle(h, r.Style)
+			h = fnvMixInlineImage(h, r.Image)
+			h = fnvMixString(h, r.Text)
+			continue
+		}
 		if !r.Style.NoMath {
 			emit(r.Text, r.Style)
 			continue
@@ -3534,13 +4076,17 @@ func normalizeRunsForCompare(rs []document.Run) []document.Run {
 		if txt == "" {
 			return
 		}
-		if len(out) > 0 && out[len(out)-1].Style == st {
+		if len(out) > 0 && out[len(out)-1].Image.IsZero() && out[len(out)-1].Style == st {
 			out[len(out)-1].Text += txt
 		} else {
 			out = append(out, document.Run{Text: txt, Style: st})
 		}
 	}
 	for _, r := range rs {
+		if !r.Image.IsZero() {
+			out = append(out, r)
+			continue
+		}
 		if !r.Style.NoMath {
 			emit(r.Text, r.Style)
 			continue

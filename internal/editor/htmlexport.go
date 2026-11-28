@@ -198,6 +198,12 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 					if b.ImageWidth > 0 {
 						fmt.Fprintf(&out, " width=\"%.0f\"", b.ImageWidth)
 					}
+					if b.ImageHeight > 0 {
+						fmt.Fprintf(&out, " height=\"%.0f\"", b.ImageHeight)
+					}
+					if b.Align == "left" || b.Align == "right" {
+						out.WriteString(` align="` + b.Align + `"`)
+					}
 					out.WriteString(">")
 				}
 				continue

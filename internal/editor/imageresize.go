@@ -15,13 +15,17 @@ type imageResize struct {
 }
 
 func (e *Editor) imageHandles(c *ui.Context, r row) {
-	if e.ReadOnly || r.picture == nil || r.picture.resource.Bitmap == nil {
+	if e.ReadOnly || r.picture == nil || !r.picture.resource.HasVisual() {
 		return
 	}
 	id := r.leaf.Block.ID
 	rect := r.picture.bounds
 	if e.imageResize.id != id && !e.hovered(rect, 12) && e.LeafAt(e.Caret).Block.ID != id {
 		return
+	}
+	dragMult := float32(2)
+	if r.leaf.Block.Align == "left" || r.leaf.Block.Align == "right" {
+		dragMult = 1
 	}
 	for _, side := range []int{-1, 1} {
 		x := rect.X - 5
@@ -38,7 +42,7 @@ func (e *Editor) imageHandles(c *ui.Context, r row) {
 			if e.imageResize.id != id {
 				e.imageResize = imageResize{id, rect.W}
 			}
-			e.imageResize.width = max(48, min(r.rect.W, e.imageResize.width+float32(side)*2*dx))
+			e.imageResize.width = max(48, min(r.rect.W, e.imageResize.width+float32(side)*dragMult*dx))
 			e.ready = false
 		}
 		if _, _, ended := h.DragEnded(); ended && e.imageResize.id == id {
@@ -76,8 +80,8 @@ func (v *imageViewer) scaleFor(w, h float32) float32 {
 	if v.actual {
 		return 1
 	}
-	iw, ih := v.bitmap.Size()
-	return min(float32(1), w/float32(max(1, iw)), h/float32(max(1, ih)))
+	iw, ih := v.intrinsicSize()
+	return min(float32(1), w/max(1, iw), h/max(1, ih))
 }
 func (v *imageViewer) zoomAt(scale, x, y, w, h float32) {
 	old := v.scaleFor(w, h)
@@ -89,9 +93,9 @@ func (v *imageViewer) zoomAt(scale, x, y, w, h float32) {
 	v.clampPan(w, h)
 }
 func (v *imageViewer) clampPan(w, h float32) {
-	iw, ih := v.bitmap.Size()
+	iw, ih := v.intrinsicSize()
 	scale := v.scaleFor(w, h)
-	x, y := max(0, (float32(iw)*scale-w)/2), max(0, (float32(ih)*scale-h)/2)
+	x, y := max(0, (iw*scale-w)/2), max(0, (ih*scale-h)/2)
 	v.pan.X = max(-x, min(x, v.pan.X))
 	v.pan.Y = max(-y, min(y, v.pan.Y))
 }
@@ -174,8 +178,8 @@ func (e *Editor) imageCanvas(c *ui.Context, w, h float32) {
 		if scale <= 0 {
 			scale = targetScale
 		}
-		iw, ih := v.bitmap.Size()
-		pw, ph := float32(iw)*scale, float32(ih)*scale
+		iw, ih := v.intrinsicSize()
+		pw, ph := iw*scale, ih*scale
 		dst := ui.Rect{X: r.X + (w-pw)/2 + pan.X, Y: r.Y + (h-ph)/2 + pan.Y, W: pw, H: ph}
 		if !reduceMotion && !v.openedAt.IsZero() && v.origin.W > 0 && v.origin.H > 0 {
 			const heroDur = 180 * time.Millisecond
@@ -191,6 +195,10 @@ func (e *Editor) imageCanvas(c *ui.Context, w, h float32) {
 				}
 			}
 		}
-		p.Image(v.bitmap, dst, ui.Contain)
+		if v.bitmap != nil {
+			p.Image(v.bitmap, dst, ui.Contain)
+		} else if v.svg != nil {
+			p.Image(v.svg.WithDark(c.Theme().Dark), dst, ui.Contain)
+		}
 	})
 }

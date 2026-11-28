@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io/fs"
+	"math"
 	neturl "net/url"
 	"os"
 	"path"
@@ -1783,6 +1784,58 @@ func (d *document) imageResourceFrom(full, url string, post func(func())) editor
 	return placeholder
 }
 
+func looksLikeSVG(data []byte) bool {
+	s := strings.TrimPrefix(string(data), "\xef\xbb\xbf")
+	for {
+		s = strings.TrimLeft(s, " \t\r\n")
+		switch {
+		case strings.HasPrefix(s, "<!--"):
+			end := strings.Index(s[4:], "-->")
+			if end < 0 {
+				return false
+			}
+			s = s[4+end+3:]
+		case strings.HasPrefix(s, "<?"):
+			end := strings.Index(s[2:], "?>")
+			if end < 0 {
+				return false
+			}
+			s = s[2+end+2:]
+		case len(s) >= 9 && strings.EqualFold(s[:9], "<!doctype"):
+			end := strings.IndexByte(s, '>')
+			if end < 0 {
+				return false
+			}
+			s = s[end+1:]
+		default:
+			return len(s) >= 4 && strings.EqualFold(s[:4], "<svg")
+		}
+	}
+}
+
+func decodeImageBytes(data []byte, local bool) editor.ImageResource {
+	if bmp, err := ui.DecodeBitmap(data); err == nil {
+		w, h := bmp.Size()
+		res := editor.ImageResource{Bitmap: bmp, Width: w, Height: h, Local: local}
+		if frames, delays, ok := gifFrames(data); ok {
+			res.Frames, res.Delays = frames, delays
+		}
+		return res
+	}
+	if looksLikeSVG(data) {
+		if svg, err := ui.ParseSVG(data); err == nil {
+			sw, sh := svg.Size()
+			return editor.ImageResource{
+				SVG:    svg,
+				Width:  int(math.Ceil(float64(sw))),
+				Height: int(math.Ceil(float64(sh))),
+				Local:  local,
+			}
+		}
+	}
+	return editor.ImageResource{Problem: editor.ImageUnsupported, Local: local}
+}
+
 func decodeLocalImageThumb(full string) editor.ImageResource {
 	data, err := os.ReadFile(full)
 	if err != nil {
@@ -1794,6 +1847,12 @@ func decodeLocalImageThumb(full string) editor.ImageResource {
 	}
 	bmp, err := ui.DecodeBitmapScaled(data, 640)
 	if err != nil {
+		if looksLikeSVG(data) {
+			if svg, svgErr := ui.ParseSVG(data); svgErr == nil {
+				sw, sh := svg.Size()
+				return editor.ImageResource{SVG: svg, Width: int(math.Ceil(float64(sw))), Height: int(math.Ceil(float64(sh))), Local: true}
+			}
+		}
 		return editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}
 	}
 	w, h := bmp.Size()
@@ -1809,16 +1868,7 @@ func decodeLocalImageSync(full string) editor.ImageResource {
 		}
 		return editor.ImageResource{Problem: problem, Local: true}
 	}
-	bmp, err := ui.DecodeBitmap(data)
-	if err != nil {
-		return editor.ImageResource{Problem: editor.ImageUnsupported, Local: true}
-	}
-	w, h := bmp.Size()
-	res := editor.ImageResource{Bitmap: bmp, Width: w, Height: h, Local: true}
-	if frames, delays, ok := gifFrames(data); ok {
-		res.Frames, res.Delays = frames, delays
-	}
-	return res
+	return decodeImageBytes(data, true)
 }
 
 // isMissingDocFile distinguishes a deleted document file from a non-directory

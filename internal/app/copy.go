@@ -590,6 +590,13 @@ func copyDocumentText(rel, text string, urls, coverURLs map[string]string) (stri
 						b.URL = to
 					}
 				}
+				for i := range b.Runs {
+					if b.Runs[i].Image.URL != "" {
+						if to, ok := urls[b.Runs[i].Image.URL]; ok {
+							b.Runs[i].Image.URL = to
+						}
+					}
+				}
 				walk(b.Children)
 			}
 		}

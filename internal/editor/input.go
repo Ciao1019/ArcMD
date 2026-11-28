@@ -145,7 +145,7 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 		if e.clickNumberedMarker(ev.X, ev.Y) {
 			return true
 		}
-		if (!e.ReadOnly || e.directLinks) && ev.Mods == 0 && ev.Clicks < 2 {
+		if (!e.ReadOnly || e.directLinks || e.isLinkedInlineImagePoint(ev.X, ev.Y)) && ev.Mods == 0 && ev.Clicks < 2 {
 			if span, ok := e.linkAtPoint(ev.X, ev.Y, !e.directLinks); ok {
 				e.pendingLink = span
 				e.pendingLinkDown = ui.Point{X: ev.X, Y: ev.Y}
@@ -215,7 +215,7 @@ func (e *Editor) input(ev ui.InputEvent, read func() string, write func(string),
 			e.pendingLink = linkSpan{}
 			if e.Anchor == e.Caret {
 				if hit, ok := e.linkAtPoint(ev.X, ev.Y, !e.directLinks); ok && hit == span {
-					if e.ReadOnly && e.directLinks && open != nil {
+					if e.ReadOnly && (e.directLinks || e.isLinkedInlineImagePoint(ev.X, ev.Y)) && open != nil {
 						open(span.url)
 					} else if !e.ReadOnly {
 						e.openLinkSpan(span)

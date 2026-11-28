@@ -371,12 +371,33 @@ func exportHTMLRuns(runs []document.Run, preserveNoMath bool) string {
 	return renderHTMLRunSlice(runs, preserveNoMath)
 }
 
+func formatHTMLImgTag(img document.InlineImage) string {
+	if !safeHTMLURL(img.URL) {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString(`<img src="` + html.EscapeString(img.URL) + `" alt="` + html.EscapeString(img.Alt) + `"`)
+	if img.Width > 0 {
+		fmt.Fprintf(&out, ` width="%.0f"`, img.Width)
+	}
+	if img.Height > 0 {
+		fmt.Fprintf(&out, ` height="%.0f"`, img.Height)
+	}
+	out.WriteString(">")
+	return out.String()
+}
+
 func renderHTMLRunSlice(runs []document.Run, preserveNoMath bool) string {
 	var out strings.Builder
 	for i := 0; i < len(runs); {
 		r := runs[i]
 		kind, val := outerHTMLMark(r.Style)
 		if kind == "" {
+			if r.IsImage() {
+				out.WriteString(formatHTMLImgTag(r.Image))
+				i++
+				continue
+			}
 			s := html.EscapeString(r.Text)
 			s = strings.NewReplacer("\u2028", "<br>", "\n", "<br>").Replace(s)
 			if r.Style.Code {
@@ -535,6 +556,10 @@ func parseInlineHTMLNodeSlice(nodes []*xhtml.Node, base document.Style, softBrea
 		runs = append(runs, document.Run{Text: text, Style: style})
 		u16Len += document.Len(text)
 	}
+	appendImage := func(img document.InlineImage, style document.Style) {
+		runs = append(runs, document.InlineImageRun(img, style))
+		u16Len += document.Len(document.InlineImagePlaceholder)
+	}
 	var walk func(*xhtml.Node, document.Style)
 	walk = func(c *xhtml.Node, style document.Style) {
 		switch c.Type {
@@ -558,6 +583,14 @@ func parseInlineHTMLNodeSlice(nodes []*xhtml.Node, base document.Style, softBrea
 			switch c.DataAtom {
 			case atom.Br:
 				appendRun(softBreak, style)
+			case atom.Img:
+				if img, _, ok := parseHTMLInlineImage(c); ok {
+					appendImage(img, style)
+				}
+			case atom.Picture:
+				if img, _, ok := parsePictureInlineImage(c); ok {
+					appendImage(img, style)
+				}
 			case atom.Script, atom.Style:
 			case atom.Q:
 				appendRun("“", next)

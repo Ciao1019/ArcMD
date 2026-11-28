@@ -784,6 +784,7 @@ var en = map[string]string{
 	"编辑中，点击设为只读": "Editing; click to make read-only",
 	"编辑主题":       "Edit Theme",
 	"编辑主题颜色…":    "Edit Theme Colors…",
+	"图片说明":       "Image alt text",
 	"编辑图片说明…":    "Edit Caption…",
 	"编辑并保存后，ArcMD 会自动保留版本（每 10 分钟至多一个，最多 100 个），保存在空间文件夹的 .arcmd/history 里。": "Once you edit and save, ArcMD keeps versions by itself (at most one per 10 minutes, 100 in all) in the space folder's .arcmd/history.",
 	"编辑空间":       "Edit Space",

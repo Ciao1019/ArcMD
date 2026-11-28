@@ -111,6 +111,7 @@ func dropStrayColors(blocks []*Block) {
 	for _, b := range blocks {
 		if b.Kind != "image" {
 			b.ImageWidth = 0
+			b.ImageHeight = 0
 		}
 		if b.Kind != "numbered" {
 			b.Start = 0
@@ -129,6 +130,28 @@ func dropStrayColors(blocks []*Block) {
 		}
 		if len(b.Comments) > 0 && (len(b.Children) > 0 || b.Kind == "code" || b.Kind == "raw" || b.Kind == "math" || b.Kind == "rule" || b.Kind == "image") {
 			b.Comments = nil
+		}
+		if len(b.Children) > 0 || !AllowsInlineComments(b.Kind) {
+			hasInlineImg := false
+			for _, r := range b.Runs {
+				if !r.Image.IsZero() {
+					hasInlineImg = true
+					break
+				}
+			}
+			if hasInlineImg {
+				cleaned := make([]Run, 0, len(b.Runs))
+				for _, r := range b.Runs {
+					if !r.Image.IsZero() {
+						if r.Image.Alt != "" {
+							cleaned = append(cleaned, Run{Text: r.Image.Alt, Style: r.Style})
+						}
+						continue
+					}
+					cleaned = append(cleaned, r)
+				}
+				b.Runs = Compact(cleaned)
+			}
 		}
 		dropStrayColors(b.Children)
 	}
@@ -207,7 +230,7 @@ func styleAtRange(runs []Run, start, a, z int) Style {
 			if a == z && s.Link != "" {
 				atLinkStart := at == runStart && (i == 0 || runs[i-1].Style.Link != s.Link)
 				atLinkEnd := at == position && (i+1 >= len(runs) || runs[i+1].Style.Link != s.Link)
-				if atLinkStart || atLinkEnd {
+				if !run.Image.IsZero() || atLinkStart || atLinkEnd {
 					s.Link = ""
 				}
 			}
@@ -304,7 +327,7 @@ func (e *Engine) replace(a, z int, text string) {
 		if first.Block != last.Block && a == first.Start && (isRule(first.Block) || isMedia(first.Block) || isWhiteboardBlockLang(first.Block)) {
 			// A rule or attachment selected whole goes with the selection
 			// rather than taking the text after it.
-			first.Block.Kind, first.Block.URL, first.Block.Language, first.Block.ImageWidth = "paragraph", "", "", 0
+			first.Block.Kind, first.Block.URL, first.Block.Language, first.Block.ImageWidth, first.Block.ImageHeight = "paragraph", "", "", 0, 0
 		}
 		first.Block.Runs = runs
 		first.Block.Comments = mergedComments
@@ -395,6 +418,10 @@ func splitRunsByNewline(runs []Run) [][]Run {
 	var out [][]Run
 	var cur []Run
 	for _, run := range runs {
+		if !run.Image.IsZero() {
+			cur = append(cur, run)
+			continue
+		}
 		rest := run.Text
 		for {
 			idx := strings.IndexByte(rest, '\n')
@@ -484,7 +511,7 @@ func (e *Engine) autoformat(inserted string) {
 		return
 	}
 	for _, r := range SliceRuns(b.Runs, 0, prefixUnits) {
-		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" {
+		if r.Style.Code || r.Style.Kbd || r.Style.Link != "" || !r.Image.IsZero() {
 			return
 		}
 	}
@@ -538,6 +565,10 @@ func (e *Engine) autoformat(inserted string) {
 	if kind == "code" || kind == "math" {
 		var plain strings.Builder
 		for _, r := range rest {
+			if !r.Image.IsZero() {
+				plain.WriteString(r.Image.Alt)
+				continue
+			}
 			plain.WriteString(r.Text)
 		}
 		if s := plain.String(); s != "" {
@@ -716,7 +747,7 @@ func (e *Engine) Fragment() *Document {
 		b.Comments = SliceComments(leaf.Block.Comments, max(0, a-leaf.Start), min(z, leaf.End)-leaf.Start)
 		if b.Kind == "cell" || a > leaf.Start || z < leaf.End {
 			b.Kind = "paragraph"
-			b.Level, b.NoteLabel, b.ImageWidth, b.URL = 0, "", 0, ""
+			b.Level, b.NoteLabel, b.ImageWidth, b.ImageHeight, b.URL = 0, "", 0, 0, ""
 			b.Background, b.ColSpan, b.RowSpan = "", 0, 0
 			b.Align, b.Indent, b.Checked, b.Language, b.MapList = "", 0, false, "", nil
 		}

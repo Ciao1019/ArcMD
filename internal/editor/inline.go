@@ -34,6 +34,12 @@ type inlineObject struct {
 	sourceLayout      *ui.TextLayout
 	source            string
 	note              string
+	image             document.InlineImage
+	imageLink         string
+	imageRes          ImageResource
+	imgW, imgH        float32
+	imgDescent        float32
+	hasImage          bool
 	rect              ui.Rect
 	scale             float32
 	script            bool
@@ -53,6 +59,76 @@ func inlineTokens(s string) []inlineToken {
 
 func runDisallowsInlineToken(st document.Style) bool {
 	return st.Code || st.Kbd || st.Link != "" || st.NoMath
+}
+
+func (e *Editor) inlineImageMetrics(img document.InlineImage, res ImageResource, font ui.Font, maxW float32) (w, h, descent float32, chip *ui.TextLayout) {
+	z := e.zoomFactor()
+	iw, ih := res.IntrinsicSize()
+	switch {
+	case res.HasVisual() && iw > 0 && ih > 0:
+		switch {
+		case img.Width > 0 && img.Height > 0:
+			w, h = img.Width*z, img.Height*z
+		case img.Width > 0:
+			w = img.Width * z
+			h = w * ih / iw
+		case img.Height > 0:
+			h = img.Height * z
+			w = h * iw / ih
+		default:
+			w, h = iw*z, ih*z
+		}
+	case res.Loading:
+		switch {
+		case img.Width > 0 && img.Height > 0:
+			w, h = img.Width*z, img.Height*z
+		case img.Width > 0 && iw > 0 && ih > 0:
+			w = img.Width * z
+			h = w * ih / iw
+		case img.Height > 0 && iw > 0 && ih > 0:
+			h = img.Height * z
+			w = h * iw / ih
+		case iw > 0 && ih > 0:
+			w, h = iw*z, ih*z
+		case img.Height > 0:
+			h = img.Height * z
+			w = max(h*2.2, 64*z)
+		case img.Width > 0:
+			w = img.Width * z
+			h = max(20*z, min(w*0.6, font.Size*1.4))
+		default:
+			w, h = 72*z, max(20*z, font.Size*1.25)
+		}
+	default:
+		text := strings.TrimSpace(img.Alt)
+		if text == "" {
+			text = imageName(img.URL)
+		}
+		if text == "" {
+			text = i18n.T("图片")
+		}
+		chipFont := ui.Font{Family: "system-ui", Size: max(11, font.Size*0.78)}
+		chip = ui.ShapeText(text, chipFont, 0)
+		cw, ch := chip.Size()
+		iconSz := max(12, chipFont.Size)
+		w = iconSz + cw + 16*z
+		h = max(20*z, ch+6*z)
+	}
+	if maxW > 0 && w > maxW && w > 0 {
+		scale := maxW / w
+		w = maxW
+		if res.HasVisual() || res.Loading {
+			h = max(1, h*scale)
+		}
+	}
+	w = max(1, w)
+	h = max(1, h)
+	if h <= font.Size*1.5 {
+		descent = max(font.Size*0.18, (h-font.Size*0.62)/2)
+	} else {
+		descent = font.Size * 0.16
+	}
+	return w, h, descent, chip
 }
 
 func inlineTokensInBlock(b *document.Block, s string) []inlineToken {
@@ -328,6 +404,30 @@ func (e *Editor) buildEditingInlineMath(b *document.Block, text string, font ui.
 func (e *Editor) shapeInline(b *document.Block, spans []ui.Span, font ui.Font, shape ui.TextShape) *textLayout {
 	l := &textLayout{}
 	text := b.Text()
+	if !literalBlock(b.Kind) {
+		runOff := 0
+		for _, r := range b.Runs {
+			n := document.Len(r.Text)
+			if r.IsImage() && n > 0 {
+				res := e.imageResource(r.Image.URL, Options{LoadImage: e.loadImage})
+				w, h, descent, chip := e.inlineImageMetrics(r.Image, res, font, shape.Width)
+				l.objects = append(l.objects, inlineObject{
+					start:      runOff,
+					end:        runOff + n,
+					image:      r.Image,
+					imageLink:  r.Style.Link,
+					imageRes:   res,
+					imgW:       w,
+					imgH:       h,
+					imgDescent: descent,
+					hasImage:   true,
+					label:      chip,
+					scale:      1,
+				})
+			}
+			runOff += n
+		}
+	}
 	editObj, hasEdit := e.buildEditingInlineMath(b, text, font, shape)
 	if hasEdit {
 		l.objects = append(l.objects, editObj)
@@ -405,7 +505,15 @@ func (e *Editor) shapeInline(b *document.Block, spans []ui.Span, font ui.Font, s
 		o := &l.objects[i]
 		o.index = o.start - delta
 		span := ui.Span{Text: "\ufffc"}
-		if o.box != nil {
+		if o.hasImage {
+			padY := float32(0)
+			if o.imgH >= 20 {
+				padY = 2
+			}
+			span.ObjectWidth = o.imgW
+			span.ObjectHeight = max(1, o.imgH-o.imgDescent) + padY
+			span.ObjectDescent = o.imgDescent + padY
+		} else if o.box != nil {
 			extra := float32(4)
 			if o.editing {
 				extra = 10
@@ -675,6 +783,51 @@ func (e *Editor) paintInline(p *ui.Painter, bounds ui.Rect, r row, t *ui.Theme) 
 	for _, o := range r.layout.objects {
 		ox, oy := bounds.X+r.x+dx+o.rect.X, bounds.Y+r.y+dy+o.rect.Y
 		x, y := ox+2, oy
+		if o.hasImage {
+			padY := float32(0)
+			if o.imgH >= 20 && o.rect.H > o.imgH {
+				padY = (o.rect.H - o.imgH) / 2
+			}
+			dst := ui.Rect{X: ox, Y: oy + padY, W: o.rect.W, H: max(1, o.rect.H-2*padY)}
+			if o.imageRes.Bitmap != nil {
+				bitmap := o.imageRes.Bitmap
+				if !e.printing && !e.reduceMotion && dst.Y+dst.H > bounds.Y+e.Scroll.Y && dst.Y < bounds.Y+e.Scroll.Y+e.viewport {
+					frame, next := o.imageRes.frameAt(p.Now())
+					if next > 0 {
+						bitmap = frame
+						p.After(next)
+					}
+				}
+				p.Image(bitmap, dst, ui.Contain)
+			} else if o.imageRes.SVG != nil {
+				p.Image(o.imageRes.SVG.WithDark(t.Dark), dst, ui.Contain)
+			} else if o.imageRes.Loading {
+				rad := min(float32(4), min(dst.W, dst.H)/4)
+				p.Fill(dst, e.page.CodeFill, rad)
+				p.Stroke(dst, e.page.CodeBorder, rad, 1)
+			} else {
+				rad := min(float32(5), dst.H/2)
+				p.Fill(dst, e.page.InlineFill, rad)
+				p.Stroke(dst, e.page.CodeBorder, rad, 1)
+				ink := e.page.Caption
+				if o.imageLink != "" {
+					ink = t.Accent
+				}
+				iconSz := min(float32(14), max(10, dst.H-6))
+				p.Icon(iconImage, ui.Rect{X: dst.X + 5, Y: dst.Y + (dst.H-iconSz)/2, W: iconSz, H: iconSz}, ink)
+				if o.label != nil {
+					_, lh := o.label.Size()
+					textX := dst.X + 5 + iconSz + 4
+					clipW := max(0, dst.X+dst.W-textX-4)
+					if clipW > 2 {
+						p.Clip(ui.Rect{X: textX, Y: dst.Y, W: clipW, H: dst.H}, 0, func() {
+							p.TextLayout(o.label, textX, dst.Y+(dst.H-lh)/2, ink)
+						})
+					}
+				}
+			}
+			continue
+		}
 		if o.box != nil {
 			if o.editing {
 				frame := ui.Rect{X: ox, Y: oy - 2, W: max(20, o.rect.W-2), H: o.rect.H + 4}
