@@ -236,7 +236,19 @@ func (e *Editor) exportVectorDecorations(
 				drawVectorCalloutIcon(vp, d.tone, px(icon.X+3), py(icon.Y+3), 18*sc, look.Icon)
 			}
 
+		case "block-bg":
+			if fill, ok := pg.CellFills[d.bg]; ok && fill.A > 0 {
+				bgRect, rad := blockBackgroundPaintRect(d.rect, 1, d.inColumn)
+				vp.FillRect(px(bgRect.X), py(bgRect.Y), pw(bgRect.W), ph(bgRect.H), float64(rad)*sc, pdfRGBA(fill))
+			}
+
 		case "quote":
+			if d.bg != "" {
+				if fill, ok := pg.CellFills[d.bg]; ok && fill.A > 0 {
+					bgRect, rad := blockBackgroundPaintRect(d.rect, 1, d.inColumn)
+					vp.FillRect(px(bgRect.X), py(bgRect.Y), pw(bgRect.W), ph(bgRect.H), float64(rad)*sc, pdfRGBA(fill))
+				}
+			}
 			vp.FillRect(x, y, 2*sx, h, 1*sc, pdfRGBA(pg.QuoteBar))
 
 		case "rule":

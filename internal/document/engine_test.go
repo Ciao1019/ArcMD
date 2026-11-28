@@ -919,8 +919,8 @@ func TestRemoveBlockWhiteboardAndColumns(t *testing.T) {
 }
 
 func TestOrderedListStartAndNumbering(t *testing.T) {
-	if CurrentVersion != 10 {
-		t.Fatalf("CurrentVersion = %d, want 10", CurrentVersion)
+	if CurrentVersion < 10 {
+		t.Fatalf("CurrentVersion = %d, want >= 10", CurrentVersion)
 	}
 
 	bValid := NewBlock("numbered", "five")

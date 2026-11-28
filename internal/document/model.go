@@ -26,9 +26,10 @@ import (
 // emoji, version 5 the page's icon and cover, version 6 scripts, image widths
 // and footnotes, version 7 hand-drawn text annotations, version 8 toggle
 // blocks and the word goal, version 9 keyboard key marks, version 10 ordered
-// list start numbers. Older documents are read and migrated in memory, and
-// written back as the current version only when edited.
-const CurrentVersion = 10
+// list start numbers, version 11 text block backgrounds. Older documents are
+// read and migrated in memory, and written back as the current version only
+// when edited.
+const CurrentVersion = 11
 
 // CoverGradients are the covers drawn rather than pictured, as
 // "gradient:name" in Document.Cover.
@@ -67,6 +68,23 @@ func validCalloutColor(color string) bool {
 		}
 	}
 	return false
+}
+
+// AllowsBlockBackground reports whether a non-cell block kind may carry a
+// block background tint.
+func AllowsBlockBackground(kind string) bool {
+	switch kind {
+	case "paragraph", "heading", "bullet", "numbered", "task", "quote", "toggle", "footnote":
+		return true
+	default:
+		return false
+	}
+}
+
+// AllowsBackground reports whether a block kind may carry Background (either
+// a table cell fill or a text block background).
+func AllowsBackground(kind string) bool {
+	return kind == "cell" || AllowsBlockBackground(kind)
 }
 
 type Style struct {
@@ -130,9 +148,9 @@ type Block struct {
 	Color string `json:"color,omitempty"`
 	// Folded hides what a heading or list item holds (version 4).
 	Folded bool `json:"folded,omitempty"`
-	// Background is a table cell's fill, one of TextHighlights; ColSpan
-	// and RowSpan merge it with the cells right of and below it, which then
-	// stay empty and out of the text (version 4).
+	// Background is a table cell's (version 4) or text block's (version 11)
+	// fill, one of TextHighlights; ColSpan and RowSpan merge a cell with the
+	// cells right of and below it, which then stay empty and out of the text.
 	Background string `json:"background,omitempty"`
 	ColSpan    int    `json:"colspan,omitempty"`
 	RowSpan    int    `json:"rowspan,omitempty"`
@@ -416,6 +434,18 @@ func (d *Document) migrate() error {
 	}
 	if d.Version < 10 && v10(d.Blocks) {
 		return errors.New("document: ordered list start values require version 10")
+	}
+	var v11 func([]*Block) bool
+	v11 = func(blocks []*Block) bool {
+		for _, b := range blocks {
+			if b != nil && ((b.Background != "" && b.Kind != "cell") || v11(b.Children)) {
+				return true
+			}
+		}
+		return false
+	}
+	if d.Version < 11 && v11(d.Blocks) {
+		return errors.New("document: block backgrounds require version 11")
 	}
 	d.Version = CurrentVersion
 	return nil
@@ -776,11 +806,16 @@ func (d *Document) validateWithLeafRuns(leafOverrides map[string][]Run) error {
 		if b.Folded && b.Kind != "heading" && b.Kind != "bullet" && b.Kind != "numbered" && b.Kind != "task" && b.Kind != "toggle" {
 			return errors.New("document: only headings and list items fold")
 		}
-		if (b.Background != "" || b.ColSpan != 0 || b.RowSpan != 0) && b.Kind != "cell" {
+		if (b.ColSpan != 0 || b.RowSpan != 0) && b.Kind != "cell" {
 			return errors.New("document: cell attributes outside a cell")
 		}
-		if b.Background != "" && !oneOf(b.Background, TextHighlights) {
-			return errors.New("document: invalid cell background")
+		if b.Background != "" {
+			if !AllowsBackground(b.Kind) {
+				return errors.New("document: background on unsupported block kind")
+			}
+			if !oneOf(b.Background, TextHighlights) {
+				return errors.New("document: invalid background")
+			}
 		}
 		if b.ColSpan < 0 || b.RowSpan < 0 || b.ColSpan > 64 || b.RowSpan > 64 {
 			return errors.New("document: invalid cell span")

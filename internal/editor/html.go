@@ -90,6 +90,7 @@ type htmlImporter struct {
 	level   int
 	indent  int
 	align   string
+	bg      string
 	checked *bool
 	// lists are the kinds of the lists the text is in, innermost last.
 	lists     []string
@@ -588,7 +589,11 @@ func (h *htmlImporter) text(s string, style document.Style) {
 		if kind == "paragraph" || kind == "heading" {
 			align = h.align
 		}
-		h.cur = &document.Block{ID: document.NewID(), Kind: kind, Level: h.level, Indent: h.indent, Align: align}
+		bg := ""
+		if document.AllowsBlockBackground(kind) {
+			bg = h.bg
+		}
+		h.cur = &document.Block{ID: document.NewID(), Kind: kind, Level: h.level, Indent: h.indent, Align: align, Background: bg}
 		if h.checked != nil {
 			h.cur.Kind, h.cur.Checked = "task", *h.checked
 		}
@@ -615,6 +620,17 @@ func (h *htmlImporter) withAlign(align string, explicit bool, inside func()) {
 	h.align = align
 	inside()
 	h.align = saved
+}
+
+func (h *htmlImporter) withBg(bg string, inside func()) {
+	if bg == "" {
+		inside()
+		return
+	}
+	saved := h.bg
+	h.bg = bg
+	inside()
+	h.bg = saved
 }
 
 func attr(n *html.Node, name string) string {
@@ -679,7 +695,22 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 	if n.DataAtom == atom.A {
 		h.recordID(attr(n, "name"))
 	}
-	if h.inTableCell {
+	nodeBg := ""
+	if !h.inTableCell {
+		switch n.DataAtom {
+		case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6, atom.Blockquote, atom.Li:
+			nodeBg = parseBlockBackground(n)
+		case atom.Div, atom.Center:
+			if bg := attr(n, "data-bg"); validStyleName(bg, document.TextHighlights) {
+				nodeBg = bg
+			}
+		}
+		prevHighlight := style.Highlight
+		style = applyNodeRichStyle(n, styled(n, style))
+		if nodeBg != "" && n.DataAtom != atom.Mark && attr(n, "data-highlight") == "" {
+			style.Highlight = prevHighlight
+		}
+	} else {
 		props := mergedNodeCSSProps(n, h.classes)
 		style = applyCSSPropsStyle(props, attr(n, "data-mark") != "", true, style)
 		if n.DataAtom == atom.Font {
@@ -692,8 +723,6 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 			}
 		}
 		style = applyNodeRichStyle(n, style)
-	} else {
-		style = applyNodeRichStyle(n, styled(n, style))
 	}
 	switch n.DataAtom {
 	case atom.Head:
@@ -761,8 +790,10 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 	case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		level := int(n.Data[1] - '0')
 		align, explicit := parseBlockAlignExplicit(n)
-		h.withAlign(align, explicit, func() {
-			h.block("heading", level, func() { h.children(n, style) })
+		h.withBg(nodeBg, func() {
+			h.withAlign(align, explicit, func() {
+				h.block("heading", level, func() { h.children(n, style) })
+			})
 		})
 		return
 	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav, atom.Figure, atom.Figcaption, atom.Dt, atom.Dd, atom.Address, atom.Center, atom.Details, atom.Summary, atom.Dl:
@@ -816,19 +847,23 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		if n.DataAtom == atom.Center {
 			align, explicit = "center", true
 		}
-		h.withAlign(align, explicit, func() {
-			if h.kind == "quote" || h.kind == "bullet" || h.kind == "numbered" {
-				// Paragraphs inside a quote or a list item stay what they are in.
-				h.flush()
-				h.children(n, style)
-				h.flush()
-				return
-			}
-			h.block(h.kind, h.level, func() { h.children(n, style) })
+		h.withBg(nodeBg, func() {
+			h.withAlign(align, explicit, func() {
+				if h.kind == "quote" || h.kind == "bullet" || h.kind == "numbered" {
+					// Paragraphs inside a quote or a list item stay what they are in.
+					h.flush()
+					h.children(n, style)
+					h.flush()
+					return
+				}
+				h.block(h.kind, h.level, func() { h.children(n, style) })
+			})
 		})
 		return
 	case atom.Blockquote:
-		h.block("quote", 0, func() { h.children(n, style) })
+		h.withBg(nodeBg, func() {
+			h.block("quote", 0, func() { h.children(n, style) })
+		})
 		return
 	case atom.Pre:
 		h.flush()
@@ -935,7 +970,9 @@ func (h *htmlImporter) walk(n *html.Node, style document.Style) {
 		saved, savedChecked, savedListStart := h.kind, h.checked, h.listStart
 		h.kind, h.checked, h.listStart = kind, taskState(n), 0
 		beforeLen := len(h.blocks)
-		h.children(n, style)
+		h.withBg(nodeBg, func() {
+			h.children(n, style)
+		})
 		h.flush()
 		h.kind, h.checked, h.listStart = saved, savedChecked, savedListStart
 		if liStart > 0 && len(h.blocks) > beforeLen {

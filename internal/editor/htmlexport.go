@@ -110,7 +110,7 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 							break
 						}
 						firstAtDepth = false
-						out.WriteString("<li>")
+						out.WriteString("<li" + blockBgAttrString(item.Background, theme) + ">")
 						if item.Kind == "task" {
 							if item.Checked {
 								out.WriteString("☑ ")
@@ -165,7 +165,7 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 				if !b.Folded {
 					open = " open"
 				}
-				out.WriteString("<details" + open + "><summary>" + body + "</summary>" + blocks(inner) + "</details>")
+				out.WriteString("<details" + open + blockBgAttrString(b.Background, theme) + "><summary>" + body + "</summary>" + blocks(inner) + "</details>")
 				continue
 			case "raw":
 				if spec, snapMD, ok := ParseDatabaseEmbed(b.Text()); ok {
@@ -271,9 +271,21 @@ func exportHTML(doc *document.Document, theme *HTMLTheme) string {
 			if b.Kind == "heading" && theme != nil && theme.Light.Page.HeadingWeight > 0 {
 				styles = append(styles, fmt.Sprintf("font-weight:%d", theme.Light.Page.HeadingWeight))
 			}
-			attrs := ""
+			var attrParts []string
+			if b.Background != "" && document.AllowsBlockBackground(b.Kind) {
+				if theme != nil {
+					attrParts = append(attrParts, `class="arcmd-bg arcmd-bg-`+b.Background+`"`)
+				} else if hex := cellFillHex[b.Background]; hex != "" {
+					styles = append(styles, "background-color:"+hex)
+				}
+				attrParts = append(attrParts, `data-bg="`+b.Background+`"`)
+			}
 			if len(styles) > 0 {
-				attrs = ` style="` + strings.Join(styles, ";") + `"`
+				attrParts = append(attrParts, `style="`+strings.Join(styles, ";")+`"`)
+			}
+			attrs := ""
+			if len(attrParts) > 0 {
+				attrs = " " + strings.Join(attrParts, " ")
 			}
 			out.WriteString("<" + tag + attrs + ">" + body + "</" + tag + ">")
 		}
@@ -333,6 +345,33 @@ func htmlTokenClass(c ui.Color) string {
 		return "arcmd-tok-function"
 	}
 	return ""
+}
+
+func blockBgAttrString(bg string, theme *HTMLTheme) string {
+	if bg == "" {
+		return ""
+	}
+	var parts []string
+	if theme != nil {
+		parts = append(parts, `class="arcmd-bg arcmd-bg-`+bg+`"`)
+	} else if hex := cellFillHex[bg]; hex != "" {
+		parts = append(parts, `style="background-color:`+hex+`"`)
+	}
+	parts = append(parts, `data-bg="`+bg+`"`)
+	return " " + strings.Join(parts, " ")
+}
+
+// BlockBackgroundCSS writes the CSS rules that color .arcmd-bg-<name> elements
+// emitted by ExportHTMLPage, using the paper theme's CellFills palette so
+// exported pages follow the reader's light or dark system appearance.
+func BlockBackgroundCSS(fills map[string]ui.Color) string {
+	var b strings.Builder
+	for _, name := range document.TextHighlights {
+		if c, ok := fills[name]; ok && c.A > 0 {
+			fmt.Fprintf(&b, ".arcmd-bg-%s { background-color: %s; }\n", name, cssColor(c))
+		}
+	}
+	return b.String()
 }
 
 // CodeTokenCSS writes the rules that color the token classes htmlCode emits,
