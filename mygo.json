@@ -2,7 +2,7 @@
   "name": "ArcMD",
   "slug": "arcmd",
   "identifier": "com.cizai.arcmd",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "license": "MIT",
   "copyright": "Copyright (c) 2026 ArcMD contributors",
   "icon": "resources/icon.png",

@@ -327,7 +327,7 @@ type rpcError struct {
 // and Content-Length header framing.
 func Serve(ctx context.Context, in io.Reader, out io.Writer, version string, caller ToolCaller) error {
 	if version == "" {
-		version = "0.5.1"
+		version = "0.5.2"
 	}
 	br := bufio.NewReaderSize(in, 64*1024)
 	var writeMu sync.Mutex
